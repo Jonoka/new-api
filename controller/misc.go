@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/console_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -37,6 +38,34 @@ func TestStatus(c *gin.Context) {
 		"http_stats": httpStats,
 	})
 	return
+}
+
+func GetGitHubLatestRelease(c *gin.Context) {
+	release, err := service.GetLatestSelfUpdateRelease(c.Request.Context())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, release)
+}
+
+type SelfUpdateRequest struct {
+	TagName string `json:"tag_name"`
+}
+
+func SelfUpdate(c *gin.Context) {
+	var req SelfUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	result, err := service.RunSelfUpdate(c.Request.Context(), req.TagName)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, result)
 }
 
 func GetStatus(c *gin.Context) {
