@@ -626,9 +626,28 @@ export const calculateModelPrice = ({
   const stripTrailingZeros = (value) =>
     String(value).replace(/(\.\d*?[1-9])0+$/u, '$1').replace(/\.0+$/u, '');
 
+  const getOriginalPriceSymbol = () => {
+    if (quotaDisplayType === 'CNY') {
+      return '¥';
+    }
+    if (quotaDisplayType === 'CUSTOM') {
+      try {
+        const statusStr = localStorage.getItem('status');
+        if (statusStr) {
+          const s = JSON.parse(statusStr);
+          return s?.custom_currency_symbol || '¤';
+        }
+      } catch (e) {
+        return '¤';
+      }
+      return '¤';
+    }
+    return '$';
+  };
+
   const formatUsdOriginalPrice = (priceUSD, unitDivisor = 1) => {
     const numericPrice = priceUSD / unitDivisor;
-    return `$${stripTrailingZeros(numericPrice.toFixed(precision))}`;
+    return `${getOriginalPriceSymbol()}${stripTrailingZeros(numericPrice.toFixed(precision))}`;
   };
 
   // 1. 选择实际使用的分组

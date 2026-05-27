@@ -34,6 +34,10 @@ func InitEnv() {
 	envVersion := os.Getenv("VERSION")
 	if envVersion != "" {
 		Version = envVersion
+	} else if fileVersion, err := os.ReadFile("VERSION"); err == nil {
+		if trimmedVersion := strings.TrimSpace(string(fileVersion)); trimmedVersion != "" {
+			Version = trimmedVersion
+		}
 	}
 
 	if *PrintVersion {

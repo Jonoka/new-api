@@ -104,6 +104,7 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
       >,
       defaultValues: normalizedDefaults,
       onSubmit: async (_data, changedFields) => {
+        let shouldReloadFrontend = false
         for (const [key, value] of Object.entries(changedFields)) {
           let v = normalizeValue(value)
           if (key === 'ServerAddress') {
@@ -113,6 +114,13 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
             key,
             value: v,
           })
+          if (key === 'theme.frontend') {
+            shouldReloadFrontend = true
+          }
+        }
+
+        if (shouldReloadFrontend) {
+          window.location.assign('/')
         }
       },
     })

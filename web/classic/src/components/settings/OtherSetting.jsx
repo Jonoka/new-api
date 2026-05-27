@@ -303,7 +303,7 @@ const OtherSetting = () => {
           }
           showSuccess(t('已切换到新版前端，正在刷新页面'));
           setTimeout(() => {
-            window.location.reload();
+            window.location.assign('/');
           }, 600);
         } catch (error) {
           console.error('切换新版前端失败', error);
