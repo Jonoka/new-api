@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -31,14 +32,7 @@ func printHelp() {
 func InitEnv() {
 	flag.Parse()
 
-	envVersion := os.Getenv("VERSION")
-	if envVersion != "" {
-		Version = envVersion
-	} else if fileVersion, err := os.ReadFile("VERSION"); err == nil {
-		if trimmedVersion := strings.TrimSpace(string(fileVersion)); trimmedVersion != "" {
-			Version = trimmedVersion
-		}
-	}
+	Version = resolveRuntimeVersion(os.Getenv("VERSION"), "VERSION", gitDescribeVersion)
 
 	if *PrintVersion {
 		fmt.Println(Version)
@@ -130,6 +124,36 @@ func InitEnv() {
 	SearchRateLimitNum = GetEnvOrDefault("SEARCH_RATE_LIMIT", 10)
 	SearchRateLimitDuration = int64(GetEnvOrDefault("SEARCH_RATE_LIMIT_DURATION", 60))
 	initConstantEnv()
+}
+
+func resolveRuntimeVersion(envVersion string, versionFile string, gitDescribe func() (string, error)) string {
+	if strings.TrimSpace(envVersion) != "" {
+		return strings.TrimSpace(envVersion)
+	}
+
+	if fileVersion, err := os.ReadFile(versionFile); err == nil {
+		if trimmedVersion := strings.TrimSpace(string(fileVersion)); trimmedVersion != "" {
+			return trimmedVersion
+		}
+	}
+
+	if gitDescribe != nil {
+		if gitVersion, err := gitDescribe(); err == nil {
+			if trimmedVersion := strings.TrimSpace(gitVersion); trimmedVersion != "" {
+				return trimmedVersion
+			}
+		}
+	}
+
+	return Version
+}
+
+func gitDescribeVersion() (string, error) {
+	output, err := exec.Command("git", "describe", "--tags", "--dirty", "--always").Output()
+	if err != nil {
+		return "", err
+	}
+	return string(output), nil
 }
 
 func initConstantEnv() {

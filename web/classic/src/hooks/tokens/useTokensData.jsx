@@ -258,6 +258,16 @@ export const useTokensData = (openFluentNotification, openCCSwitchModal) => {
         encodeToBase64(JSON.stringify(aionuiConfig)),
       );
       url = url.replaceAll('{aionuiConfig}', encodedConfig);
+    } else if (url.includes('{deepchatConfig}') === true) {
+      let deepchatConfig = {
+        id: 'new-api',
+        baseUrl: serverAddress,
+        apiKey: `sk-${fullKey}`,
+      };
+      let encodedConfig = encodeURIComponent(
+        encodeToBase64(JSON.stringify(deepchatConfig)),
+      );
+      url = url.replaceAll('{deepchatConfig}', encodedConfig);
     } else {
       let encodedServerAddress = encodeURIComponent(serverAddress);
       url = url.replaceAll('{address}', encodedServerAddress);
