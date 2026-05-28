@@ -15,6 +15,7 @@ import {
   CreditCard,
   ListTodo,
   Settings,
+  HandCoins,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { WORKSPACE_IDS } from '@/components/layout/lib/workspace-registry'
@@ -90,6 +91,11 @@ export function useSidebarData(): SidebarData {
             title: t('Wallet'),
             url: '/wallet',
             icon: Wallet,
+          },
+          {
+            title: t('Affiliate Commission'),
+            url: '/affiliate',
+            icon: HandCoins,
           },
           {
             title: t('Profile'),

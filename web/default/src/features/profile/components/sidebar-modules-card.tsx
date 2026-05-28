@@ -96,6 +96,11 @@ export function SidebarModulesCard() {
           description: t('Balance and top-up management'),
         },
         {
+          key: 'affiliate',
+          title: t('Affiliate Commission'),
+          description: t('Referral commission and payout management'),
+        },
+        {
           key: 'personal',
           title: t('Personal Settings'),
           description: t('Personal info settings'),

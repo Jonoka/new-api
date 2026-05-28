@@ -96,6 +96,10 @@ export function SidebarModulesSection({
         title: t('Wallet'),
         description: t('Top up balance and view billing history.'),
       },
+      affiliate: {
+        title: t('Affiliate Commission'),
+        description: t('Referral commission and payout center.'),
+      },
       personal: {
         title: t('Profile'),
         description: t('Personal settings and profile management.'),

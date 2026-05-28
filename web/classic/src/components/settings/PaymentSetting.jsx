@@ -25,6 +25,7 @@ import SettingsPaymentGatewayStripe from '../../pages/Setting/Payment/SettingsPa
 import SettingsPaymentGatewayCreem from '../../pages/Setting/Payment/SettingsPaymentGatewayCreem';
 import SettingsPaymentGatewayWaffo from '../../pages/Setting/Payment/SettingsPaymentGatewayWaffo';
 import SettingsPaymentGatewayWaffoPancake from '../../pages/Setting/Payment/SettingsPaymentGatewayWaffoPancake';
+import SettingsAffiliateCommission from '../../pages/Setting/Payment/SettingsAffiliateCommission';
 import { API, showError, toBoolean } from '../../helpers';
 import { useTranslation } from 'react-i18next';
 
@@ -60,6 +61,17 @@ const PaymentSetting = () => {
     WaffoPancakeCurrency: 'USD',
     WaffoPancakeUnitPrice: 1.0,
     WaffoPancakeMinTopUp: 1,
+
+    'affiliate_setting.first_level_enabled': false,
+    'affiliate_setting.first_level_ratio': 0,
+    'affiliate_setting.second_level_enabled': false,
+    'affiliate_setting.second_level_ratio': 0,
+    'affiliate_setting.settlement_delay_seconds': 0,
+    'affiliate_setting.min_withdrawal_amount': 10,
+    'affiliate_setting.trigger_topup_enabled': true,
+    'affiliate_setting.trigger_subscription_enabled': false,
+    'affiliate_setting.usdt_chain': 'TRC20',
+    'affiliate_setting.promotion_template': '邀请链接：{invite_link}',
   });
 
   let [loading, setLoading] = useState(false);
@@ -110,7 +122,21 @@ const PaymentSetting = () => {
           case 'StripeMinTopUp':
           case 'WaffoPancakeUnitPrice':
           case 'WaffoPancakeMinTopUp':
+          case 'affiliate_setting.first_level_ratio':
+          case 'affiliate_setting.second_level_ratio':
+          case 'affiliate_setting.settlement_delay_seconds':
+          case 'affiliate_setting.min_withdrawal_amount':
             newInputs[item.key] = parseFloat(item.value);
+            break;
+          case 'affiliate_setting.first_level_enabled':
+          case 'affiliate_setting.second_level_enabled':
+          case 'affiliate_setting.trigger_topup_enabled':
+          case 'affiliate_setting.trigger_subscription_enabled':
+            newInputs[item.key] = toBoolean(item.value);
+            break;
+          case 'affiliate_setting.usdt_chain':
+          case 'affiliate_setting.promotion_template':
+            newInputs[item.key] = item.value;
             break;
           case 'WaffoPancakeMerchantID':
           case 'WaffoPancakePrivateKey':
@@ -205,6 +231,13 @@ const PaymentSetting = () => {
             {/*    hideSectionTitle*/}
             {/*  />*/}
             {/*</Tabs.TabPane>*/}
+            <Tabs.TabPane tab={t('返佣分成设置')} itemKey='affiliate'>
+              <SettingsAffiliateCommission
+                options={inputs}
+                refresh={onRefresh}
+                hideSectionTitle
+              />
+            </Tabs.TabPane>
           </Tabs>
         </Card>
       </Spin>

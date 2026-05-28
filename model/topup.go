@@ -144,6 +144,10 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 			return err
 		}
 
+		if err := createAffiliateRewardsForPaymentTx(tx, topUp.UserId, AffiliateSourceTopUp, topUp.TradeNo, int(quota)); err != nil {
+			return err
+		}
+
 		return nil
 	})
 
@@ -373,6 +377,10 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 			return err
 		}
 
+		if err := createAffiliateRewardsForPaymentTx(tx, topUp.UserId, AffiliateSourceTopUp, topUp.TradeNo, quotaToAdd); err != nil {
+			return err
+		}
+
 		userId = topUp.UserId
 		payMoney = topUp.Money
 		paymentMethod = topUp.PaymentMethod
@@ -449,6 +457,10 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 			return err
 		}
 
+		if err := createAffiliateRewardsForPaymentTx(tx, topUp.UserId, AffiliateSourceTopUp, topUp.TradeNo, int(quota)); err != nil {
+			return err
+		}
+
 		return nil
 	})
 
@@ -510,6 +522,10 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 			return err
 		}
 
+		if err := createAffiliateRewardsForPaymentTx(tx, topUp.UserId, AffiliateSourceTopUp, topUp.TradeNo, quotaToAdd); err != nil {
+			return err
+		}
+
 		return nil
 	})
 
@@ -568,6 +584,10 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 		}
 
 		if err := tx.Model(&User{}).Where("id = ?", topUp.UserId).Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
+			return err
+		}
+
+		if err := createAffiliateRewardsForPaymentTx(tx, topUp.UserId, AffiliateSourceTopUp, topUp.TradeNo, quotaToAdd); err != nil {
 			return err
 		}
 

@@ -550,6 +550,9 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 		if err := upsertSubscriptionTopUpTx(tx, &order); err != nil {
 			return err
 		}
+		if err := createAffiliateRewardsForPaymentTx(tx, order.UserId, AffiliateSourceSubscription, order.TradeNo, int(plan.TotalAmount)); err != nil {
+			return err
+		}
 		order.Status = common.TopUpStatusSuccess
 		order.CompleteTime = common.GetTimestamp()
 		if providerPayload != "" {
