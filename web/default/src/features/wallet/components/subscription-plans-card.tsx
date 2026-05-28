@@ -195,15 +195,15 @@ export function SubscriptionPlansCard({
   const displayPref =
     disablePref && isSubPref ? 'wallet_first' : billingPreference
 
-  const planPurchaseCountMap = useMemo(() => {
+  const activePlanPurchaseCountMap = useMemo(() => {
     const map = new Map<number, number>()
-    for (const sub of allSubscriptions) {
+    for (const sub of activeSubscriptions) {
       const planId = sub?.subscription?.plan_id
       if (!planId) continue
       map.set(planId, (map.get(planId) || 0) + 1)
     }
     return map
-  }, [allSubscriptions])
+  }, [activeSubscriptions])
 
   useEffect(() => {
     onAvailabilityChange?.(isAvailable)
@@ -519,7 +519,7 @@ export function SubscriptionPlansCard({
               const price = Number(plan.price_amount || 0).toFixed(2)
               const isPopular = index === 0 && plans.length > 1
               const limit = Number(plan.max_purchase_per_user || 0)
-              const count = planPurchaseCountMap.get(plan.id) || 0
+              const count = activePlanPurchaseCountMap.get(plan.id) || 0
               const reached = limit > 0 && count >= limit
 
               const benefits = [
@@ -646,7 +646,7 @@ export function SubscriptionPlansCard({
         }
         purchaseCount={
           selectedPlan?.plan?.id
-            ? planPurchaseCountMap.get(selectedPlan.plan.id)
+            ? activePlanPurchaseCountMap.get(selectedPlan.plan.id)
             : undefined
         }
       />
