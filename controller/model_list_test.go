@@ -221,6 +221,8 @@ func TestListModelsTokenLimitIncludesTieredBillingModel(t *testing.T) {
 		"zz-token-tiered-empty-expr-model": "",
 	})
 
+	_ = setupModelListControllerTestDB(t)
+
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)

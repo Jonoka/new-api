@@ -100,6 +100,25 @@ Use `bun` as the preferred package manager and script runner for the frontend (`
 - `bun run build` for production build
 - `bun run i18n:*` for i18n tooling
 
+### Rule 3.1: 本地测试固定流程
+
+本地手工测试必须固定入口、固定数据源，不能临时乱开端口或随手换库：
+
+- 后端固定使用 `http://localhost:3000`
+- classic 前端固定使用 `http://localhost:3001`
+- 固定复用本地测试库 `tmp-local-v10101.db`
+- 启动、切换版本、切换测试模式前，必须先检查 `3000` 和 `3001`
+- 如果固定端口上已有本项目旧测试进程，先停止旧进程，再在同一端口启动
+- 不得遗留旧测试进程，不得改用 `3010`、`5173` 等临时端口绕开问题
+- 不得新建临时 SQLite 库替代固定测试库，除非用户明确要求干净隔离环境
+- 如确需干净库，必须提前说明，并且不能污染正常 `3000`/`3001` 流程
+- 本地测试统一使用 `scripts/local-test.ps1`：
+  - 查看状态：`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-test.ps1 -Action status`
+  - 启动/切换：`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-test.ps1 -Action start`
+  - 停止服务：`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-test.ps1 -Action stop`
+  - 页面验证：`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-test.ps1 -Action verify`
+- 启动或切换后，必须验证 `/api/status`、`http://localhost:3001/`、默认账号登录和演示数据接口，不能只看进程是否存在。
+
 ### Rule 4: New Channel StreamOptions Support
 
 When implementing a new channel:

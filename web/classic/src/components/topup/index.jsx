@@ -36,6 +36,23 @@ import RechargeCard from './RechargeCard';
 import PaymentConfirmModal from './modals/PaymentConfirmModal';
 import TopupHistoryModal from './modals/TopupHistoryModal';
 
+// Reject non-navigable schemes (e.g. javascript:, data:) and relative URLs.
+// Only http / https are allowed for backend-provided redirect targets.
+// Mirrors isSafeHttpCheckoutUrl in the default frontend's
+// features/wallet/hooks/use-waffo-pancake-payment.ts.
+function isSafeHttpCheckoutUrl(value) {
+  const trimmed = (value || '').trim();
+  if (!trimmed) {
+    return false;
+  }
+  try {
+    const u = new URL(trimmed);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 const TopUp = () => {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -99,6 +116,8 @@ const TopUp = () => {
   const [topupInfo, setTopupInfo] = useState({
     amount_options: [],
     discount: {},
+    enable_redemption: true,
+    payment_compliance_confirmed: true,
   });
 
   const confirmPayMethods = [
@@ -441,8 +460,12 @@ const TopUp = () => {
         const { message, data } = res.data;
         if (message === 'success') {
           const checkoutUrl = data?.checkout_url || '';
-          if (checkoutUrl) {
-            window.open(checkoutUrl, '_blank');
+          if (checkoutUrl && isSafeHttpCheckoutUrl(checkoutUrl)) {
+            // In-tab redirect (not window.open) — popup blocker fires after
+            // the await loses user-gesture context.
+            window.location.href = checkoutUrl;
+          } else if (checkoutUrl) {
+            showError(t('支付跳转地址不安全'));
           } else {
             showError(t('支付请求失败'));
           }
@@ -634,7 +657,7 @@ const TopUp = () => {
                 ? data.waffo_min_topup
                 : enableWaffoPancakeTopUp
                   ? data.waffo_pancake_min_topup
-                : 1;
+                  : 1;
           setEnableOnlineTopUp(enableOnlineTopUp);
           setEnableStripeTopUp(enableStripeTopUp);
           setEnableCreemTopUp(enableCreemTopUp);
@@ -646,6 +669,14 @@ const TopUp = () => {
           setMinTopUp(minTopUpValue);
           setTopUpCount(minTopUpValue);
           setTopUpLink(data.topup_link || '');
+          setTopupInfo((prev) => ({
+            ...prev,
+            enable_redemption: data.enable_redemption !== false,
+            payment_compliance_confirmed:
+              data.payment_compliance_confirmed !== false,
+            payment_compliance_terms_version:
+              data.payment_compliance_terms_version || '',
+          }));
 
           // 设置 Creem 产品
           try {
@@ -916,6 +947,7 @@ const TopUp = () => {
           activeSubscriptions={activeSubscriptions}
           allSubscriptions={allSubscriptions}
           reloadSubscriptionSelf={getSubscriptionSelf}
+          enableRedemption={topupInfo.enable_redemption !== false}
         />
       </div>
     </div>

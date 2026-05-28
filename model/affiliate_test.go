@@ -30,6 +30,20 @@ func resetAffiliateSettingForTest(t *testing.T) {
 	affiliateSetting.PromotionTemplate = "邀请链接：{invite_link}"
 }
 
+func confirmAffiliatePaymentComplianceForTest(t *testing.T) {
+	t.Helper()
+	paymentSetting := operation_setting.GetPaymentSetting()
+	originalConfirmed := paymentSetting.ComplianceConfirmed
+	originalTermsVersion := paymentSetting.ComplianceTermsVersion
+	t.Cleanup(func() {
+		paymentSetting.ComplianceConfirmed = originalConfirmed
+		paymentSetting.ComplianceTermsVersion = originalTermsVersion
+	})
+
+	paymentSetting.ComplianceConfirmed = true
+	paymentSetting.ComplianceTermsVersion = operation_setting.CurrentComplianceTermsVersion
+}
+
 func insertAffiliateUser(t *testing.T, id int, inviterId int, quota int) {
 	t.Helper()
 	require.NoError(t, DB.Create(&User{
@@ -89,6 +103,7 @@ func TestCreateAffiliateRewardsForPaymentCreatesTwoLevelsAndIsIdempotent(t *test
 func TestInvitedRegistrationKeepsInviteeRewardWithoutFixedInviterQuota(t *testing.T) {
 	truncateTables(t)
 	resetAffiliateSettingForTest(t)
+	confirmAffiliatePaymentComplianceForTest(t)
 
 	originalNewUserQuota := common.QuotaForNewUser
 	originalInviteeQuota := common.QuotaForInvitee

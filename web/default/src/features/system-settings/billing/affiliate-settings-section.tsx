@@ -145,12 +145,7 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
   }
 
   return (
-    <SettingsSection
-      title={t('Affiliate Commission')}
-      description={t(
-        'Configure paid-referral commission levels, settlement delay, payout threshold, and promotion copy.'
-      )}
-    >
+    <SettingsSection title={t('Affiliate Commission')}>
       <FormNavigationGuard when={isDirty} />
       <Form {...form}>
         <form onSubmit={handleSubmit} className='space-y-6'>

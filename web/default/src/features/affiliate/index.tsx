@@ -231,9 +231,6 @@ export function Affiliate() {
         <SectionPageLayout.Title>
           {t('Affiliate Commission')}
         </SectionPageLayout.Title>
-        <SectionPageLayout.Description>
-          {t('Track commission from paid referrals and manage payouts')}
-        </SectionPageLayout.Description>
         <SectionPageLayout.Content>
           <div className='mx-auto flex w-full max-w-7xl flex-col gap-4 sm:gap-5'>
             <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>

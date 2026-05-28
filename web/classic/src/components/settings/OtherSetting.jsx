@@ -82,6 +82,7 @@ const OtherSetting = () => {
     About: false,
     Footer: false,
     CheckUpdate: false,
+    SelfUpdate: false,
     FrontendTheme: false,
   });
   const handleInputChange = async (value, e) => {
@@ -235,37 +236,23 @@ const OtherSetting = () => {
         ...loadingInput,
         CheckUpdate: true,
       }));
-      // Use a CORS proxy to avoid direct cross-origin requests to GitHub API
-      // Option 1: Use a public CORS proxy service
-      // const proxyUrl = 'https://cors-anywhere.herokuapp.com/';
-      // const res = await API.get(
-      //   `${proxyUrl}https://api.github.com/repos/moeacgx/new-api/releases/latest`,
-      // );
-
-      // Option 2: Use the JSON proxy approach which often works better with GitHub API
-      const res = await fetch(
-        'https://api.github.com/repos/moeacgx/new-api/releases/latest',
-        {
-          headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-            // Adding User-Agent which is often required by GitHub API
-            'User-Agent': 'new-api-update-checker',
-          },
-        },
-      ).then((response) => response.json());
-
-      // Option 3: Use a local proxy endpoint
-      // Create a cached version of the response to avoid frequent GitHub API calls
-      // const res = await API.get('/api/status/github-latest-release');
-
-      const { tag_name, body } = res;
+      const res = await API.get('/api/status/github-latest-release', {
+        disableDuplicate: true,
+      });
+      const { success, message, data } = res.data;
+      if (!success) {
+        showError(message);
+        return;
+      }
+      const { tag_name, body } = data;
       if (tag_name === statusState?.status?.version) {
         showSuccess(`已是最新版本：${tag_name}`);
       } else {
         setUpdateData({
           tag_name: tag_name,
-          content: marked.parse(body),
+          content: marked.parse(body || ''),
+          self_update_supported: data.self_update_supported,
+          self_update_disabled_reason: data.self_update_disabled_reason,
         });
         setShowUpdateModal(true);
       }
@@ -278,6 +265,47 @@ const OtherSetting = () => {
         CheckUpdate: false,
       }));
     }
+  };
+
+  const runSelfUpdate = async () => {
+    Modal.confirm({
+      title: t('一键更新'),
+      content: t(
+        '将下载新版本二进制并替换容器内当前运行文件，随后进程会退出并等待 Docker 自动重启。是否继续？',
+      ),
+      okText: t('确认更新'),
+      cancelText: t('取消'),
+      onOk: async () => {
+        try {
+          setLoadingInput((loadingInput) => ({
+            ...loadingInput,
+            SelfUpdate: true,
+          }));
+          const res = await API.post(
+            '/api/status/self-update',
+            { tag_name: updateData.tag_name },
+            { skipErrorHandler: true, timeout: 10 * 60 * 1000 },
+          );
+          const { success, message, data } = res.data;
+          if (!success) {
+            showError(message || t('一键更新失败'));
+            return;
+          }
+          showSuccess(
+            data?.message ||
+              t('更新已安装，Docker 容器将自动重启，请稍后刷新页面'),
+          );
+          setShowUpdateModal(false);
+        } catch (error) {
+          showError(error?.response?.data?.message || error.message || t('一键更新失败'));
+        } finally {
+          setLoadingInput((loadingInput) => ({
+            ...loadingInput,
+            SelfUpdate: false,
+          }));
+        }
+      },
+    });
   };
 
   const switchToDefaultFrontend = () => {
@@ -303,7 +331,7 @@ const OtherSetting = () => {
           }
           showSuccess(t('已切换到新版前端，正在刷新页面'));
           setTimeout(() => {
-            window.location.reload();
+            window.location.assign('/');
           }, 600);
         } catch (error) {
           console.error('切换新版前端失败', error);
@@ -550,8 +578,16 @@ const OtherSetting = () => {
         onCancel={() => setShowUpdateModal(false)}
         footer={[
           <Button
-            key='details'
+            key='self-update'
             type='primary'
+            onClick={runSelfUpdate}
+            loading={loadingInput['SelfUpdate']}
+            disabled={!updateData.self_update_supported}
+          >
+            {t('一键更新')}
+          </Button>,
+          <Button
+            key='details'
             onClick={() => {
               setShowUpdateModal(false);
               openGitHubRelease();
@@ -561,6 +597,20 @@ const OtherSetting = () => {
           </Button>,
         ]}
       >
+        <Banner
+          fullMode={false}
+          type={updateData.self_update_supported ? 'info' : 'warning'}
+          description={
+            updateData.self_update_supported
+              ? t(
+                  '一键更新会下载新版本二进制、校验后替换容器内当前运行文件，并退出等待 Docker 自动重启。',
+                )
+              : updateData.self_update_disabled_reason ||
+                t('当前环境不支持一键更新')
+          }
+          closeIcon={null}
+          style={{ marginBottom: 12 }}
+        />
         <div dangerouslySetInnerHTML={{ __html: updateData.content }}></div>
       </Modal>
     </Row>
