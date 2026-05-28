@@ -153,6 +153,15 @@ function describeGroup(
     .join(' && ')
 }
 
+function extractPerCallPrice(expr: string | undefined): number | null {
+  if (!expr) return null
+  const m = expr.match(/^\s*([\d.eE+-]+)\s*(?:\*|$)/)
+  if (!m) return null
+  const raw = Number(m[1])
+  if (!Number.isFinite(raw)) return null
+  return raw / 1000000
+}
+
 export function DynamicPricingBreakdown({
   billingExpr,
   matchedTierLabel,
@@ -187,6 +196,9 @@ export function DynamicPricingBreakdown({
 
   const hasTiers = tiers.length > 0
   const hasRules = ruleGroups.length > 0
+  const hasPerCallPrice = tiers.some(
+    (tier) => extractPerCallPrice(tier.expression) !== null
+  )
   const normalizedMatchedTierLabel = normalizeTierLabel(
     matchedTierLabel ?? undefined
   )
@@ -285,6 +297,21 @@ export function DynamicPricingBreakdown({
                     </div>
                   )}
                   <div className='grid grid-cols-2 gap-x-3 gap-y-1.5'>
+                    {hasPerCallPrice && (
+                      <div className='min-w-0'>
+                        <div className='text-muted-foreground truncate text-[10px] font-medium tracking-wider uppercase'>
+                          {t('Per Call')}
+                        </div>
+                        <div className='truncate font-mono text-sm font-semibold'>
+                          {extractPerCallPrice(tier.expression) !== null
+                            ? `${symbol}${(
+                                (extractPerCallPrice(tier.expression) ?? 0) *
+                                rate
+                              ).toFixed(4)} / ${t('Call')}`
+                            : '-'}
+                        </div>
+                      </div>
+                    )}
                     {visiblePriceFields.map((v) => {
                       const value = Number(
                         tier[v.field as string as keyof ParsedTier] || 0
@@ -314,6 +341,11 @@ export function DynamicPricingBreakdown({
                   <TableHead className='text-muted-foreground py-2 font-medium'>
                     {t('Tier')}
                   </TableHead>
+                  {hasPerCallPrice && (
+                    <TableHead className='text-muted-foreground py-2 text-right font-medium'>
+                      {t('Per Call')}
+                    </TableHead>
+                  )}
                   {visiblePriceFields.map((v) => (
                     <TableHead
                       key={v.field}
@@ -362,6 +394,20 @@ export function DynamicPricingBreakdown({
                           </div>
                         )}
                       </TableCell>
+                      {hasPerCallPrice && (
+                        <TableCell className='py-2.5 text-right align-top font-mono'>
+                          {extractPerCallPrice(tier.expression) !== null ? (
+                            <span className='font-semibold'>
+                              {`${symbol}${(
+                                (extractPerCallPrice(tier.expression) ?? 0) *
+                                rate
+                              ).toFixed(4)} / ${t('Call')}`}
+                            </span>
+                          ) : (
+                            '-'
+                          )}
+                        </TableCell>
+                      )}
                       {visiblePriceFields.map((v) => {
                         const value = Number(
                           tier[v.field as string as keyof ParsedTier] || 0

@@ -237,6 +237,7 @@ export type TierCondition = {
 export type ParsedTier = {
   label: string
   conditions: TierCondition[]
+  expression?: string
   [field: string]: unknown
 }
 
@@ -269,21 +270,39 @@ export function parseTiersFromExpr(exprStr: string): ParsedTier[] {
   if (!exprStr) return []
   try {
     const { body } = stripExprVersion(exprStr)
-    const condGroup =
-      `((?:(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)` +
-      `(?:\\s*&&\\s*(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)*)`
-    const tierRe = new RegExp(
-      `(?:${condGroup}\\s*\\?\\s*)?tier\\("([^"]*)",\\s*([^)]+)\\)`,
-      'g'
-    )
+    const tierRe = /tier\("([^"]*)",\s*/g
     const tiers: ParsedTier[] = []
     let m
     while ((m = tierRe.exec(body)) !== null) {
-      const condStr = m[1] || ''
+      const valueStart = tierRe.lastIndex
+      let depth = 0
+      let valueEnd = -1
+
+      for (let i = valueStart; i < body.length; i += 1) {
+        const ch = body[i]
+        if (ch === '(') {
+          depth += 1
+        } else if (ch === ')') {
+          if (depth === 0) {
+            valueEnd = i
+            break
+          }
+          depth -= 1
+        }
+      }
+
+      if (valueEnd === -1) break
+
+      const valueExpr = body.slice(valueStart, valueEnd)
+      const before = body.slice(0, m.index)
+      const condMatch = before.match(/(?:^|[?:])\s*([^?:]+?)\s*\?\s*$/)
+      const condStr = condMatch ? condMatch[1].trim() : ''
       const conditions: TierCondition[] = []
-      if (condStr) {
+      if (condStr && /^(?:p|c|len)\b/.test(condStr)) {
         for (const cp of condStr.split(/\s*&&\s*/)) {
-          const cm = cp.trim().match(/^(p|c|len)\s*(<|<=|>|>=)\s*([\d.eE+]+)$/)
+          const cm = cp
+            .trim()
+            .match(/^(p|c|len)\s*(<=|<|>=|>)\s*([\d.eE+-]+)$/)
           if (cm) {
             conditions.push({
               var: cm[1] as TierCondition['var'],
@@ -293,10 +312,12 @@ export function parseTiersFromExpr(exprStr: string): ParsedTier[] {
           }
         }
       }
-      const tier = parseTierBody(m[3]) as ParsedTier
-      tier.label = m[2]
+      const tier = parseTierBody(valueExpr) as ParsedTier
+      tier.label = m[1]
       tier.conditions = conditions
+      tier.expression = valueExpr.trim()
       tiers.push(tier)
+      tierRe.lastIndex = valueEnd + 1
     }
     return tiers
   } catch {
