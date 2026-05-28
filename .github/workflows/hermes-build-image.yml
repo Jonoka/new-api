@@ -1,0 +1,84 @@
+name: Hermes Build Docker image
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Docker image tag suffix (default: hermes-<short-sha>)'
+        required: false
+        type: string
+      push_latest:
+        description: 'Also update ghcr.io/<repo>:hermes-latest'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build_amd64:
+    name: Build & push amd64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Resolve image tags
+        id: tags
+        shell: bash
+        run: |
+          repo="${GITHUB_REPOSITORY,,}"
+          tag='${{ inputs.image_tag }}'
+          if [ -z "$tag" ]; then
+            tag="hermes-${GITHUB_SHA::12}"
+          fi
+          {
+            echo "image=ghcr.io/${repo}:${tag}"
+            echo "tags<<EOF"
+            echo "ghcr.io/${repo}:${tag}"
+            if [ '${{ inputs.push_latest }}' = 'true' ]; then
+              echo "ghcr.io/${repo}:hermes-latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "${tag}" > VERSION
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
+
+      - name: Summary
+        run: |
+          echo "### Hermes image" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '${{ steps.tags.outputs.image }}' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
