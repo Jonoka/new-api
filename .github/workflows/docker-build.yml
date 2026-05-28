@@ -120,6 +120,9 @@ jobs:
     needs: [build_single_arch]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    permissions:
+      packages: write
+      contents: read
 
     steps:
       - name: Set version
