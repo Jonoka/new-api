@@ -581,6 +581,7 @@ func RelayTask(c *gin.Context) {
 			task.TaskID = result.PublicTaskID
 		}
 		task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
+		task.PrivateData.RequestPath = relayInfo.RequestURLPath
 		task.PrivateData.BillingSource = relayInfo.BillingSource
 		task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
 		task.PrivateData.TokenId = relayInfo.TokenId
