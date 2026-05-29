@@ -1,0 +1,134 @@
+package controller
+
+import (
+	"net/http"
+	"strings"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
+)
+
+// RelayImageTaskSubmit handles upstreams that expose async image jobs through
+// the OpenAI-compatible /v1/images/generations submit path.  The normal image
+// relay path writes the submit response and charges the request, but it does
+// not persist a row in tasks, so later GET /v1/images/generations/{task_id}
+// cannot find the returned public task id.  This task-shaped submit path keeps
+// billing and response behavior in ImageHelper, then persists the returned task
+// metadata for polling.
+func RelayImageTaskSubmit(c *gin.Context) {
+	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatOpenAIImage, nil, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, &dto.TaskError{
+			Code:       "gen_relay_info_failed",
+			Message:    err.Error(),
+			StatusCode: http.StatusInternalServerError,
+		})
+		return
+	}
+
+	if apiErr := relayHandler(c, relayInfo); apiErr != nil {
+		c.JSON(apiErr.StatusCode, apiErr.ToOpenAIError())
+		return
+	}
+
+	if relayInfo.OriginModelName == "" {
+		return
+	}
+
+	taskID, upstreamTaskID, taskStatus, progress := parseImageTaskSubmitResponse(c)
+	if strings.TrimSpace(taskID) == "" {
+		return
+	}
+	if strings.TrimSpace(upstreamTaskID) == "" {
+		upstreamTaskID = taskID
+	}
+
+	task := model.InitTask(constant.TaskPlatform(c.GetString("platform")), relayInfo)
+	task.TaskID = taskID
+	task.PrivateData.UpstreamTaskID = upstreamTaskID
+	task.PrivateData.RequestPath = c.Request.URL.Path
+	task.PrivateData.BillingSource = relayInfo.BillingSource
+	task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
+	task.PrivateData.TokenId = relayInfo.TokenId
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		ModelPrice:      relayInfo.PriceData.ModelPrice,
+		GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
+		ModelRatio:      relayInfo.PriceData.ModelRatio,
+		OtherRatios:     relayInfo.PriceData.OtherRatios,
+		OriginModelName: relayInfo.OriginModelName,
+		PerCallBilling:  relayInfo.PriceData.UsePrice || relayInfo.TieredBillingSnapshot != nil,
+	}
+	task.PrivateData.TieredBillingSnapshot = relayInfo.TieredBillingSnapshot
+	task.Quota = relayInfo.PriceData.Quota
+	task.Action = relayInfo.Action
+	if task.Action == "" {
+		task.Action = constant.TaskActionTextGenerate
+	}
+	if taskStatus != "" {
+		task.Status = model.TaskStatus(taskStatus)
+	}
+	if progress != "" {
+		task.Progress = progress
+	}
+	if body := responseBodyFromGin(c); len(body) > 0 {
+		task.Data = body
+	}
+	if insertErr := task.Insert(); insertErr != nil {
+		common.SysError("insert image task error: " + insertErr.Error())
+	}
+}
+
+func parseImageTaskSubmitResponse(c *gin.Context) (taskID, upstreamTaskID, status, progress string) {
+	body := responseBodyFromGin(c)
+	if len(body) == 0 {
+		return
+	}
+	var resp struct {
+		ID       string `json:"id"`
+		TaskID   string `json:"task_id"`
+		Status   string `json:"status"`
+		Progress any    `json:"progress"`
+	}
+	if err := common.Unmarshal(body, &resp); err != nil {
+		return
+	}
+	taskID = strings.TrimSpace(resp.ID)
+	if taskID == "" {
+		taskID = strings.TrimSpace(resp.TaskID)
+		upstreamTaskID = taskID
+	} else if resp.TaskID != "" && resp.TaskID != taskID {
+		upstreamTaskID = strings.TrimSpace(resp.TaskID)
+	}
+	if !strings.HasPrefix(taskID, "task_") && strings.HasPrefix(resp.TaskID, "task_") {
+		upstreamTaskID = taskID
+		taskID = strings.TrimSpace(resp.TaskID)
+	}
+	status = strings.ToUpper(strings.TrimSpace(resp.Status))
+	switch strings.ToLower(status) {
+	case "queued", "pending", "not_start", "not-start":
+		status = string(model.TaskStatusQueued)
+	case "running", "processing", "in_progress", "in-progress":
+		status = string(model.TaskStatusInProgress)
+	case "succeeded", "success", "completed", "complete":
+		status = string(model.TaskStatusSuccess)
+	case "failed", "failure", "error":
+		status = string(model.TaskStatusFailure)
+	}
+	progress = "0%"
+	return
+}
+
+func responseBodyFromGin(c *gin.Context) []byte {
+	if c == nil || c.Writer == nil || c.Writer.Size() <= 0 {
+		return nil
+	}
+	if w, ok := c.Writer.(interface{ Body() []byte }); ok {
+		return w.Body()
+	}
+	return nil
+}
