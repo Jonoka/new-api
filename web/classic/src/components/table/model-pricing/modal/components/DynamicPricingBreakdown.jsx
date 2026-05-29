@@ -114,6 +114,18 @@ export default function DynamicPricingBreakdown({ billingExpr, t }) {
   }
 
   const priceFields = BILLING_PRICING_VARS.map((v) => [v.field, v.shortLabel]);
+  const extractPerCallPrice = (expr) => {
+    if (!expr) return null;
+    const match = expr.match(/^\s*([\d.eE+-]+)\s*(?:\*|$)/);
+    if (!match) return null;
+    const raw = Number(match[1]);
+    return Number.isFinite(raw) ? raw / 1000000 : null;
+  };
+  const formatPerCallPrice = (tier) => {
+    const price = extractPerCallPrice(tier?.expression);
+    return price === null ? '-' : `${symbol}${(price * rate).toFixed(4)} / ${t('次')}`;
+  };
+  const hasPerCallPrice = hasTiers && tiers.some((tier) => extractPerCallPrice(tier.expression) !== null);
 
   const tierColumns = [
     {
@@ -122,6 +134,11 @@ export default function DynamicPricingBreakdown({ billingExpr, t }) {
       render: (text, record) => (
         <div>
           <Tag color='blue' size='small'>{text || t('默认')}</Tag>
+          {hasPerCallPrice && (
+            <div className='text-xs mt-1'>
+              <Text strong>{record.perCallPrice}</Text>
+            </div>
+          )}
           {record.condSummary && (
             <div className='text-xs text-gray-500 mt-1'>{record.condSummary}</div>
           )}
@@ -142,6 +159,7 @@ export default function DynamicPricingBreakdown({ billingExpr, t }) {
         key: `tier-${i}`,
         label: tier.label,
         condSummary: formatConditionSummary(tier.conditions, t),
+        perCallPrice: formatPerCallPrice(tier),
         ...Object.fromEntries(priceFields.map(([field]) => [field, tier[field] || 0])),
       }))
     : [];
