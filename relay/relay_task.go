@@ -24,6 +24,7 @@ import (
 
 type TaskSubmitResult struct {
 	UpstreamTaskID string
+	PublicTaskID   string
 	TaskData       []byte
 	Platform       constant.TaskPlatform
 	Quota          int
@@ -227,6 +228,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 
 	// 10. 返回 OtherRatios 给下游（header 必须在 DoResponse 写 body 之前设置）
+	publicTaskID := info.PublicTaskID
 	otherRatios := info.PriceData.OtherRatios
 	if otherRatios == nil {
 		otherRatios = map[string]float64{}
@@ -251,6 +253,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 
 	return &TaskSubmitResult{
 		UpstreamTaskID: upstreamTaskID,
+		PublicTaskID:   publicTaskID,
 		TaskData:       taskData,
 		Platform:       platform,
 		Quota:          finalQuota,
