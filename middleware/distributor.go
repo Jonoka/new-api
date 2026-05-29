@@ -300,6 +300,10 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 			shouldSelectChannel = false
 		}
 		c.Set("relay_mode", relayMode)
+	} else if strings.Contains(c.Request.URL.Path, "/v1/images/generations/") {
+		relayMode := relayconstant.RelayModeVideoFetchByID
+		shouldSelectChannel = false
+		c.Set("relay_mode", relayMode)
 	} else if strings.Contains(c.Request.URL.Path, "/v1/video/generations") {
 		relayMode := relayconstant.RelayModeUnknown
 		if c.Request.Method == http.MethodPost {
