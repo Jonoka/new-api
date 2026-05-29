@@ -2235,36 +2235,116 @@ function parseTierBody(bodyStr) {
   while ((m = re.exec(bodyStr)) !== null) {
     if (!(m[1] in coeffs)) coeffs[m[1]] = Number(m[2]);
   }
-  const tier = {};
+  const tier = { expression: bodyStr.trim() };
   for (const [varName, field] of Object.entries(BILLING_VAR_KEY_TO_FIELD)) {
     tier[field] = coeffs[varName] || 0;
   }
   return tier;
 }
 
+function splitTopLevelArgs(argStr) {
+  const args = [];
+  let current = '';
+  let depth = 0;
+  let quote = null;
+  let escaped = false;
+  for (const ch of argStr) {
+    if (quote) {
+      current += ch;
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === '(') depth += 1;
+    if (ch === ')') depth -= 1;
+    if (ch === ',' && depth === 0) {
+      args.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) args.push(current.trim());
+  return args;
+}
+
+function extractTierCalls(body) {
+  const tiers = [];
+  let searchFrom = 0;
+  while (searchFrom < body.length) {
+    const idx = body.indexOf('tier(', searchFrom);
+    if (idx === -1) break;
+    let pos = idx + 'tier('.length;
+    let depth = 1;
+    let quote = null;
+    let escaped = false;
+    while (pos < body.length && depth > 0) {
+      const ch = body[pos];
+      if (quote) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch === '\\') {
+          escaped = true;
+        } else if (ch === quote) {
+          quote = null;
+        }
+      } else if (ch === '"' || ch === "'") {
+        quote = ch;
+      } else if (ch === '(') {
+        depth += 1;
+      } else if (ch === ')') {
+        depth -= 1;
+      }
+      pos += 1;
+    }
+    if (depth !== 0) break;
+    const args = splitTopLevelArgs(body.slice(idx + 'tier('.length, pos - 1));
+    if (args.length >= 2) {
+      const label = args[0].replace(/^['"]|['"]$/g, '');
+      const expression = args.slice(1).join(',').trim();
+      tiers.push({ label, expression });
+    }
+    searchFrom = pos;
+  }
+  return tiers;
+}
+
+function parseSimpleConditionsBeforeTier(body, tierIndex) {
+  const before = body.slice(0, tierIndex);
+  const lastQuestion = before.lastIndexOf('?');
+  if (lastQuestion === -1) return [];
+  const lastColon = before.lastIndexOf(':');
+  if (lastColon > lastQuestion) return [];
+  const condStart = Math.max(before.lastIndexOf('? ', lastQuestion - 1), before.lastIndexOf(':', lastQuestion - 1)) + 1;
+  const condStr = before.slice(condStart, lastQuestion).trim().replace(/^\(+|\)+$/g, '');
+  const conditions = [];
+  for (const cp of condStr.split(/\s*&&\s*/)) {
+    const cm = cp.trim().match(/^(p|c|len)\s*(<|<=|>|>=)\s*([\d.eE+]+)$/);
+    if (cm) conditions.push({ var: cm[1], op: cm[2], value: Number(cm[3]) });
+  }
+  return conditions;
+}
+
 export function parseTiersFromExpr(exprStr) {
   if (!exprStr) return [];
   try {
     const { body } = stripExprVersion(exprStr);
-    const condGroup = `((?:(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)(?:\\s*&&\\s*(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)*)`;
-    const tierRe = new RegExp(`(?:${condGroup}\\s*\\?\\s*)?tier\\("([^"]*)",\\s*([^)]+)\\)`, 'g');
-    const tiers = [];
-    let m;
-    while ((m = tierRe.exec(body)) !== null) {
-      const condStr = m[1] || '';
-      const conditions = [];
-      if (condStr) {
-        for (const cp of condStr.split(/\s*&&\s*/)) {
-          const cm = cp.trim().match(/^(p|c|len)\s*(<|<=|>|>=)\s*([\d.eE+]+)$/);
-          if (cm) conditions.push({ var: cm[1], op: cm[2], value: Number(cm[3]) });
-        }
-      }
-      const tier = parseTierBody(m[3]);
-      tier.label = m[2];
-      tier.conditions = conditions;
-      tiers.push(tier);
-    }
-    return tiers;
+    return extractTierCalls(body).map((call) => {
+      const tier = parseTierBody(call.expression);
+      tier.label = call.label;
+      tier.conditions = parseSimpleConditionsBeforeTier(body, body.indexOf(`tier("${call.label}"`));
+      return tier;
+    });
   } catch {
     return [];
   }
