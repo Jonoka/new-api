@@ -415,7 +415,9 @@ export function SubscriptionsMutateDrawer({
                         />
                       </FormControl>
                       <FormDescription>
-                        {t('0 means unlimited')}
+                        {t(
+                          '0 means unlimited. Only currently active subscriptions count toward this limit.'
+                        )}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>

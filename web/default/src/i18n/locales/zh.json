@@ -65,6 +65,7 @@
     "| Based on": "| 基于",
     "0 means data is kept permanently": "0 表示永久保留数据",
     "0 means unlimited": "0 表示不限",
+    "0 means unlimited. Only currently active subscriptions count toward this limit.": "0 表示不限。仅当前有效订阅会计入此上限。",
     "1 Day": "1 天",
     "1 day ago": "1 天前",
     "1 hour": "1 小时",
