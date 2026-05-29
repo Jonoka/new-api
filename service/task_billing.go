@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"strings"
 
@@ -129,6 +130,13 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 			for k, v := range bc.OtherRatios {
 				other[k] = v
 			}
+		}
+	}
+	if snap := task.PrivateData.TieredBillingSnapshot; snap != nil {
+		other["billing_mode"] = "tiered_expr"
+		other["expr_b64"] = base64.StdEncoding.EncodeToString([]byte(snap.ExprString))
+		if snap.EstimatedTier != "" {
+			other["matched_tier"] = snap.EstimatedTier
 		}
 	}
 	props := task.Properties

@@ -84,6 +84,10 @@ func Path2RelayMode(path string) int {
 		relayMode = RelayModeAudioTranslation
 	} else if strings.HasPrefix(path, "/v1/rerank") {
 		relayMode = RelayModeRerank
+	} else if strings.HasPrefix(path, "/v1/video/generations/") || strings.HasPrefix(path, "/v1/images/generations/") {
+		relayMode = RelayModeVideoFetchByID
+	} else if strings.HasPrefix(path, "/v1/video/generations") || strings.HasPrefix(path, "/v1/videos") {
+		relayMode = RelayModeVideoSubmit
 	} else if strings.HasPrefix(path, "/v1/realtime") {
 		relayMode = RelayModeRealtime
 	} else if strings.HasPrefix(path, "/v1beta/models") || strings.HasPrefix(path, "/v1/models") {
