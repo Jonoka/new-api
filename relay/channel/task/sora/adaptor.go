@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"path"
 	"strconv"
 	"strings"
 
@@ -130,10 +131,20 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func (a *TaskAdaptor) BuildRequestURL(info *relaycommon.RelayInfo) (string, error) {
-	if info.Action == constant.TaskActionRemix {
-		return fmt.Sprintf("%s/v1/videos/%s/remix", a.baseURL, info.OriginTaskID), nil
+	base := strings.TrimRight(a.baseURL, "/")
+	requestPath := info.RequestURLPath
+	if requestPath == "" {
+		requestPath = "/v1/videos"
 	}
-	return fmt.Sprintf("%s/v1/videos", a.baseURL), nil
+	requestPath = strings.Split(requestPath, "?")[0]
+
+	if info.Action == constant.TaskActionRemix {
+		return fmt.Sprintf("%s/v1/videos/%s/remix", base, info.OriginTaskID), nil
+	}
+	if strings.HasPrefix(requestPath, "/v1/video/generations") {
+		return base + "/v1/video/generations", nil
+	}
+	return fmt.Sprintf("%s/v1/videos", base), nil
 }
 
 // BuildRequestHeader sets required headers.
@@ -258,12 +269,17 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 
 // FetchTask fetch task status
 func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy string) (*http.Response, error) {
+	baseUrl = strings.TrimRight(baseUrl, "/")
 	taskID, ok := body["task_id"].(string)
-	if !ok {
+	if !ok || taskID == "" {
 		return nil, fmt.Errorf("invalid task_id")
 	}
 
-	uri := fmt.Sprintf("%s/v1/videos/%s", baseUrl, taskID)
+	uriPath := fmt.Sprintf("/v1/videos/%s", taskID)
+	if rawPath, _ := body["request_path"].(string); strings.HasPrefix(rawPath, "/v1/video/generations/") {
+		uriPath = path.Join("/v1/video/generations", taskID)
+	}
+	uri := baseUrl + uriPath
 
 	req, err := http.NewRequest(http.MethodGet, uri, nil)
 	if err != nil {
