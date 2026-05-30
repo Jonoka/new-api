@@ -75,10 +75,6 @@ func RelayImageTaskSubmit(c *gin.Context) {
 		return
 	}
 
-	if relayInfo.OriginModelName == "" {
-		return
-	}
-
 	body := capture.Body()
 	taskID, upstreamTaskID, taskStatus, progress := parseImageTaskSubmitResponseBody(body)
 	if strings.TrimSpace(taskID) == "" {
