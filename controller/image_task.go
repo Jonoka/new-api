@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"strings"
 
@@ -9,6 +11,8 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relay/helper"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
@@ -21,7 +25,14 @@ import (
 // billing and response behavior in ImageHelper, then persists the returned task
 // metadata for polling.
 func RelayImageTaskSubmit(c *gin.Context) {
-	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatOpenAIImage, nil, nil)
+	request, err := helper.GetAndValidateRequest(c, types.RelayFormatOpenAIImage)
+	if err != nil {
+		apiErr := types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+		c.JSON(apiErr.StatusCode, gin.H{"error": apiErr.ToOpenAIError()})
+		return
+	}
+
+	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatOpenAIImage, request, nil)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, &dto.TaskError{
 			Code:       "gen_relay_info_failed",
@@ -31,7 +42,34 @@ func RelayImageTaskSubmit(c *gin.Context) {
 		return
 	}
 
-	if apiErr := relayHandler(c, relayInfo); apiErr != nil {
+	meta := request.GetTokenCountMeta()
+	tokens, err := service.EstimateRequestToken(c, meta, relayInfo)
+	if err != nil {
+		apiErr := types.NewErrorWithStatusCode(err, types.ErrorCodeCountTokenFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+		c.JSON(apiErr.StatusCode, gin.H{"error": apiErr.ToOpenAIError()})
+		return
+	}
+	relayInfo.SetEstimatePromptTokens(tokens)
+	priceData, err := helper.ModelPriceHelper(c, relayInfo, tokens, meta)
+	if err != nil {
+		apiErr := types.NewErrorWithStatusCode(err, types.ErrorCodeModelPriceError, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+		c.JSON(apiErr.StatusCode, gin.H{"error": apiErr.ToOpenAIError()})
+		return
+	}
+	if !priceData.FreeModel {
+		if apiErr := service.PreConsumeBilling(c, priceData.QuotaToPreConsume, relayInfo); apiErr != nil {
+			c.JSON(apiErr.StatusCode, apiErr.ToOpenAIError())
+			return
+		}
+	}
+
+	capture := &imageTaskResponseCapture{ResponseWriter: c.Writer}
+	c.Writer = capture
+	apiErr := relayHandler(c, relayInfo)
+	if apiErr != nil {
+		if relayInfo.Billing != nil {
+			relayInfo.Billing.Refund(c)
+		}
 		c.JSON(apiErr.StatusCode, apiErr.ToOpenAIError())
 		return
 	}
@@ -131,4 +169,23 @@ func responseBodyFromGin(c *gin.Context) []byte {
 		return w.Body()
 	}
 	return nil
+}
+
+type imageTaskResponseCapture struct {
+	gin.ResponseWriter
+	buf bytes.Buffer
+}
+
+func (w *imageTaskResponseCapture) Write(data []byte) (int, error) {
+	w.buf.Write(data)
+	return w.ResponseWriter.Write(data)
+}
+
+func (w *imageTaskResponseCapture) WriteString(s string) (int, error) {
+	w.buf.WriteString(s)
+	return io.WriteString(w.ResponseWriter, s)
+}
+
+func (w *imageTaskResponseCapture) Body() []byte {
+	return w.buf.Bytes()
 }
