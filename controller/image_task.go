@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -78,8 +79,10 @@ func RelayImageTaskSubmit(c *gin.Context) {
 		return
 	}
 
-	taskID, upstreamTaskID, taskStatus, progress := parseImageTaskSubmitResponse(c)
+	body := capture.Body()
+	taskID, upstreamTaskID, taskStatus, progress := parseImageTaskSubmitResponseBody(body)
 	if strings.TrimSpace(taskID) == "" {
+		common.SysLog(fmt.Sprintf("skip image task insert: no task id in response, status=%d, body=%s", capture.Status(), common.LocalLogPreview(string(body))))
 		return
 	}
 	if strings.TrimSpace(upstreamTaskID) == "" {
@@ -113,16 +116,17 @@ func RelayImageTaskSubmit(c *gin.Context) {
 	if progress != "" {
 		task.Progress = progress
 	}
-	if body := responseBodyFromGin(c); len(body) > 0 {
+	if len(body) > 0 {
 		task.Data = body
 	}
 	if insertErr := task.Insert(); insertErr != nil {
 		common.SysError("insert image task error: " + insertErr.Error())
+		return
 	}
+	common.SysLog(fmt.Sprintf("insert image task success: task_id=%s upstream_task_id=%s channel_id=%d status=%s", task.TaskID, task.PrivateData.UpstreamTaskID, task.ChannelId, task.Status))
 }
 
-func parseImageTaskSubmitResponse(c *gin.Context) (taskID, upstreamTaskID, status, progress string) {
-	body := responseBodyFromGin(c)
+func parseImageTaskSubmitResponseBody(body []byte) (taskID, upstreamTaskID, status, progress string) {
 	if len(body) == 0 {
 		return
 	}
@@ -133,6 +137,7 @@ func parseImageTaskSubmitResponse(c *gin.Context) (taskID, upstreamTaskID, statu
 		Progress any    `json:"progress"`
 	}
 	if err := common.Unmarshal(body, &resp); err != nil {
+		common.SysLog("skip image task insert: parse response failed: " + err.Error() + ", body=" + common.LocalLogPreview(string(body)))
 		return
 	}
 	taskID = strings.TrimSpace(resp.TaskID)
@@ -159,16 +164,6 @@ func parseImageTaskSubmitResponse(c *gin.Context) (taskID, upstreamTaskID, statu
 	}
 	progress = "0%"
 	return
-}
-
-func responseBodyFromGin(c *gin.Context) []byte {
-	if c == nil || c.Writer == nil || c.Writer.Size() <= 0 {
-		return nil
-	}
-	if w, ok := c.Writer.(interface{ Body() []byte }); ok {
-		return w.Body()
-	}
-	return nil
 }
 
 type imageTaskResponseCapture struct {
