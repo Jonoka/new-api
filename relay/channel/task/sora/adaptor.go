@@ -276,7 +276,7 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	}
 
 	uriPath := fmt.Sprintf("/v1/videos/%s", taskID)
-	if rawPath, _ := body["request_path"].(string); strings.HasPrefix(rawPath, "/v1/video/generations/") {
+	if rawPath, _ := body["request_path"].(string); strings.HasPrefix(rawPath, "/v1/video/generations") {
 		uriPath = path.Join("/v1/video/generations", taskID)
 	}
 	uri := baseUrl + uriPath
