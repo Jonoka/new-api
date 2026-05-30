@@ -1,5 +1,5 @@
 import * as z from 'zod'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import type { Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -53,6 +53,7 @@ const affiliateSchema = z.object({
     min_withdrawal_amount: z.coerce.number().min(0),
     trigger_topup_enabled: z.boolean(),
     trigger_subscription_enabled: z.boolean(),
+    payout_methods: z.string().min(1),
     usdt_chain: z.string().min(1),
     promotion_template: z.string().min(1),
   }),
@@ -65,6 +66,22 @@ type Props = {
 }
 
 type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline'
+
+const SETTLEMENT_DELAY_KEY = 'affiliate_setting.settlement_delay_seconds'
+const PAYOUT_METHODS_KEY = 'affiliate_setting.payout_methods'
+const PAYOUT_METHOD_OPTIONS = [
+  ['usdt', 'USDT'],
+  ['alipay', 'Alipay'],
+  ['wechat', 'WeChat'],
+] as const
+
+function secondsToMinutes(value: number) {
+  return Math.max(0, Math.round((Number(value) || 0) / 60))
+}
+
+function minutesToSeconds(value: number | string | boolean) {
+  return Math.max(0, Math.round(Number(value) || 0)) * 60
+}
 
 function withdrawalStatusVariant(status: string): BadgeVariant {
   if (status === 'paid') return 'default'
@@ -87,6 +104,17 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
   const [withdrawalStatus, setWithdrawalStatus] = useState('')
   const [withdrawalsLoading, setWithdrawalsLoading] = useState(false)
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null)
+  const displayDefaultValues = useMemo<AffiliateFormValues>(
+    () => ({
+      affiliate_setting: {
+        ...defaultValues.affiliate_setting,
+        settlement_delay_seconds: secondsToMinutes(
+          defaultValues.affiliate_setting.settlement_delay_seconds
+        ),
+      },
+    }),
+    [defaultValues]
+  )
   const handleNumberChange =
     (onChange: (value: number | string) => void) =>
     (event: ChangeEvent<HTMLInputElement>) => {
@@ -102,16 +130,41 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
         unknown,
         AffiliateFormValues
       >,
-      defaultValues,
+      defaultValues: displayDefaultValues,
       onSubmit: async (_data, changedFields) => {
         for (const [key, value] of Object.entries(changedFields)) {
           await updateOption.mutateAsync({
-            key,
-            value: value as string | number | boolean,
+            key: key === SETTLEMENT_DELAY_KEY ? SETTLEMENT_DELAY_KEY : key,
+            value:
+              key === SETTLEMENT_DELAY_KEY
+                ? minutesToSeconds(value as string | number | boolean)
+                : (value as string | number | boolean),
           })
         }
       },
     })
+
+  const selectedPayoutMethods = (form.watch('affiliate_setting.payout_methods') || '')
+    .split(',')
+    .map((method) => method.trim())
+    .filter(Boolean)
+
+  const togglePayoutMethod = (method: string, checked: boolean) => {
+    if (!checked && selectedPayoutMethods.length <= 1) {
+      toast.error(t('At least one payout method must remain enabled'))
+      return
+    }
+    const next = checked
+      ? [...selectedPayoutMethods, method]
+      : selectedPayoutMethods.filter((item) => item !== method)
+    const unique = PAYOUT_METHOD_OPTIONS.map(([value]) => value).filter((value) =>
+      next.includes(value)
+    )
+    form.setValue(PAYOUT_METHODS_KEY, unique.join(','), {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
+  }
 
   const loadWithdrawals = useCallback(async () => {
     try {
@@ -200,7 +253,7 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
               ['affiliate_setting.second_level_ratio', 'Level 2 ratio (%)'],
               [
                 'affiliate_setting.settlement_delay_seconds',
-                'Settlement delay seconds',
+                'Settlement delay minutes',
               ],
               ['affiliate_setting.min_withdrawal_amount', 'Minimum withdrawal'],
             ].map(([name, label]) => (
@@ -273,6 +326,36 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
               )}
             />
           </div>
+
+          <FormField
+            control={form.control}
+            name='affiliate_setting.payout_methods'
+            render={() => (
+              <FormItem>
+                <FormLabel>{t('Supported payout methods')}</FormLabel>
+                <FormDescription>
+                  {t('Only enabled methods are shown on the affiliate page.')}
+                </FormDescription>
+                <div className='grid gap-3 md:grid-cols-3'>
+                  {PAYOUT_METHOD_OPTIONS.map(([method, label]) => (
+                    <label
+                      key={method}
+                      className='flex items-center justify-between rounded-lg border p-4 text-sm'
+                    >
+                      <span>{t(label)}</span>
+                      <Switch
+                        checked={selectedPayoutMethods.includes(method)}
+                        onCheckedChange={(checked) =>
+                          togglePayoutMethod(method, checked)
+                        }
+                      />
+                    </label>
+                  ))}
+                </div>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
 
           <FormField
             control={form.control}

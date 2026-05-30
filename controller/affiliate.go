@@ -17,15 +17,16 @@ import (
 )
 
 type affiliateSettingResponse struct {
-	FirstLevelEnabled          bool   `json:"first_level_enabled"`
-	FirstLevelRatio            int    `json:"first_level_ratio"`
-	SecondLevelEnabled         bool   `json:"second_level_enabled"`
-	SecondLevelRatio           int    `json:"second_level_ratio"`
-	SettlementDelaySeconds     int64  `json:"settlement_delay_seconds"`
-	MinWithdrawalAmount        int    `json:"min_withdrawal_amount"`
-	TriggerTopupEnabled        bool   `json:"trigger_topup_enabled"`
-	TriggerSubscriptionEnabled bool   `json:"trigger_subscription_enabled"`
-	UsdtChain                  string `json:"usdt_chain"`
+	FirstLevelEnabled          bool     `json:"first_level_enabled"`
+	FirstLevelRatio            int      `json:"first_level_ratio"`
+	SecondLevelEnabled         bool     `json:"second_level_enabled"`
+	SecondLevelRatio           int      `json:"second_level_ratio"`
+	SettlementDelaySeconds     int64    `json:"settlement_delay_seconds"`
+	MinWithdrawalAmount        int      `json:"min_withdrawal_amount"`
+	TriggerTopupEnabled        bool     `json:"trigger_topup_enabled"`
+	TriggerSubscriptionEnabled bool     `json:"trigger_subscription_enabled"`
+	PayoutMethods              []string `json:"payout_methods"`
+	UsdtChain                  string   `json:"usdt_chain"`
 }
 
 type affiliateDisplayResponse struct {
@@ -66,6 +67,7 @@ func affiliateSettingPayload() affiliateSettingResponse {
 		MinWithdrawalAmount:        affiliateSetting.MinWithdrawalAmount,
 		TriggerTopupEnabled:        affiliateSetting.TriggerTopupEnabled,
 		TriggerSubscriptionEnabled: affiliateSetting.TriggerSubscriptionEnabled,
+		PayoutMethods:              model.NormalizeAffiliatePayoutMethods(affiliateSetting.PayoutMethods),
 		UsdtChain:                  affiliateSetting.UsdtChain,
 	}
 }
@@ -165,7 +167,11 @@ func GetAffiliateWithdrawals(c *gin.Context) {
 
 func GetAffiliateLeaderboard(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	items, err := model.GetAffiliateLeaderboard(c.DefaultQuery("period", "month"), limit)
+	items, err := model.GetAffiliateLeaderboard(
+		c.DefaultQuery("period", "month"),
+		limit,
+		c.DefaultQuery("sort", "commission"),
+	)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -233,6 +239,33 @@ func TransferAffiliateToBalance(c *gin.Context) {
 	common.ApiSuccess(c, nil)
 }
 
+const affiliateQrPublicPrefix = "/upload/affiliate_qr/"
+
+func affiliateQrPublicPathToLocalPath(publicPath string) (string, bool) {
+	publicPath = strings.TrimSpace(publicPath)
+	if publicPath == "" || !strings.HasPrefix(publicPath, affiliateQrPublicPrefix) {
+		return "", false
+	}
+	fileName := strings.TrimPrefix(publicPath, affiliateQrPublicPrefix)
+	if fileName == "" || strings.Contains(fileName, "/") || strings.Contains(fileName, "\\") {
+		return "", false
+	}
+	if fileName == "." || fileName == ".." || filepath.Base(fileName) != fileName {
+		return "", false
+	}
+	return filepath.Join("upload", "affiliate_qr", fileName), true
+}
+
+func removeAffiliateQrFile(publicPath string) {
+	localPath, ok := affiliateQrPublicPathToLocalPath(publicPath)
+	if !ok {
+		return
+	}
+	if err := os.Remove(localPath); err != nil && !os.IsNotExist(err) {
+		common.SysError("remove affiliate qr failed: " + err.Error())
+	}
+}
+
 func UploadAffiliateQr(c *gin.Context) {
 	method := strings.ToLower(strings.TrimSpace(c.PostForm("method")))
 	if method != model.AffiliatePayoutMethodAlipay && method != model.AffiliatePayoutMethodWechat {
@@ -259,29 +292,56 @@ func UploadAffiliateQr(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	fileName := fmt.Sprintf("%d_%s_%d%s", c.GetInt("id"), method, common.GetTimestamp(), ext)
+	account, err := model.GetAffiliatePayoutAccount(c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	oldPath := account.AlipayQrPath
+	if method == model.AffiliatePayoutMethodWechat {
+		oldPath = account.WechatQrPath
+	}
+	fileName := fmt.Sprintf("%d_%s_%d_%s%s", c.GetInt("id"), method, common.GetTimestamp(), common.GetRandomString(8), ext)
 	savePath := filepath.Join(dir, fileName)
 	if err := c.SaveUploadedFile(file, savePath); err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	publicPath := "/upload/affiliate_qr/" + fileName
+	account, err = model.SetAffiliatePayoutQrPath(c.GetInt("id"), method, publicPath)
+	if err != nil {
+		_ = os.Remove(savePath)
+		common.ApiError(c, err)
+		return
+	}
+	if oldPath != publicPath {
+		removeAffiliateQrFile(oldPath)
+	}
+	common.ApiSuccess(c, gin.H{"path": publicPath, "account": account})
+}
+
+func DeleteAffiliateQr(c *gin.Context) {
+	method := strings.ToLower(strings.TrimSpace(c.Query("method")))
+	if method != model.AffiliatePayoutMethodAlipay && method != model.AffiliatePayoutMethodWechat {
+		common.ApiErrorMsg(c, "仅支持删除支付宝或微信收款码")
+		return
+	}
 	account, err := model.GetAffiliatePayoutAccount(c.GetInt("id"))
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	if method == model.AffiliatePayoutMethodAlipay {
-		account.AlipayQrPath = publicPath
-	} else {
-		account.WechatQrPath = publicPath
+	oldPath := account.AlipayQrPath
+	if method == model.AffiliatePayoutMethodWechat {
+		oldPath = account.WechatQrPath
 	}
-	account.UsdtChain = setting.GetAffiliateSetting().UsdtChain
-	if err := model.SaveAffiliatePayoutAccount(account); err != nil {
+	account, err = model.SetAffiliatePayoutQrPath(c.GetInt("id"), method, "")
+	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, gin.H{"path": publicPath})
+	removeAffiliateQrFile(oldPath)
+	common.ApiSuccess(c, account)
 }
 
 func AdminListAffiliateWithdrawals(c *gin.Context) {

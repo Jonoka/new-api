@@ -31,7 +31,10 @@ import RiskAcknowledgementModal from '../common/modals/RiskAcknowledgementModal'
 
 const CURRENT_COMPLIANCE_TERMS_VERSION = 'v1';
 
-const PaymentSetting = () => {
+const PaymentSetting = ({
+  defaultActiveKey = 'general',
+  onlyAffiliate = false,
+} = {}) => {
   const { t } = useTranslation();
   let [inputs, setInputs] = useState({
     ServerAddress: '',
@@ -61,6 +64,7 @@ const PaymentSetting = () => {
     'affiliate_setting.min_withdrawal_amount': 10,
     'affiliate_setting.trigger_topup_enabled': true,
     'affiliate_setting.trigger_subscription_enabled': false,
+    'affiliate_setting.payout_methods': 'usdt,alipay,wechat',
     'affiliate_setting.usdt_chain': 'TRC20',
     'affiliate_setting.promotion_template': '邀请链接：{invite_link}',
 
@@ -185,6 +189,7 @@ const PaymentSetting = () => {
             newInputs[item.key] = toBoolean(item.value);
             break;
           case 'affiliate_setting.usdt_chain':
+          case 'affiliate_setting.payout_methods':
           case 'affiliate_setting.promotion_template':
             newInputs[item.key] = item.value;
             break;
@@ -291,44 +296,54 @@ const PaymentSetting = () => {
           >
             <Tabs
               type='card'
-              defaultActiveKey='general'
+              defaultActiveKey={defaultActiveKey}
               contentStyle={{ paddingTop: 24 }}
             >
-              <Tabs.TabPane tab={t('通用设置')} itemKey='general'>
-                <SettingsGeneralPayment
-                  options={inputs}
-                  refresh={onRefresh}
-                  hideSectionTitle
-                />
-              </Tabs.TabPane>
-              <Tabs.TabPane tab={t('易支付设置')} itemKey='epay'>
-                <SettingsPaymentGateway
-                  options={inputs}
-                  refresh={onRefresh}
-                  hideSectionTitle
-                />
-              </Tabs.TabPane>
-              <Tabs.TabPane tab={t('Stripe 设置')} itemKey='stripe'>
-                <SettingsPaymentGatewayStripe
-                  options={inputs}
-                  refresh={onRefresh}
-                  hideSectionTitle
-                />
-              </Tabs.TabPane>
-              <Tabs.TabPane tab={t('Creem 设置')} itemKey='creem'>
-                <SettingsPaymentGatewayCreem
-                  options={inputs}
-                  refresh={onRefresh}
-                  hideSectionTitle
-                />
-              </Tabs.TabPane>
-              <Tabs.TabPane tab={t('Waffo 设置')} itemKey='waffo'>
-                <SettingsPaymentGatewayWaffo
-                  options={inputs}
-                  refresh={onRefresh}
-                  hideSectionTitle
-                />
-              </Tabs.TabPane>
+              {!onlyAffiliate && (
+                <Tabs.TabPane tab={t('通用设置')} itemKey='general'>
+                  <SettingsGeneralPayment
+                    options={inputs}
+                    refresh={onRefresh}
+                    hideSectionTitle
+                  />
+                </Tabs.TabPane>
+              )}
+              {!onlyAffiliate && (
+                <Tabs.TabPane tab={t('易支付设置')} itemKey='epay'>
+                  <SettingsPaymentGateway
+                    options={inputs}
+                    refresh={onRefresh}
+                    hideSectionTitle
+                  />
+                </Tabs.TabPane>
+              )}
+              {!onlyAffiliate && (
+                <Tabs.TabPane tab={t('Stripe 设置')} itemKey='stripe'>
+                  <SettingsPaymentGatewayStripe
+                    options={inputs}
+                    refresh={onRefresh}
+                    hideSectionTitle
+                  />
+                </Tabs.TabPane>
+              )}
+              {!onlyAffiliate && (
+                <Tabs.TabPane tab={t('Creem 设置')} itemKey='creem'>
+                  <SettingsPaymentGatewayCreem
+                    options={inputs}
+                    refresh={onRefresh}
+                    hideSectionTitle
+                  />
+                </Tabs.TabPane>
+              )}
+              {!onlyAffiliate && (
+                <Tabs.TabPane tab={t('Waffo 设置')} itemKey='waffo'>
+                  <SettingsPaymentGatewayWaffo
+                    options={inputs}
+                    refresh={onRefresh}
+                    hideSectionTitle
+                  />
+                </Tabs.TabPane>
+              )}
               <Tabs.TabPane tab={t('返佣分成设置')} itemKey='affiliate'>
                 <SettingsAffiliateCommission
                   options={inputs}

@@ -91,6 +91,7 @@ const NotificationSettings = ({
       subscription: true,
       redemption: true,
       user: true,
+      affiliate_admin: true,
       setting: true,
     },
   });
@@ -180,6 +181,7 @@ const NotificationSettings = ({
         subscription: true,
         redemption: true,
         user: true,
+        affiliate_admin: true,
         setting: true,
       },
     };
@@ -321,6 +323,11 @@ const NotificationSettings = ({
           description: t('兑换码生成管理'),
         },
         { key: 'user', title: t('用户管理'), description: t('用户账户管理') },
+        {
+          key: 'affiliate_admin',
+          title: t('返佣分成设置'),
+          description: t('返佣配置与提现审核'),
+        },
         {
           key: 'setting',
           title: t('系统设置'),

@@ -624,6 +624,7 @@
     "返佣分成": "Affiliate Commission",
     "返佣分成设置": "Affiliate commission settings",
     "返佣明细": "Commission records",
+    "返佣配置与提现审核": "Commission configuration and payout review",
     "返佣提现审核": "Affiliate withdrawal review",
     "访问 io.net 控制台的 API Keys 页面": "Visit the API Keys page of the io.net console",
     "访问模型部署功能需要先启用 io.net 部署服务": "Accessing model deployment features requires enabling the io.net deployment service first",
@@ -3906,6 +3907,24 @@
     "Well-Known URL 必须以 http:// 或 https:// 开头": "Well-Known URL must start with http:// or https://",
     "whsec_xxx 的 Webhook 签名密钥，敏感信息不显示": "Webhook signature key for whsec_xxx, sensitive information not displayed",
     "Worker地址": "Worker Address",
-    "Worker密钥": "Worker Key"
+    "Worker密钥": "Worker Key",
+    "支付宝收款码": "Alipay QR code",
+    "微信收款码": "WeChat QR code",
+    "删除收款码": "Delete QR code",
+    "收款码已删除": "QR code deleted",
+    "按返利金额": "Sort by commission",
+    "按邀请人数": "Sort by invites",
+    "延迟到账分钟数": "Settlement delay minutes",
+    "编辑收款账户": "Edit payout account",
+    "返佣动态": "Affiliate activity",
+    "支持的提现渠道": "Supported payout methods",
+    "未开放的渠道不会在用户返佣页展示": "Disabled methods are hidden on the affiliate page",
+    "至少需要保留一个提现渠道": "At least one payout method must remain enabled",
+    "暂无可用提现渠道": "No payout methods are available",
+    "设置一级和二级返佣的开关与比例": "Configure level 1 and level 2 commission toggles and ratios",
+    "触发与提现": "Triggers and payouts",
+    "配置返佣触发范围和用户可见的提现渠道": "Configure commission triggers and payout methods visible to users",
+    "充值成功后按规则生成返佣": "Generate commission after a successful top-up",
+    "订阅付费后按规则生成返佣": "Generate commission after a subscription payment"
   }
 }

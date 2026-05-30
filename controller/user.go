@@ -459,7 +459,8 @@ func calculateUserPermissions(userRole int) map[string]interface{} {
 		permissions["sidebar_settings"] = true
 		permissions["sidebar_modules"] = map[string]interface{}{
 			"admin": map[string]interface{}{
-				"setting": false, // 管理员不能访问系统设置
+				"affiliate_admin": false, // 返佣配置走系统设置权限
+				"setting":         false, // 管理员不能访问系统设置
 			},
 		}
 	} else {
@@ -506,22 +507,24 @@ func generateDefaultSidebarConfig(userRole int) string {
 	if userRole == common.RoleAdminUser {
 		// 管理员可以访问管理员区域，但不能访问系统设置
 		defaultConfig["admin"] = map[string]any{
-			"enabled":    true,
-			"channel":    true,
-			"models":     true,
-			"redemption": true,
-			"user":       true,
-			"setting":    false, // 管理员不能访问系统设置
+			"enabled":         true,
+			"channel":         true,
+			"models":          true,
+			"redemption":      true,
+			"user":            true,
+			"affiliate_admin": false,
+			"setting":         false, // 管理员不能访问系统设置
 		}
 	} else if userRole == common.RoleRootUser {
 		// 超级管理员可以访问所有功能
 		defaultConfig["admin"] = map[string]any{
-			"enabled":    true,
-			"channel":    true,
-			"models":     true,
-			"redemption": true,
-			"user":       true,
-			"setting":    true,
+			"enabled":         true,
+			"channel":         true,
+			"models":          true,
+			"redemption":      true,
+			"user":            true,
+			"affiliate_admin": true,
+			"setting":         true,
 		}
 	}
 	// 普通用户不包含admin区域

@@ -32,10 +32,14 @@ export async function getAffiliateWithdrawals(page = 1, pageSize = 20) {
   return res.data
 }
 
-export async function getAffiliateLeaderboard(period = 'month', limit = 20) {
+export async function getAffiliateLeaderboard(
+  period = 'month',
+  limit = 20,
+  sort = 'commission'
+) {
   const res = await api.get<ApiResponse<AffiliateLeaderboardItem[]>>(
     '/api/affiliate/leaderboard',
-    { params: { period, limit } }
+    { params: { period, limit, sort } }
   )
   return res.data
 }
@@ -77,10 +81,20 @@ export async function uploadAffiliateQr(method: string, file: File) {
   const form = new FormData()
   form.append('method', method)
   form.append('file', file)
-  const res = await api.post<ApiResponse<{ path: string }>>(
+  const res = await api.post<
+    ApiResponse<{ path: string; account?: AffiliatePayoutAccount }>
+  >(
     '/api/affiliate/upload-qr',
     form,
     { headers: { 'Content-Type': 'multipart/form-data' } }
+  )
+  return res.data
+}
+
+export async function deleteAffiliateQr(method: string) {
+  const res = await api.delete<ApiResponse<AffiliatePayoutAccount>>(
+    '/api/affiliate/qr',
+    { params: { method } }
   )
   return res.data
 }

@@ -146,6 +146,10 @@ export function SidebarModulesSection({
         title: t('Users'),
         description: t('Administer user accounts and roles.'),
       },
+      affiliate_admin: {
+        title: t('Affiliate Commission'),
+        description: t('Configure paid-referral commission and payouts'),
+      },
       setting: {
         title: t('System settings'),
         description: t('Advanced platform configuration.'),

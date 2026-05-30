@@ -134,6 +134,37 @@ func normalizeAffiliatePayoutMethod(method string) string {
 	}
 }
 
+func NormalizeAffiliatePayoutMethods(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		raw = setting.DefaultAffiliatePayoutMethods
+	}
+	seen := make(map[string]bool, 3)
+	methods := make([]string, 0, 3)
+	for _, item := range strings.Split(raw, ",") {
+		method := normalizeAffiliatePayoutMethod(item)
+		if method == "" || seen[method] {
+			continue
+		}
+		seen[method] = true
+		methods = append(methods, method)
+	}
+	return methods
+}
+
+func isAffiliatePayoutMethodEnabled(method string) bool {
+	method = normalizeAffiliatePayoutMethod(method)
+	if method == "" {
+		return false
+	}
+	for _, enabledMethod := range NormalizeAffiliatePayoutMethods(setting.GetAffiliateSetting().PayoutMethods) {
+		if enabledMethod == method {
+			return true
+		}
+	}
+	return false
+}
+
 func getAffiliateBalanceForUpdateTx(tx *gorm.DB, userId int) (*AffiliateBalance, error) {
 	if userId <= 0 {
 		return nil, errors.New("invalid user id")
@@ -411,8 +442,58 @@ func SaveAffiliatePayoutAccount(account *AffiliatePayoutAccount) error {
 		}
 		account.Id = existing.Id
 		account.CreatedAt = existing.CreatedAt
+		if account.AlipayQrPath == "" {
+			account.AlipayQrPath = existing.AlipayQrPath
+		}
+		if account.WechatQrPath == "" {
+			account.WechatQrPath = existing.WechatQrPath
+		}
 		return tx.Save(account).Error
 	})
+}
+
+func SetAffiliatePayoutQrPath(userId int, method string, qrPath string) (*AffiliatePayoutAccount, error) {
+	if userId <= 0 {
+		return nil, errors.New("invalid user id")
+	}
+	method = normalizeAffiliatePayoutMethod(method)
+	if method != AffiliatePayoutMethodAlipay && method != AffiliatePayoutMethodWechat {
+		return nil, errors.New("invalid payout qr method")
+	}
+	qrPath = strings.TrimSpace(qrPath)
+
+	var saved *AffiliatePayoutAccount
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		account := &AffiliatePayoutAccount{}
+		err := tx.Set("gorm:query_option", "FOR UPDATE").Where("user_id = ?", userId).First(account).Error
+		if err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			account = &AffiliatePayoutAccount{
+				UserId:    userId,
+				UsdtChain: setting.GetAffiliateSetting().UsdtChain,
+			}
+		}
+		if account.UsdtChain == "" {
+			account.UsdtChain = setting.GetAffiliateSetting().UsdtChain
+		}
+		if method == AffiliatePayoutMethodAlipay {
+			account.AlipayQrPath = qrPath
+		} else {
+			account.WechatQrPath = qrPath
+		}
+		if account.Id == 0 {
+			if err := tx.Create(account).Error; err != nil {
+				return err
+			}
+		} else if err := tx.Save(account).Error; err != nil {
+			return err
+		}
+		saved = account
+		return nil
+	})
+	return saved, err
 }
 
 func CreateAffiliateWithdrawal(userId int, method string, quota int) (*AffiliateWithdrawal, error) {
@@ -428,6 +509,9 @@ func CreateAffiliateWithdrawal(userId int, method string, quota int) (*Affiliate
 	method = normalizeAffiliatePayoutMethod(method)
 	if method == "" {
 		return nil, errors.New("无效的提现方式")
+	}
+	if !isAffiliatePayoutMethodEnabled(method) {
+		return nil, errors.New("当前提现方式未开放")
 	}
 	if err := SettleMatureAffiliateRecords(userId); err != nil {
 		return nil, err
@@ -634,11 +718,21 @@ func affiliateLeaderboardPeriodStart(period string) int64 {
 	}
 }
 
-func GetAffiliateLeaderboard(period string, limit int) ([]AffiliateLeaderboardItem, error) {
+func normalizeAffiliateLeaderboardSort(sortBy string) string {
+	switch strings.ToLower(strings.TrimSpace(sortBy)) {
+	case "invite", "invites", "invite_count", "invite_count_desc":
+		return "invites"
+	default:
+		return "commission"
+	}
+}
+
+func GetAffiliateLeaderboard(period string, limit int, sortBy string) ([]AffiliateLeaderboardItem, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
 	startTime := affiliateLeaderboardPeriodStart(period)
+	normalizedSort := normalizeAffiliateLeaderboardSort(sortBy)
 
 	type inviteRow struct {
 		UserId      int
@@ -715,6 +809,15 @@ func GetAffiliateLeaderboard(period string, limit int) ([]AffiliateLeaderboardIt
 		items = append(items, *item)
 	}
 	sort.SliceStable(items, func(i, j int) bool {
+		if normalizedSort == "invites" {
+			if items[i].InviteCount != items[j].InviteCount {
+				return items[i].InviteCount > items[j].InviteCount
+			}
+			if items[i].CommissionQuota != items[j].CommissionQuota {
+				return items[i].CommissionQuota > items[j].CommissionQuota
+			}
+			return items[i].UserId < items[j].UserId
+		}
 		if items[i].CommissionQuota != items[j].CommissionQuota {
 			return items[i].CommissionQuota > items[j].CommissionQuota
 		}

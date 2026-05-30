@@ -271,6 +271,7 @@ export type BillingSettings = {
   'affiliate_setting.min_withdrawal_amount': number
   'affiliate_setting.trigger_topup_enabled': boolean
   'affiliate_setting.trigger_subscription_enabled': boolean
+  'affiliate_setting.payout_methods': string
   'affiliate_setting.usdt_chain': string
   'affiliate_setting.promotion_template': string
   'checkin_setting.enabled': boolean

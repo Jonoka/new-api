@@ -148,6 +148,11 @@ export function useSidebarData(): SidebarData {
             icon: CreditCard,
           },
           {
+            title: t('Affiliate Commission'),
+            url: '/system-settings/billing/affiliate',
+            icon: HandCoins,
+          },
+          {
             title: t('System Settings'),
             url: '/system-settings/site',
             activeUrls: ['/system-settings'],

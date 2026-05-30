@@ -139,6 +139,7 @@ export function getLucideIcon(key, selected = false) {
     case 'topup':
       return <CreditCard {...commonProps} color={iconColor} />;
     case 'affiliate':
+    case 'affiliate_admin':
       return <HandCoins {...commonProps} color={iconColor} />;
     case 'channel':
       return <Layers {...commonProps} color={iconColor} />;

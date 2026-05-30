@@ -195,6 +195,7 @@ func SetApiRouter(router *gin.Engine) {
 			affiliateRoute.POST("/withdraw", controller.CreateAffiliateWithdrawal)
 			affiliateRoute.POST("/transfer-to-balance", controller.TransferAffiliateToBalance)
 			affiliateRoute.POST("/upload-qr", middleware.UploadRateLimit(), controller.UploadAffiliateQr)
+			affiliateRoute.DELETE("/qr", controller.DeleteAffiliateQr)
 		}
 		affiliateAdminRoute := apiRouter.Group("/affiliate/admin")
 		affiliateAdminRoute.Use(middleware.AdminAuth())

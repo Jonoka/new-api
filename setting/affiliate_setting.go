@@ -2,6 +2,8 @@ package setting
 
 import "github.com/QuantumNous/new-api/setting/config"
 
+const DefaultAffiliatePayoutMethods = "usdt,alipay,wechat"
+
 type AffiliateSetting struct {
 	FirstLevelEnabled          bool   `json:"first_level_enabled"`
 	FirstLevelRatio            int    `json:"first_level_ratio"`
@@ -11,6 +13,7 @@ type AffiliateSetting struct {
 	MinWithdrawalAmount        int    `json:"min_withdrawal_amount"`
 	TriggerTopupEnabled        bool   `json:"trigger_topup_enabled"`
 	TriggerSubscriptionEnabled bool   `json:"trigger_subscription_enabled"`
+	PayoutMethods              string `json:"payout_methods"`
 	UsdtChain                  string `json:"usdt_chain"`
 	PromotionTemplate          string `json:"promotion_template"`
 }
@@ -24,6 +27,7 @@ var affiliateSetting = AffiliateSetting{
 	MinWithdrawalAmount:        10,
 	TriggerTopupEnabled:        true,
 	TriggerSubscriptionEnabled: false,
+	PayoutMethods:              DefaultAffiliatePayoutMethods,
 	UsdtChain:                  "TRC20",
 	PromotionTemplate:          "邀请链接：{invite_link}",
 }
@@ -35,6 +39,9 @@ func init() {
 func GetAffiliateSetting() *AffiliateSetting {
 	if affiliateSetting.UsdtChain == "" {
 		affiliateSetting.UsdtChain = "TRC20"
+	}
+	if affiliateSetting.PayoutMethods == "" {
+		affiliateSetting.PayoutMethods = DefaultAffiliatePayoutMethods
 	}
 	if affiliateSetting.PromotionTemplate == "" {
 		affiliateSetting.PromotionTemplate = "邀请链接：{invite_link}"

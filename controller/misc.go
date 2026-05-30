@@ -40,6 +40,73 @@ func TestStatus(c *gin.Context) {
 	return
 }
 
+func getSidebarModulesAdminStatusValue(raw string) string {
+	defaultConfig := map[string]any{
+		"chat": map[string]any{
+			"enabled":    true,
+			"playground": true,
+			"chat":       true,
+		},
+		"console": map[string]any{
+			"enabled":    true,
+			"detail":     true,
+			"token":      true,
+			"log":        true,
+			"midjourney": true,
+			"task":       true,
+		},
+		"personal": map[string]any{
+			"enabled":   true,
+			"topup":     true,
+			"affiliate": true,
+			"personal":  true,
+		},
+		"admin": map[string]any{
+			"enabled":         true,
+			"channel":         true,
+			"models":          true,
+			"deployment":      true,
+			"redemption":      true,
+			"user":            true,
+			"subscription":    true,
+			"affiliate_admin": true,
+			"setting":         true,
+		},
+	}
+
+	mergeConfig := func(saved map[string]any) map[string]any {
+		merged := defaultConfig
+		for sectionKey, rawSection := range saved {
+			section, ok := rawSection.(map[string]any)
+			if !ok {
+				continue
+			}
+			defaultSection, ok := merged[sectionKey].(map[string]any)
+			if !ok {
+				merged[sectionKey] = section
+				continue
+			}
+			for moduleKey, moduleValue := range section {
+				defaultSection[moduleKey] = moduleValue
+			}
+		}
+		return merged
+	}
+
+	var savedConfig map[string]any
+	if strings.TrimSpace(raw) != "" {
+		if err := common.UnmarshalJsonStr(raw, &savedConfig); err != nil {
+			savedConfig = nil
+		}
+	}
+
+	configBytes, err := common.Marshal(mergeConfig(savedConfig))
+	if err != nil {
+		return raw
+	}
+	return string(configBytes)
+}
+
 func GetGitHubLatestRelease(c *gin.Context) {
 	release, err := service.GetLatestSelfUpdateRelease(c.Request.Context())
 	if err != nil {
@@ -133,7 +200,7 @@ func GetStatus(c *gin.Context) {
 
 		// 模块管理配置
 		"HeaderNavModules":    common.OptionMap["HeaderNavModules"],
-		"SidebarModulesAdmin": common.OptionMap["SidebarModulesAdmin"],
+		"SidebarModulesAdmin": getSidebarModulesAdminStatusValue(common.OptionMap["SidebarModulesAdmin"]),
 
 		"oidc_enabled":                system_setting.GetOIDCSettings().Enabled,
 		"oidc_client_id":              system_setting.GetOIDCSettings().ClientId,

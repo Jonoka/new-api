@@ -30,6 +30,7 @@ export type AffiliateSetting = {
   min_withdrawal_amount: number
   trigger_topup_enabled: boolean
   trigger_subscription_enabled: boolean
+  payout_methods: string[]
   usdt_chain: string
 }
 

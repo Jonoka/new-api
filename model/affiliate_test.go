@@ -26,6 +26,7 @@ func resetAffiliateSettingForTest(t *testing.T) {
 	affiliateSetting.MinWithdrawalAmount = 10
 	affiliateSetting.TriggerTopupEnabled = true
 	affiliateSetting.TriggerSubscriptionEnabled = false
+	affiliateSetting.PayoutMethods = "usdt,alipay,wechat"
 	affiliateSetting.UsdtChain = "TRC20"
 	affiliateSetting.PromotionTemplate = "邀请链接：{invite_link}"
 }
@@ -224,6 +225,46 @@ func TestAffiliateWithdrawalRequiresPayoutAccountAndUsesDisplayMinimum(t *testin
 	assert.Equal(t, minQuota, withdrawal.Quota)
 }
 
+func TestAffiliateWithdrawalHonorsConfiguredPayoutMethods(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+	affiliateSetting := setting.GetAffiliateSetting()
+	affiliateSetting.MinWithdrawalAmount = 0
+	affiliateSetting.PayoutMethods = "usdt"
+
+	insertAffiliateUser(t, 22, 0, 0)
+	require.NoError(t, DB.Create(&AffiliateBalance{UserId: 22, AvailableQuota: 5000, TotalQuota: 5000}).Error)
+	require.NoError(t, DB.Create(&AffiliatePayoutAccount{
+		UserId:        22,
+		UsdtAddress:   "TExampleAddress",
+		AlipayAccount: "pay@example.com",
+	}).Error)
+
+	_, err := CreateAffiliateWithdrawal(22, AffiliatePayoutMethodAlipay, 1000)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "未开放")
+
+	withdrawal, err := CreateAffiliateWithdrawal(22, AffiliatePayoutMethodUSDT, 1000)
+	require.NoError(t, err)
+	assert.Equal(t, AffiliatePayoutMethodUSDT, withdrawal.Method)
+}
+
+func TestAffiliateWithdrawalKeepsDefaultPayoutMethodsWhenConfigEmpty(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+	affiliateSetting := setting.GetAffiliateSetting()
+	affiliateSetting.MinWithdrawalAmount = 0
+	affiliateSetting.PayoutMethods = ""
+
+	insertAffiliateUser(t, 23, 0, 0)
+	require.NoError(t, DB.Create(&AffiliateBalance{UserId: 23, AvailableQuota: 5000, TotalQuota: 5000}).Error)
+	require.NoError(t, DB.Create(&AffiliatePayoutAccount{UserId: 23, AlipayAccount: "pay@example.com"}).Error)
+
+	withdrawal, err := CreateAffiliateWithdrawal(23, AffiliatePayoutMethodAlipay, 1000)
+	require.NoError(t, err)
+	assert.Equal(t, AffiliatePayoutMethodAlipay, withdrawal.Method)
+}
+
 func TestTransferAffiliateQuotaToBalance(t *testing.T) {
 	truncateTables(t)
 	resetAffiliateSettingForTest(t)
@@ -261,7 +302,7 @@ func TestGetAffiliateLeaderboardAggregatesInvitesAndCommissionByPeriod(t *testin
 	require.NoError(t, DB.Create(&AffiliateRecord{UserId: 51, InviteeId: 54, Level: 1, SourceType: AffiliateSourceTopUp, SourceId: "lb-2", RewardQuota: 2000, Status: AffiliateRecordStatusAvailable, CreatedAt: dayStart}).Error)
 	require.NoError(t, DB.Create(&AffiliateRecord{UserId: 50, InviteeId: 55, Level: 1, SourceType: AffiliateSourceTopUp, SourceId: "lb-old", RewardQuota: 9999, Status: AffiliateRecordStatusAvailable, CreatedAt: old}).Error)
 
-	items, err := GetAffiliateLeaderboard("day", 10)
+	items, err := GetAffiliateLeaderboard("day", 10, "commission")
 	require.NoError(t, err)
 	require.Len(t, items, 2)
 
@@ -274,4 +315,66 @@ func TestGetAffiliateLeaderboardAggregatesInvitesAndCommissionByPeriod(t *testin
 	assert.Equal(t, 50, items[1].UserId)
 	assert.Equal(t, 2, items[1].InviteCount)
 	assert.Equal(t, 1000, items[1].CommissionQuota)
+
+	items, err = GetAffiliateLeaderboard("day", 10, "invites")
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+
+	assert.Equal(t, 1, items[0].Rank)
+	assert.Equal(t, 50, items[0].UserId)
+	assert.Equal(t, 2, items[0].InviteCount)
+	assert.Equal(t, 1000, items[0].CommissionQuota)
+
+	assert.Equal(t, 2, items[1].Rank)
+	assert.Equal(t, 51, items[1].UserId)
+	assert.Equal(t, 1, items[1].InviteCount)
+	assert.Equal(t, 2000, items[1].CommissionQuota)
+}
+
+func TestSaveAffiliatePayoutAccountPreservesQrPaths(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	require.NoError(t, DB.Create(&AffiliatePayoutAccount{
+		UserId:        60,
+		AlipayQrPath:  "/upload/affiliate_qr/alipay-old.png",
+		WechatQrPath:  "/upload/affiliate_qr/wechat-old.png",
+		AlipayAccount: "old@example.com",
+	}).Error)
+
+	require.NoError(t, SaveAffiliatePayoutAccount(&AffiliatePayoutAccount{
+		UserId:        60,
+		UsdtAddress:   "TExample",
+		AlipayAccount: "new@example.com",
+		WechatAccount: "wechat-id",
+	}))
+
+	account, err := GetAffiliatePayoutAccount(60)
+	require.NoError(t, err)
+	assert.Equal(t, "new@example.com", account.AlipayAccount)
+	assert.Equal(t, "wechat-id", account.WechatAccount)
+	assert.Equal(t, "/upload/affiliate_qr/alipay-old.png", account.AlipayQrPath)
+	assert.Equal(t, "/upload/affiliate_qr/wechat-old.png", account.WechatQrPath)
+}
+
+func TestSetAffiliatePayoutQrPathReplacesAndClearsQrPath(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	require.NoError(t, DB.Create(&AffiliatePayoutAccount{
+		UserId:        61,
+		AlipayQrPath:  "/upload/affiliate_qr/alipay-old.png",
+		WechatQrPath:  "/upload/affiliate_qr/wechat-old.png",
+		AlipayAccount: "pay@example.com",
+	}).Error)
+
+	account, err := SetAffiliatePayoutQrPath(61, AffiliatePayoutMethodAlipay, "/upload/affiliate_qr/alipay-new.png")
+	require.NoError(t, err)
+	assert.Equal(t, "/upload/affiliate_qr/alipay-new.png", account.AlipayQrPath)
+	assert.Equal(t, "/upload/affiliate_qr/wechat-old.png", account.WechatQrPath)
+
+	account, err = SetAffiliatePayoutQrPath(61, AffiliatePayoutMethodAlipay, "")
+	require.NoError(t, err)
+	assert.Equal(t, "", account.AlipayQrPath)
+	assert.Equal(t, "/upload/affiliate_qr/wechat-old.png", account.WechatQrPath)
 }

@@ -39,6 +39,7 @@ const routerMap = {
   affiliate: '/console/affiliate',
   user: '/console/user',
   subscription: '/console/subscription',
+  affiliate_admin: '/console/affiliate-admin',
   log: '/console/log',
   midjourney: '/console/midjourney',
   setting: '/console/setting',
@@ -188,6 +189,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         itemKey: 'user',
         to: '/user',
         className: isAdmin() ? '' : 'tableHiddle',
+      },
+      {
+        text: t('返佣分成设置'),
+        itemKey: 'affiliate_admin',
+        to: '/affiliate-admin',
+        className: isRoot() ? '' : 'tableHiddle',
       },
       {
         text: t('系统设置'),
