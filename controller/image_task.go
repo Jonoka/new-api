@@ -135,16 +135,16 @@ func parseImageTaskSubmitResponse(c *gin.Context) (taskID, upstreamTaskID, statu
 	if err := common.Unmarshal(body, &resp); err != nil {
 		return
 	}
-	taskID = strings.TrimSpace(resp.ID)
+	taskID = strings.TrimSpace(resp.TaskID)
+	upstreamTaskID = strings.TrimSpace(resp.ID)
 	if taskID == "" {
-		taskID = strings.TrimSpace(resp.TaskID)
-		upstreamTaskID = taskID
-	} else if resp.TaskID != "" && resp.TaskID != taskID {
-		upstreamTaskID = strings.TrimSpace(resp.TaskID)
+		taskID = upstreamTaskID
 	}
-	if !strings.HasPrefix(taskID, "task_") && strings.HasPrefix(resp.TaskID, "task_") {
+	if upstreamTaskID == "" {
 		upstreamTaskID = taskID
-		taskID = strings.TrimSpace(resp.TaskID)
+	}
+	if !strings.HasPrefix(taskID, "task_") && strings.HasPrefix(upstreamTaskID, "task_") {
+		taskID, upstreamTaskID = upstreamTaskID, taskID
 	}
 	status = strings.ToUpper(strings.TrimSpace(resp.Status))
 	switch strings.ToLower(status) {
