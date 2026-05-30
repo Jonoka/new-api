@@ -102,7 +102,9 @@ func RelayImageTaskSubmit(c *gin.Context) {
 	}
 	task.PrivateData.TieredBillingSnapshot = relayInfo.TieredBillingSnapshot
 	task.Quota = relayInfo.PriceData.Quota
-	task.Action = relayInfo.Action
+	if relayInfo.TaskRelayInfo != nil {
+		task.Action = relayInfo.TaskRelayInfo.Action
+	}
 	if task.Action == "" {
 		task.Action = constant.TaskActionTextGenerate
 	}
