@@ -70,6 +70,7 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
   personal: {
     enabled: true,
     topup: true,
+    affiliate: true,
     personal: true,
   },
   admin: {
@@ -78,6 +79,7 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
     models: true,
     redemption: true,
     user: true,
+    affiliate_admin: true,
     setting: true,
     subscription: true,
   },

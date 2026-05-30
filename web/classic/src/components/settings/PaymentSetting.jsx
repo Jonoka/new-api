@@ -24,13 +24,17 @@ import SettingsPaymentGateway from '../../pages/Setting/Payment/SettingsPaymentG
 import SettingsPaymentGatewayStripe from '../../pages/Setting/Payment/SettingsPaymentGatewayStripe';
 import SettingsPaymentGatewayCreem from '../../pages/Setting/Payment/SettingsPaymentGatewayCreem';
 import SettingsPaymentGatewayWaffo from '../../pages/Setting/Payment/SettingsPaymentGatewayWaffo';
+import SettingsAffiliateCommission from '../../pages/Setting/Payment/SettingsAffiliateCommission';
 import { API, showError, showSuccess, toBoolean } from '../../helpers';
 import { useTranslation } from 'react-i18next';
 import RiskAcknowledgementModal from '../common/modals/RiskAcknowledgementModal';
 
 const CURRENT_COMPLIANCE_TERMS_VERSION = 'v1';
 
-const PaymentSetting = () => {
+const PaymentSetting = ({
+  defaultActiveKey = 'general',
+  onlyAffiliate = false,
+} = {}) => {
   const { t } = useTranslation();
   let [inputs, setInputs] = useState({
     ServerAddress: '',
@@ -51,6 +55,18 @@ const PaymentSetting = () => {
     StripeUnitPrice: 8.0,
     StripeMinTopUp: 1,
     StripePromotionCodesEnabled: false,
+
+    'affiliate_setting.first_level_enabled': false,
+    'affiliate_setting.first_level_ratio': 0,
+    'affiliate_setting.second_level_enabled': false,
+    'affiliate_setting.second_level_ratio': 0,
+    'affiliate_setting.settlement_delay_seconds': 0,
+    'affiliate_setting.min_withdrawal_amount': 10,
+    'affiliate_setting.trigger_topup_enabled': true,
+    'affiliate_setting.trigger_subscription_enabled': false,
+    'affiliate_setting.payout_methods': 'usdt,alipay,wechat',
+    'affiliate_setting.usdt_chain': 'TRC20',
+    'affiliate_setting.promotion_template': '邀请链接：{invite_link}',
 
     'payment_setting.compliance_confirmed': false,
     'payment_setting.compliance_terms_version': '',
@@ -160,7 +176,22 @@ const PaymentSetting = () => {
           case 'MinTopUp':
           case 'StripeUnitPrice':
           case 'StripeMinTopUp':
+          case 'affiliate_setting.first_level_ratio':
+          case 'affiliate_setting.second_level_ratio':
+          case 'affiliate_setting.settlement_delay_seconds':
+          case 'affiliate_setting.min_withdrawal_amount':
             newInputs[item.key] = parseFloat(item.value);
+            break;
+          case 'affiliate_setting.first_level_enabled':
+          case 'affiliate_setting.second_level_enabled':
+          case 'affiliate_setting.trigger_topup_enabled':
+          case 'affiliate_setting.trigger_subscription_enabled':
+            newInputs[item.key] = toBoolean(item.value);
+            break;
+          case 'affiliate_setting.usdt_chain':
+          case 'affiliate_setting.payout_methods':
+          case 'affiliate_setting.promotion_template':
+            newInputs[item.key] = item.value;
             break;
           default:
             if (item.key.endsWith('Enabled')) {
@@ -265,39 +296,56 @@ const PaymentSetting = () => {
           >
             <Tabs
               type='card'
-              defaultActiveKey='general'
+              defaultActiveKey={defaultActiveKey}
               contentStyle={{ paddingTop: 24 }}
             >
-              <Tabs.TabPane tab={t('通用设置')} itemKey='general'>
-                <SettingsGeneralPayment
-                  options={inputs}
-                  refresh={onRefresh}
-                  hideSectionTitle
-                />
-              </Tabs.TabPane>
-              <Tabs.TabPane tab={t('易支付设置')} itemKey='epay'>
-                <SettingsPaymentGateway
-                  options={inputs}
-                  refresh={onRefresh}
-                  hideSectionTitle
-                />
-              </Tabs.TabPane>
-              <Tabs.TabPane tab={t('Stripe 设置')} itemKey='stripe'>
-                <SettingsPaymentGatewayStripe
-                  options={inputs}
-                  refresh={onRefresh}
-                  hideSectionTitle
-                />
-              </Tabs.TabPane>
-              <Tabs.TabPane tab={t('Creem 设置')} itemKey='creem'>
-                <SettingsPaymentGatewayCreem
-                  options={inputs}
-                  refresh={onRefresh}
-                  hideSectionTitle
-                />
-              </Tabs.TabPane>
-              <Tabs.TabPane tab={t('Waffo 设置')} itemKey='waffo'>
-                <SettingsPaymentGatewayWaffo
+              {!onlyAffiliate && (
+                <Tabs.TabPane tab={t('通用设置')} itemKey='general'>
+                  <SettingsGeneralPayment
+                    options={inputs}
+                    refresh={onRefresh}
+                    hideSectionTitle
+                  />
+                </Tabs.TabPane>
+              )}
+              {!onlyAffiliate && (
+                <Tabs.TabPane tab={t('易支付设置')} itemKey='epay'>
+                  <SettingsPaymentGateway
+                    options={inputs}
+                    refresh={onRefresh}
+                    hideSectionTitle
+                  />
+                </Tabs.TabPane>
+              )}
+              {!onlyAffiliate && (
+                <Tabs.TabPane tab={t('Stripe 设置')} itemKey='stripe'>
+                  <SettingsPaymentGatewayStripe
+                    options={inputs}
+                    refresh={onRefresh}
+                    hideSectionTitle
+                  />
+                </Tabs.TabPane>
+              )}
+              {!onlyAffiliate && (
+                <Tabs.TabPane tab={t('Creem 设置')} itemKey='creem'>
+                  <SettingsPaymentGatewayCreem
+                    options={inputs}
+                    refresh={onRefresh}
+                    hideSectionTitle
+                  />
+                </Tabs.TabPane>
+              )}
+              {!onlyAffiliate && (
+                <Tabs.TabPane tab={t('Waffo 设置')} itemKey='waffo'>
+                  <SettingsPaymentGatewayWaffo
+                    options={inputs}
+                    refresh={onRefresh}
+                    hideSectionTitle
+                  />
+                </Tabs.TabPane>
+              )}
+              <Tabs.TabPane tab={t('返佣分成设置')} itemKey='affiliate'>
+                <SettingsAffiliateCommission
                   options={inputs}
                   refresh={onRefresh}
                   hideSectionTitle

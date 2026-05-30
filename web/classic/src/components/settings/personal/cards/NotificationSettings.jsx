@@ -80,6 +80,7 @@ const NotificationSettings = ({
     personal: {
       enabled: true,
       topup: true,
+      affiliate: true,
       personal: true,
     },
     admin: {
@@ -90,6 +91,7 @@ const NotificationSettings = ({
       subscription: true,
       redemption: true,
       user: true,
+      affiliate_admin: true,
       setting: true,
     },
   });
@@ -165,7 +167,12 @@ const NotificationSettings = ({
         midjourney: true,
         task: true,
       },
-      personal: { enabled: true, topup: true, personal: true },
+      personal: {
+        enabled: true,
+        topup: true,
+        affiliate: true,
+        personal: true,
+      },
       admin: {
         enabled: true,
         channel: true,
@@ -174,6 +181,7 @@ const NotificationSettings = ({
         subscription: true,
         redemption: true,
         user: true,
+        affiliate_admin: true,
         setting: true,
       },
     };
@@ -280,6 +288,11 @@ const NotificationSettings = ({
       modules: [
         { key: 'topup', title: t('钱包管理'), description: t('余额充值管理') },
         {
+          key: 'affiliate',
+          title: t('返佣分成'),
+          description: t('邀请返佣与提现管理'),
+        },
+        {
           key: 'personal',
           title: t('个人设置'),
           description: t('个人信息设置'),
@@ -310,6 +323,11 @@ const NotificationSettings = ({
           description: t('兑换码生成管理'),
         },
         { key: 'user', title: t('用户管理'), description: t('用户账户管理') },
+        {
+          key: 'affiliate_admin',
+          title: t('返佣分成设置'),
+          description: t('返佣配置与提现审核'),
+        },
         {
           key: 'setting',
           title: t('系统设置'),

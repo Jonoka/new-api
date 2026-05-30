@@ -182,6 +182,30 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/subscription/epay/notify", controller.SubscriptionEpayNotify)
 		apiRouter.GET("/subscription/epay/return", controller.SubscriptionEpayReturn)
 		apiRouter.POST("/subscription/epay/return", controller.SubscriptionEpayReturn)
+
+		affiliateRoute := apiRouter.Group("/affiliate")
+		affiliateRoute.Use(middleware.UserAuth())
+		{
+			affiliateRoute.GET("/summary", controller.GetAffiliateSummary)
+			affiliateRoute.GET("/records", controller.GetAffiliateRecords)
+			affiliateRoute.GET("/withdrawals", controller.GetAffiliateWithdrawals)
+			affiliateRoute.GET("/leaderboard", controller.GetAffiliateLeaderboard)
+			affiliateRoute.GET("/payout-account", controller.GetAffiliatePayoutAccount)
+			affiliateRoute.PUT("/payout-account", controller.UpdateAffiliatePayoutAccount)
+			affiliateRoute.POST("/withdraw", controller.CreateAffiliateWithdrawal)
+			affiliateRoute.POST("/transfer-to-balance", controller.TransferAffiliateToBalance)
+			affiliateRoute.POST("/upload-qr", middleware.UploadRateLimit(), controller.UploadAffiliateQr)
+			affiliateRoute.DELETE("/qr", controller.DeleteAffiliateQr)
+		}
+		affiliateAdminRoute := apiRouter.Group("/affiliate/admin")
+		affiliateAdminRoute.Use(middleware.AdminAuth())
+		{
+			affiliateAdminRoute.GET("/withdrawals", controller.AdminListAffiliateWithdrawals)
+			affiliateAdminRoute.POST("/withdrawals/:id/approve", controller.AdminApproveAffiliateWithdrawal)
+			affiliateAdminRoute.POST("/withdrawals/:id/reject", controller.AdminRejectAffiliateWithdrawal)
+			affiliateAdminRoute.POST("/withdrawals/:id/paid", controller.AdminMarkAffiliateWithdrawalPaid)
+		}
+
 		optionRoute := apiRouter.Group("/option")
 		optionRoute.Use(middleware.RootAuth())
 		{

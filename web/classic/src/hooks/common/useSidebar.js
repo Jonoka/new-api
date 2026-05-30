@@ -42,6 +42,7 @@ export const DEFAULT_ADMIN_CONFIG = {
   personal: {
     enabled: true,
     topup: true,
+    affiliate: true,
     personal: true,
   },
   admin: {
@@ -52,6 +53,7 @@ export const DEFAULT_ADMIN_CONFIG = {
     redemption: true,
     user: true,
     subscription: true,
+    affiliate_admin: true,
     setting: true,
   },
 };

@@ -263,6 +263,17 @@ export type BillingSettings = {
   // section (saved via /api/option/waffo-pancake/save).
   WaffoPancakeStoreID: string
   WaffoPancakeProductID: string
+  'affiliate_setting.first_level_enabled': boolean
+  'affiliate_setting.first_level_ratio': number
+  'affiliate_setting.second_level_enabled': boolean
+  'affiliate_setting.second_level_ratio': number
+  'affiliate_setting.settlement_delay_seconds': number
+  'affiliate_setting.min_withdrawal_amount': number
+  'affiliate_setting.trigger_topup_enabled': boolean
+  'affiliate_setting.trigger_subscription_enabled': boolean
+  'affiliate_setting.payout_methods': string
+  'affiliate_setting.usdt_chain': string
+  'affiliate_setting.promotion_template': string
   'checkin_setting.enabled': boolean
   'checkin_setting.min_quota': number
   'checkin_setting.max_quota': number

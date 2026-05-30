@@ -22,6 +22,7 @@ import { PricingSection } from '../general/pricing-section'
 import { QuotaSettingsSection } from '../general/quota-settings-section'
 import { PaymentSettingsSection } from '../integrations/payment-settings-section'
 import { RatioSettingsCard } from '../models/ratio-settings-card'
+import { AffiliateSettingsSection } from './affiliate-settings-section'
 import type { BillingSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
 
@@ -182,6 +183,38 @@ const BILLING_SECTIONS = [
             settings['payment_setting.compliance_terms_version'] ?? '',
           confirmedAt: settings['payment_setting.compliance_confirmed_at'] ?? 0,
           confirmedBy: settings['payment_setting.compliance_confirmed_by'] ?? 0,
+        }}
+      />
+    ),
+  },
+  {
+    id: 'affiliate',
+    titleKey: 'Affiliate Commission',
+    descriptionKey: 'Configure paid-referral commission and payouts',
+    build: (settings: BillingSettings) => (
+      <AffiliateSettingsSection
+        defaultValues={{
+          affiliate_setting: {
+            first_level_enabled:
+              settings['affiliate_setting.first_level_enabled'],
+            first_level_ratio: settings['affiliate_setting.first_level_ratio'],
+            second_level_enabled:
+              settings['affiliate_setting.second_level_enabled'],
+            second_level_ratio:
+              settings['affiliate_setting.second_level_ratio'],
+            settlement_delay_seconds:
+              settings['affiliate_setting.settlement_delay_seconds'],
+            min_withdrawal_amount:
+              settings['affiliate_setting.min_withdrawal_amount'],
+            trigger_topup_enabled:
+              settings['affiliate_setting.trigger_topup_enabled'],
+            trigger_subscription_enabled:
+              settings['affiliate_setting.trigger_subscription_enabled'],
+            payout_methods: settings['affiliate_setting.payout_methods'],
+            usdt_chain: settings['affiliate_setting.usdt_chain'],
+            promotion_template:
+              settings['affiliate_setting.promotion_template'],
+          },
         }}
       />
     ),

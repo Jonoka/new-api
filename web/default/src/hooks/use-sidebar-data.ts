@@ -30,6 +30,7 @@ import {
   Settings,
   Ticket,
   User,
+  HandCoins,
   Users,
   Wallet,
 } from 'lucide-react'
@@ -106,6 +107,11 @@ export function useSidebarData(): SidebarData {
             icon: Wallet,
           },
           {
+            title: t('Affiliate Commission'),
+            url: '/affiliate',
+            icon: HandCoins,
+          },
+          {
             title: t('Profile'),
             url: '/profile',
             icon: User,
@@ -140,6 +146,11 @@ export function useSidebarData(): SidebarData {
             title: t('Subscription Management'),
             url: '/subscriptions',
             icon: CreditCard,
+          },
+          {
+            title: t('Affiliate Commission'),
+            url: '/system-settings/billing/affiliate',
+            icon: HandCoins,
           },
           {
             title: t('System Settings'),

@@ -31,6 +31,7 @@ type SidebarModulesAdminConfig = Record<string, SidebarSectionConfig>
 // User-layer config is shape-identical to admin, but may be null
 // to signal "no narrowing" (empty/invalid/legacy users).
 type SidebarModulesUserConfig = SidebarModulesAdminConfig | null
+type SidebarModulesPermissionConfig = Record<string, unknown> | undefined
 
 /**
  * Default sidebar modules configuration
@@ -52,6 +53,7 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
   personal: {
     enabled: true,
     topup: true,
+    affiliate: true,
     personal: true,
   },
   admin: {
@@ -60,6 +62,7 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     models: true,
     redemption: true,
     user: true,
+    affiliate_admin: true,
     setting: true,
     subscription: true,
   },
@@ -105,6 +108,7 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/usage-logs/drawing': { section: 'console', module: 'midjourney' },
   '/usage-logs/task': { section: 'console', module: 'task' },
   '/wallet': { section: 'personal', module: 'topup' },
+  '/affiliate': { section: 'personal', module: 'affiliate' },
   '/profile': { section: 'personal', module: 'personal' },
   '/channels': { section: 'admin', module: 'channel' },
   '/models': { section: 'admin', module: 'models' },
@@ -113,6 +117,10 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/users': { section: 'admin', module: 'user' },
   '/redemption-codes': { section: 'admin', module: 'redemption' },
   '/subscriptions': { section: 'admin', module: 'subscription' },
+  '/system-settings/billing/affiliate': {
+    section: 'admin',
+    module: 'affiliate_admin',
+  },
   '/system-settings': { section: 'admin', module: 'setting' },
   '/system-settings/site': { section: 'admin', module: 'setting' },
 }
@@ -167,7 +175,8 @@ function parseUserSidebarConfig(
 function isModuleEnabled(
   url: string,
   adminConfig: SidebarModulesAdminConfig,
-  userConfig: SidebarModulesUserConfig
+  userConfig: SidebarModulesUserConfig,
+  permissionConfig: SidebarModulesPermissionConfig
 ): boolean {
   const mapping = URL_TO_CONFIG_MAP[url]
   if (!mapping) {
@@ -181,6 +190,16 @@ function isModuleEnabled(
     adminSection && adminSection.enabled && adminSection[module] === true
   )
   if (!adminAllowed) return false
+
+  const permissionSection = permissionConfig?.[section]
+  if (permissionSection === false) return false
+  if (
+    permissionSection &&
+    typeof permissionSection === 'object' &&
+    (permissionSection as Record<string, unknown>)[module] === false
+  ) {
+    return false
+  }
 
   if (!userConfig) return true
 
@@ -196,7 +215,8 @@ function isModuleEnabled(
 function isNavItemVisible(
   item: NavItem,
   adminConfig: SidebarModulesAdminConfig,
-  userConfig: SidebarModulesUserConfig
+  userConfig: SidebarModulesUserConfig,
+  permissionConfig: SidebarModulesPermissionConfig
 ): boolean {
   // Handle dynamic chat presets type — also runs the admin × user AND gate
   if ('type' in item && item.type === 'chat-presets') {
@@ -214,7 +234,7 @@ function isNavItemVisible(
   if ('url' in item && item.url) {
     const configUrls = item.configUrls ?? [item.url]
     return configUrls.some((url) =>
-      isModuleEnabled(url as string, adminConfig, userConfig)
+      isModuleEnabled(url as string, adminConfig, userConfig, permissionConfig)
     )
   }
 
@@ -222,7 +242,12 @@ function isNavItemVisible(
   if ('items' in item && item.items) {
     // If has sub-items, show this collapsible item if at least one sub-item is visible
     return item.items.some((subItem) =>
-      isModuleEnabled(subItem.url as string, adminConfig, userConfig)
+      isModuleEnabled(
+        subItem.url as string,
+        adminConfig,
+        userConfig,
+        permissionConfig
+      )
     )
   }
 
@@ -235,14 +260,20 @@ function isNavItemVisible(
 function filterNavItems(
   items: NavItem[],
   adminConfig: SidebarModulesAdminConfig,
-  userConfig: SidebarModulesUserConfig
+  userConfig: SidebarModulesUserConfig,
+  permissionConfig: SidebarModulesPermissionConfig
 ): NavItem[] {
   return items
     .map((item) => {
       // If collapsible item, also filter its sub-items
       if ('items' in item && item.items) {
         const filteredSubItems = item.items.filter((subItem) =>
-          isModuleEnabled(subItem.url as string, adminConfig, userConfig)
+          isModuleEnabled(
+            subItem.url as string,
+            adminConfig,
+            userConfig,
+            permissionConfig
+          )
         )
 
         return {
@@ -252,7 +283,9 @@ function filterNavItems(
       }
       return item
     })
-    .filter((item) => isNavItemVisible(item, adminConfig, userConfig))
+    .filter((item) =>
+      isNavItemVisible(item, adminConfig, userConfig, permissionConfig)
+    )
 }
 
 /**
@@ -295,15 +328,22 @@ export function useSidebarConfig(navGroups: NavGroup[]): NavGroup[] {
     return parseUserSidebarConfig(auth?.user?.sidebar_modules)
   }, [auth?.user?.permissions?.sidebar_settings, auth?.user?.sidebar_modules])
 
+  const permissionConfig = auth?.user?.permissions?.sidebar_modules
+
   const filteredNavGroups = useMemo(
     () =>
       navGroups
         .map((group) => ({
           ...group,
-          items: filterNavItems(group.items, adminConfig, userConfig),
+          items: filterNavItems(
+            group.items,
+            adminConfig,
+            userConfig,
+            permissionConfig
+          ),
         }))
         .filter((group) => group.items.length > 0), // Only show navigation groups with visible items
-    [navGroups, adminConfig, userConfig]
+    [navGroups, adminConfig, userConfig, permissionConfig]
   )
 
   return filteredNavGroups

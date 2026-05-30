@@ -30,6 +30,7 @@ import {
 } from '@douyinfe/semi-ui';
 import { API, showSuccess, showError } from '../../../helpers';
 import { StatusContext } from '../../../context/Status';
+import { mergeAdminConfig } from '../../../hooks/common/useSidebar';
 
 const { Text } = Typography;
 
@@ -56,6 +57,7 @@ export default function SettingsSidebarModulesAdmin(props) {
     personal: {
       enabled: true,
       topup: true,
+      affiliate: true,
       personal: true,
     },
     admin: {
@@ -66,6 +68,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       redemption: true,
       user: true,
       subscription: true,
+      affiliate_admin: true,
       setting: true,
     },
   });
@@ -117,6 +120,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       personal: {
         enabled: true,
         topup: true,
+        affiliate: true,
         personal: true,
       },
       admin: {
@@ -127,6 +131,7 @@ export default function SettingsSidebarModulesAdmin(props) {
         redemption: true,
         user: true,
         subscription: true,
+        affiliate_admin: true,
         setting: true,
       },
     };
@@ -174,7 +179,7 @@ export default function SettingsSidebarModulesAdmin(props) {
     if (props.options && props.options.SidebarModulesAdmin) {
       try {
         const modules = JSON.parse(props.options.SidebarModulesAdmin);
-        setSidebarModulesAdmin(modules);
+        setSidebarModulesAdmin(mergeAdminConfig(modules));
       } catch (error) {
         // 使用默认配置
         const defaultModules = {
@@ -187,7 +192,12 @@ export default function SettingsSidebarModulesAdmin(props) {
             midjourney: true,
             task: true,
           },
-          personal: { enabled: true, topup: true, personal: true },
+          personal: {
+            enabled: true,
+            topup: true,
+            affiliate: true,
+            personal: true,
+          },
           admin: {
             enabled: true,
             channel: true,
@@ -196,6 +206,7 @@ export default function SettingsSidebarModulesAdmin(props) {
             redemption: true,
             user: true,
             subscription: true,
+            affiliate_admin: true,
             setting: true,
           },
         };
@@ -242,6 +253,11 @@ export default function SettingsSidebarModulesAdmin(props) {
       modules: [
         { key: 'topup', title: t('钱包管理'), description: t('余额充值管理') },
         {
+          key: 'affiliate',
+          title: t('返佣分成'),
+          description: t('邀请返佣与提现管理'),
+        },
+        {
           key: 'personal',
           title: t('个人设置'),
           description: t('个人信息设置'),
@@ -271,6 +287,11 @@ export default function SettingsSidebarModulesAdmin(props) {
           description: t('兑换码生成管理'),
         },
         { key: 'user', title: t('用户管理'), description: t('用户账户管理') },
+        {
+          key: 'affiliate_admin',
+          title: t('返佣分成设置'),
+          description: t('返佣配置与提现审核'),
+        },
         {
           key: 'setting',
           title: t('系统设置'),
