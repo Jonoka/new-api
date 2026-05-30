@@ -390,6 +390,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		taskResult.Reason = t.FailReason
 		task.Data = t.Data
 	} else if taskResult, err = adaptor.ParseTaskResult(responseBody); err != nil {
+		logger.LogError(ctx, fmt.Sprintf("parseTaskResult failed raw response preview for task %s: status=%d content_type=%q body=%q", taskId, resp.StatusCode, resp.Header.Get("Content-Type"), common.LocalLogPreview(string(responseBody))))
 		return fmt.Errorf("parseTaskResult failed for task %s: %w", taskId, err)
 	}
 
