@@ -49,6 +49,8 @@ const SECURITY_SECTIONS = [
           CheckSensitiveEnabled: settings.CheckSensitiveEnabled,
           CheckSensitiveOnPromptEnabled: settings.CheckSensitiveOnPromptEnabled,
           SensitiveWords: settings.SensitiveWords,
+          SensitiveRules: settings.SensitiveRules,
+          SensitiveRuleChannelIds: settings.SensitiveRuleChannelIds,
         }}
       />
     ),

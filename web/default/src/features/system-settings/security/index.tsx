@@ -33,6 +33,8 @@ const defaultSecuritySettings: SecuritySettings = {
   CheckSensitiveEnabled: false,
   CheckSensitiveOnPromptEnabled: false,
   SensitiveWords: '',
+  SensitiveRules: '{"rules":[]}',
+  SensitiveRuleChannelIds: '[]',
   'fetch_setting.enable_ssrf_protection': true,
   'fetch_setting.allow_private_ip': false,
   'fetch_setting.domain_filter_mode': false,
