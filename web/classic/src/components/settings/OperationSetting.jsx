@@ -60,6 +60,8 @@ const OperationSetting = () => {
     CheckSensitiveEnabled: false,
     CheckSensitiveOnPromptEnabled: false,
     SensitiveWords: '',
+    SensitiveRules: '{"rules":[]}',
+    SensitiveRuleChannelIds: '[]',
 
     /* 日志设置 */
     LogConsumeEnabled: false,
