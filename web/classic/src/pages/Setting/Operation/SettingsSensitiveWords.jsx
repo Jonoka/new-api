@@ -28,6 +28,7 @@ import {
   Select,
   Space,
   Spin,
+  Switch,
   Tag,
   TextArea,
   Typography,
@@ -457,8 +458,7 @@ export default function SettingsSensitiveWords(props) {
                       </Col>
                       <Col xs={24} sm={12} md={16} lg={18} xl={18}>
                         <Space style={{ float: 'right' }}>
-                          <Form.Switch
-                            noLabel
+                          <Switch
                             checked={rule.enabled}
                             checkedText='｜'
                             uncheckedText='〇'
