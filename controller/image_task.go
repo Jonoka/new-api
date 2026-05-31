@@ -133,6 +133,10 @@ func parseImageTaskSubmitResponseBody(body []byte) (taskID, upstreamTaskID, stat
 		TaskID   string `json:"task_id"`
 		Status   string `json:"status"`
 		Progress any    `json:"progress"`
+		Data     []struct {
+			URL     string `json:"url"`
+			B64JSON string `json:"b64_json"`
+		} `json:"data"`
 	}
 	if err := common.Unmarshal(body, &resp); err != nil {
 		common.SysLog("skip image task insert: parse response failed: " + err.Error() + ", body=" + common.LocalLogPreview(string(body)))
@@ -160,8 +164,48 @@ func parseImageTaskSubmitResponseBody(body []byte) (taskID, upstreamTaskID, stat
 	case "failed", "failure", "error":
 		status = string(model.TaskStatusFailure)
 	}
-	progress = "0%"
+	progress = normalizeImageTaskProgress(resp.Progress)
+	if imageTaskSubmitHasResultData(resp.Data) || status == string(model.TaskStatusSuccess) || status == string(model.TaskStatusFailure) {
+		progress = "100%"
+		if status == "" {
+			status = string(model.TaskStatusSuccess)
+		}
+	}
 	return
+}
+
+func imageTaskSubmitHasResultData(data []struct {
+	URL     string `json:"url"`
+	B64JSON string `json:"b64_json"`
+}) bool {
+	for _, item := range data {
+		if strings.TrimSpace(item.URL) != "" || strings.TrimSpace(item.B64JSON) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeImageTaskProgress(progress any) string {
+	switch v := progress.(type) {
+	case string:
+		p := strings.TrimSpace(v)
+		if p == "" {
+			return "0%"
+		}
+		if strings.HasSuffix(p, "%") {
+			return p
+		}
+		return p + "%"
+	case float64:
+		return fmt.Sprintf("%.0f%%", v)
+	case int:
+		return fmt.Sprintf("%d%%", v)
+	case int64:
+		return fmt.Sprintf("%d%%", v)
+	default:
+		return "0%"
+	}
 }
 
 type imageTaskResponseCapture struct {
