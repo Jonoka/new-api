@@ -20,6 +20,7 @@ import {
   Activity,
   Box,
   CreditCard,
+  Gamepad2,
   FileText,
   FlaskConical,
   Key,
@@ -95,6 +96,12 @@ export function useSidebarData(): SidebarData {
             configUrls: ['/usage-logs/drawing', '/usage-logs/task'],
             icon: ListTodo,
           },
+          {
+            title: t('Game Center'),
+            url: '/game-center',
+            activeUrls: ['/game-center'],
+            icon: Gamepad2,
+          },
         ],
       },
       {
@@ -151,6 +158,11 @@ export function useSidebarData(): SidebarData {
             title: t('Affiliate Commission'),
             url: '/system-settings/billing/affiliate',
             icon: HandCoins,
+          },
+          {
+            title: t('Game Management'),
+            url: '/game-management',
+            icon: Gamepad2,
           },
           {
             title: t('System Settings'),

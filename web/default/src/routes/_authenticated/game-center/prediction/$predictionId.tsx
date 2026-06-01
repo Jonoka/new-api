@@ -16,28 +16,22 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type * as React from 'react'
+import { createFileRoute, redirect } from '@tanstack/react-router'
+import { PredictionDetail } from '@/features/games/prediction-detail'
 
-export type DropdownMenuItemSelectEvent = React.MouseEvent<HTMLElement> & {
-  preventBaseUIHandler?: () => void
-}
+export const Route = createFileRoute(
+  '/_authenticated/game-center/prediction/$predictionId'
+)({
+  beforeLoad: ({ params }) => {
+    const id = Number(params.predictionId)
+    if (!Number.isFinite(id) || id <= 0) {
+      throw redirect({ to: '/game-center' })
+    }
+  },
+  component: RouteComponent,
+})
 
-export type DropdownMenuItemSelectHandler = (
-  event: DropdownMenuItemSelectEvent
-) => void
-
-export function handleDropdownMenuItemSelect(
-  event: DropdownMenuItemSelectEvent,
-  onClick?: React.MouseEventHandler<HTMLElement>,
-  onSelect?: DropdownMenuItemSelectHandler
-) {
-  onClick?.(event)
-
-  if (!event.defaultPrevented) {
-    onSelect?.(event)
-  }
-
-  if (event.defaultPrevented) {
-    event.preventBaseUIHandler?.()
-  }
+function RouteComponent() {
+  const { predictionId } = Route.useParams()
+  return <PredictionDetail predictionId={Number(predictionId)} />
 }

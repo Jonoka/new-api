@@ -66,6 +66,7 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
     log: true,
     midjourney: true,
     task: true,
+    game: true,
   },
   personal: {
     enabled: true,
@@ -82,6 +83,7 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
     affiliate_admin: true,
     setting: true,
     subscription: true,
+    game: true,
   },
 }
 

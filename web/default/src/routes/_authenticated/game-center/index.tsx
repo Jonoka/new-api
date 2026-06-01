@@ -16,28 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type * as React from 'react'
+import { createFileRoute } from '@tanstack/react-router'
+import { GameCenter } from '@/features/games'
 
-export type DropdownMenuItemSelectEvent = React.MouseEvent<HTMLElement> & {
-  preventBaseUIHandler?: () => void
-}
-
-export type DropdownMenuItemSelectHandler = (
-  event: DropdownMenuItemSelectEvent
-) => void
-
-export function handleDropdownMenuItemSelect(
-  event: DropdownMenuItemSelectEvent,
-  onClick?: React.MouseEventHandler<HTMLElement>,
-  onSelect?: DropdownMenuItemSelectHandler
-) {
-  onClick?.(event)
-
-  if (!event.defaultPrevented) {
-    onSelect?.(event)
-  }
-
-  if (event.defaultPrevented) {
-    event.preventBaseUIHandler?.()
-  }
-}
+export const Route = createFileRoute('/_authenticated/game-center/')({
+  component: GameCenter,
+})

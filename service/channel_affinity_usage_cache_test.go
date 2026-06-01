@@ -3,7 +3,7 @@ package service
 import (
 	"fmt"
 	"net/http/httptest"
-	"sync/atomic"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/dto"
@@ -11,12 +11,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
-
-var channelAffinityUsageCacheTestSequence atomic.Int64
-
-func nextChannelAffinityUsageCacheTestKey(prefix string) string {
-	return fmt.Sprintf("%s_%d", prefix, channelAffinityUsageCacheTestSequence.Add(1))
-}
 
 func buildChannelAffinityStatsContextForTest(ruleName, usingGroup, keyFP string) *gin.Context {
 	rec := httptest.NewRecorder()
@@ -31,10 +25,20 @@ func buildChannelAffinityStatsContextForTest(ruleName, usingGroup, keyFP string)
 	return ctx
 }
 
+func resetChannelAffinityUsageCacheStatsForTest(t *testing.T) {
+	t.Helper()
+	require.NoError(t, getChannelAffinityUsageCacheStatsCache().Purge())
+}
+
+func channelAffinityUsageCacheKeyPartsForTest(t *testing.T) (string, string, string) {
+	t.Helper()
+	name := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
+	return "rule_" + name, "default", "fp_" + name
+}
+
 func TestObserveChannelAffinityUsageCacheByRelayFormat_ClaudeMode(t *testing.T) {
-	ruleName := nextChannelAffinityUsageCacheTestKey("rule")
-	usingGroup := "default"
-	keyFP := nextChannelAffinityUsageCacheTestKey("fp")
+	resetChannelAffinityUsageCacheStatsForTest(t)
+	ruleName, usingGroup, keyFP := channelAffinityUsageCacheKeyPartsForTest(t)
 	ctx := buildChannelAffinityStatsContextForTest(ruleName, usingGroup, keyFP)
 
 	usage := &dto.Usage{
@@ -59,9 +63,8 @@ func TestObserveChannelAffinityUsageCacheByRelayFormat_ClaudeMode(t *testing.T) 
 }
 
 func TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode(t *testing.T) {
-	ruleName := nextChannelAffinityUsageCacheTestKey("rule")
-	usingGroup := "default"
-	keyFP := nextChannelAffinityUsageCacheTestKey("fp")
+	resetChannelAffinityUsageCacheStatsForTest(t)
+	ruleName, usingGroup, keyFP := channelAffinityUsageCacheKeyPartsForTest(t)
 	ctx := buildChannelAffinityStatsContextForTest(ruleName, usingGroup, keyFP)
 
 	openAIUsage := &dto.Usage{
@@ -89,9 +92,8 @@ func TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode(t *testing.T) {
 }
 
 func TestObserveChannelAffinityUsageCacheByRelayFormat_UnsupportedModeKeepsEmpty(t *testing.T) {
-	ruleName := nextChannelAffinityUsageCacheTestKey("rule")
-	usingGroup := "default"
-	keyFP := nextChannelAffinityUsageCacheTestKey("fp")
+	resetChannelAffinityUsageCacheStatsForTest(t)
+	ruleName, usingGroup, keyFP := channelAffinityUsageCacheKeyPartsForTest(t)
 	ctx := buildChannelAffinityStatsContextForTest(ruleName, usingGroup, keyFP)
 
 	usage := &dto.Usage{

@@ -20,6 +20,7 @@ import { type TFunction } from 'i18next'
 import {
   Box,
   CreditCard,
+  Gamepad2,
   Layout,
   Settings,
   Shield,
@@ -62,6 +63,11 @@ function getSystemSettingsNavGroups(t: TFunction): NavGroup[] {
           title: t('Billing & Payment'),
           icon: CreditCard,
           items: getBillingSectionNavItems(t),
+        },
+        {
+          title: t('Game Center Settings'),
+          icon: Gamepad2,
+          url: '/system-settings/games',
         },
         {
           title: t('Models & Routing'),
