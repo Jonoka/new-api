@@ -467,6 +467,22 @@ export const STATIC_I18N_KEYS = [
   'No enabled tokens available',
   'Redirecting to chat page...',
 
+  // Game center dynamic labels
+  'open',
+  'answered',
+  'settling',
+  'settled',
+  'failed',
+  'exchange_in',
+  'exchange_out',
+  'bet',
+  'payout',
+  'Game Center',
+  'Game Management',
+  'Game Center Settings',
+  'Save game settings',
+  'Game Wallet Transactions',
+
   // Channel upstream updates
   'No processable upstream model updates for this channel',
   'Upstream model updates applied: {{added}} added, {{removed}} removed, {{ignored}} ignored this time, {{totalIgnored}} total ignored models',

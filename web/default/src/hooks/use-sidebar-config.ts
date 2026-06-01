@@ -48,6 +48,7 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     log: true,
     midjourney: true,
     task: true,
+    game: true,
   },
   personal: {
     enabled: true,
@@ -62,6 +63,7 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     user: true,
     setting: true,
     subscription: true,
+    game: true,
   },
 }
 
@@ -104,6 +106,7 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/usage-logs/common': { section: 'console', module: 'log' },
   '/usage-logs/drawing': { section: 'console', module: 'midjourney' },
   '/usage-logs/task': { section: 'console', module: 'task' },
+  '/game-center': { section: 'console', module: 'game' },
   '/wallet': { section: 'personal', module: 'topup' },
   '/profile': { section: 'personal', module: 'personal' },
   '/channels': { section: 'admin', module: 'channel' },
@@ -113,8 +116,10 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/users': { section: 'admin', module: 'user' },
   '/redemption-codes': { section: 'admin', module: 'redemption' },
   '/subscriptions': { section: 'admin', module: 'subscription' },
+  '/game-management': { section: 'admin', module: 'game' },
   '/system-settings': { section: 'admin', module: 'setting' },
   '/system-settings/site': { section: 'admin', module: 'setting' },
+  '/system-settings/games': { section: 'admin', module: 'setting' },
 }
 
 /**
@@ -169,7 +174,13 @@ function isModuleEnabled(
   adminConfig: SidebarModulesAdminConfig,
   userConfig: SidebarModulesUserConfig
 ): boolean {
-  const mapping = URL_TO_CONFIG_MAP[url]
+  const normalizedUrl =
+    url.endsWith('/') && url !== '/' ? url.slice(0, -1) : url
+  const mapping =
+    URL_TO_CONFIG_MAP[normalizedUrl] ??
+    Object.entries(URL_TO_CONFIG_MAP)
+      .sort(([a], [b]) => b.length - a.length)
+      .find(([prefix]) => normalizedUrl.startsWith(`${prefix}/`))?.[1]
   if (!mapping) {
     // No mapping config, default to visible (e.g. system settings and new features)
     return true
@@ -255,6 +266,19 @@ function filterNavItems(
     .filter((item) => isNavItemVisible(item, adminConfig, userConfig))
 }
 
+export function filterSidebarNavGroups(
+  navGroups: NavGroup[],
+  adminConfig: SidebarModulesAdminConfig,
+  userConfig: SidebarModulesUserConfig
+): NavGroup[] {
+  return navGroups
+    .map((group) => ({
+      ...group,
+      items: filterNavItems(group.items, adminConfig, userConfig),
+    }))
+    .filter((group) => group.items.length > 0)
+}
+
 /**
  * Filter sidebar navigation groups by admin × user sidebar_modules config.
  *
@@ -296,13 +320,7 @@ export function useSidebarConfig(navGroups: NavGroup[]): NavGroup[] {
   }, [auth?.user?.permissions?.sidebar_settings, auth?.user?.sidebar_modules])
 
   const filteredNavGroups = useMemo(
-    () =>
-      navGroups
-        .map((group) => ({
-          ...group,
-          items: filterNavItems(group.items, adminConfig, userConfig),
-        }))
-        .filter((group) => group.items.length > 0), // Only show navigation groups with visible items
+    () => filterSidebarNavGroups(navGroups, adminConfig, userConfig),
     [navGroups, adminConfig, userConfig]
   )
 

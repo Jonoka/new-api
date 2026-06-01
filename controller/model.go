@@ -190,19 +190,31 @@ func getModelListGroups(c *gin.Context) (modelListGroups, error) {
 		return modelListGroups{
 			userGroup:   userGroup,
 			tokenGroup:  tokenGroup,
-			ownerGroups: service.GetUserAutoGroup(userGroup),
+			ownerGroups: getModelOwnerGroups(userGroup, tokenGroup),
 		}, nil
 	}
 
-	group := userGroup
-	if tokenGroup != "" {
-		group = tokenGroup
-	}
 	return modelListGroups{
 		userGroup:   userGroup,
 		tokenGroup:  tokenGroup,
-		ownerGroups: []string{group},
+		ownerGroups: getModelOwnerGroups(userGroup, tokenGroup),
 	}, nil
+}
+
+func getModelOwnerGroups(userGroup string, tokenGroup string) []string {
+	if tokenGroup == "auto" {
+		if userGroup == "" {
+			return nil
+		}
+		return service.GetUserAutoGroup(userGroup)
+	}
+	if tokenGroup != "" {
+		return []string{tokenGroup}
+	}
+	if userGroup != "" {
+		return []string{userGroup}
+	}
+	return nil
 }
 
 func ListModels(c *gin.Context, modelType int) {
@@ -218,17 +230,13 @@ func ListModels(c *gin.Context, modelType int) {
 	}
 
 	userModelNames := make([]string, 0)
-	groups, err := getModelListGroups(c)
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": "get user group failed",
-		})
-		return
-	}
-	ownerGroups := groups.ownerGroups
+	ownerGroups := make([]string, 0)
 	modelLimitEnable := common.GetContextKeyBool(c, constant.ContextKeyTokenModelLimitEnabled)
 	if modelLimitEnable {
+		ownerGroups = getModelOwnerGroups(
+			common.GetContextKeyString(c, constant.ContextKeyUserGroup),
+			common.GetContextKeyString(c, constant.ContextKeyTokenGroup),
+		)
 		s, ok := common.GetContextKey(c, constant.ContextKeyTokenModelLimit)
 		var tokenModelLimit map[string]bool
 		if ok {
@@ -245,6 +253,15 @@ func ListModels(c *gin.Context, modelType int) {
 			userModelNames = append(userModelNames, allowModel)
 		}
 	} else {
+		groups, err := getModelListGroups(c)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "get user group failed",
+			})
+			return
+		}
+		ownerGroups = groups.ownerGroups
 		var models []string
 		if groups.tokenGroup == "auto" {
 			for _, autoGroup := range ownerGroups {

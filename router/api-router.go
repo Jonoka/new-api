@@ -182,6 +182,28 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/subscription/epay/notify", controller.SubscriptionEpayNotify)
 		apiRouter.GET("/subscription/epay/return", controller.SubscriptionEpayReturn)
 		apiRouter.POST("/subscription/epay/return", controller.SubscriptionEpayReturn)
+
+		gameRoute := apiRouter.Group("/game")
+		gameRoute.Use(middleware.UserAuth())
+		{
+			gameRoute.GET("/wallet", controller.GetGameWallet)
+			gameRoute.GET("/transactions", controller.GetGameWalletTransactions)
+			gameRoute.POST("/exchange/quota-to-token", controller.ExchangeQuotaToGameTokens)
+			gameRoute.POST("/exchange/token-to-quota", controller.ExchangeGameTokensToQuota)
+			gameRoute.GET("/predictions", controller.ListGamePredictions)
+			gameRoute.GET("/predictions/:id", controller.GetGamePrediction)
+			gameRoute.POST("/predictions/:id/bets", controller.PlaceGamePredictionBet)
+		}
+
+		gameAdminRoute := apiRouter.Group("/game/admin")
+		gameAdminRoute.Use(middleware.AdminAuth())
+		{
+			gameAdminRoute.GET("/predictions", controller.AdminListGamePredictions)
+			gameAdminRoute.POST("/predictions", controller.AdminCreateGamePrediction)
+			gameAdminRoute.PUT("/predictions/:id/answer", controller.AdminSetGamePredictionAnswer)
+			gameAdminRoute.POST("/predictions/:id/settle", controller.AdminSettleGamePrediction)
+		}
+
 		optionRoute := apiRouter.Group("/option")
 		optionRoute.Use(middleware.RootAuth())
 		{

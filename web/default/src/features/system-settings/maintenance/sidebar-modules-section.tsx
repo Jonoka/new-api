@@ -114,6 +114,10 @@ export function SidebarModulesSection({
         title: t('Task logs'),
         description: t('Background job tracker for queued work.'),
       },
+      game: {
+        title: t('Game Center'),
+        description: t('Game wallet, prediction rounds, and participation.'),
+      },
     },
     personal: {
       topup: {
@@ -149,6 +153,10 @@ export function SidebarModulesSection({
       subscription: {
         title: t('Subscription Management'),
         description: t('Manage subscription plans and pricing.'),
+      },
+      game: {
+        title: t('Game Management'),
+        description: t('Create prediction rounds and settle player rewards.'),
       },
     },
   }

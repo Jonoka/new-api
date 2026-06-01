@@ -16,28 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type * as React from 'react'
+import { createFileRoute, redirect } from '@tanstack/react-router'
+import { useAuthStore } from '@/stores/auth-store'
+import { ROLE } from '@/lib/roles'
+import { GameManagement } from '@/features/games/admin'
 
-export type DropdownMenuItemSelectEvent = React.MouseEvent<HTMLElement> & {
-  preventBaseUIHandler?: () => void
-}
-
-export type DropdownMenuItemSelectHandler = (
-  event: DropdownMenuItemSelectEvent
-) => void
-
-export function handleDropdownMenuItemSelect(
-  event: DropdownMenuItemSelectEvent,
-  onClick?: React.MouseEventHandler<HTMLElement>,
-  onSelect?: DropdownMenuItemSelectHandler
-) {
-  onClick?.(event)
-
-  if (!event.defaultPrevented) {
-    onSelect?.(event)
-  }
-
-  if (event.defaultPrevented) {
-    event.preventBaseUIHandler?.()
-  }
-}
+export const Route = createFileRoute('/_authenticated/game-management/')({
+  beforeLoad: () => {
+    const { auth } = useAuthStore.getState()
+    if (!auth.user || auth.user.role < ROLE.ADMIN) {
+      throw redirect({ to: '/403' })
+    }
+  },
+  component: GameManagement,
+})
