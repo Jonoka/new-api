@@ -41,6 +41,16 @@ type ChannelOtherSettings struct {
 	UpstreamModelUpdateLastDetectedModels []string      `json:"upstream_model_update_last_detected_models,omitempty"` // 上次检测到的可加入模型
 	UpstreamModelUpdateLastRemovedModels  []string      `json:"upstream_model_update_last_removed_models,omitempty"`  // 上次检测到的可删除模型
 	UpstreamModelUpdateIgnoredModels      []string      `json:"upstream_model_update_ignored_models,omitempty"`       // 手动忽略的模型
+	MonitorEnabled                        *bool         `json:"monitor_enabled,omitempty"`                            // 是否启用单渠道自动监控，nil 表示继承全局
+	MonitorTestIntervalMinutes            *float64      `json:"monitor_test_interval_minutes,omitempty"`              // 单渠道测试间隔，nil 表示继承全局调度
+	MonitorResponseTimeThresholdSeconds   *float64      `json:"monitor_response_time_threshold_seconds,omitempty"`    // 单渠道最长响应时间，nil 表示继承全局
+	MonitorAutoDisableEnabled             *bool         `json:"monitor_auto_disable_enabled,omitempty"`               // 单渠道失败自动禁用开关，nil 表示继承全局
+	MonitorAutoEnableEnabled              *bool         `json:"monitor_auto_enable_enabled,omitempty"`                // 单渠道成功自动启用开关，nil 表示继承全局
+	MonitorDisableThreshold               *int          `json:"monitor_disable_threshold,omitempty"`                  // 连续失败阈值，nil 表示继承全局
+	MonitorEnableThreshold                *int          `json:"monitor_enable_threshold,omitempty"`                   // 连续成功阈值，nil 表示继承全局
+	MonitorLastTestTime                   int64         `json:"monitor_last_test_time,omitempty"`                     // 上次自动监控测试时间
+	MonitorConsecutiveFailures            int           `json:"monitor_consecutive_failures,omitempty"`               // 连续失败次数
+	MonitorConsecutiveSuccesses           int           `json:"monitor_consecutive_successes,omitempty"`              // 连续成功次数
 }
 
 func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {

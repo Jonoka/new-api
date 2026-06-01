@@ -67,6 +67,14 @@ const monitoringSchema = z
         .number()
         .int()
         .min(1, 'Interval must be at least 1 minute'),
+      auto_disable_threshold: z.coerce
+        .number()
+        .int()
+        .min(1, 'Threshold must be at least 1'),
+      auto_enable_threshold: z.coerce
+        .number()
+        .int()
+        .min(1, 'Threshold must be at least 1'),
     }),
   })
   .superRefine((values, ctx) => {
@@ -111,6 +119,8 @@ type MonitoringSettingsSectionProps = {
     AutomaticRetryStatusCodes: string
     'monitor_setting.auto_test_channel_enabled': boolean
     'monitor_setting.auto_test_channel_minutes': number
+    'monitor_setting.auto_disable_threshold': number
+    'monitor_setting.auto_enable_threshold': number
   }
 }
 
@@ -128,6 +138,8 @@ type NormalizedMonitoringValues = {
   AutomaticRetryStatusCodes: string
   'monitor_setting.auto_test_channel_enabled': boolean
   'monitor_setting.auto_test_channel_minutes': number
+  'monitor_setting.auto_disable_threshold': number
+  'monitor_setting.auto_enable_threshold': number
 }
 
 const buildFormDefaults = (
@@ -147,6 +159,10 @@ const buildFormDefaults = (
       defaults['monitor_setting.auto_test_channel_enabled'],
     auto_test_channel_minutes:
       defaults['monitor_setting.auto_test_channel_minutes'],
+    auto_disable_threshold:
+      defaults['monitor_setting.auto_disable_threshold'] ?? 1,
+    auto_enable_threshold:
+      defaults['monitor_setting.auto_enable_threshold'] ?? 1,
   },
 })
 
@@ -170,6 +186,10 @@ const normalizeDefaults = (
     defaults['monitor_setting.auto_test_channel_enabled'],
   'monitor_setting.auto_test_channel_minutes':
     defaults['monitor_setting.auto_test_channel_minutes'],
+  'monitor_setting.auto_disable_threshold':
+    defaults['monitor_setting.auto_disable_threshold'] ?? 1,
+  'monitor_setting.auto_enable_threshold':
+    defaults['monitor_setting.auto_enable_threshold'] ?? 1,
 })
 
 const normalizeFormValues = (
@@ -192,6 +212,10 @@ const normalizeFormValues = (
     values.monitor_setting.auto_test_channel_enabled,
   'monitor_setting.auto_test_channel_minutes':
     values.monitor_setting.auto_test_channel_minutes,
+  'monitor_setting.auto_disable_threshold':
+    values.monitor_setting.auto_disable_threshold,
+  'monitor_setting.auto_enable_threshold':
+    values.monitor_setting.auto_enable_threshold,
 })
 
 export function MonitoringSettingsSection({
@@ -392,6 +416,60 @@ export function MonitoringSettingsSection({
                     />
                   </FormControl>
                 </SettingsSwitchItem>
+              )}
+            />
+          </div>
+
+          <div className='grid gap-6 md:grid-cols-2'>
+            <FormField
+              control={form.control}
+              name='monitor_setting.auto_disable_threshold'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>
+                    {t('Consecutive failures before disabling')}
+                  </FormLabel>
+                  <FormControl>
+                    <Input
+                      type='number'
+                      min={1}
+                      step={1}
+                      {...safeNumberFieldProps(field)}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'Disable a channel only after this many failed monitoring tests in a row'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='monitor_setting.auto_enable_threshold'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>
+                    {t('Consecutive successes before enabling')}
+                  </FormLabel>
+                  <FormControl>
+                    <Input
+                      type='number'
+                      min={1}
+                      step={1}
+                      {...safeNumberFieldProps(field)}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'Re-enable a channel only after this many successful monitoring tests in a row'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
               )}
             />
           </div>

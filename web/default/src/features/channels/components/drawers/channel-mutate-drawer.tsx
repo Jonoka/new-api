@@ -221,7 +221,14 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.claude_beta_query ||
     values.upstream_model_update_check_enabled ||
     values.upstream_model_update_auto_sync_enabled ||
-    values.upstream_model_update_ignored_models?.trim()
+    values.upstream_model_update_ignored_models?.trim() ||
+    values.monitor_enabled !== 'inherit' ||
+    values.monitor_test_interval_minutes?.trim() ||
+    values.monitor_response_time_threshold_seconds?.trim() ||
+    values.monitor_auto_disable_enabled !== 'inherit' ||
+    values.monitor_auto_enable_enabled !== 'inherit' ||
+    values.monitor_disable_threshold?.trim() ||
+    values.monitor_enable_threshold?.trim()
   )
 }
 
@@ -2874,6 +2881,247 @@ export function ChannelMutateDrawer({
                             </FormItem>
                           )}
                         />
+                      </div>
+
+                      <div className='flex flex-col gap-4 border-t pt-4'>
+                        <SubHeading
+                          title={t('Channel Monitoring')}
+                          icon={<RefreshCw className='h-3.5 w-3.5' />}
+                        />
+                        <div className='grid gap-4 sm:grid-cols-2'>
+                          <FormField
+                            control={form.control}
+                            name='monitor_enabled'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Monitoring')}</FormLabel>
+                                <Select
+                                  value={field.value || 'inherit'}
+                                  onValueChange={field.onChange}
+                                >
+                                  <FormControl>
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent alignItemWithTrigger={false}>
+                                    <SelectGroup>
+                                      <SelectItem value='inherit'>
+                                        {t('Inherit global')}
+                                      </SelectItem>
+                                      <SelectItem value='enabled'>
+                                        {t('Enabled')}
+                                      </SelectItem>
+                                      <SelectItem value='disabled'>
+                                        {t('Disabled')}
+                                      </SelectItem>
+                                    </SelectGroup>
+                                  </SelectContent>
+                                </Select>
+                                <FormDescription>
+                                  {t(
+                                    'Controls whether scheduled monitoring tests include this channel'
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name='monitor_test_interval_minutes'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>
+                                  {t('Monitor interval override (minutes)')}
+                                </FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={1}
+                                    step={1}
+                                    placeholder={t('Inherit global')}
+                                    {...field}
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t('Leave empty to use the global schedule')}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+
+                        <div className='grid gap-4 sm:grid-cols-2'>
+                          <FormField
+                            control={form.control}
+                            name='monitor_response_time_threshold_seconds'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>
+                                  {t('Response time override (seconds)')}
+                                </FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={0}
+                                    step={1}
+                                    placeholder={t('Inherit global')}
+                                    {...field}
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t(
+                                    'Leave empty to use the global response time limit'
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name='monitor_auto_disable_enabled'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>
+                                  {t('Disable on monitor failure')}
+                                </FormLabel>
+                                <Select
+                                  value={field.value || 'inherit'}
+                                  onValueChange={field.onChange}
+                                >
+                                  <FormControl>
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent alignItemWithTrigger={false}>
+                                    <SelectGroup>
+                                      <SelectItem value='inherit'>
+                                        {t('Inherit global')}
+                                      </SelectItem>
+                                      <SelectItem value='enabled'>
+                                        {t('Enabled')}
+                                      </SelectItem>
+                                      <SelectItem value='disabled'>
+                                        {t('Disabled')}
+                                      </SelectItem>
+                                    </SelectGroup>
+                                  </SelectContent>
+                                </Select>
+                                <FormDescription>
+                                  {t(
+                                    'Controls automatic disabling for this channel during monitoring'
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+
+                        <div className='grid gap-4 sm:grid-cols-2'>
+                          <FormField
+                            control={form.control}
+                            name='monitor_disable_threshold'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>
+                                  {t('Channel failure threshold')}
+                                </FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={1}
+                                    step={1}
+                                    placeholder={t('Inherit global')}
+                                    {...field}
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t(
+                                    'Disable after this many failed monitoring tests in a row'
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name='monitor_auto_enable_enabled'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>
+                                  {t('Enable on monitor success')}
+                                </FormLabel>
+                                <Select
+                                  value={field.value || 'inherit'}
+                                  onValueChange={field.onChange}
+                                >
+                                  <FormControl>
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent alignItemWithTrigger={false}>
+                                    <SelectGroup>
+                                      <SelectItem value='inherit'>
+                                        {t('Inherit global')}
+                                      </SelectItem>
+                                      <SelectItem value='enabled'>
+                                        {t('Enabled')}
+                                      </SelectItem>
+                                      <SelectItem value='disabled'>
+                                        {t('Disabled')}
+                                      </SelectItem>
+                                    </SelectGroup>
+                                  </SelectContent>
+                                </Select>
+                                <FormDescription>
+                                  {t(
+                                    'Controls automatic re-enabling for this channel during monitoring'
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+
+                        <div className='grid gap-4 sm:grid-cols-2'>
+                          <FormField
+                            control={form.control}
+                            name='monitor_enable_threshold'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>
+                                  {t('Channel success threshold')}
+                                </FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={1}
+                                    step={1}
+                                    placeholder={t('Inherit global')}
+                                    {...field}
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t(
+                                    'Enable after this many successful monitoring tests in a row'
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
                       </div>
                     </div>
 
