@@ -314,6 +314,12 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 		return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的可用渠道不存在（retry）", selectGroup, info.OriginModelName), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
 
+	if retryParam.GetRetry() > 0 {
+		if rateLimitErr := middleware.CheckModelRequestRateLimitForGroup(c, selectGroup); rateLimitErr != nil {
+			return nil, rateLimitErr
+		}
+	}
+
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
 	if newAPIError != nil {
 		return nil, newAPIError

@@ -38,6 +38,11 @@ import type { LogCategory } from '../types'
 import { LOG_TYPE_ENUM } from '../constants'
 import { getLogTypeConfig } from '../lib/utils'
 
+type CommonLogRowData = {
+  created_at?: unknown
+  type?: unknown
+}
+
 const logTypeRowTint: Record<number, string> = {
   [LOG_TYPE_ENUM.ERROR]: 'bg-rose-50/40 dark:bg-rose-950/20 border-rose-200/50 dark:border-rose-900/30',
   [LOG_TYPE_ENUM.REFUND]: 'bg-blue-50/30 dark:bg-blue-950/15 border-blue-200/50 dark:border-blue-900/30',
@@ -174,7 +179,7 @@ function MobileLogTimeStatus({
   )
 }
 
-function CommonLogsCard<TData>({
+function CommonLogsCard<TData extends CommonLogRowData>({
   cells,
 }: {
   cells: Map<string, Cell<TData, unknown>>
@@ -329,7 +334,7 @@ function DrawingLogsCard<TData>({
   )
 }
 
-export function UsageLogsMobileList<TData>({
+export function UsageLogsMobileList<TData extends CommonLogRowData>({
   table,
   isLoading = false,
   emptyTitle,
