@@ -212,6 +212,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.remark?.trim() ||
     values.priority ||
     values.weight ||
+    values.concurrency_limit ||
     values.proxy?.trim() ||
     values.system_prompt?.trim() ||
     values.force_format ||
@@ -2547,6 +2548,33 @@ export function ChannelMutateDrawer({
                                 </FormControl>
                                 <FormDescription>
                                   {t(FIELD_DESCRIPTIONS.WEIGHT)}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name='concurrency_limit'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Concurrency Limit')}</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={0}
+                                    placeholder='0'
+                                    {...field}
+                                    onChange={(e) =>
+                                      field.onChange(Number(e.target.value))
+                                    }
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t(
+                                    '0 means unlimited. Requests over this limit will use other available channels.'
+                                  )}
                                 </FormDescription>
                                 <FormMessage />
                               </FormItem>

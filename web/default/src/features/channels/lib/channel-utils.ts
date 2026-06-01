@@ -539,6 +539,7 @@ export function aggregateChannelsByTag(
         response_time: 0,
         priority: -1 as unknown as number | null,
         weight: -1 as unknown as number | null,
+        concurrency_limit: -1 as unknown as number | null,
         balance: 0,
         test_time: 0,
         created_time: 0,
@@ -576,6 +577,13 @@ export function aggregateChannelsByTag(
       tagRow.weight = channel.weight
     } else if (tagRow.weight !== channel.weight) {
       tagRow.weight = null
+    }
+
+    // Aggregate concurrency limit (same value or null if different)
+    if (tagRow.concurrency_limit === -1) {
+      tagRow.concurrency_limit = channel.concurrency_limit
+    } else if (tagRow.concurrency_limit !== channel.concurrency_limit) {
+      tagRow.concurrency_limit = null
     }
 
     // Aggregate group (concatenate and deduplicate)

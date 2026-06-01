@@ -118,6 +118,9 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 
 	if len(channels) == 1 {
 		if channel, ok := channelsIDM[channels[0]]; ok {
+			if !IsChannelConcurrencyAvailable(channel) {
+				return nil, nil
+			}
 			return channel, nil
 		}
 		return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channels[0])
@@ -126,7 +129,9 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	uniquePriorities := make(map[int]bool)
 	for _, channelId := range channels {
 		if channel, ok := channelsIDM[channelId]; ok {
-			uniquePriorities[int(channel.GetPriority())] = true
+			if IsChannelConcurrencyAvailable(channel) {
+				uniquePriorities[int(channel.GetPriority())] = true
+			}
 		} else {
 			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId)
 		}
@@ -134,6 +139,9 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	var sortedUniquePriorities []int
 	for priority := range uniquePriorities {
 		sortedUniquePriorities = append(sortedUniquePriorities, priority)
+	}
+	if len(sortedUniquePriorities) == 0 {
+		return nil, nil
 	}
 	sort.Sort(sort.Reverse(sort.IntSlice(sortedUniquePriorities)))
 
@@ -147,7 +155,7 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	var targetChannels []*Channel
 	for _, channelId := range channels {
 		if channel, ok := channelsIDM[channelId]; ok {
-			if channel.GetPriority() == targetPriority {
+			if channel.GetPriority() == targetPriority && IsChannelConcurrencyAvailable(channel) {
 				sumWeight += channel.GetWeight()
 				targetChannels = append(targetChannels, channel)
 			}
