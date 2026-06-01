@@ -32,6 +32,7 @@ type ModelRequest struct {
 func Distribute() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		var channel *model.Channel
+		var selectGroup string
 		channelId, ok := common.GetContextKey(c, constant.ContextKeyTokenSpecificChannelId)
 		modelRequest, shouldSelectChannel, err := getModelRequest(c)
 		if err != nil {
@@ -81,7 +82,6 @@ func Distribute() func(c *gin.Context) {
 					abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorModelNameRequired))
 					return
 				}
-				var selectGroup string
 				usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 				// check path is /pg/chat/completions
 				if strings.HasPrefix(c.Request.URL.Path, "/pg/chat/completions") {
@@ -158,7 +158,17 @@ func Distribute() func(c *gin.Context) {
 			}
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
-		SetupContextForSelectedChannel(c, channel, modelRequest.Model)
+		if modelRequest.Group != "" {
+			common.SetContextKey(c, constant.ContextKeySelectedChannelGroup, modelRequest.Group)
+		} else if selectGroup != "" {
+			common.SetContextKey(c, constant.ContextKeySelectedChannelGroup, selectGroup)
+		} else {
+			common.SetContextKey(c, constant.ContextKeySelectedChannelGroup, common.GetContextKeyString(c, constant.ContextKeyUsingGroup))
+		}
+		common.SetContextKey(c, constant.ContextKeyOriginalModel, modelRequest.Model)
+		if channel != nil {
+			common.SetContextKey(c, constant.ContextKeySelectedChannel, channel)
+		}
 		c.Next()
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
 			service.RecordChannelAffinity(c, channel.Id)
@@ -397,7 +407,7 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 }
 
 func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, modelName string) *types.NewAPIError {
-	c.Set("original_model", modelName) // for retry
+	common.SetContextKey(c, constant.ContextKeyOriginalModel, modelName)
 	if channel == nil {
 		return types.NewError(errors.New("channel is nil"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
