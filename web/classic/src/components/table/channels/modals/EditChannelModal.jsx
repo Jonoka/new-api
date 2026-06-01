@@ -215,6 +215,13 @@ const EditChannelModal = (props) => {
     upstream_model_update_last_check_time: 0,
     upstream_model_update_last_detected_models: [],
     upstream_model_update_ignored_models: '',
+    monitor_enabled: 'inherit',
+    monitor_test_interval_minutes: '',
+    monitor_response_time_threshold_seconds: '',
+    monitor_auto_disable_enabled: 'inherit',
+    monitor_auto_enable_enabled: 'inherit',
+    monitor_disable_threshold: '',
+    monitor_enable_threshold: '',
   };
   const [batch, setBatch] = useState(false);
   const [multiToSingle, setMultiToSingle] = useState(false);
@@ -564,6 +571,13 @@ const EditChannelModal = (props) => {
     settings[key] = value;
     const settingsJson = JSON.stringify(settings);
     handleInputChange('settings', settingsJson);
+  };
+
+  const handleChannelMonitorSettingChange = (key, value) => {
+    setInputs((prev) => ({ ...prev, [key]: value }));
+    if (formApiRef.current) {
+      formApiRef.current.setValue(key, value);
+    }
   };
 
   const applyClipboardConfig = (config) => {
@@ -927,6 +941,40 @@ const EditChannelModal = (props) => {
           )
             ? parsedSettings.upstream_model_update_ignored_models.join(',')
             : '';
+          data.monitor_enabled =
+            parsedSettings.monitor_enabled === true
+              ? 'enabled'
+              : parsedSettings.monitor_enabled === false
+                ? 'disabled'
+                : 'inherit';
+          data.monitor_test_interval_minutes =
+            typeof parsedSettings.monitor_test_interval_minutes === 'number'
+              ? String(parsedSettings.monitor_test_interval_minutes)
+              : '';
+          data.monitor_response_time_threshold_seconds =
+            typeof parsedSettings.monitor_response_time_threshold_seconds === 'number'
+              ? String(parsedSettings.monitor_response_time_threshold_seconds)
+              : '';
+          data.monitor_auto_disable_enabled =
+            parsedSettings.monitor_auto_disable_enabled === true
+              ? 'enabled'
+              : parsedSettings.monitor_auto_disable_enabled === false
+                ? 'disabled'
+                : 'inherit';
+          data.monitor_auto_enable_enabled =
+            parsedSettings.monitor_auto_enable_enabled === true
+              ? 'enabled'
+              : parsedSettings.monitor_auto_enable_enabled === false
+                ? 'disabled'
+                : 'inherit';
+          data.monitor_disable_threshold =
+            typeof parsedSettings.monitor_disable_threshold === 'number'
+              ? String(parsedSettings.monitor_disable_threshold)
+              : '';
+          data.monitor_enable_threshold =
+            typeof parsedSettings.monitor_enable_threshold === 'number'
+              ? String(parsedSettings.monitor_enable_threshold)
+              : '';
         } catch (error) {
           console.error('解析其他设置失败:', error);
           data.azure_responses_version = '';
@@ -946,6 +994,13 @@ const EditChannelModal = (props) => {
           data.upstream_model_update_last_check_time = 0;
           data.upstream_model_update_last_detected_models = [];
           data.upstream_model_update_ignored_models = '';
+          data.monitor_enabled = 'inherit';
+          data.monitor_test_interval_minutes = '';
+          data.monitor_response_time_threshold_seconds = '';
+          data.monitor_auto_disable_enabled = 'inherit';
+          data.monitor_auto_enable_enabled = 'inherit';
+          data.monitor_disable_threshold = '';
+          data.monitor_enable_threshold = '';
         }
       } else {
         // 兼容历史数据：老渠道没有 settings 时，默认按 json 展示
@@ -964,6 +1019,13 @@ const EditChannelModal = (props) => {
         data.upstream_model_update_last_check_time = 0;
         data.upstream_model_update_last_detected_models = [];
         data.upstream_model_update_ignored_models = '';
+        data.monitor_enabled = 'inherit';
+        data.monitor_test_interval_minutes = '';
+        data.monitor_response_time_threshold_seconds = '';
+        data.monitor_auto_disable_enabled = 'inherit';
+        data.monitor_auto_enable_enabled = 'inherit';
+        data.monitor_disable_threshold = '';
+        data.monitor_enable_threshold = '';
       }
 
       if (
@@ -1037,7 +1099,14 @@ const EditChannelModal = (props) => {
         data.pass_through_body_enabled ||
         data.force_format ||
         data.claude_beta_query ||
-        data.system_prompt_override;
+        data.system_prompt_override ||
+        data.monitor_enabled !== 'inherit' ||
+        (data.monitor_test_interval_minutes && data.monitor_test_interval_minutes.trim()) ||
+        (data.monitor_response_time_threshold_seconds && data.monitor_response_time_threshold_seconds.trim()) ||
+        data.monitor_auto_disable_enabled !== 'inherit' ||
+        data.monitor_auto_enable_enabled !== 'inherit' ||
+        (data.monitor_disable_threshold && data.monitor_disable_threshold.trim()) ||
+        (data.monitor_enable_threshold && data.monitor_enable_threshold.trim());
       if (hasAdvancedValues) {
         setAdvancedSettingsOpen(true);
       }
@@ -1826,6 +1895,56 @@ const EditChannelModal = (props) => {
       settings.upstream_model_update_last_check_time = 0;
     }
 
+    const applyBooleanOverride = (key, value) => {
+      if (value === 'enabled') {
+        settings[key] = true;
+      } else if (value === 'disabled') {
+        settings[key] = false;
+      } else {
+        delete settings[key];
+      }
+    };
+    const applyNumberOverride = (key, value, integer = false) => {
+      const trimmed = String(value || '').trim();
+      if (!trimmed) {
+        delete settings[key];
+        return;
+      }
+      const parsed = integer ? parseInt(trimmed, 10) : Number(trimmed);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        settings[key] = parsed;
+      } else {
+        delete settings[key];
+      }
+    };
+    applyBooleanOverride('monitor_enabled', localInputs.monitor_enabled);
+    applyNumberOverride(
+      'monitor_test_interval_minutes',
+      localInputs.monitor_test_interval_minutes,
+    );
+    applyNumberOverride(
+      'monitor_response_time_threshold_seconds',
+      localInputs.monitor_response_time_threshold_seconds,
+    );
+    applyBooleanOverride(
+      'monitor_auto_disable_enabled',
+      localInputs.monitor_auto_disable_enabled,
+    );
+    applyBooleanOverride(
+      'monitor_auto_enable_enabled',
+      localInputs.monitor_auto_enable_enabled,
+    );
+    applyNumberOverride(
+      'monitor_disable_threshold',
+      localInputs.monitor_disable_threshold,
+      true,
+    );
+    applyNumberOverride(
+      'monitor_enable_threshold',
+      localInputs.monitor_enable_threshold,
+      true,
+    );
+
     localInputs.settings = JSON.stringify(settings);
 
     // 清理不需要发送到后端的字段
@@ -1853,6 +1972,13 @@ const EditChannelModal = (props) => {
     delete localInputs.upstream_model_update_last_check_time;
     delete localInputs.upstream_model_update_last_detected_models;
     delete localInputs.upstream_model_update_ignored_models;
+    delete localInputs.monitor_enabled;
+    delete localInputs.monitor_test_interval_minutes;
+    delete localInputs.monitor_response_time_threshold_seconds;
+    delete localInputs.monitor_auto_disable_enabled;
+    delete localInputs.monitor_auto_enable_enabled;
+    delete localInputs.monitor_disable_threshold;
+    delete localInputs.monitor_enable_threshold;
 
     let res;
     localInputs.auto_ban = localInputs.auto_ban ? 1 : 0;
@@ -2481,6 +2607,142 @@ const EditChannelModal = (props) => {
                         min={0}
                         onNumberChange={(value) => handleInputChange('weight', value)}
                         style={{ width: '100%' }}
+                      />
+                    </Col>
+                  </Row>
+
+                  <div className='mt-4 mb-2 text-sm font-medium text-gray-700'>
+                    {t('单渠道监控设置')}
+                  </div>
+                  <Row gutter={12}>
+                    <Col span={12}>
+                      <Form.Select
+                        field='monitor_enabled'
+                        label={t('监控开关')}
+                        optionList={[
+                          { label: t('继承全局'), value: 'inherit' },
+                          { label: t('监控启用'), value: 'enabled' },
+                          { label: t('监控关闭'), value: 'disabled' },
+                        ]}
+                        style={{ width: '100%' }}
+                        value={inputs.monitor_enabled || 'inherit'}
+                        onChange={(value) =>
+                          handleChannelMonitorSettingChange(
+                            'monitor_enabled',
+                            value,
+                          )
+                        }
+                        extraText={t('控制定时监控测试是否包含此渠道')}
+                      />
+                    </Col>
+                    <Col span={12}>
+                      <Form.Input
+                        field='monitor_test_interval_minutes'
+                        label={t('监控间隔覆盖')}
+                        placeholder={t('留空继承全局')}
+                        suffix={t('分钟')}
+                        showClear
+                        onChange={(value) =>
+                          handleChannelMonitorSettingChange(
+                            'monitor_test_interval_minutes',
+                            value,
+                          )
+                        }
+                        extraText={t('留空则跟随全局定时测试间隔')}
+                      />
+                    </Col>
+                  </Row>
+                  <Row gutter={12}>
+                    <Col span={12}>
+                      <Form.Input
+                        field='monitor_response_time_threshold_seconds'
+                        label={t('最长响应时间覆盖')}
+                        placeholder={t('留空继承全局')}
+                        suffix={t('秒')}
+                        showClear
+                        onChange={(value) =>
+                          handleChannelMonitorSettingChange(
+                            'monitor_response_time_threshold_seconds',
+                            value,
+                          )
+                        }
+                        extraText={t('留空则使用全局最长响应时间')}
+                      />
+                    </Col>
+                    <Col span={12}>
+                      <Form.Select
+                        field='monitor_auto_disable_enabled'
+                        label={t('失败时自动禁用')}
+                        optionList={[
+                          { label: t('继承全局'), value: 'inherit' },
+                          { label: t('监控启用'), value: 'enabled' },
+                          { label: t('监控关闭'), value: 'disabled' },
+                        ]}
+                        style={{ width: '100%' }}
+                        value={inputs.monitor_auto_disable_enabled || 'inherit'}
+                        onChange={(value) =>
+                          handleChannelMonitorSettingChange(
+                            'monitor_auto_disable_enabled',
+                            value,
+                          )
+                        }
+                        extraText={t('控制此渠道监控失败后的自动禁用行为')}
+                      />
+                    </Col>
+                  </Row>
+                  <Row gutter={12}>
+                    <Col span={12}>
+                      <Form.Input
+                        field='monitor_disable_threshold'
+                        label={t('连续失败阈值')}
+                        placeholder={t('留空继承全局')}
+                        suffix={t('次')}
+                        showClear
+                        onChange={(value) =>
+                          handleChannelMonitorSettingChange(
+                            'monitor_disable_threshold',
+                            value,
+                          )
+                        }
+                        extraText={t('连续失败达到该次数后才禁用')}
+                      />
+                    </Col>
+                    <Col span={12}>
+                      <Form.Select
+                        field='monitor_auto_enable_enabled'
+                        label={t('成功时自动启用')}
+                        optionList={[
+                          { label: t('继承全局'), value: 'inherit' },
+                          { label: t('监控启用'), value: 'enabled' },
+                          { label: t('监控关闭'), value: 'disabled' },
+                        ]}
+                        style={{ width: '100%' }}
+                        value={inputs.monitor_auto_enable_enabled || 'inherit'}
+                        onChange={(value) =>
+                          handleChannelMonitorSettingChange(
+                            'monitor_auto_enable_enabled',
+                            value,
+                          )
+                        }
+                        extraText={t('控制此渠道监控成功后的自动启用行为')}
+                      />
+                    </Col>
+                  </Row>
+                  <Row gutter={12}>
+                    <Col span={12}>
+                      <Form.Input
+                        field='monitor_enable_threshold'
+                        label={t('连续成功阈值')}
+                        placeholder={t('留空继承全局')}
+                        suffix={t('次')}
+                        showClear
+                        onChange={(value) =>
+                          handleChannelMonitorSettingChange(
+                            'monitor_enable_threshold',
+                            value,
+                          )
+                        }
+                        extraText={t('连续成功达到该次数后才启用')}
                       />
                     </Col>
                   </Row>

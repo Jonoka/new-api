@@ -189,6 +189,16 @@ func InitOptionMap() {
 func loadOptionsFromDatabase() {
 	options, _ := AllOption()
 	for _, option := range options {
+		if option.Key == "AutomaticRetryStatusCodes" {
+			if normalized, migrated := operation_setting.NormalizeAutomaticRetryStatusCodesOption(option.Value); migrated {
+				if err := DB.Model(&Option{}).
+					Where("key = ? AND value = ?", option.Key, option.Value).
+					Update("value", normalized).Error; err != nil {
+					common.SysLog("failed to migrate legacy automatic retry status codes: " + err.Error())
+				}
+				option.Value = normalized
+			}
+		}
 		err := updateOptionMap(option.Key, option.Value)
 		if err != nil {
 			common.SysLog("failed to update option map: " + err.Error())

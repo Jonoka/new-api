@@ -105,6 +105,16 @@ export interface ChannelOtherSettings {
   upstream_model_update_ignored_models?: string[]
   upstream_model_update_last_check_time?: number
   upstream_model_update_last_detected_models?: string[]
+  monitor_enabled?: boolean
+  monitor_test_interval_minutes?: number
+  monitor_response_time_threshold_seconds?: number
+  monitor_auto_disable_enabled?: boolean
+  monitor_auto_enable_enabled?: boolean
+  monitor_disable_threshold?: number
+  monitor_enable_threshold?: number
+  monitor_last_test_time?: number
+  monitor_consecutive_failures?: number
+  monitor_consecutive_successes?: number
 }
 
 // ============================================================================

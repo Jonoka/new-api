@@ -16,22 +16,18 @@ type StatusCodeRange struct {
 
 var AutomaticDisableStatusCodeRanges = []StatusCodeRange{{Start: 401, End: 401}}
 
-// Default behavior matches legacy hardcoded retry rules in controller/relay.go shouldRetry:
-// retry for 1xx, 3xx, 4xx(except 400/408), 5xx(except 504/524), and no retry for 2xx.
+// Default behavior matches configurable retry rules:
+// retry for 1xx, 3xx, 4xx(except 400/408), 5xx, and no retry for 2xx.
 var AutomaticRetryStatusCodeRanges = []StatusCodeRange{
 	{Start: 100, End: 199},
 	{Start: 300, End: 399},
 	{Start: 401, End: 407},
 	{Start: 409, End: 499},
-	{Start: 500, End: 503},
-	{Start: 505, End: 523},
-	{Start: 525, End: 599},
+	{Start: 500, End: 599},
 }
 
-var alwaysSkipRetryStatusCodes = map[int]struct{}{
-	504: {},
-	524: {},
-}
+const legacyAutomaticRetryStatusCodesWithoutTimeoutRetry = "100-199,300-399,401-407,409-499,500-503,505-523,525-599"
+const defaultAutomaticRetryStatusCodesWithTimeoutRetry = "100-199,300-399,401-407,409-499,500-599"
 
 var alwaysSkipRetryCodes = map[types.ErrorCode]struct{}{
 	types.ErrorCodeBadResponseBody: {},
@@ -67,9 +63,15 @@ func AutomaticRetryStatusCodesFromString(s string) error {
 	return nil
 }
 
+func NormalizeAutomaticRetryStatusCodesOption(value string) (string, bool) {
+	if strings.TrimSpace(value) != legacyAutomaticRetryStatusCodesWithoutTimeoutRetry {
+		return value, false
+	}
+	return defaultAutomaticRetryStatusCodesWithTimeoutRetry, true
+}
+
 func IsAlwaysSkipRetryStatusCode(code int) bool {
-	_, exists := alwaysSkipRetryStatusCodes[code]
-	return exists
+	return false
 }
 
 func IsAlwaysSkipRetryCode(errorCode types.ErrorCode) bool {
@@ -78,9 +80,6 @@ func IsAlwaysSkipRetryCode(errorCode types.ErrorCode) bool {
 }
 
 func ShouldRetryByStatusCode(code int) bool {
-	if IsAlwaysSkipRetryStatusCode(code) {
-		return false
-	}
 	return shouldMatchStatusCodeRanges(AutomaticRetryStatusCodeRanges, code)
 }
 

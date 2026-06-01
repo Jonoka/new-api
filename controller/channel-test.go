@@ -910,10 +910,7 @@ func testAllChannels(notify bool) error {
 	if getChannelErr != nil {
 		return getChannelErr
 	}
-	var disableThreshold = int64(common.ChannelDisableThreshold * 1000)
-	if disableThreshold == 0 {
-		disableThreshold = 10000000 // a impossible value
-	}
+	monitorSetting := operation_setting.GetMonitorSetting()
 	gopool.Go(func() {
 		// 使用 defer 确保无论如何都会重置运行状态，防止死锁
 		defer func() {
@@ -923,7 +920,9 @@ func testAllChannels(notify bool) error {
 		}()
 
 		for _, channel := range channels {
-			if channel.Status == common.ChannelStatusManuallyDisabled {
+			settings := channel.GetOtherSettings()
+			policy := newChannelMonitorPolicy(channel, settings, monitorSetting)
+			if !policy.shouldTest(!notify, common.GetTimestamp()) {
 				continue
 			}
 			isChannelEnabled := channel.Status == common.ChannelStatusEnabled
@@ -936,25 +935,37 @@ func testAllChannels(notify bool) error {
 			newAPIError := result.newAPIError
 			// request error disables the channel
 			if newAPIError != nil {
-				shouldBanChannel = service.ShouldDisableChannel(result.newAPIError)
+				shouldBanChannel = service.ShouldDisableChannelWithSwitch(result.newAPIError, policy.autoDisableEnabled)
 			}
 
 			// 当错误检查通过，才检查响应时间
-			if common.AutomaticDisableChannelEnabled && !shouldBanChannel {
-				if milliseconds > disableThreshold {
-					err := fmt.Errorf("响应时间 %.2fs 超过阈值 %.2fs", float64(milliseconds)/1000.0, float64(disableThreshold)/1000.0)
+			if policy.autoDisableEnabled && !shouldBanChannel {
+				if milliseconds > policy.responseTimeThresholdMillis {
+					err := fmt.Errorf("响应时间 %.2fs 超过阈值 %.2fs", float64(milliseconds)/1000.0, float64(policy.responseTimeThresholdMillis)/1000.0)
 					newAPIError = types.NewOpenAIError(err, types.ErrorCodeChannelResponseTimeExceeded, http.StatusRequestTimeout)
 					shouldBanChannel = true
 				}
 			}
 
+			enableCandidate := !isChannelEnabled && service.ShouldEnableChannelWithSwitch(newAPIError, channel.Status, policy.autoEnableEnabled)
+			decision := policy.applyResult(&settings, channelMonitorTestOutcome{
+				failed:             newAPIError != nil,
+				disableCandidate:   shouldBanChannel,
+				enableCandidate:    enableCandidate,
+				responseTimeMillis: milliseconds,
+				now:                common.GetTimestamp(),
+			})
+			if err := saveChannelMonitorSettings(channel, settings); err != nil {
+				common.SysLog(fmt.Sprintf("failed to save channel monitor state: channel_id=%d, error=%v", channel.Id, err))
+			}
+
 			// disable channel
-			if isChannelEnabled && shouldBanChannel && channel.GetAutoBan() {
-				processChannelError(result.context, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(result.context, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+			if isChannelEnabled && decision.shouldDisable && channel.GetAutoBan() {
+				service.DisableChannel(*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(result.context, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError.ErrorWithStatusCode())
 			}
 
 			// enable channel
-			if !isChannelEnabled && service.ShouldEnableChannel(newAPIError, channel.Status) {
+			if !isChannelEnabled && decision.shouldEnable {
 				service.EnableChannel(channel.Id, common.GetContextKeyString(result.context, constant.ContextKeyChannelKey), channel.Name)
 			}
 
@@ -983,6 +994,21 @@ func TestAllChannels(c *gin.Context) {
 
 var autoTestChannelsOnce sync.Once
 
+func automaticChannelTestPollInterval(monitorSetting *operation_setting.MonitorSetting) time.Duration {
+	if monitorSetting == nil {
+		return time.Minute
+	}
+	intervalSeconds := monitorIntervalSeconds(monitorSetting.AutoTestChannelMinutes)
+	if intervalSeconds <= 0 {
+		return time.Minute
+	}
+	interval := time.Duration(intervalSeconds) * time.Second
+	if interval < time.Minute {
+		return interval
+	}
+	return time.Minute
+}
+
 func AutomaticallyTestChannels() {
 	// 只在Master节点定时测试渠道
 	if !common.IsMasterNode {
@@ -990,21 +1016,16 @@ func AutomaticallyTestChannels() {
 	}
 	autoTestChannelsOnce.Do(func() {
 		for {
-			if !operation_setting.GetMonitorSetting().AutoTestChannelEnabled {
+			monitorSetting := operation_setting.GetMonitorSetting()
+			if !monitorSetting.AutoTestChannelEnabled {
 				time.Sleep(1 * time.Minute)
 				continue
 			}
-			for {
-				frequency := operation_setting.GetMonitorSetting().AutoTestChannelMinutes
-				time.Sleep(time.Duration(int(math.Round(frequency))) * time.Minute)
-				common.SysLog(fmt.Sprintf("automatically test channels with interval %f minutes", frequency))
-				common.SysLog("automatically testing all channels")
-				_ = testAllChannels(false)
-				common.SysLog("automatically channel test finished")
-				if !operation_setting.GetMonitorSetting().AutoTestChannelEnabled {
-					break
-				}
-			}
+			time.Sleep(automaticChannelTestPollInterval(monitorSetting))
+			common.SysLog(fmt.Sprintf("automatically test channels with interval %f minutes", monitorSetting.AutoTestChannelMinutes))
+			common.SysLog("automatically testing all channels")
+			_ = testAllChannels(false)
+			common.SysLog("automatically channel test finished")
 		}
 	})
 }

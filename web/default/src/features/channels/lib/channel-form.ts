@@ -108,6 +108,20 @@ function isVertexJsonKey(value: string | undefined): boolean {
   }
 }
 
+function isOptionalPositiveNumber(value: string | undefined): boolean {
+  const trimmed = String(value || '').trim()
+  if (!trimmed) return true
+  const parsed = Number(trimmed)
+  return Number.isFinite(parsed) && parsed > 0
+}
+
+function isOptionalPositiveInteger(value: string | undefined): boolean {
+  const trimmed = String(value || '').trim()
+  if (!trimmed) return true
+  const parsed = Number(trimmed)
+  return Number.isInteger(parsed) && parsed > 0
+}
+
 function addRequiredIssue(
   ctx: z.RefinementCtx,
   path: string,
@@ -199,6 +213,29 @@ export const channelFormSchema = z
     upstream_model_update_check_enabled: z.boolean().optional(),
     upstream_model_update_auto_sync_enabled: z.boolean().optional(),
     upstream_model_update_ignored_models: z.string().optional(),
+    monitor_enabled: z.enum(['inherit', 'enabled', 'disabled']).optional(),
+    monitor_test_interval_minutes: z
+      .string()
+      .optional()
+      .refine(isOptionalPositiveNumber, 'Value must be greater than 0'),
+    monitor_response_time_threshold_seconds: z
+      .string()
+      .optional()
+      .refine(isOptionalPositiveNumber, 'Value must be greater than 0'),
+    monitor_auto_disable_enabled: z
+      .enum(['inherit', 'enabled', 'disabled'])
+      .optional(),
+    monitor_auto_enable_enabled: z
+      .enum(['inherit', 'enabled', 'disabled'])
+      .optional(),
+    monitor_disable_threshold: z
+      .string()
+      .optional()
+      .refine(isOptionalPositiveInteger, 'Value must be a positive integer'),
+    monitor_enable_threshold: z
+      .string()
+      .optional()
+      .refine(isOptionalPositiveInteger, 'Value must be a positive integer'),
   })
   .superRefine((data, ctx) => {
     if ([3, 8, 36, 45].includes(data.type) && !data.base_url?.trim()) {
@@ -316,6 +353,13 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   upstream_model_update_check_enabled: false,
   upstream_model_update_auto_sync_enabled: false,
   upstream_model_update_ignored_models: '',
+  monitor_enabled: 'inherit',
+  monitor_test_interval_minutes: '',
+  monitor_response_time_threshold_seconds: '',
+  monitor_auto_disable_enabled: 'inherit',
+  monitor_auto_enable_enabled: 'inherit',
+  monitor_disable_threshold: '',
+  monitor_enable_threshold: '',
 }
 
 // ============================================================================
@@ -370,6 +414,13 @@ export function transformChannelToFormDefaults(
   let upstreamModelUpdateCheckEnabled = false
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
+  let monitorEnabled: 'inherit' | 'enabled' | 'disabled' = 'inherit'
+  let monitorTestIntervalMinutes = ''
+  let monitorResponseTimeThresholdSeconds = ''
+  let monitorAutoDisableEnabled: 'inherit' | 'enabled' | 'disabled' = 'inherit'
+  let monitorAutoEnableEnabled: 'inherit' | 'enabled' | 'disabled' = 'inherit'
+  let monitorDisableThreshold = ''
+  let monitorEnableThreshold = ''
 
   if (channel.settings) {
     try {
@@ -394,6 +445,40 @@ export function transformChannelToFormDefaults(
       )
         ? parsed.upstream_model_update_ignored_models.join(',')
         : ''
+      monitorEnabled =
+        parsed.monitor_enabled === true
+          ? 'enabled'
+          : parsed.monitor_enabled === false
+            ? 'disabled'
+            : 'inherit'
+      monitorTestIntervalMinutes =
+        typeof parsed.monitor_test_interval_minutes === 'number'
+          ? String(parsed.monitor_test_interval_minutes)
+          : ''
+      monitorResponseTimeThresholdSeconds =
+        typeof parsed.monitor_response_time_threshold_seconds === 'number'
+          ? String(parsed.monitor_response_time_threshold_seconds)
+          : ''
+      monitorAutoDisableEnabled =
+        parsed.monitor_auto_disable_enabled === true
+          ? 'enabled'
+          : parsed.monitor_auto_disable_enabled === false
+            ? 'disabled'
+            : 'inherit'
+      monitorAutoEnableEnabled =
+        parsed.monitor_auto_enable_enabled === true
+          ? 'enabled'
+          : parsed.monitor_auto_enable_enabled === false
+            ? 'disabled'
+            : 'inherit'
+      monitorDisableThreshold =
+        typeof parsed.monitor_disable_threshold === 'number'
+          ? String(parsed.monitor_disable_threshold)
+          : ''
+      monitorEnableThreshold =
+        typeof parsed.monitor_enable_threshold === 'number'
+          ? String(parsed.monitor_enable_threshold)
+          : ''
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error('Failed to parse channel settings:', error)
@@ -443,6 +528,13 @@ export function transformChannelToFormDefaults(
     upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
+    monitor_enabled: monitorEnabled,
+    monitor_test_interval_minutes: monitorTestIntervalMinutes,
+    monitor_response_time_threshold_seconds: monitorResponseTimeThresholdSeconds,
+    monitor_auto_disable_enabled: monitorAutoDisableEnabled,
+    monitor_auto_enable_enabled: monitorAutoEnableEnabled,
+    monitor_disable_threshold: monitorDisableThreshold,
+    monitor_enable_threshold: monitorEnableThreshold,
   }
 }
 
@@ -567,7 +659,91 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     }
   }
 
+  setOptionalBooleanOverride(settingsObj, 'monitor_enabled', formData.monitor_enabled)
+  setOptionalNumber(
+    settingsObj,
+    'monitor_test_interval_minutes',
+    formData.monitor_test_interval_minutes
+  )
+  setOptionalNumber(
+    settingsObj,
+    'monitor_response_time_threshold_seconds',
+    formData.monitor_response_time_threshold_seconds
+  )
+  setOptionalBooleanOverride(
+    settingsObj,
+    'monitor_auto_disable_enabled',
+    formData.monitor_auto_disable_enabled
+  )
+  setOptionalBooleanOverride(
+    settingsObj,
+    'monitor_auto_enable_enabled',
+    formData.monitor_auto_enable_enabled
+  )
+  setOptionalInteger(
+    settingsObj,
+    'monitor_disable_threshold',
+    formData.monitor_disable_threshold
+  )
+  setOptionalInteger(
+    settingsObj,
+    'monitor_enable_threshold',
+    formData.monitor_enable_threshold
+  )
+
   return JSON.stringify(settingsObj)
+}
+
+function setOptionalBooleanOverride(
+  settingsObj: Record<string, unknown>,
+  key: string,
+  value: 'inherit' | 'enabled' | 'disabled' | undefined
+): void {
+  if (value === 'enabled') {
+    settingsObj[key] = true
+    return
+  }
+  if (value === 'disabled') {
+    settingsObj[key] = false
+    return
+  }
+  delete settingsObj[key]
+}
+
+function setOptionalNumber(
+  settingsObj: Record<string, unknown>,
+  key: string,
+  value: string | undefined
+): void {
+  const trimmed = String(value || '').trim()
+  if (!trimmed) {
+    delete settingsObj[key]
+    return
+  }
+  const parsed = Number(trimmed)
+  if (Number.isFinite(parsed) && parsed > 0) {
+    settingsObj[key] = parsed
+    return
+  }
+  delete settingsObj[key]
+}
+
+function setOptionalInteger(
+  settingsObj: Record<string, unknown>,
+  key: string,
+  value: string | undefined
+): void {
+  const trimmed = String(value || '').trim()
+  if (!trimmed) {
+    delete settingsObj[key]
+    return
+  }
+  const parsed = Number.parseInt(trimmed, 10)
+  if (Number.isFinite(parsed) && parsed > 0) {
+    settingsObj[key] = parsed
+    return
+  }
+  delete settingsObj[key]
 }
 
 function normalizeBaseUrl(value: string | undefined): string {
