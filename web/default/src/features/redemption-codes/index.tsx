@@ -18,6 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useTranslation } from 'react-i18next'
 import { SectionPageLayout } from '@/components/layout'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { PromoCodesPanel } from './components/promo-codes-panel'
 import { RedemptionsDialogs } from './components/redemptions-dialogs'
 import { RedemptionsPrimaryButtons } from './components/redemptions-primary-buttons'
 import { RedemptionsProvider } from './components/redemptions-provider'
@@ -29,13 +31,26 @@ export function Redemptions() {
     <RedemptionsProvider>
       <SectionPageLayout>
         <SectionPageLayout.Title>
-          {t('Redemption Codes')}
+          {t('Marketing Benefits')}
         </SectionPageLayout.Title>
         <SectionPageLayout.Actions>
           <RedemptionsPrimaryButtons />
         </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
-          <RedemptionsTable />
+          <Tabs defaultValue='redemptions' className='gap-4'>
+            <TabsList>
+              <TabsTrigger value='redemptions'>
+                {t('Redemption Codes')}
+              </TabsTrigger>
+              <TabsTrigger value='promo-codes'>{t('Promo Codes')}</TabsTrigger>
+            </TabsList>
+            <TabsContent value='redemptions'>
+              <RedemptionsTable />
+            </TabsContent>
+            <TabsContent value='promo-codes'>
+              <PromoCodesPanel />
+            </TabsContent>
+          </Tabs>
         </SectionPageLayout.Content>
       </SectionPageLayout>
 

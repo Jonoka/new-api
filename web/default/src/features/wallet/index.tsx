@@ -65,6 +65,7 @@ export function Wallet(props: WalletProps) {
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false)
   const [billingDialogOpen, setBillingDialogOpen] = useState(false)
   const [redemptionCode, setRedemptionCode] = useState('')
+  const [promoCode, setPromoCode] = useState('')
   const [creemDialogOpen, setCreemDialogOpen] = useState(false)
   const [selectedCreemProduct, setSelectedCreemProduct] =
     useState<CreemProduct | null>(null)
@@ -128,9 +129,9 @@ export function Wallet(props: WalletProps) {
 
       // Calculate initial payment amount with default payment type
       const defaultPaymentType = getDefaultPaymentType(topupInfo)
-      calculatePaymentAmount(minTopup, defaultPaymentType)
+      calculatePaymentAmount(minTopup, defaultPaymentType, promoCode)
     }
-  }, [topupInfo, topupAmount, calculatePaymentAmount])
+  }, [topupInfo, topupAmount, calculatePaymentAmount, promoCode])
 
   // Get current payment type (selected or default)
   const getCurrentPaymentType = useCallback(() => {
@@ -141,14 +142,19 @@ export function Wallet(props: WalletProps) {
   const handleSelectPreset = (preset: PresetAmount) => {
     setTopupAmount(preset.value)
     setSelectedPreset(preset.value)
-    calculatePaymentAmount(preset.value, getCurrentPaymentType())
+    calculatePaymentAmount(preset.value, getCurrentPaymentType(), promoCode)
   }
 
   // Handle topup amount change
   const handleTopupAmountChange = (amount: number) => {
     setTopupAmount(amount)
     setSelectedPreset(null)
-    calculatePaymentAmount(amount, getCurrentPaymentType())
+    calculatePaymentAmount(amount, getCurrentPaymentType(), promoCode)
+  }
+
+  const handlePromoCodeChange = (code: string) => {
+    setPromoCode(code)
+    calculatePaymentAmount(topupAmount, getCurrentPaymentType(), code)
   }
 
   // Handle payment method selection
@@ -164,7 +170,7 @@ export function Wallet(props: WalletProps) {
       }
 
       // Calculate payment amount and show confirmation dialog
-      await calculatePaymentAmount(topupAmount, method.type)
+      await calculatePaymentAmount(topupAmount, method.type, promoCode)
       setConfirmDialogOpen(true)
     } finally {
       setPaymentLoading(null)
@@ -177,8 +183,8 @@ export function Wallet(props: WalletProps) {
 
     const isPancake = isWaffoPancakePayment(selectedPaymentMethod.type)
     const success = isPancake
-      ? await processWaffoPancakePayment(topupAmount)
-      : await processPayment(topupAmount, selectedPaymentMethod.type)
+      ? await processWaffoPancakePayment(topupAmount, promoCode)
+      : await processPayment(topupAmount, selectedPaymentMethod.type, promoCode)
 
     if (success) {
       setConfirmDialogOpen(false)
@@ -220,7 +226,7 @@ export function Wallet(props: WalletProps) {
     setPaymentLoading(loadingKey)
 
     try {
-      await processWaffoPayment(topupAmount, index)
+      await processWaffoPayment(topupAmount, index, promoCode)
     } finally {
       setPaymentLoading(null)
     }
@@ -263,6 +269,8 @@ export function Wallet(props: WalletProps) {
                   onTopupAmountChange={handleTopupAmountChange}
                   paymentAmount={paymentAmount}
                   calculating={calculating}
+                  promoCode={promoCode}
+                  onPromoCodeChange={handlePromoCodeChange}
                   onPaymentMethodSelect={handlePaymentMethodSelect}
                   paymentLoading={paymentLoading}
                   redemptionCode={redemptionCode}

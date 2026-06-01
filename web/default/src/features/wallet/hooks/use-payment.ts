@@ -44,17 +44,26 @@ export function usePayment() {
 
   // Calculate payment amount
   const calculatePaymentAmount = useCallback(
-    async (topupAmount: number, paymentType: string) => {
+    async (topupAmount: number, paymentType: string, promoCode?: string) => {
       try {
         setCalculating(true)
 
         const isStripe = isStripePayment(paymentType)
         const isPancake = isWaffoPancakePayment(paymentType)
         const response = isStripe
-          ? await calculateStripeAmount({ amount: topupAmount })
+          ? await calculateStripeAmount({
+              amount: topupAmount,
+              promo_code: promoCode,
+            })
           : isPancake
-            ? await calculateWaffoPancakeAmount({ amount: topupAmount })
-            : await calculateAmount({ amount: topupAmount })
+            ? await calculateWaffoPancakeAmount({
+                amount: topupAmount,
+                promo_code: promoCode,
+              })
+            : await calculateAmount({
+                amount: topupAmount,
+                promo_code: promoCode,
+              })
 
         if (isApiSuccess(response) && response.data) {
           const calculatedAmount = parseFloat(response.data)
@@ -77,7 +86,7 @@ export function usePayment() {
 
   // Process payment
   const processPayment = useCallback(
-    async (topupAmount: number, paymentType: string) => {
+    async (topupAmount: number, paymentType: string, promoCode?: string) => {
       try {
         setProcessing(true)
 
@@ -88,10 +97,12 @@ export function usePayment() {
           ? await requestStripePayment({
               amount,
               payment_method: 'stripe',
+              promo_code: promoCode,
             })
           : await requestPayment({
               amount,
               payment_method: paymentType,
+              promo_code: promoCode,
             })
 
         if (!isApiSuccess(response)) {

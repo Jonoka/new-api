@@ -31,6 +31,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -76,12 +77,14 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const { currency } = useSystemConfig()
   const [paying, setPaying] = useState(false)
   const [selectedEpayMethod, setSelectedEpayMethod] = useState('')
+  const [promoCode, setPromoCode] = useState('')
 
   useEffect(() => {
     if (props.open && props.epayMethods && props.epayMethods.length > 0) {
       setSelectedEpayMethod(props.epayMethods[0].type)
     } else if (!props.open) {
       setSelectedEpayMethod('')
+      setPromoCode('')
     }
   }, [props.open, props.epayMethods])
 
@@ -111,7 +114,8 @@ export function SubscriptionPurchaseDialog(props: Props) {
     Math.ceil(Number(plan.price_amount || 0) * quotaPerUnit)
   )
   const userQuota = Math.max(0, Number(props.userQuota || 0))
-  const insufficientBalance = userQuota < balanceCost
+  const hasPromoCode = promoCode.trim().length > 0
+  const insufficientBalance = !hasPromoCode && userQuota < balanceCost
   const limitReached =
     (props.purchaseLimit || 0) > 0 &&
     (props.purchaseCount || 0) >= (props.purchaseLimit || 0)
@@ -119,7 +123,10 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const handlePayStripe = async () => {
     setPaying(true)
     try {
-      const res = await paySubscriptionStripe({ plan_id: plan.id })
+      const res = await paySubscriptionStripe({
+        plan_id: plan.id,
+        promo_code: promoCode,
+      })
       if (res.message === 'success' && res.data?.pay_link) {
         window.open(res.data.pay_link, '_blank')
         toast.success(t('Payment page opened'))
@@ -141,7 +148,10 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const handlePayCreem = async () => {
     setPaying(true)
     try {
-      const res = await paySubscriptionCreem({ plan_id: plan.id })
+      const res = await paySubscriptionCreem({
+        plan_id: plan.id,
+        promo_code: promoCode,
+      })
       if (res.message === 'success' && res.data?.checkout_url) {
         window.open(res.data.checkout_url, '_blank')
         toast.success(t('Payment page opened'))
@@ -165,7 +175,10 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const handlePayWaffoPancake = async () => {
     setPaying(true)
     try {
-      const res = await paySubscriptionWaffoPancake({ plan_id: plan.id })
+      const res = await paySubscriptionWaffoPancake({
+        plan_id: plan.id,
+        promo_code: promoCode,
+      })
       if (res.message === 'success' && res.data?.checkout_url) {
         toast.success(t('Redirecting to payment page...'))
         window.location.href = res.data.checkout_url
@@ -197,6 +210,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
       const res = await paySubscriptionEpay({
         plan_id: plan.id,
         payment_method: selectedEpayMethod,
+        promo_code: promoCode,
       })
       if (res.message === 'success' && res.url) {
         const form = document.createElement('form')
@@ -234,7 +248,10 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const handlePayBalance = async () => {
     setPaying(true)
     try {
-      const res = await paySubscriptionBalance({ plan_id: plan.id })
+      const res = await paySubscriptionBalance({
+        plan_id: plan.id,
+        promo_code: promoCode,
+      })
       if (res.success) {
         toast.success(t('Subscription purchased successfully'))
         void props.onPurchaseSuccess?.()
@@ -344,6 +361,14 @@ export function SubscriptionPurchaseDialog(props: Props) {
             >
               {t('Pay with Balance')}
             </Button>
+          </div>
+
+          <div className='space-y-2'>
+            <Input
+              value={promoCode}
+              onChange={(event) => setPromoCode(event.target.value)}
+              placeholder={t('Enter promo code')}
+            />
           </div>
 
           {hasAnyPayment && (

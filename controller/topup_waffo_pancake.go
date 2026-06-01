@@ -19,7 +19,8 @@ import (
 )
 
 type WaffoPancakePayRequest struct {
-	Amount int64 `json:"amount"`
+	Amount    int64  `json:"amount"`
+	PromoCode string `json:"promo_code"`
 }
 
 func RequestWaffoPancakeAmount(c *gin.Context) {
@@ -42,12 +43,24 @@ func RequestWaffoPancakeAmount(c *gin.Context) {
 	}
 
 	payMoney := getWaffoPancakePayMoney(req.Amount, group)
+	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetTopUp, 0, payMoney)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+		return
+	}
+	if discount != nil {
+		payMoney = discount.PaidAmount
+	}
 	if payMoney <= 0.01 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "success", "data": fmt.Sprintf("%.2f", payMoney)})
+	response := gin.H{"message": "success", "data": fmt.Sprintf("%.2f", payMoney)}
+	if discount != nil {
+		response["discount"] = discount
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 func getWaffoPancakePayMoney(amount int64, group string) float64 {
@@ -375,6 +388,14 @@ func RequestWaffoPancakePay(c *gin.Context) {
 	}
 
 	payMoney := getWaffoPancakePayMoney(req.Amount, group)
+	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetTopUp, 0, payMoney)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+		return
+	}
+	if discount != nil {
+		payMoney = discount.PaidAmount
+	}
 	if payMoney < 0.01 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
@@ -391,6 +412,7 @@ func RequestWaffoPancakePay(c *gin.Context) {
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}
+	model.ApplyPromoCodeResultToTopUp(topUp, discount)
 	if err := topUp.Insert(); err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Waffo Pancake 创建充值订单失败 user_id=%d trade_no=%s amount=%d error=%q", id, tradeNo, req.Amount, err.Error()))
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "创建订单失败"})

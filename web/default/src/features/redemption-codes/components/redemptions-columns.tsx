@@ -178,6 +178,22 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
       },
     },
     {
+      id: 'redeem_count',
+      meta: { label: t('Redeemed'), mobileHidden: true },
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} title={t('Redeemed')} />
+      ),
+      cell: ({ row }) => {
+        const redemption = row.original
+        return (
+          <span className='font-mono text-sm'>
+            {redemption.redeemed_count || 0}/
+            {redemption.max_redeem_count || 1}
+          </span>
+        )
+      },
+    },
+    {
       accessorKey: 'created_time',
       meta: { label: t('Created'), mobileHidden: true },
       header: ({ column }) => (

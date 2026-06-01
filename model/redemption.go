@@ -12,18 +12,27 @@ import (
 )
 
 type Redemption struct {
-	Id           int            `json:"id"`
-	UserId       int            `json:"user_id"`
-	Key          string         `json:"key" gorm:"type:char(32);uniqueIndex"`
-	Status       int            `json:"status" gorm:"default:1"`
-	Name         string         `json:"name" gorm:"index"`
-	Quota        int            `json:"quota" gorm:"default:100"`
-	CreatedTime  int64          `json:"created_time" gorm:"bigint"`
-	RedeemedTime int64          `json:"redeemed_time" gorm:"bigint"`
-	Count        int            `json:"count" gorm:"-:all"` // only for api request
-	UsedUserId   int            `json:"used_user_id"`
-	DeletedAt    gorm.DeletedAt `gorm:"index"`
-	ExpiredTime  int64          `json:"expired_time" gorm:"bigint"` // 过期时间，0 表示不过期
+	Id             int            `json:"id"`
+	UserId         int            `json:"user_id"`
+	Key            string         `json:"key" gorm:"type:char(32);uniqueIndex"`
+	Status         int            `json:"status" gorm:"default:1"`
+	Name           string         `json:"name" gorm:"index"`
+	Quota          int            `json:"quota" gorm:"default:100"`
+	CreatedTime    int64          `json:"created_time" gorm:"bigint"`
+	RedeemedTime   int64          `json:"redeemed_time" gorm:"bigint"`
+	Count          int            `json:"count" gorm:"-:all"` // only for api request
+	UsedUserId     int            `json:"used_user_id"`
+	MaxRedeemCount int            `json:"max_redeem_count" gorm:"default:1"`
+	RedeemedCount  int            `json:"redeemed_count" gorm:"default:0"`
+	DeletedAt      gorm.DeletedAt `gorm:"index"`
+	ExpiredTime    int64          `json:"expired_time" gorm:"bigint"` // 过期时间，0 表示不过期
+}
+
+type RedemptionUsage struct {
+	Id           int   `json:"id"`
+	RedemptionId int   `json:"redemption_id" gorm:"index;uniqueIndex:idx_redemption_usage_user,priority:1"`
+	UserId       int   `json:"user_id" gorm:"index;uniqueIndex:idx_redemption_usage_user,priority:2"`
+	CreatedTime  int64 `json:"created_time" gorm:"bigint"`
 }
 
 func GetAllRedemptions(startIdx int, num int) (redemptions []*Redemption, total int64, err error) {
@@ -137,12 +146,38 @@ func Redeem(key string, userId int) (quota int, err error) {
 		if redemption.ExpiredTime != 0 && redemption.ExpiredTime < common.GetTimestamp() {
 			return errors.New("该兑换码已过期")
 		}
+		if redemption.MaxRedeemCount <= 0 {
+			redemption.MaxRedeemCount = 1
+		}
+		if redemption.RedeemedCount >= redemption.MaxRedeemCount {
+			return errors.New("该兑换码已达兑换次数上限")
+		}
+		var existingUsage int64
+		if err := tx.Model(&RedemptionUsage{}).
+			Where("redemption_id = ? AND user_id = ?", redemption.Id, userId).
+			Count(&existingUsage).Error; err != nil {
+			return err
+		}
+		if existingUsage > 0 {
+			return errors.New("该兑换码已兑换过")
+		}
 		err = tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota)).Error
 		if err != nil {
 			return err
 		}
-		redemption.RedeemedTime = common.GetTimestamp()
-		redemption.Status = common.RedemptionCodeStatusUsed
+		now := common.GetTimestamp()
+		if err := tx.Create(&RedemptionUsage{
+			RedemptionId: redemption.Id,
+			UserId:       userId,
+			CreatedTime:  now,
+		}).Error; err != nil {
+			return err
+		}
+		redemption.RedeemedTime = now
+		redemption.RedeemedCount++
+		if redemption.RedeemedCount >= redemption.MaxRedeemCount {
+			redemption.Status = common.RedemptionCodeStatusUsed
+		}
 		redemption.UsedUserId = userId
 		err = tx.Save(redemption).Error
 		return err
@@ -157,6 +192,12 @@ func Redeem(key string, userId int) (quota int, err error) {
 
 func (redemption *Redemption) Insert() error {
 	var err error
+	if redemption.Status == 0 {
+		redemption.Status = common.RedemptionCodeStatusEnabled
+	}
+	if redemption.MaxRedeemCount <= 0 {
+		redemption.MaxRedeemCount = 1
+	}
 	err = DB.Create(redemption).Error
 	return err
 }
@@ -169,7 +210,10 @@ func (redemption *Redemption) SelectUpdate() error {
 // Update Make sure your token's fields is completed, because this will update non-zero values
 func (redemption *Redemption) Update() error {
 	var err error
-	err = DB.Model(redemption).Select("name", "status", "quota", "redeemed_time", "expired_time").Updates(redemption).Error
+	if redemption.MaxRedeemCount <= 0 {
+		redemption.MaxRedeemCount = 1
+	}
+	err = DB.Model(redemption).Select("name", "status", "quota", "redeemed_time", "expired_time", "max_redeem_count", "redeemed_count").Updates(redemption).Error
 	return err
 }
 

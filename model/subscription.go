@@ -195,10 +195,16 @@ func (p *SubscriptionPlan) BeforeUpdate(tx *gorm.DB) error {
 
 // Subscription order (payment -> webhook -> create UserSubscription)
 type SubscriptionOrder struct {
-	Id     int     `json:"id"`
-	UserId int     `json:"user_id" gorm:"index"`
-	PlanId int     `json:"plan_id" gorm:"index"`
-	Money  float64 `json:"money"`
+	Id                   int     `json:"id"`
+	UserId               int     `json:"user_id" gorm:"index"`
+	PlanId               int     `json:"plan_id" gorm:"index"`
+	Money                float64 `json:"money"`
+	OriginalMoney        float64 `json:"original_money"`
+	DiscountMoney        float64 `json:"discount_money"`
+	ActualMoney          float64 `json:"actual_money"`
+	PromoCodeId          int     `json:"promo_code_id" gorm:"index"`
+	PromoCode            string  `json:"promo_code" gorm:"type:varchar(64);default:''"`
+	AffiliateSourceQuota int     `json:"affiliate_source_quota"`
 
 	TradeNo         string `json:"trade_no" gorm:"unique;type:varchar(255);index"`
 	PaymentMethod   string `json:"payment_method" gorm:"type:varchar(50)"`
@@ -214,7 +220,23 @@ func (o *SubscriptionOrder) Insert() error {
 	if o.CreateTime == 0 {
 		o.CreateTime = common.GetTimestamp()
 	}
+	normalizeSubscriptionOrderMoneySnapshot(o)
 	return DB.Create(o).Error
+}
+
+func normalizeSubscriptionOrderMoneySnapshot(order *SubscriptionOrder) {
+	if order == nil {
+		return
+	}
+	if order.OriginalMoney == 0 {
+		order.OriginalMoney = order.Money
+	}
+	if order.ActualMoney == 0 && order.Money > 0 {
+		order.ActualMoney = order.Money
+	}
+	if order.Money == 0 && order.ActualMoney > 0 {
+		order.Money = order.ActualMoney
+	}
 }
 
 func (o *SubscriptionOrder) Update() error {
@@ -555,7 +577,7 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 		if order.Status != common.TopUpStatusPending {
 			return ErrSubscriptionOrderStatusInvalid
 		}
-		plan, err := GetSubscriptionPlanById(order.PlanId)
+		plan, err := getSubscriptionPlanByIdTx(tx, order.PlanId)
 		if err != nil {
 			return err
 		}
@@ -570,7 +592,10 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 		if err := upsertSubscriptionTopUpTx(tx, &order); err != nil {
 			return err
 		}
-		if err := createAffiliateRewardsForPaymentTx(tx, order.UserId, AffiliateSourceSubscription, order.TradeNo, int(plan.TotalAmount)); err != nil {
+		if err := recordSubscriptionPromoUsageTx(tx, &order, false); err != nil {
+			return err
+		}
+		if err := createAffiliateRewardsForPaymentTx(tx, order.UserId, AffiliateSourceSubscription, order.TradeNo, subscriptionOrderAffiliateSourceQuota(&order)); err != nil {
 			return err
 		}
 		order.Status = common.TopUpStatusSuccess
@@ -612,20 +637,33 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 	if err := tx.Where("trade_no = ?", order.TradeNo).First(&topup).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			topup = TopUp{
-				UserId:        order.UserId,
-				Amount:        0,
-				Money:         order.Money,
-				TradeNo:       order.TradeNo,
-				PaymentMethod: order.PaymentMethod,
-				CreateTime:    order.CreateTime,
-				CompleteTime:  now,
-				Status:        common.TopUpStatusSuccess,
+				UserId:               order.UserId,
+				Amount:               0,
+				Money:                order.Money,
+				OriginalMoney:        order.OriginalMoney,
+				DiscountMoney:        order.DiscountMoney,
+				ActualMoney:          order.ActualMoney,
+				PromoCodeId:          order.PromoCodeId,
+				PromoCode:            order.PromoCode,
+				AffiliateSourceQuota: order.AffiliateSourceQuota,
+				TradeNo:              order.TradeNo,
+				PaymentMethod:        order.PaymentMethod,
+				PaymentProvider:      order.PaymentProvider,
+				CreateTime:           order.CreateTime,
+				CompleteTime:         now,
+				Status:               common.TopUpStatusSuccess,
 			}
 			return tx.Create(&topup).Error
 		}
 		return err
 	}
 	topup.Money = order.Money
+	topup.OriginalMoney = order.OriginalMoney
+	topup.DiscountMoney = order.DiscountMoney
+	topup.ActualMoney = order.ActualMoney
+	topup.PromoCodeId = order.PromoCodeId
+	topup.PromoCode = order.PromoCode
+	topup.AffiliateSourceQuota = order.AffiliateSourceQuota
 	if topup.PaymentMethod == "" {
 		topup.PaymentMethod = order.PaymentMethod
 	} else if topup.PaymentMethod != order.PaymentMethod {
@@ -702,7 +740,7 @@ func calcSubscriptionBalanceQuota(priceAmount float64) (int, error) {
 }
 
 // PurchaseSubscriptionWithBalance creates a subscription by deducting the user's wallet quota.
-func PurchaseSubscriptionWithBalance(userId int, planId int) error {
+func PurchaseSubscriptionWithBalance(userId int, planId int, promoCode string) error {
 	if userId <= 0 || planId <= 0 {
 		return errors.New("invalid userId or planId")
 	}
@@ -726,6 +764,13 @@ func PurchaseSubscriptionWithBalance(userId int, planId int) error {
 		requiredQuota, err := calcSubscriptionBalanceQuota(plan.PriceAmount)
 		if err != nil {
 			return err
+		}
+		discount, err := calculatePromoCodeDiscountTx(tx, promoCode, PromoCodeTargetSubscription, plan.Id, plan.PriceAmount)
+		if err != nil {
+			return err
+		}
+		if discount != nil {
+			requiredQuota = discount.ActualPaidQuota
 		}
 
 		var user User
@@ -760,12 +805,19 @@ func PurchaseSubscriptionWithBalance(userId int, planId int) error {
 			CompleteTime:    now,
 			ProviderPayload: fmt.Sprintf("charged_quota=%d", requiredQuota),
 		}
+		ApplyPromoCodeResultToSubscriptionOrder(order, discount)
 		if err := tx.Create(order).Error; err != nil {
+			return err
+		}
+		if err := recordSubscriptionPromoUsageTx(tx, order, true); err != nil {
+			return err
+		}
+		if err := createAffiliateRewardsForPaymentTx(tx, order.UserId, AffiliateSourceSubscription, order.TradeNo, subscriptionOrderAffiliateSourceQuota(order)); err != nil {
 			return err
 		}
 
 		logPlanTitle = plan.Title
-		logMoney = plan.PriceAmount
+		logMoney = order.Money
 		chargedQuota = requiredQuota
 		upgradeGroup = strings.TrimSpace(plan.UpgradeGroup)
 		return nil

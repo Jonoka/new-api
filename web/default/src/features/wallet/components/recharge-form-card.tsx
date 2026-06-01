@@ -59,6 +59,8 @@ interface RechargeFormCardProps {
   onTopupAmountChange: (amount: number) => void
   paymentAmount: number
   calculating: boolean
+  promoCode: string
+  onPromoCodeChange: (code: string) => void
   onPaymentMethodSelect: (method: PaymentMethod) => void
   paymentLoading: string | null
   redemptionCode: string
@@ -89,6 +91,8 @@ export function RechargeFormCard({
   onTopupAmountChange,
   paymentAmount,
   calculating,
+  promoCode,
+  onPromoCodeChange,
   onPaymentMethodSelect,
   paymentLoading,
   redemptionCode,
@@ -301,6 +305,22 @@ export function RechargeFormCard({
                     )}
                   </div>
                 </div>
+              </div>
+
+              <div className='space-y-2.5 sm:space-y-3'>
+                <Label
+                  htmlFor='promo-code'
+                  className='text-muted-foreground text-xs font-medium tracking-wider uppercase'
+                >
+                  {t('Promo Code')}
+                </Label>
+                <Input
+                  id='promo-code'
+                  value={promoCode}
+                  onChange={(e) => onPromoCodeChange(e.target.value)}
+                  placeholder={t('Enter promo code')}
+                  className='h-9'
+                />
               </div>
 
               <div className='space-y-2.5 sm:space-y-3'>
