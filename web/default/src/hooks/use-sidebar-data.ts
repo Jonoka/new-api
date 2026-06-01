@@ -145,7 +145,7 @@ export function useSidebarData(): SidebarData {
             icon: Users,
           },
           {
-            title: t('Redemption Codes'),
+            title: t('Marketing Benefits'),
             url: '/redemption-codes',
             icon: Ticket,
           },

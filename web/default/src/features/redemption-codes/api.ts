@@ -24,6 +24,10 @@ import type {
   GetRedemptionsResponse,
   SearchRedemptionsParams,
   RedemptionFormData,
+  PromoCode,
+  PromoCodeFormData,
+  GetPromoCodesParams,
+  GetPromoCodesResponse,
 } from './types'
 
 // ============================================================================
@@ -92,5 +96,59 @@ export async function deleteRedemption(id: number): Promise<ApiResponse> {
 // Delete invalid redemption codes (used, disabled, expired)
 export async function deleteInvalidRedemptions(): Promise<ApiResponse<number>> {
   const res = await api.delete('/api/redemption/invalid')
+  return res.data
+}
+
+export async function getPromoCodes(
+  params: GetPromoCodesParams = {}
+): Promise<GetPromoCodesResponse> {
+  const { p = 1, page_size = 10 } = params
+  const res = await api.get(`/api/promo-code/?p=${p}&page_size=${page_size}`)
+  return res.data
+}
+
+export async function searchPromoCodes(params: {
+  keyword?: string
+  p?: number
+  page_size?: number
+}): Promise<GetPromoCodesResponse> {
+  const { keyword = '', p = 1, page_size = 10 } = params
+  const res = await api.get(
+    `/api/promo-code/search?keyword=${keyword}&p=${p}&page_size=${page_size}`
+  )
+  return res.data
+}
+
+export async function getPromoCode(
+  id: number
+): Promise<ApiResponse<PromoCode>> {
+  const res = await api.get(`/api/promo-code/${id}`)
+  return res.data
+}
+
+export async function createPromoCode(
+  data: PromoCodeFormData
+): Promise<ApiResponse<PromoCode>> {
+  const res = await api.post('/api/promo-code/', data)
+  return res.data
+}
+
+export async function updatePromoCode(
+  data: PromoCodeFormData & { id: number }
+): Promise<ApiResponse<PromoCode>> {
+  const res = await api.put('/api/promo-code/', data)
+  return res.data
+}
+
+export async function updatePromoCodeStatus(
+  id: number,
+  status: number
+): Promise<ApiResponse<PromoCode>> {
+  const res = await api.put('/api/promo-code/?status_only=true', { id, status })
+  return res.data
+}
+
+export async function deletePromoCode(id: number): Promise<ApiResponse> {
+  const res = await api.delete(`/api/promo-code/${id}/`)
   return res.data
 }

@@ -68,12 +68,13 @@ export function useWaffoPancakePayment() {
   const [processing, setProcessing] = useState(false)
 
   const processWaffoPancakePayment = useCallback(
-    async (topupAmount: number) => {
+    async (topupAmount: number, promoCode?: string) => {
       setProcessing(true)
 
       try {
         const response = await requestWaffoPancakePayment({
           amount: Math.floor(topupAmount),
+          promo_code: promoCode,
         })
 
         if (isApiSuccess(response)) {

@@ -84,6 +84,7 @@ export interface CreemPaymentRequest {
   product_id: string
   /** Payment method identifier */
   payment_method: 'creem'
+  promo_code?: string
 }
 
 /**
@@ -184,6 +185,8 @@ export interface PaymentRequest {
   amount: number
   /** Payment method identifier */
   payment_method: string
+  /** Optional promo code */
+  promo_code?: string
 }
 
 /**
@@ -194,6 +197,8 @@ export interface WaffoPaymentRequest {
   amount: number
   /** Optional server-side Waffo payment method index */
   pay_method_index?: number
+  /** Optional promo code */
+  promo_code?: string
 }
 
 /**
@@ -202,6 +207,8 @@ export interface WaffoPaymentRequest {
 export interface WaffoPancakePaymentRequest {
   /** Topup amount */
   amount: number
+  /** Optional promo code */
+  promo_code?: string
 }
 
 /**
@@ -210,6 +217,8 @@ export interface WaffoPancakePaymentRequest {
 export interface AmountRequest {
   /** Topup amount to calculate */
   amount: number
+  /** Optional promo code */
+  promo_code?: string
 }
 
 /**
