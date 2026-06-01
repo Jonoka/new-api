@@ -283,6 +283,72 @@ function WeightCell({ channel }: { channel: Channel }) {
 }
 
 /**
+ * Concurrency limit cell component with inline editing
+ */
+function ConcurrencyLimitCell({ channel }: { channel: Channel }) {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const isTagRow = isTagAggregateRow(channel)
+  const concurrencyLimit = channel.concurrency_limit
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [pendingValue, setPendingValue] = useState<number | null>(null)
+
+  if (isTagRow) {
+    const tag = channel.tag || ''
+    const channelCount = channel.children?.length || 0
+
+    return (
+      <>
+        <NumericSpinnerInput
+          value={concurrencyLimit ?? 0}
+          onChange={(value) => {
+            setPendingValue(value)
+            setConfirmOpen(true)
+          }}
+          min={0}
+        />
+        <ConfirmDialog
+          open={confirmOpen}
+          onOpenChange={setConfirmOpen}
+          title={t('Confirm Batch Update')}
+          desc={t(
+            'This will update the concurrency limit to {{limit}} for all {{count}} channel(s) with tag "{{tag}}". Continue?',
+            { limit: pendingValue, count: channelCount, tag }
+          )}
+          confirmText={t('Update')}
+          handleConfirm={() => {
+            if (pendingValue !== null) {
+              handleUpdateTagField(
+                tag,
+                'concurrency_limit',
+                pendingValue,
+                queryClient
+              )
+            }
+            setConfirmOpen(false)
+          }}
+        />
+      </>
+    )
+  }
+
+  return (
+    <NumericSpinnerInput
+      value={concurrencyLimit ?? 0}
+      onChange={(value) => {
+        handleUpdateChannelField(
+          channel.id,
+          'concurrency_limit',
+          value,
+          queryClient
+        )
+      }}
+      min={0}
+    />
+  )
+}
+
+/**
  * Balance cell component with click to update
  */
 function BalanceCell({ channel }: { channel: Channel }) {
@@ -965,6 +1031,15 @@ export function useChannelsColumns(): ColumnDef<Channel>[] {
       enableSorting: false,
     },
 
+    // Concurrency Limit column
+    {
+      accessorKey: 'concurrency_limit',
+      meta: { label: t('Concurrency Limit'), mobileHidden: true },
+      header: t('Concurrency Limit'),
+      cell: ({ row }) => <ConcurrencyLimitCell channel={row.original} />,
+      size: 120,
+      enableSorting: false,
+    },
     // Balance column (Used/Remaining)
     {
       accessorKey: 'balance',

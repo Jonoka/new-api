@@ -29,6 +29,7 @@ type Channel struct {
 	Status             int     `json:"status" gorm:"default:1"`
 	Name               string  `json:"name" gorm:"index"`
 	Weight             *uint   `json:"weight" gorm:"default:0"`
+	ConcurrencyLimit   *int    `json:"concurrency_limit" gorm:"default:0;not null"`
 	CreatedTime        int64   `json:"created_time" gorm:"bigint"`
 	TestTime           int64   `json:"test_time" gorm:"bigint"`
 	ResponseTime       int     `json:"response_time"` // in milliseconds
@@ -488,6 +489,13 @@ func (channel *Channel) GetWeight() int {
 	return int(*channel.Weight)
 }
 
+func (channel *Channel) GetConcurrencyLimit() int {
+	if channel.ConcurrencyLimit == nil {
+		return 0
+	}
+	return *channel.ConcurrencyLimit
+}
+
 func (channel *Channel) GetBaseURL() string {
 	if channel.BaseURL == nil {
 		return ""
@@ -796,7 +804,7 @@ func DisableChannelByTag(tag string) error {
 	return err
 }
 
-func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *string, group *string, priority *int64, weight *uint, paramOverride *string, headerOverride *string) error {
+func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *string, group *string, priority *int64, weight *uint, concurrencyLimit *int, paramOverride *string, headerOverride *string) error {
 	updateData := Channel{}
 	shouldReCreateAbilities := false
 	updatedTag := tag
@@ -821,6 +829,9 @@ func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *
 	}
 	if weight != nil {
 		updateData.Weight = weight
+	}
+	if concurrencyLimit != nil {
+		updateData.ConcurrencyLimit = concurrencyLimit
 	}
 	if paramOverride != nil {
 		updateData.ParamOverride = paramOverride

@@ -455,6 +455,9 @@ func validateTwoFactorAuth(twoFA *model.TwoFA, code string) bool {
 
 // validateChannel 通用的渠道校验函数
 func validateChannel(channel *model.Channel, isAdd bool) error {
+	if channel != nil && channel.ConcurrencyLimit != nil && *channel.ConcurrencyLimit < 0 {
+		return fmt.Errorf("并发上限不能小于 0")
+	}
 	// 校验 channel settings
 	if err := channel.ValidateSettings(); err != nil {
 		return fmt.Errorf("渠道额外设置[channel setting] 格式错误：%s", err.Error())
@@ -716,15 +719,16 @@ func DeleteDisabledChannel(c *gin.Context) {
 }
 
 type ChannelTag struct {
-	Tag            string  `json:"tag"`
-	NewTag         *string `json:"new_tag"`
-	Priority       *int64  `json:"priority"`
-	Weight         *uint   `json:"weight"`
-	ModelMapping   *string `json:"model_mapping"`
-	Models         *string `json:"models"`
-	Groups         *string `json:"groups"`
-	ParamOverride  *string `json:"param_override"`
-	HeaderOverride *string `json:"header_override"`
+	Tag              string  `json:"tag"`
+	NewTag           *string `json:"new_tag"`
+	Priority         *int64  `json:"priority"`
+	Weight           *uint   `json:"weight"`
+	ConcurrencyLimit *int    `json:"concurrency_limit"`
+	ModelMapping     *string `json:"model_mapping"`
+	Models           *string `json:"models"`
+	Groups           *string `json:"groups"`
+	ParamOverride    *string `json:"param_override"`
+	HeaderOverride   *string `json:"header_override"`
 }
 
 func DisableTagChannels(c *gin.Context) {
@@ -812,7 +816,14 @@ func EditTagChannels(c *gin.Context) {
 		}
 		channelTag.HeaderOverride = common.GetPointer[string](trimmed)
 	}
-	err = model.EditChannelByTag(channelTag.Tag, channelTag.NewTag, channelTag.ModelMapping, channelTag.Models, channelTag.Groups, channelTag.Priority, channelTag.Weight, channelTag.ParamOverride, channelTag.HeaderOverride)
+	if channelTag.ConcurrencyLimit != nil && *channelTag.ConcurrencyLimit < 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "并发上限不能小于 0",
+		})
+		return
+	}
+	err = model.EditChannelByTag(channelTag.Tag, channelTag.NewTag, channelTag.ModelMapping, channelTag.Models, channelTag.Groups, channelTag.Priority, channelTag.Weight, channelTag.ConcurrencyLimit, channelTag.ParamOverride, channelTag.HeaderOverride)
 	if err != nil {
 		common.ApiError(c, err)
 		return

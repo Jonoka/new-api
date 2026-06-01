@@ -52,6 +52,20 @@ export const channelsQueryKeys = {
   detail: (id: number) => [...channelsQueryKeys.details(), id] as const,
 }
 
+const INLINE_UPDATE_FIELD_LABELS: Record<string, string> = {
+  priority: 'Priority',
+  weight: 'Weight',
+  concurrency_limit: 'Concurrency Limit',
+}
+
+function getInlineUpdateFieldLabel(fieldName: string): string {
+  const label = INLINE_UPDATE_FIELD_LABELS[fieldName]
+  if (label) {
+    return i18next.t(label)
+  }
+  return fieldName.charAt(0).toUpperCase() + fieldName.slice(1).toLowerCase()
+}
+
 // ============================================================================
 // Single Channel Actions
 // ============================================================================
@@ -154,8 +168,7 @@ export async function handleUpdateChannelField(
     const response = await updateChannel(id, { [fieldName]: value })
     if (response.success) {
       // Show success toast with field name
-      const fieldLabel =
-        fieldName.charAt(0).toUpperCase() + fieldName.slice(1).toLowerCase()
+      const fieldLabel = getInlineUpdateFieldLabel(fieldName)
       toast.success(
         i18next.t('{{field}} updated to {{value}}', {
           field: fieldLabel,
@@ -177,7 +190,7 @@ export async function handleUpdateChannelField(
  */
 export async function handleUpdateTagField(
   tag: string,
-  fieldName: 'priority' | 'weight',
+  fieldName: 'priority' | 'weight' | 'concurrency_limit',
   value: number,
   queryClient?: QueryClient,
   onSuccess?: () => void
@@ -187,8 +200,7 @@ export async function handleUpdateTagField(
     const response = await editTagChannels(params)
     if (response.success) {
       // Show success toast with field name
-      const fieldLabel =
-        fieldName.charAt(0).toUpperCase() + fieldName.slice(1).toLowerCase()
+      const fieldLabel = getInlineUpdateFieldLabel(fieldName)
       toast.success(
         i18next.t('{{field}} updated to {{value}} for tag: {{tag}}', {
           field: fieldLabel,
