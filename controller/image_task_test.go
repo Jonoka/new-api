@@ -4,8 +4,22 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 )
+
+// compile-time adapter for gin-specific Refund signature
+type imageTaskTestBillingSettler struct {
+	preConsumed int
+}
+
+func (s imageTaskTestBillingSettler) Settle(int) error         { return nil }
+func (s imageTaskTestBillingSettler) Refund(*gin.Context)      {}
+func (s imageTaskTestBillingSettler) NeedsRefund() bool        { return false }
+func (s imageTaskTestBillingSettler) GetPreConsumedQuota() int { return s.preConsumed }
+func (s imageTaskTestBillingSettler) Reserve(int) error        { return nil }
 
 func TestParseImageTaskSubmitResponseBodyMarksImmediateURLResultSuccess(t *testing.T) {
 	body := []byte(`{
@@ -66,4 +80,35 @@ func TestParseImageTaskSubmitResponseBodyCompletedStatusProgress(t *testing.T) {
 
 	assert.Equal(t, string(model.TaskStatusSuccess), status)
 	assert.Equal(t, "100%", progress)
+}
+
+func TestImageTaskPersistedQuotaPrefersFinalQuota(t *testing.T) {
+	relayInfo := &relaycommon.RelayInfo{
+		PriceData: types.PriceData{
+			Quota:             125000,
+			QuotaToPreConsume: 100000,
+		},
+		Billing: imageTaskTestBillingSettler{preConsumed: 90000},
+	}
+
+	assert.Equal(t, 125000, imageTaskPersistedQuota(relayInfo))
+}
+
+func TestImageTaskPersistedQuotaFallsBackToPreConsume(t *testing.T) {
+	relayInfo := &relaycommon.RelayInfo{
+		PriceData: types.PriceData{
+			QuotaToPreConsume: 100000,
+		},
+		Billing: imageTaskTestBillingSettler{preConsumed: 90000},
+	}
+
+	assert.Equal(t, 100000, imageTaskPersistedQuota(relayInfo))
+}
+
+func TestImageTaskPersistedQuotaFallsBackToBillingSession(t *testing.T) {
+	relayInfo := &relaycommon.RelayInfo{
+		Billing: imageTaskTestBillingSettler{preConsumed: 90000},
+	}
+
+	assert.Equal(t, 90000, imageTaskPersistedQuota(relayInfo))
 }

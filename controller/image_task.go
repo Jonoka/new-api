@@ -101,7 +101,7 @@ func RelayImageTaskSubmit(c *gin.Context) {
 		PerCallBilling:  relayInfo.PriceData.UsePrice || relayInfo.TieredBillingSnapshot != nil,
 	}
 	task.PrivateData.TieredBillingSnapshot = relayInfo.TieredBillingSnapshot
-	task.Quota = relayInfo.PriceData.Quota
+	task.Quota = imageTaskPersistedQuota(relayInfo)
 	if relayInfo.TaskRelayInfo != nil {
 		task.Action = relayInfo.TaskRelayInfo.Action
 	}
@@ -122,6 +122,22 @@ func RelayImageTaskSubmit(c *gin.Context) {
 		return
 	}
 	common.SysLog(fmt.Sprintf("insert image task success: task_id=%s upstream_task_id=%s channel_id=%d status=%s", task.TaskID, task.PrivateData.UpstreamTaskID, task.ChannelId, task.Status))
+}
+
+func imageTaskPersistedQuota(relayInfo *relaycommon.RelayInfo) int {
+	if relayInfo == nil {
+		return 0
+	}
+	if relayInfo.PriceData.Quota > 0 {
+		return relayInfo.PriceData.Quota
+	}
+	if relayInfo.PriceData.QuotaToPreConsume > 0 {
+		return relayInfo.PriceData.QuotaToPreConsume
+	}
+	if relayInfo.Billing != nil {
+		return relayInfo.Billing.GetPreConsumedQuota()
+	}
+	return 0
 }
 
 func parseImageTaskSubmitResponseBody(body []byte) (taskID, upstreamTaskID, status, progress string) {

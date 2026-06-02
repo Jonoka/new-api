@@ -330,6 +330,10 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 
 	adminRejectReason := common.GetContextKeyString(ctx, constant.ContextKeyAdminRejectReason)
 	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+	// Preserve the final settled quota on RelayInfo so wrappers that need to
+	// persist async task billing context (for example OpenAI-compatible image
+	// tasks) can refund the exact amount if the task later fails or times out.
+	relayInfo.PriceData.Quota = summary.Quota
 
 	var tieredResult *billingexpr.TieredResult
 	tieredBillingApplied := false
@@ -343,6 +347,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 			tieredBillingApplied = true
 			tieredResult = tieredRes
 			summary.Quota = composeTieredTextQuota(relayInfo, summary, tieredQuota, tieredRes)
+			relayInfo.PriceData.Quota = summary.Quota
 		}
 	}
 
