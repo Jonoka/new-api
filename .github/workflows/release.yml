@@ -8,6 +8,9 @@ on:
       name:
         description: 'reason'
         required: false
+      tag:
+        description: 'release tag to build, e.g. v1.0.0-rc.10.1.2'
+        required: false
   push:
     tags:
       - '*'
@@ -22,10 +25,16 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
       - name: Determine Version
+        id: version
         run: |
-          VERSION=$(git describe --tags)
+          VERSION="${{ github.event.inputs.tag }}"
+          if [ -z "$VERSION" ]; then
+            VERSION=$(git describe --tags)
+          fi
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: latest
@@ -64,8 +73,9 @@ jobs:
 
       - name: Release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.tag != ''
         with:
+          tag_name: ${{ steps.version.outputs.version }}
           files: |
             new-api-*
             checksums-linux.txt
@@ -80,10 +90,16 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
       - name: Determine Version
+        id: version
         run: |
-          VERSION=$(git describe --tags)
+          VERSION="${{ github.event.inputs.tag }}"
+          if [ -z "$VERSION" ]; then
+            VERSION=$(git describe --tags)
+          fi
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: latest
@@ -117,8 +133,9 @@ jobs:
 
       - name: Release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.tag != ''
         with:
+          tag_name: ${{ steps.version.outputs.version }}
           files: |
             new-api-macos-*
             checksums-macos.txt
@@ -136,10 +153,16 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
       - name: Determine Version
+        id: version
         run: |
-          VERSION=$(git describe --tags)
+          VERSION="${{ github.event.inputs.tag }}"
+          if [ -z "$VERSION" ]; then
+            VERSION=$(git describe --tags)
+          fi
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: latest
@@ -172,8 +195,9 @@ jobs:
 
       - name: Release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.tag != ''
         with:
+          tag_name: ${{ steps.version.outputs.version }}
           files: |
             new-api-*.exe
             checksums-windows.txt
