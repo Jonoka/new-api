@@ -25,13 +25,14 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.inputs.tag || github.ref }}
       - name: Determine Version
         id: version
         run: |
           VERSION="${{ github.event.inputs.tag }}"
           if [ -z "$VERSION" ]; then
             VERSION=$(git describe --tags)
+          else
+            git checkout "$VERSION"
           fi
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "version=$VERSION" >> $GITHUB_OUTPUT
@@ -90,13 +91,14 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.inputs.tag || github.ref }}
       - name: Determine Version
         id: version
         run: |
           VERSION="${{ github.event.inputs.tag }}"
           if [ -z "$VERSION" ]; then
             VERSION=$(git describe --tags)
+          else
+            git checkout "$VERSION"
           fi
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "version=$VERSION" >> $GITHUB_OUTPUT
@@ -153,13 +155,14 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.inputs.tag || github.ref }}
       - name: Determine Version
         id: version
         run: |
           VERSION="${{ github.event.inputs.tag }}"
           if [ -z "$VERSION" ]; then
             VERSION=$(git describe --tags)
+          else
+            git checkout "$VERSION"
           fi
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "version=$VERSION" >> $GITHUB_OUTPUT
