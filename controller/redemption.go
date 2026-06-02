@@ -165,6 +165,10 @@ func UpdateRedemption(c *gin.Context) {
 		if redemption.MaxRedeemCount <= 0 {
 			redemption.MaxRedeemCount = 1
 		}
+		if redemption.MaxRedeemCount > 100000 {
+			common.ApiErrorMsg(c, "兑换次数不能超过 100000")
+			return
+		}
 		if redemption.MaxRedeemCount < cleanRedemption.RedeemedCount {
 			common.ApiErrorMsg(c, "兑换次数不能小于已兑换次数")
 			return
