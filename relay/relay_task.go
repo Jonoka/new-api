@@ -194,8 +194,10 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		}
 	}
 
-	// 6. 将 OtherRatios 应用到基础额度
-	if !common.StringsContains(constant.TaskPricePatches, modelName) {
+	// 6. 将 OtherRatios 应用到基础额度。
+	// tiered_expr 已经通过 request body 的 duration/quality/n 等参数算出最终档位价格；
+	// 此处的 OtherRatios 仅用于日志展示，不能再次作为倍率，否则 6s 会被 $0.70 档位价再乘 6。
+	if info.TieredBillingSnapshot == nil && !common.StringsContains(constant.TaskPricePatches, modelName) {
 		for _, ra := range info.PriceData.OtherRatios {
 			if ra != 1.0 {
 				info.PriceData.Quota = int(float64(info.PriceData.Quota) * ra)
