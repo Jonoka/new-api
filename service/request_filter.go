@@ -8,9 +8,12 @@ import (
 	"mime"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -65,6 +68,21 @@ type sensitiveTextFilter struct {
 
 const sensitiveStreamBlockTailContextKey = "sensitive_response_stream_block_tail"
 const sensitiveStreamDelayBufferContextKey = "sensitive_response_stream_delay_buffer"
+const sensitiveWordPrefillGroupType = "sensitive_word"
+const sensitiveWordPrefillGroupCacheTTL = 30 * time.Second
+
+var sensitiveWordPrefillGroupCache = struct {
+	sync.RWMutex
+	loadedAt time.Time
+	groups   []*model.PrefillGroup
+}{}
+
+func InvalidateSensitiveWordPrefillGroupCache() {
+	sensitiveWordPrefillGroupCache.Lock()
+	defer sensitiveWordPrefillGroupCache.Unlock()
+	sensitiveWordPrefillGroupCache.loadedAt = time.Time{}
+	sensitiveWordPrefillGroupCache.groups = nil
+}
 
 type sensitiveStreamDelayBuffer struct {
 	lookbehind int
@@ -312,7 +330,7 @@ func isJSONContentType(contentType string) bool {
 
 func newSensitiveTextFilter(rules []setting.SensitiveRule) *sensitiveTextFilter {
 	filter := &sensitiveTextFilter{}
-	for idx, rule := range setting.NormalizeSensitiveRules(rules) {
+	for idx, rule := range expandSensitiveRuleGroupRefs(setting.NormalizeSensitiveRules(rules)) {
 		if !rule.Enabled {
 			continue
 		}
@@ -340,6 +358,114 @@ func newSensitiveTextFilter(rules []setting.SensitiveRule) *sensitiveTextFilter 
 		}
 	}
 	return filter
+}
+
+func expandSensitiveRuleGroupRefs(rules []setting.SensitiveRule) []setting.SensitiveRule {
+	if len(rules) == 0 || !hasSensitiveRuleGroupRefs(rules) {
+		return rules
+	}
+	groupKeywords := loadSensitiveWordPrefillGroupKeywords()
+	if len(groupKeywords) == 0 {
+		return rules
+	}
+	expanded := make([]setting.SensitiveRule, 0, len(rules))
+	for _, rule := range rules {
+		if len(rule.GroupRefs) == 0 {
+			expanded = append(expanded, rule)
+			continue
+		}
+		keywords := append([]string{}, rule.Keywords...)
+		for _, groupRef := range rule.GroupRefs {
+			keywords = append(keywords, groupKeywords[strings.ToLower(strings.TrimSpace(groupRef))]...)
+		}
+		rule.Keywords = normalizeSensitiveFilterKeywords(keywords)
+		expanded = append(expanded, rule)
+	}
+	return expanded
+}
+
+func hasSensitiveRuleGroupRefs(rules []setting.SensitiveRule) bool {
+	for _, rule := range rules {
+		if len(rule.GroupRefs) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func loadSensitiveWordPrefillGroupKeywords() map[string][]string {
+	groups, err := getSensitiveWordPrefillGroups()
+	if err != nil || len(groups) == 0 {
+		return nil
+	}
+	result := make(map[string][]string, len(groups)*2)
+	for _, group := range groups {
+		if group == nil {
+			continue
+		}
+		keywords := parseSensitiveWordPrefillGroupItems(group.Items)
+		if len(keywords) == 0 {
+			continue
+		}
+		result[strings.ToLower(strings.TrimSpace(group.Name))] = keywords
+		if group.Id > 0 {
+			result[fmt.Sprintf("%d", group.Id)] = keywords
+		}
+	}
+	return result
+}
+
+func getSensitiveWordPrefillGroups() ([]*model.PrefillGroup, error) {
+	now := time.Now()
+	sensitiveWordPrefillGroupCache.RLock()
+	if now.Sub(sensitiveWordPrefillGroupCache.loadedAt) < sensitiveWordPrefillGroupCacheTTL {
+		groups := sensitiveWordPrefillGroupCache.groups
+		sensitiveWordPrefillGroupCache.RUnlock()
+		return groups, nil
+	}
+	sensitiveWordPrefillGroupCache.RUnlock()
+
+	sensitiveWordPrefillGroupCache.Lock()
+	defer sensitiveWordPrefillGroupCache.Unlock()
+	if now.Sub(sensitiveWordPrefillGroupCache.loadedAt) < sensitiveWordPrefillGroupCacheTTL {
+		return sensitiveWordPrefillGroupCache.groups, nil
+	}
+	groups, err := model.GetAllPrefillGroups(sensitiveWordPrefillGroupType)
+	if err != nil {
+		return nil, err
+	}
+	sensitiveWordPrefillGroupCache.groups = groups
+	sensitiveWordPrefillGroupCache.loadedAt = now
+	return groups, nil
+}
+
+func parseSensitiveWordPrefillGroupItems(items model.JSONValue) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	var parsed []string
+	if err := common.Unmarshal(items, &parsed); err != nil {
+		return nil
+	}
+	return normalizeSensitiveFilterKeywords(parsed)
+}
+
+func normalizeSensitiveFilterKeywords(keywords []string) []string {
+	result := make([]string, 0, len(keywords))
+	seen := make(map[string]struct{}, len(keywords))
+	for _, keyword := range keywords {
+		keyword = strings.TrimSpace(keyword)
+		if keyword == "" {
+			continue
+		}
+		key := strings.ToLower(keyword)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, keyword)
+	}
+	return result
 }
 
 func (f *sensitiveTextFilter) empty() bool {

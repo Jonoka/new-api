@@ -41,6 +41,9 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { MultiSelect } from '@/components/multi-select'
+import { getPrefillGroups } from '@/features/models/api'
+import type { PrefillGroup } from '@/features/models/types'
 import { getUpstreamChannels } from '../api'
 import {
   SettingsForm,
@@ -72,10 +75,12 @@ type SensitiveRule = {
   scope?: SensitiveRuleScope
   replacement?: string
   keywords: string[]
+  group_refs?: string[]
 }
 
 type SensitiveRuleDraft = Omit<SensitiveRule, 'keywords'> & {
   keywordsText: string
+  groupRefs: string[]
 }
 
 type SensitiveRulesConfig = {
@@ -158,19 +163,38 @@ function createRule(): SensitiveRuleDraft {
     scope: SCOPE_REQUEST,
     replacement: DEFAULT_REPLACEMENT,
     keywordsText: '',
+    groupRefs: [],
   }
+}
+
+function normalizeGroupRefs(groupRefs?: string[]) {
+  const seen = new Set<string>()
+  const normalized: string[] = []
+
+  ;(groupRefs ?? [])
+    .map((item) => String(item).trim())
+    .filter(Boolean)
+    .forEach((item) => {
+      const key = item.toLowerCase()
+      if (seen.has(key)) return
+      seen.add(key)
+      normalized.push(item)
+    })
+
+  return normalized
 }
 
 function normalizeRule(rule: SensitiveRuleDraft): SensitiveRule | null {
   const keywords = splitKeywords(rule.keywordsText)
-  if (keywords.length === 0) return null
+  const groupRefs = normalizeGroupRefs(rule.groupRefs)
+  if (keywords.length === 0 && groupRefs.length === 0) return null
 
   const action = rule.action === ACTION_BLOCK ? ACTION_BLOCK : ACTION_MASK
   const scope =
     rule.scope === SCOPE_RESPONSE || rule.scope === SCOPE_BOTH
       ? rule.scope
       : SCOPE_REQUEST
-  const fallbackName = keywords[0] ?? ''
+  const fallbackName = keywords[0] ?? groupRefs[0] ?? ''
 
   return {
     id: rule.id || fallbackName.toLowerCase() || nanoid(),
@@ -183,6 +207,7 @@ function normalizeRule(rule: SensitiveRuleDraft): SensitiveRule | null {
         ? rule.replacement?.trim() || DEFAULT_REPLACEMENT
         : undefined,
     keywords,
+    group_refs: groupRefs.length > 0 ? groupRefs : undefined,
   }
 }
 
@@ -198,6 +223,7 @@ function rulesToDrafts(rules: SensitiveRule[]): SensitiveRuleDraft[] {
         : SCOPE_REQUEST,
     replacement: rule.replacement || DEFAULT_REPLACEMENT,
     keywordsText: (rule.keywords ?? []).join('\n'),
+    groupRefs: normalizeGroupRefs(rule.group_refs),
   }))
 }
 
@@ -244,6 +270,14 @@ function getChannelLabel(channel: UpstreamChannel) {
   return channel.name?.trim() || `#${channel.id}`
 }
 
+function getPrefillGroupRef(group: PrefillGroup) {
+  return String(group.id)
+}
+
+function getPrefillGroupLabel(group: PrefillGroup) {
+  return group.name?.trim() || `#${group.id}`
+}
+
 export function SensitiveWordsSection({
   defaultValues,
 }: SensitiveWordsSectionProps) {
@@ -253,12 +287,31 @@ export function SensitiveWordsSection({
     queryKey: ['upstream-channels'],
     queryFn: getUpstreamChannels,
   })
+  const { data: sensitiveGroupsData } = useQuery({
+    queryKey: ['prefill-groups', 'sensitive_word'],
+    queryFn: () => getPrefillGroups('sensitive_word'),
+  })
   const channels = useMemo(() => {
     return [...(channelsData?.data ?? [])].sort((a, b) => {
       const nameCompare = getChannelLabel(a).localeCompare(getChannelLabel(b))
       return nameCompare === 0 ? a.id - b.id : nameCompare
     })
   }, [channelsData?.data])
+  const sensitiveGroups = useMemo(
+    () =>
+      [...(sensitiveGroupsData?.data ?? [])].sort((a, b) =>
+        getPrefillGroupLabel(a).localeCompare(getPrefillGroupLabel(b))
+      ),
+    [sensitiveGroupsData?.data]
+  )
+  const sensitiveGroupOptions = useMemo(
+    () =>
+      sensitiveGroups.map((group) => ({
+        value: getPrefillGroupRef(group),
+        label: `${getPrefillGroupLabel(group)} #${group.id}`,
+      })),
+    [sensitiveGroups]
+  )
   const [filterEnabled, setFilterEnabled] = useState(
     defaultValues.CheckSensitiveEnabled
   )
@@ -690,6 +743,28 @@ export function SensitiveWordsSection({
                     />
                     <p className='text-muted-foreground text-xs'>
                       {t('Empty lines and duplicate keywords are ignored.')}
+                    </p>
+                  </div>
+
+                  <div className='space-y-1.5'>
+                    <Label htmlFor={`${rule.id}-group-refs`}>
+                      {t('Group references')}
+                    </Label>
+                    <MultiSelect
+                      id={`${rule.id}-group-refs`}
+                      options={sensitiveGroupOptions}
+                      selected={rule.groupRefs}
+                      onChange={(groupRefs) =>
+                        updateRule(rule.id, { groupRefs })
+                      }
+                      placeholder={t('Select sensitive word groups...')}
+                      emptyText={t('No sensitive word groups found')}
+                      maxVisibleChips={3}
+                    />
+                    <p className='text-muted-foreground text-xs'>
+                      {t(
+                        'Referenced groups are expanded with the manual keywords above.'
+                      )}
                     </p>
                   </div>
                 </div>

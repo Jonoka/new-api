@@ -194,7 +194,9 @@ export function PrefillGroupFormDrawer({
           <SheetDescription>
             {isEdit
               ? t('Update the reusable bundle below.')
-              : t('Capture a reusable bundle of models, tags, or endpoints.')}
+              : t(
+                  'Capture a reusable bundle of models, tags, endpoints, or sensitive keywords.'
+                )}
           </SheetDescription>
         </SheetHeader>
 
@@ -376,7 +378,11 @@ export function PrefillGroupFormDrawer({
                           ? t(
                               'Provide a JSON object where each key maps to an endpoint definition.'
                             )
-                          : t('Add each model or tag you want to include.')}
+                          : selectedType === 'sensitive_word'
+                            ? t(
+                                'Add each keyword you want this group to provide.'
+                              )
+                            : t('Add each model or tag you want to include.')}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>

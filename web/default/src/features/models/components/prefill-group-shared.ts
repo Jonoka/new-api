@@ -40,6 +40,12 @@ export const PREFILL_GROUP_TYPES = [
     description: 'HTTP endpoint mappings shared across providers.',
     badge: 'cyan' as StatusBadgeProps['variant'],
   },
+  {
+    value: 'sensitive_word' as PrefillGroupType,
+    label: 'Sensitive Word Group',
+    description: 'Reusable keyword lists referenced by sensitive word rules.',
+    badge: 'red' as StatusBadgeProps['variant'],
+  },
 ] as const
 
 export const PREFILL_GROUP_TYPE_META = PREFILL_GROUP_TYPES.reduce<

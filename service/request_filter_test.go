@@ -6,14 +6,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func withRequestFilterRules(t *testing.T, rules []setting.SensitiveRule) {
@@ -64,6 +68,30 @@ func storedBody(t *testing.T, c *gin.Context) string {
 
 func setFilterChannelIds(ids ...int) {
 	setting.SensitiveRuleChannelIds = ids
+}
+
+func withSensitivePrefillGroups(t *testing.T, groups ...model.PrefillGroup) {
+	t.Helper()
+	oldDB := model.DB
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.PrefillGroup{}))
+	model.DB = db
+	t.Cleanup(func() {
+		sensitiveWordPrefillGroupCache.Lock()
+		sensitiveWordPrefillGroupCache.loadedAt = time.Time{}
+		sensitiveWordPrefillGroupCache.groups = nil
+		sensitiveWordPrefillGroupCache.Unlock()
+		model.DB = oldDB
+	})
+	sensitiveWordPrefillGroupCache.Lock()
+	sensitiveWordPrefillGroupCache.loadedAt = time.Time{}
+	sensitiveWordPrefillGroupCache.groups = nil
+	sensitiveWordPrefillGroupCache.Unlock()
+
+	for i := range groups {
+		require.NoError(t, db.Create(&groups[i]).Error)
+	}
 }
 
 func TestApplySensitiveFilterToRequestBodyBlocksBeforeMasking(t *testing.T) {
@@ -362,6 +390,36 @@ func TestApplySensitiveFilterToRequestBodyAppliesBothScopeRules(t *testing.T) {
 	body := storedBody(t, c)
 	assert.Contains(t, body, "[MASK]")
 	assert.NotContains(t, body, "secret")
+}
+
+func TestApplySensitiveFilterToRequestBodyExpandsSensitivePrefillGroupRefs(t *testing.T) {
+	withSensitivePrefillGroups(t, model.PrefillGroup{
+		Id:    10,
+		Name:  "Blocked Words",
+		Type:  "sensitive_word",
+		Items: model.JSONValue(`["group-secret","重复","GROUP-SECRET"]`),
+	})
+	withRequestFilterRules(t, []setting.SensitiveRule{
+		{
+			ID:        "group-only",
+			Name:      "Group Only",
+			Enabled:   true,
+			Action:    setting.SensitiveRuleActionBlock,
+			Scope:     setting.SensitiveRuleScopeRequest,
+			GroupRefs: []string{"10"},
+		},
+	})
+	setFilterChannelIds(1)
+
+	c := newJSONFilterContext(t, `{"model":"gpt-test","messages":[{"role":"user","content":"hello group-secret"}]}`)
+	common.SetContextKey(c, constant.ContextKeyChannelId, 1)
+
+	result, err := ApplySensitiveFilterToRequestBody(c, types.RelayFormatOpenAI)
+	require.NoError(t, err)
+
+	assert.True(t, result.Blocked)
+	require.Len(t, result.Matches, 1)
+	assert.Equal(t, "group-secret", result.Matches[0].Keyword)
 }
 
 func TestApplySensitiveFilterToResponseBodyMasksJSONText(t *testing.T) {

@@ -43,6 +43,7 @@ const SCOPE_REQUEST = 'request';
 const SCOPE_RESPONSE = 'response';
 const SCOPE_BOTH = 'both';
 const DEFAULT_REPLACEMENT = '[REDACTED]';
+const SENSITIVE_WORD_GROUP_TYPE = 'sensitive_word';
 
 function createLocalId() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -110,19 +111,38 @@ function createRule() {
     scope: SCOPE_REQUEST,
     replacement: DEFAULT_REPLACEMENT,
     keywordsText: '',
+    groupRefs: [],
   };
+}
+
+function normalizeGroupRefs(groupRefs) {
+  const seen = new Set();
+  const normalized = [];
+
+  (groupRefs || [])
+    .map((item) => String(item).trim())
+    .filter(Boolean)
+    .forEach((item) => {
+      const key = item.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      normalized.push(item);
+    });
+
+  return normalized;
 }
 
 function normalizeRule(rule) {
   const keywords = splitKeywords(rule.keywordsText);
-  if (keywords.length === 0) return null;
+  const groupRefs = normalizeGroupRefs(rule.groupRefs);
+  if (keywords.length === 0 && groupRefs.length === 0) return null;
 
   const action = rule.action === ACTION_BLOCK ? ACTION_BLOCK : ACTION_MASK;
   const scope =
     rule.scope === SCOPE_RESPONSE || rule.scope === SCOPE_BOTH
       ? rule.scope
       : SCOPE_REQUEST;
-  const fallbackName = keywords[0] || '';
+  const fallbackName = keywords[0] || groupRefs[0] || '';
 
   return {
     id: rule.id || fallbackName.toLowerCase() || createLocalId(),
@@ -135,6 +155,7 @@ function normalizeRule(rule) {
         ? String(rule.replacement || '').trim() || DEFAULT_REPLACEMENT
         : undefined,
     keywords,
+    group_refs: groupRefs.length > 0 ? groupRefs : undefined,
   };
 }
 
@@ -150,6 +171,7 @@ function rulesToDrafts(rules) {
         : SCOPE_REQUEST,
     replacement: rule.replacement || DEFAULT_REPLACEMENT,
     keywordsText: (rule.keywords || []).join('\n'),
+    groupRefs: normalizeGroupRefs(rule.group_refs),
   }));
 }
 
@@ -196,11 +218,17 @@ function getChannelLabel(channel) {
   return channel?.name?.trim() || `#${channel?.id}`;
 }
 
+function getPrefillGroupLabel(group) {
+  return group?.name?.trim() || `#${group?.id}`;
+}
+
 export default function SettingsSensitiveWords(props) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [channelsLoading, setChannelsLoading] = useState(false);
   const [channels, setChannels] = useState([]);
+  const [sensitiveGroupsLoading, setSensitiveGroupsLoading] = useState(false);
+  const [sensitiveGroups, setSensitiveGroups] = useState([]);
   const [inputs, setInputs] = useState({
     CheckSensitiveEnabled: false,
     CheckSensitiveOnPromptEnabled: false,
@@ -251,6 +279,28 @@ export default function SettingsSensitiveWords(props) {
       showError(t('获取渠道列表失败'));
     } finally {
       setChannelsLoading(false);
+    }
+  };
+
+  const fetchSensitiveGroups = async () => {
+    setSensitiveGroupsLoading(true);
+    try {
+      const res = await API.get(
+        `/api/prefill_group?type=${SENSITIVE_WORD_GROUP_TYPE}`,
+      );
+      const { success, message, data } = res.data;
+      if (!success) {
+        showError(message);
+        return;
+      }
+      const sortedGroups = [...(data || [])].sort((a, b) =>
+        getPrefillGroupLabel(a).localeCompare(getPrefillGroupLabel(b)),
+      );
+      setSensitiveGroups(sortedGroups);
+    } catch {
+      showError(t('获取屏蔽词组失败'));
+    } finally {
+      setSensitiveGroupsLoading(false);
     }
   };
 
@@ -337,6 +387,7 @@ export default function SettingsSensitiveWords(props) {
 
   useEffect(() => {
     fetchChannels();
+    fetchSensitiveGroups();
   }, []);
 
   return (
@@ -606,6 +657,47 @@ export default function SettingsSensitiveWords(props) {
                           }}
                         >
                           {t('空行和重复关键词会被自动忽略')}
+                        </div>
+                      </Col>
+                    </Row>
+
+                    <Row style={{ marginTop: 12 }}>
+                      <Col xs={24} sm={24} md={16} lg={14} xl={12}>
+                        <Typography.Text strong>
+                          {t('分组引用')}
+                        </Typography.Text>
+                        <Select
+                          multiple
+                          filter
+                          loading={sensitiveGroupsLoading}
+                          value={rule.groupRefs || []}
+                          placeholder={t('选择屏蔽词组')}
+                          emptyContent={t('暂无屏蔽词组')}
+                          style={{ width: '100%', marginTop: 8 }}
+                          onChange={(value) =>
+                            updateRule(rule.id, {
+                              groupRefs: normalizeGroupRefs(
+                                Array.isArray(value) ? value : [],
+                              ),
+                            })
+                          }
+                        >
+                          {sensitiveGroups.map((group) => (
+                            <Select.Option
+                              key={group.id}
+                              value={String(group.id)}
+                            >
+                              {getPrefillGroupLabel(group)} #{group.id}
+                            </Select.Option>
+                          ))}
+                        </Select>
+                        <div
+                          style={{
+                            marginTop: 6,
+                            color: 'var(--semi-color-text-2)',
+                          }}
+                        >
+                          {t('引用的分组会和上方手动关键词一起生效')}
                         </div>
                       </Col>
                     </Row>

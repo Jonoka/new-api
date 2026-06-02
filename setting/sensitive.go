@@ -43,6 +43,7 @@ type SensitiveRule struct {
 	Scope       string   `json:"scope,omitempty"`
 	Replacement string   `json:"replacement,omitempty"`
 	Keywords    []string `json:"keywords"`
+	GroupRefs   []string `json:"group_refs,omitempty"`
 }
 
 type SensitiveRuleConfig struct {
@@ -191,14 +192,21 @@ func NormalizeSensitiveRules(rules []SensitiveRule) []SensitiveRule {
 			rule.Replacement = DefaultSensitiveMaskReplacement
 		}
 		rule.Keywords = normalizeSensitiveKeywords(rule.Keywords)
-		if len(rule.Keywords) == 0 {
+		rule.GroupRefs = normalizeSensitiveGroupRefs(rule.GroupRefs)
+		if len(rule.Keywords) == 0 && len(rule.GroupRefs) == 0 {
 			continue
 		}
+		fallbackName := ""
+		if len(rule.Keywords) > 0 {
+			fallbackName = rule.Keywords[0]
+		} else {
+			fallbackName = rule.GroupRefs[0]
+		}
 		if rule.ID == "" {
-			rule.ID = strings.ToLower(rule.Keywords[0])
+			rule.ID = strings.ToLower(fallbackName)
 		}
 		if rule.Name == "" {
-			rule.Name = rule.Keywords[0]
+			rule.Name = fallbackName
 		}
 		normalized = append(normalized, rule)
 	}
@@ -261,6 +269,24 @@ func normalizeSensitiveKeywords(keywords []string) []string {
 		}
 		seen[key] = struct{}{}
 		result = append(result, keyword)
+	}
+	return result
+}
+
+func normalizeSensitiveGroupRefs(groupRefs []string) []string {
+	result := make([]string, 0, len(groupRefs))
+	seen := make(map[string]struct{}, len(groupRefs))
+	for _, groupRef := range groupRefs {
+		groupRef = strings.TrimSpace(groupRef)
+		if groupRef == "" {
+			continue
+		}
+		key := strings.ToLower(groupRef)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, groupRef)
 	}
 	return result
 }

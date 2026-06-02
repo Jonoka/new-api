@@ -17,7 +17,8 @@ func TestParseSensitiveRulesJSONStringNormalizesRules(t *testing.T) {
 				"action": "mask",
 				"scope": " response ",
 				"replacement": " [MASK] ",
-				"keywords": [" Secret ", "secret", "", "中文"]
+				"keywords": [" Secret ", "secret", "", "中文"],
+				"group_refs": [" 1 ", "1", "", "Sensitive Group"]
 			},
 			{
 				"id": "",
@@ -40,12 +41,38 @@ func TestParseSensitiveRulesJSONStringNormalizesRules(t *testing.T) {
 	assert.Equal(t, SensitiveRuleScopeResponse, rules[0].Scope)
 	assert.Equal(t, "[MASK]", rules[0].Replacement)
 	assert.Equal(t, []string{"Secret", "中文"}, rules[0].Keywords)
+	assert.Equal(t, []string{"1", "Sensitive Group"}, rules[0].GroupRefs)
 
 	assert.Equal(t, "block-me", rules[1].ID)
 	assert.Equal(t, "block-me", rules[1].Name)
 	assert.Equal(t, SensitiveRuleActionBlock, rules[1].Action)
 	assert.Equal(t, SensitiveRuleScopeRequest, rules[1].Scope)
 	assert.Equal(t, []string{"block-me"}, rules[1].Keywords)
+}
+
+func TestParseSensitiveRulesJSONStringKeepsGroupOnlyRules(t *testing.T) {
+	raw := `{
+		"rules": [
+			{
+				"id": "",
+				"name": "",
+				"enabled": true,
+				"action": "block",
+				"scope": "request",
+				"keywords": [],
+				"group_refs": [" Sensitive Group "]
+			}
+		]
+	}`
+
+	rules, err := ParseSensitiveRulesJSONString(raw)
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+
+	assert.Equal(t, "sensitive group", rules[0].ID)
+	assert.Equal(t, "Sensitive Group", rules[0].Name)
+	assert.Equal(t, []string{"Sensitive Group"}, rules[0].GroupRefs)
+	assert.Empty(t, rules[0].Keywords)
 }
 
 func TestGetEffectiveSensitiveRulesFallsBackToLegacyWords(t *testing.T) {
