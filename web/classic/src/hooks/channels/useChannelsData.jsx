@@ -140,6 +140,7 @@ export const useChannelsData = () => {
     BALANCE: 'balance',
     PRIORITY: 'priority',
     WEIGHT: 'weight',
+    CONCURRENCY_LIMIT: 'concurrency_limit',
     OPERATE: 'operate',
   };
 
@@ -180,6 +181,7 @@ export const useChannelsData = () => {
       [COLUMN_KEYS.BALANCE]: true,
       [COLUMN_KEYS.PRIORITY]: true,
       [COLUMN_KEYS.WEIGHT]: true,
+      [COLUMN_KEYS.CONCURRENCY_LIMIT]: true,
       [COLUMN_KEYS.OPERATE]: true,
     };
   };
@@ -260,6 +262,7 @@ export const useChannelsData = () => {
             response_time: 0,
             priority: -1,
             weight: -1,
+            concurrency_limit: -1,
           };
           tagChannelDates.children = [];
           channelDates.push(tagChannelDates);
@@ -280,6 +283,15 @@ export const useChannelsData = () => {
         } else {
           if (tagChannelDates.weight !== channels[i].weight) {
             tagChannelDates.weight = '';
+          }
+        }
+
+        const childConcurrencyLimit = channels[i].concurrency_limit ?? 0;
+        if (tagChannelDates.concurrency_limit === -1) {
+          tagChannelDates.concurrency_limit = childConcurrencyLimit;
+        } else {
+          if (tagChannelDates.concurrency_limit !== childConcurrencyLimit) {
+            tagChannelDates.concurrency_limit = '';
           }
         }
 
@@ -466,6 +478,12 @@ export const useChannelsData = () => {
         if (data.weight < 0) data.weight = 0;
         res = await API.put('/api/channel/', data);
         break;
+      case 'concurrency_limit':
+        if (value === '') return;
+        data.concurrency_limit = parseInt(value);
+        if (data.concurrency_limit < 0) data.concurrency_limit = 0;
+        res = await API.put('/api/channel/', data);
+        break;
       case 'enable_all':
         data.channel_info = record.channel_info;
         data.channel_info.multi_key_status_list = {};
@@ -635,6 +653,17 @@ export const useChannelsData = () => {
           return;
         }
         data.weight = parseInt(data.weight);
+        break;
+      case 'concurrency_limit':
+        if (
+          data.concurrency_limit === undefined ||
+          data.concurrency_limit < 0 ||
+          data.concurrency_limit === ''
+        ) {
+          showInfo('并发上限必须是非负整数！');
+          return;
+        }
+        data.concurrency_limit = parseInt(data.concurrency_limit);
         break;
     }
 

@@ -134,6 +134,37 @@ func TestPromoCodeCalculateDiscountHonorsScopeAndType(t *testing.T) {
 	assert.InDelta(t, 15, result.PaidAmount, 0.000001)
 }
 
+func TestPromoCodeUpdateAllowsSameCodeForExistingRecord(t *testing.T) {
+	truncateTables(t)
+
+	promo := &PromoCode{
+		Name:           "original",
+		Code:           "KEEP_CODE",
+		Status:         common.RedemptionCodeStatusEnabled,
+		DiscountType:   PromoCodeDiscountTypePercent,
+		DiscountValue:  10,
+		AppliesToTopup: true,
+		MaxRedeemCount: 10,
+		CreatedTime:    common.GetTimestamp(),
+	}
+	require.NoError(t, promo.Insert())
+
+	promo.Name = "updated"
+	promo.Code = "keep_code"
+	promo.DiscountValue = 20
+	require.NoError(t, promo.Update())
+
+	var saved PromoCode
+	require.NoError(t, DB.Where("id = ?", promo.Id).First(&saved).Error)
+	assert.Equal(t, "updated", saved.Name)
+	assert.Equal(t, "KEEP_CODE", saved.Code)
+	assert.EqualValues(t, 20, saved.DiscountValue)
+
+	var count int64
+	require.NoError(t, DB.Model(&PromoCode{}).Where("code = ?", "KEEP_CODE").Count(&count).Error)
+	assert.EqualValues(t, 1, count)
+}
+
 func TestPromoCodeUsageAndAffiliateRewardsUseActualPaidAmount(t *testing.T) {
 	truncateTables(t)
 	resetAffiliateSettingForTest(t)
@@ -466,4 +497,192 @@ func TestCompleteEpayTopUp_RecordsPromoAndAffiliateInOneCompletion(t *testing.T)
 	var recordCount int64
 	require.NoError(t, DB.Model(&AffiliateRecord{}).Where("source_type = ? AND source_id = ?", AffiliateSourceTopUp, topUp.TradeNo).Count(&recordCount).Error)
 	assert.EqualValues(t, 1, recordCount)
+}
+
+func TestCompleteFreeTopUp_FullDiscountCompletesServerSideWithoutAffiliateReward(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+	affiliateSetting := setting.GetAffiliateSetting()
+	affiliateSetting.TriggerTopupEnabled = true
+	affiliateSetting.FirstLevelRatio = 10
+	affiliateSetting.SecondLevelEnabled = false
+
+	insertMarketingUser(t, 851, 0, 0)
+	insertMarketingUser(t, 852, 851, 0)
+
+	promo := &PromoCode{
+		Name:           "free topup",
+		Code:           "TOPFREE",
+		Status:         common.RedemptionCodeStatusEnabled,
+		DiscountType:   PromoCodeDiscountTypePercent,
+		DiscountValue:  100,
+		AppliesToTopup: true,
+		MaxRedeemCount: 1,
+		CreatedTime:    common.GetTimestamp(),
+	}
+	require.NoError(t, promo.Insert())
+
+	discount, err := CalculatePromoCodeDiscount("TOPFREE", PromoCodeTargetTopUp, 0, 100)
+	require.NoError(t, err)
+	topUp := &TopUp{
+		UserId:          852,
+		Amount:          100,
+		Money:           discount.PaidAmount,
+		TradeNo:         "topup-free-complete",
+		PaymentMethod:   PaymentProviderEpay,
+		PaymentProvider: PaymentProviderEpay,
+		CreateTime:      time.Now().Unix(),
+		Status:          common.TopUpStatusPending,
+	}
+	ApplyPromoCodeResultToTopUp(topUp, discount)
+	require.NoError(t, topUp.Insert())
+
+	completedTopUp, quotaToAdd, completedNow, err := CompleteFreeTopUp(topUp.TradeNo, PaymentProviderEpay)
+	require.NoError(t, err)
+	require.NotNil(t, completedTopUp)
+	assert.True(t, completedNow)
+	assert.Equal(t, int(100*common.QuotaPerUnit), quotaToAdd)
+	assert.InDelta(t, 0, completedTopUp.Money, 0.000001)
+	assert.InDelta(t, 0, completedTopUp.ActualMoney, 0.000001)
+	assert.Equal(t, 0, completedTopUp.AffiliateSourceQuota)
+
+	var user User
+	require.NoError(t, DB.Select("quota").Where("id = ?", 852).First(&user).Error)
+	assert.Equal(t, int(100*common.QuotaPerUnit), user.Quota)
+
+	var usage PromoCodeUsage
+	require.NoError(t, DB.Where("promo_code_id = ? AND order_no = ?", promo.Id, topUp.TradeNo).First(&usage).Error)
+	assert.InDelta(t, 100, usage.OriginalAmount, 0.000001)
+	assert.InDelta(t, 100, usage.DiscountAmount, 0.000001)
+	assert.InDelta(t, 0, usage.PaidAmount, 0.000001)
+
+	var savedPromo PromoCode
+	require.NoError(t, DB.Where("id = ?", promo.Id).First(&savedPromo).Error)
+	assert.Equal(t, 1, savedPromo.RedeemedCount)
+	assert.Equal(t, common.RedemptionCodeStatusUsed, savedPromo.Status)
+
+	var recordCount int64
+	require.NoError(t, DB.Model(&AffiliateRecord{}).Where("source_type = ? AND source_id = ?", AffiliateSourceTopUp, topUp.TradeNo).Count(&recordCount).Error)
+	assert.EqualValues(t, 0, recordCount)
+
+	_, quotaToAdd, completedNow, err = CompleteFreeTopUp(topUp.TradeNo, PaymentProviderEpay)
+	require.NoError(t, err)
+	assert.False(t, completedNow)
+	assert.Equal(t, 0, quotaToAdd)
+}
+
+func TestCompleteFreeSubscriptionOrder_FullDiscountCompletesWithoutAffiliateReward(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+	affiliateSetting := setting.GetAffiliateSetting()
+	affiliateSetting.TriggerSubscriptionEnabled = true
+	affiliateSetting.FirstLevelRatio = 10
+	affiliateSetting.SecondLevelEnabled = false
+
+	insertMarketingUser(t, 861, 0, 0)
+	insertMarketingUser(t, 862, 861, 0)
+
+	plan := &SubscriptionPlan{
+		Id:            8861,
+		Title:         "Free Promo Plan",
+		PriceAmount:   100,
+		Currency:      "USD",
+		DurationUnit:  SubscriptionDurationMonth,
+		DurationValue: 1,
+		Enabled:       true,
+		TotalAmount:   999999,
+	}
+	require.NoError(t, DB.Create(plan).Error)
+
+	promo := &PromoCode{
+		Name:                     "free subscription",
+		Code:                     "SUBFREE",
+		Status:                   common.RedemptionCodeStatusEnabled,
+		DiscountType:             PromoCodeDiscountTypePercent,
+		DiscountValue:            100,
+		AppliesToAllSubscription: true,
+		MaxRedeemCount:           1,
+		CreatedTime:              common.GetTimestamp(),
+	}
+	require.NoError(t, promo.Insert())
+
+	discount, err := CalculatePromoCodeDiscount("SUBFREE", PromoCodeTargetSubscription, plan.Id, plan.PriceAmount)
+	require.NoError(t, err)
+	order := &SubscriptionOrder{
+		UserId:          862,
+		PlanId:          plan.Id,
+		Money:           discount.PaidAmount,
+		TradeNo:         "sub-free-complete",
+		PaymentMethod:   PaymentProviderEpay,
+		PaymentProvider: PaymentProviderEpay,
+		Status:          common.TopUpStatusPending,
+		CreateTime:      time.Now().Unix(),
+	}
+	ApplyPromoCodeResultToSubscriptionOrder(order, discount)
+	require.NoError(t, order.Insert())
+
+	require.NoError(t, CompleteFreeSubscriptionOrder(order.TradeNo, PaymentProviderEpay))
+
+	var savedOrder SubscriptionOrder
+	require.NoError(t, DB.Where("trade_no = ?", order.TradeNo).First(&savedOrder).Error)
+	assert.Equal(t, common.TopUpStatusSuccess, savedOrder.Status)
+	assert.InDelta(t, 0, savedOrder.Money, 0.000001)
+	assert.InDelta(t, 0, savedOrder.ActualMoney, 0.000001)
+	assert.Equal(t, 0, savedOrder.AffiliateSourceQuota)
+
+	var sub UserSubscription
+	require.NoError(t, DB.Where("user_id = ? AND plan_id = ?", 862, plan.Id).First(&sub).Error)
+	assert.Equal(t, "active", sub.Status)
+
+	var usage PromoCodeUsage
+	require.NoError(t, DB.Where("promo_code_id = ? AND order_no = ?", promo.Id, order.TradeNo).First(&usage).Error)
+	assert.InDelta(t, 100, usage.OriginalAmount, 0.000001)
+	assert.InDelta(t, 100, usage.DiscountAmount, 0.000001)
+	assert.InDelta(t, 0, usage.PaidAmount, 0.000001)
+
+	var recordCount int64
+	require.NoError(t, DB.Model(&AffiliateRecord{}).Where("source_type = ? AND source_id = ?", AffiliateSourceSubscription, order.TradeNo).Count(&recordCount).Error)
+	assert.EqualValues(t, 0, recordCount)
+}
+
+func TestRedeem_AffiliateRewardCanFilterRedemptionTopup(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+	affiliateSetting := setting.GetAffiliateSetting()
+	affiliateSetting.TriggerTopupEnabled = true
+	affiliateSetting.FilterRedemptionTopupEnabled = false
+	affiliateSetting.FirstLevelRatio = 10
+	affiliateSetting.SecondLevelEnabled = false
+
+	insertMarketingUser(t, 871, 0, 0)
+	insertMarketingUser(t, 872, 871, 0)
+	code := &Redemption{
+		UserId:         1,
+		Key:            "affiliate-redemption-code",
+		Status:         common.RedemptionCodeStatusEnabled,
+		Name:           "affiliate redemption",
+		Quota:          1000,
+		CreatedTime:    common.GetTimestamp(),
+		MaxRedeemCount: 2,
+	}
+	require.NoError(t, code.Insert())
+
+	quota, err := Redeem(code.Key, 872)
+	require.NoError(t, err)
+	assert.Equal(t, 1000, quota)
+
+	var reward AffiliateRecord
+	require.NoError(t, DB.Where("source_type = ? AND source_id = ?", AffiliateSourceRedemption, "redemption-1-user-872").First(&reward).Error)
+	assert.Equal(t, 1000, reward.SourceQuota)
+	assert.Equal(t, 100, reward.RewardQuota)
+
+	affiliateSetting.FilterRedemptionTopupEnabled = true
+	insertMarketingUser(t, 873, 871, 0)
+	quota, err = Redeem(code.Key, 873)
+	require.NoError(t, err)
+	assert.Equal(t, 1000, quota)
+
+	var filteredCount int64
+	require.NoError(t, DB.Model(&AffiliateRecord{}).Where("source_type = ? AND source_id = ?", AffiliateSourceRedemption, "redemption-1-user-873").Count(&filteredCount).Error)
+	assert.EqualValues(t, 0, filteredCount)
 }

@@ -70,11 +70,21 @@ type UptimeKumaGroup = {
   categoryName: string
   url: string
   slug: string
+  embedUrl?: string
 }
 
 type UptimeKumaSectionProps = {
   enabled: boolean
   data: string
+}
+
+const isValidUrl = (value: string) => {
+  try {
+    new URL(value)
+    return true
+  } catch {
+    return false
+  }
 }
 
 const createUptimeKumaSchema = (t: (key: string) => string) =>
@@ -83,16 +93,61 @@ const createUptimeKumaSchema = (t: (key: string) => string) =>
       .string()
       .min(1, { error: t('Category name is required') })
       .max(50, { error: t('Category name must be less than 50 characters') }),
-    url: z.string().url({ error: t('Must be a valid URL') }),
+    url: z.string().trim().max(500, {
+      error: t('URL must be less than 500 characters'),
+    }),
     slug: z
       .string()
-      .min(1, { error: t('Slug is required') })
+      .trim()
       .max(100, { error: t('Slug must be less than 100 characters') })
-      .regex(/^[a-zA-Z0-9_-]+$/, {
+      .refine((value) => value === '' || /^[a-zA-Z0-9_-]+$/.test(value), {
         error: t(
           'Slug can only contain letters, numbers, hyphens, and underscores'
         ),
       }),
+    embedUrl: z.string().trim().max(1000, {
+      error: t('Embed URL must be less than 1000 characters'),
+    }),
+  }).superRefine((values, ctx) => {
+    if (values.embedUrl) {
+      if (!isValidUrl(values.embedUrl)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['embedUrl'],
+          message: t('Must be a valid URL'),
+        })
+      }
+      if (values.url && !isValidUrl(values.url)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['url'],
+          message: t('Must be a valid URL'),
+        })
+      }
+      return
+    }
+
+    if (!values.url) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['url'],
+        message: t('Uptime Kuma URL is required unless an embed URL is set'),
+      })
+    } else if (!isValidUrl(values.url)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['url'],
+        message: t('Must be a valid URL'),
+      })
+    }
+
+    if (!values.slug) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['slug'],
+        message: t('Slug is required unless an embed URL is set'),
+      })
+    }
   })
 
 type UptimeKumaFormValues = z.infer<ReturnType<typeof createUptimeKumaSchema>>
@@ -116,6 +171,7 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
       categoryName: '',
       url: '',
       slug: '',
+      embedUrl: '',
     },
   })
 
@@ -125,8 +181,11 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
       if (Array.isArray(parsed)) {
         setGroups(
           parsed.map((item, idx) => ({
-            ...item,
             id: item.id || idx + 1,
+            categoryName: item.categoryName || '',
+            url: item.url || '',
+            slug: item.slug || '',
+            embedUrl: item.embedUrl || '',
           }))
         )
       }
@@ -158,6 +217,7 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
       categoryName: '',
       url: '',
       slug: '',
+      embedUrl: '',
     })
     setShowDialog(true)
   }
@@ -168,6 +228,7 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
       categoryName: group.categoryName,
       url: group.url,
       slug: group.slug,
+      embedUrl: group.embedUrl || '',
     })
     setShowDialog(true)
   }
@@ -298,13 +359,14 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
                 <TableHead>{t('Category Name')}</TableHead>
                 <TableHead>{t('Uptime Kuma URL')}</TableHead>
                 <TableHead>{t('Status Page Slug')}</TableHead>
+                <TableHead>{t('Embed URL')}</TableHead>
                 <TableHead className='w-32'>{t('Actions')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {groups.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className='h-24 text-center'>
+                  <TableCell colSpan={6} className='h-24 text-center'>
                     {t(
                       'No Uptime Kuma groups yet. Click "Add Group" to create one.'
                     )}
@@ -332,6 +394,12 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
                     </TableCell>
                     <TableCell className='text-muted-foreground font-mono text-sm'>
                       {group.slug}
+                    </TableCell>
+                    <TableCell
+                      className='text-primary max-w-xs truncate font-mono text-sm'
+                      title={group.embedUrl}
+                    >
+                      {group.embedUrl || '-'}
                     </TableCell>
                     <TableCell>
                       <div className='flex gap-2'>
@@ -429,6 +497,27 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
                       {t('The slug is appended to the URL:')} {'{url}'}
                       {t('/status/')}
                       {'{slug}'}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name='embedUrl'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Embed URL')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder='https://status.example.com/embed/status?channelId=1'
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'Optional ApiPanelWatch compact page. When set, the dashboard renders it directly instead of fetching Uptime Kuma.'
+                      )}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>

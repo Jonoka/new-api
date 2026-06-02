@@ -155,6 +155,7 @@ func SetApiRouter(router *gin.Engine) {
 			subscriptionRoute.GET("/plans", controller.GetSubscriptionPlans)
 			subscriptionRoute.GET("/self", controller.GetSubscriptionSelf)
 			subscriptionRoute.PUT("/self/preference", controller.UpdateSubscriptionPreference)
+			subscriptionRoute.POST("/amount", controller.SubscriptionRequestAmount)
 			subscriptionRoute.POST("/balance/pay", middleware.CriticalRateLimit(), controller.SubscriptionRequestBalancePay)
 			subscriptionRoute.POST("/epay/pay", middleware.CriticalRateLimit(), controller.SubscriptionRequestEpay)
 			subscriptionRoute.POST("/stripe/pay", middleware.CriticalRateLimit(), controller.SubscriptionRequestStripePay)
@@ -201,6 +202,7 @@ func SetApiRouter(router *gin.Engine) {
 		affiliateAdminRoute.Use(middleware.AdminAuth())
 		{
 			affiliateAdminRoute.GET("/withdrawals", controller.AdminListAffiliateWithdrawals)
+			affiliateAdminRoute.POST("/bind-inviter", controller.AdminBindAffiliateInviter)
 			affiliateAdminRoute.POST("/withdrawals/:id/approve", controller.AdminApproveAffiliateWithdrawal)
 			affiliateAdminRoute.POST("/withdrawals/:id/reject", controller.AdminRejectAffiliateWithdrawal)
 			affiliateAdminRoute.POST("/withdrawals/:id/paid", controller.AdminMarkAffiliateWithdrawalPaid)

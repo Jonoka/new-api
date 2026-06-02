@@ -39,6 +39,9 @@ import { useTranslation } from 'react-i18next';
 
 const ACTION_MASK = 'mask';
 const ACTION_BLOCK = 'block';
+const SCOPE_REQUEST = 'request';
+const SCOPE_RESPONSE = 'response';
+const SCOPE_BOTH = 'both';
 const DEFAULT_REPLACEMENT = '[REDACTED]';
 
 function createLocalId() {
@@ -104,6 +107,7 @@ function createRule() {
     name: '',
     enabled: true,
     action: ACTION_MASK,
+    scope: SCOPE_REQUEST,
     replacement: DEFAULT_REPLACEMENT,
     keywordsText: '',
   };
@@ -114,6 +118,10 @@ function normalizeRule(rule) {
   if (keywords.length === 0) return null;
 
   const action = rule.action === ACTION_BLOCK ? ACTION_BLOCK : ACTION_MASK;
+  const scope =
+    rule.scope === SCOPE_RESPONSE || rule.scope === SCOPE_BOTH
+      ? rule.scope
+      : SCOPE_REQUEST;
   const fallbackName = keywords[0] || '';
 
   return {
@@ -121,6 +129,7 @@ function normalizeRule(rule) {
     name: String(rule.name || '').trim() || fallbackName,
     enabled: rule.enabled !== false,
     action,
+    scope,
     replacement:
       action === ACTION_MASK
         ? String(rule.replacement || '').trim() || DEFAULT_REPLACEMENT
@@ -135,6 +144,10 @@ function rulesToDrafts(rules) {
     name: rule.name || '',
     enabled: rule.enabled !== false,
     action: rule.action === ACTION_BLOCK ? ACTION_BLOCK : ACTION_MASK,
+    scope:
+      rule.scope === SCOPE_RESPONSE || rule.scope === SCOPE_BOTH
+        ? rule.scope
+        : SCOPE_REQUEST,
     replacement: rule.replacement || DEFAULT_REPLACEMENT,
     keywordsText: (rule.keywords || []).join('\n'),
   }));
@@ -269,6 +282,7 @@ export default function SettingsSensitiveWords(props) {
   function onSubmit() {
     const submitInputs = {
       ...inputs,
+      SensitiveWords: '',
       SensitiveRules: currentRulesValue,
       SensitiveRuleChannelIds: currentChannelIdsValue,
     };
@@ -411,7 +425,9 @@ export default function SettingsSensitiveWords(props) {
                   {t('过滤规则')}
                 </Typography.Title>
                 <Typography.Text type='tertiary'>
-                  {t('每条规则可独立选择脱敏或拦截')}
+                  {t(
+                    '每条规则可独立选择请求、返回或全部范围，并执行脱敏或拦截',
+                  )}
                 </Typography.Text>
               </div>
               <Button
@@ -483,7 +499,7 @@ export default function SettingsSensitiveWords(props) {
                     </Row>
 
                     <Row gutter={16} style={{ marginTop: 12 }}>
-                      <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                      <Col xs={24} sm={12} md={8} lg={6} xl={6}>
                         <Typography.Text strong>
                           {t('规则名称')}
                         </Typography.Text>
@@ -496,7 +512,7 @@ export default function SettingsSensitiveWords(props) {
                           }
                         />
                       </Col>
-                      <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                      <Col xs={24} sm={12} md={8} lg={6} xl={6}>
                         <Typography.Text strong>
                           {t('处理动作')}
                         </Typography.Text>
@@ -524,8 +540,35 @@ export default function SettingsSensitiveWords(props) {
                           </Select.Option>
                         </Select>
                       </Col>
+                      <Col xs={24} sm={12} md={8} lg={6} xl={6}>
+                        <Typography.Text strong>
+                          {t('应用范围')}
+                        </Typography.Text>
+                        <Select
+                          value={rule.scope}
+                          style={{ width: '100%', marginTop: 8 }}
+                          onChange={(value) =>
+                            updateRule(rule.id, {
+                              scope:
+                                value === SCOPE_RESPONSE || value === SCOPE_BOTH
+                                  ? value
+                                  : SCOPE_REQUEST,
+                            })
+                          }
+                        >
+                          <Select.Option value={SCOPE_REQUEST}>
+                            {t('请求')}
+                          </Select.Option>
+                          <Select.Option value={SCOPE_RESPONSE}>
+                            {t('返回')}
+                          </Select.Option>
+                          <Select.Option value={SCOPE_BOTH}>
+                            {t('全部')}
+                          </Select.Option>
+                        </Select>
+                      </Col>
                       {rule.action === ACTION_MASK ? (
-                        <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                        <Col xs={24} sm={12} md={8} lg={6} xl={6}>
                           <Typography.Text strong>
                             {t('替换文本')}
                           </Typography.Text>

@@ -628,6 +628,77 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 	return nil
 }
 
+func CompleteFreeSubscriptionOrder(tradeNo string, expectedPaymentProvider string) error {
+	if tradeNo == "" {
+		return errors.New("tradeNo is empty")
+	}
+	refCol := "`trade_no`"
+	if common.UsingPostgreSQL {
+		refCol = `"trade_no"`
+	}
+	var logUserId int
+	var logPlanTitle string
+	var logMoney float64
+	var logPaymentMethod string
+	var upgradeGroup string
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var order SubscriptionOrder
+		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(&order).Error; err != nil {
+			return ErrSubscriptionOrderNotFound
+		}
+		if expectedPaymentProvider != "" && order.PaymentProvider != expectedPaymentProvider {
+			return ErrPaymentMethodMismatch
+		}
+		if order.Status == common.TopUpStatusSuccess {
+			return nil
+		}
+		if order.Status != common.TopUpStatusPending {
+			return ErrSubscriptionOrderStatusInvalid
+		}
+		if order.PromoCodeId <= 0 || order.ActualMoney > 0 || order.Money > 0 || order.OriginalMoney <= 0 || order.DiscountMoney <= 0 {
+			return errors.New("订单不是 0 元优惠订单")
+		}
+		plan, err := getSubscriptionPlanByIdTx(tx, order.PlanId)
+		if err != nil {
+			return err
+		}
+		upgradeGroup = strings.TrimSpace(plan.UpgradeGroup)
+		if _, err = CreateUserSubscriptionFromPlanTx(tx, order.UserId, plan, "order"); err != nil {
+			return err
+		}
+		if err := upsertSubscriptionTopUpTx(tx, &order); err != nil {
+			return err
+		}
+		if err := recordSubscriptionPromoUsageTx(tx, &order, true); err != nil {
+			return err
+		}
+		if err := createAffiliateRewardsForPaymentTx(tx, order.UserId, AffiliateSourceSubscription, order.TradeNo, subscriptionOrderAffiliateSourceQuota(&order)); err != nil {
+			return err
+		}
+		order.Status = common.TopUpStatusSuccess
+		order.CompleteTime = common.GetTimestamp()
+		if err := tx.Save(&order).Error; err != nil {
+			return err
+		}
+		logUserId = order.UserId
+		logPlanTitle = plan.Title
+		logMoney = order.Money
+		logPaymentMethod = order.PaymentMethod
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if upgradeGroup != "" && logUserId > 0 {
+		_ = UpdateUserGroupCache(logUserId, upgradeGroup)
+	}
+	if logUserId > 0 {
+		msg := fmt.Sprintf("订阅购买成功，套餐: %s，支付金额: %.2f，支付方式: %s", logPlanTitle, logMoney, logPaymentMethod)
+		RecordLog(logUserId, LogTypeTopup, msg)
+	}
+	return nil
+}
+
 func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 	if tx == nil || order == nil {
 		return errors.New("invalid subscription order")

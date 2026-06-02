@@ -28,6 +28,10 @@ const (
 	SensitiveRuleActionMask  = "mask"
 	SensitiveRuleActionBlock = "block"
 
+	SensitiveRuleScopeRequest  = "request"
+	SensitiveRuleScopeResponse = "response"
+	SensitiveRuleScopeBoth     = "both"
+
 	DefaultSensitiveMaskReplacement = "[REDACTED]"
 )
 
@@ -36,6 +40,7 @@ type SensitiveRule struct {
 	Name        string   `json:"name"`
 	Enabled     bool     `json:"enabled"`
 	Action      string   `json:"action"`
+	Scope       string   `json:"scope,omitempty"`
 	Replacement string   `json:"replacement,omitempty"`
 	Keywords    []string `json:"keywords"`
 }
@@ -45,6 +50,7 @@ type SensitiveRuleConfig struct {
 }
 
 var SensitiveRules []SensitiveRule
+var SensitiveRulesConfigured bool
 var SensitiveRuleChannelIds []int
 
 func SensitiveWordsToString() string {
@@ -97,6 +103,7 @@ func UpdateSensitiveRulesByJSONString(s string) error {
 		return err
 	}
 	SensitiveRules = rules
+	SensitiveRulesConfigured = true
 	return nil
 }
 
@@ -172,9 +179,13 @@ func NormalizeSensitiveRules(rules []SensitiveRule) []SensitiveRule {
 		rule.ID = strings.TrimSpace(rule.ID)
 		rule.Name = strings.TrimSpace(rule.Name)
 		rule.Action = strings.TrimSpace(strings.ToLower(rule.Action))
+		rule.Scope = strings.TrimSpace(strings.ToLower(rule.Scope))
 		rule.Replacement = strings.TrimSpace(rule.Replacement)
 		if rule.Action != SensitiveRuleActionMask && rule.Action != SensitiveRuleActionBlock {
 			rule.Action = SensitiveRuleActionBlock
+		}
+		if rule.Scope != SensitiveRuleScopeRequest && rule.Scope != SensitiveRuleScopeResponse && rule.Scope != SensitiveRuleScopeBoth {
+			rule.Scope = SensitiveRuleScopeRequest
 		}
 		if rule.Action == SensitiveRuleActionMask && rule.Replacement == "" {
 			rule.Replacement = DefaultSensitiveMaskReplacement
@@ -199,6 +210,9 @@ func GetEffectiveSensitiveRules() []SensitiveRule {
 	if len(rules) > 0 {
 		return rules
 	}
+	if SensitiveRulesConfigured {
+		return nil
+	}
 	keywords := normalizeSensitiveKeywords(SensitiveWords)
 	if len(keywords) == 0 {
 		return nil
@@ -209,9 +223,28 @@ func GetEffectiveSensitiveRules() []SensitiveRule {
 			Name:     "Legacy sensitive words",
 			Enabled:  true,
 			Action:   SensitiveRuleActionBlock,
+			Scope:    SensitiveRuleScopeRequest,
 			Keywords: keywords,
 		},
 	}
+}
+
+func GetEffectiveSensitiveRulesByScope(scope string) []SensitiveRule {
+	scope = strings.TrimSpace(strings.ToLower(scope))
+	if scope != SensitiveRuleScopeRequest && scope != SensitiveRuleScopeResponse {
+		return nil
+	}
+	rules := GetEffectiveSensitiveRules()
+	if len(rules) == 0 {
+		return nil
+	}
+	result := make([]SensitiveRule, 0, len(rules))
+	for _, rule := range rules {
+		if rule.Scope == scope || rule.Scope == SensitiveRuleScopeBoth {
+			result = append(result, rule)
+		}
+	}
+	return result
 }
 
 func normalizeSensitiveKeywords(keywords []string) []string {

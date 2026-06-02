@@ -69,6 +69,7 @@ const EditTokenModal = (props) => {
   const [groups, setGroups] = useState([]);
   const [showQuotaInput, setShowQuotaInput] = useState(false);
   const isEdit = props.editingToken.id !== undefined;
+  const defaultUseAutoGroup = statusState?.status?.default_use_auto_group === true;
 
   const getInitValues = () => ({
     name: '',
@@ -79,8 +80,8 @@ const EditTokenModal = (props) => {
     model_limits_enabled: false,
     model_limits: [],
     allow_ips: '',
-    group: '',
-    cross_group_retry: false,
+    group: defaultUseAutoGroup ? 'auto' : '',
+    cross_group_retry: defaultUseAutoGroup,
     tokenCount: 1,
   });
 
@@ -142,15 +143,12 @@ const EditTokenModal = (props) => {
         value: group,
         ratio: info.ratio,
       }));
-      if (statusState?.status?.default_use_auto_group) {
+      if (defaultUseAutoGroup) {
         if (localGroupOptions.some((group) => group.value === 'auto')) {
           localGroupOptions.sort((a, b) => (a.value === 'auto' ? -1 : 1));
         }
       }
       setGroups(localGroupOptions);
-      // if (statusState?.status?.default_use_auto_group && formApiRef.current) {
-      //   formApiRef.current.setValue('group', 'auto');
-      // }
     } else {
       showError(t(message));
     }
@@ -201,7 +199,7 @@ const EditTokenModal = (props) => {
     } else {
       formApiRef.current?.reset();
     }
-  }, [props.visiable, props.editingToken.id]);
+  }, [props.visiable, props.editingToken.id, defaultUseAutoGroup]);
 
   const generateRandomSuffix = () => {
     const characters =

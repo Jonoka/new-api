@@ -185,6 +185,7 @@ func testChannel(channel *model.Channel, testUserID int, testModel string, endpo
 			newAPIError: newAPIError,
 		}
 	}
+	defer model.ReleaseChannelConcurrency(channel.Id)
 
 	// Determine relay format based on endpoint type or request path
 	var relayFormat types.RelayFormat

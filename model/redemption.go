@@ -173,6 +173,10 @@ func Redeem(key string, userId int) (quota int, err error) {
 		}).Error; err != nil {
 			return err
 		}
+		sourceId := fmt.Sprintf("redemption-%d-user-%d", redemption.Id, userId)
+		if err := createAffiliateRewardsForPaymentTx(tx, userId, AffiliateSourceRedemption, sourceId, redemption.Quota); err != nil {
+			return err
+		}
 		redemption.RedeemedTime = now
 		redemption.RedeemedCount++
 		if redemption.RedeemedCount >= redemption.MaxRedeemCount {

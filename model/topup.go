@@ -493,6 +493,80 @@ func CompleteEpayTopUp(tradeNo string, actualPaymentMethod string) (*TopUp, int,
 	}
 	return &saved, quotaToAdd, completedNow, nil
 }
+
+func CompleteFreeTopUp(tradeNo string, expectedPaymentProvider string) (*TopUp, int, bool, error) {
+	if tradeNo == "" {
+		return nil, 0, false, errors.New("未提供订单号")
+	}
+
+	refCol := "`trade_no`"
+	if common.UsingPostgreSQL {
+		refCol = `"trade_no"`
+	}
+
+	var saved TopUp
+	var quotaToAdd int
+	completedNow := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		topUp := &TopUp{}
+		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
+			return ErrTopUpNotFound
+		}
+		if expectedPaymentProvider != "" && topUp.PaymentProvider != expectedPaymentProvider {
+			return ErrPaymentMethodMismatch
+		}
+		if topUp.Status == common.TopUpStatusSuccess {
+			saved = *topUp
+			return nil
+		}
+		if topUp.Status != common.TopUpStatusPending {
+			return ErrTopUpStatusInvalid
+		}
+		if topUp.PromoCodeId <= 0 || topUp.ActualMoney > 0 || topUp.OriginalMoney <= 0 || topUp.DiscountMoney <= 0 {
+			return errors.New("订单不是 0 元优惠订单")
+		}
+
+		if topUp.PaymentProvider == PaymentProviderStripe {
+			quotaToAdd = int(decimal.NewFromFloat(topUp.Money).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).IntPart())
+		} else {
+			if topUp.Money > 0 {
+				return errors.New("订单不是 0 元优惠订单")
+			}
+			quotaToAdd = int(decimal.NewFromInt(topUp.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).IntPart())
+		}
+		if quotaToAdd <= 0 {
+			return errors.New("无效的充值额度")
+		}
+
+		topUp.CompleteTime = common.GetTimestamp()
+		topUp.Status = common.TopUpStatusSuccess
+		if err := tx.Save(topUp).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&User{}).Where("id = ?", topUp.UserId).Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
+			return err
+		}
+		if err := recordTopUpPromoUsageTx(tx, topUp, true); err != nil {
+			return err
+		}
+		if err := createAffiliateRewardsForPaymentTx(tx, topUp.UserId, AffiliateSourceTopUp, topUp.TradeNo, topUpAffiliateSourceQuota(topUp, 0)); err != nil {
+			return err
+		}
+		saved = *topUp
+		completedNow = true
+		return nil
+	})
+	if err != nil {
+		return nil, 0, false, err
+	}
+	if completedNow {
+		if err := cacheIncrUserQuota(saved.UserId, int64(quotaToAdd)); err != nil {
+			common.SysLog("failed to increase user quota cache after free topup: " + err.Error())
+		}
+	}
+	return &saved, quotaToAdd, completedNow, nil
+}
+
 func RechargeCreem(referenceId string, customerEmail string, customerName string, callerIp string) (err error) {
 	if referenceId == "" {
 		return errors.New("未提供支付单号")

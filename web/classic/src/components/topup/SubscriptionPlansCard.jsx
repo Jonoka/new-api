@@ -89,12 +89,17 @@ const SubscriptionPlansCard = ({
   const [paying, setPaying] = useState(false);
   const [selectedEpayMethod, setSelectedEpayMethod] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [promoCode, setPromoCode] = useState('');
+  const [promoDiscount, setPromoDiscount] = useState(null);
+  const [amountLoading, setAmountLoading] = useState(false);
 
   const epayMethods = useMemo(() => getEpayMethods(payMethods), [payMethods]);
 
   const openBuy = (p) => {
     setSelectedPlan(p);
     setSelectedEpayMethod(epayMethods?.[0]?.type || '');
+    setPromoCode('');
+    setPromoDiscount(null);
     setOpen(true);
   };
 
@@ -102,6 +107,9 @@ const SubscriptionPlansCard = ({
     setOpen(false);
     setSelectedPlan(null);
     setPaying(false);
+    setPromoCode('');
+    setPromoDiscount(null);
+    setAmountLoading(false);
   };
 
   const handleRefresh = async () => {
@@ -113,8 +121,57 @@ const SubscriptionPlansCard = ({
     }
   };
 
+  const buildPromoPayload = () => {
+    const code = promoCode.trim();
+    return code ? { promo_code: code } : {};
+  };
+
+  const handlePromoCodeChange = (value) => {
+    setPromoCode(value);
+    setPromoDiscount(null);
+  };
+
+  const previewSubscriptionAmount = async () => {
+    if (!selectedPlan?.plan?.id) {
+      return;
+    }
+    const code = promoCode.trim();
+    if (!code) {
+      setPromoDiscount(null);
+      return;
+    }
+    setAmountLoading(true);
+    try {
+      const res = await API.post('/api/subscription/amount', {
+        plan_id: selectedPlan.plan.id,
+        promo_code: code,
+      });
+      if (res.data?.message === 'success') {
+        setPromoDiscount(res.data.discount || null);
+      } else {
+        setPromoDiscount(null);
+        const errorMsg =
+          typeof res.data?.data === 'string'
+            ? res.data.data
+            : res.data?.message || t('支付请求失败');
+        showError(errorMsg);
+      }
+    } catch (e) {
+      setPromoDiscount(null);
+      showError(t('支付请求失败'));
+    } finally {
+      setAmountLoading(false);
+    }
+  };
+
+  const handleCompletedPurchase = async () => {
+    showSuccess(t('购买成功'));
+    await reloadSubscriptionSelf?.();
+    closeBuy();
+  };
+
   const payStripe = async () => {
-    if (!selectedPlan?.plan?.stripe_price_id) {
+    if (!selectedPlan?.plan?.stripe_price_id && !promoCode.trim()) {
       showError(t('该套餐未配置 Stripe'));
       return;
     }
@@ -122,8 +179,13 @@ const SubscriptionPlansCard = ({
     try {
       const res = await API.post('/api/subscription/stripe/pay', {
         plan_id: selectedPlan.plan.id,
+        ...buildPromoPayload(),
       });
       if (res.data?.message === 'success') {
+        if (res.data.completed || res.data.data?.completed) {
+          await handleCompletedPurchase();
+          return;
+        }
         window.open(res.data.data?.pay_link, '_blank');
         showSuccess(t('已打开支付页面'));
         closeBuy();
@@ -142,6 +204,10 @@ const SubscriptionPlansCard = ({
   };
 
   const payCreem = async () => {
+    if (promoCode.trim()) {
+      showError(t('Creem 暂不支持优惠码'));
+      return;
+    }
     if (!selectedPlan?.plan?.creem_product_id) {
       showError(t('该套餐未配置 Creem'));
       return;
@@ -150,6 +216,7 @@ const SubscriptionPlansCard = ({
     try {
       const res = await API.post('/api/subscription/creem/pay', {
         plan_id: selectedPlan.plan.id,
+        ...buildPromoPayload(),
       });
       if (res.data?.message === 'success') {
         window.open(res.data.data?.checkout_url, '_blank');
@@ -179,8 +246,13 @@ const SubscriptionPlansCard = ({
       const res = await API.post('/api/subscription/epay/pay', {
         plan_id: selectedPlan.plan.id,
         payment_method: selectedEpayMethod,
+        ...buildPromoPayload(),
       });
       if (res.data?.message === 'success') {
+        if (res.data.completed || res.data.data?.completed) {
+          await handleCompletedPurchase();
+          return;
+        }
         submitEpayForm({ url: res.data.url, params: res.data.data });
         showSuccess(t('已发起支付'));
         closeBuy();
@@ -681,6 +753,11 @@ const SubscriptionPlansCard = ({
               }
             : null
         }
+        promoCode={promoCode}
+        setPromoCode={handlePromoCodeChange}
+        promoDiscount={promoDiscount}
+        amountLoading={amountLoading}
+        onPromoCodeBlur={previewSubscriptionAmount}
         onPayStripe={payStripe}
         onPayCreem={payCreem}
         onPayEpay={payEpay}

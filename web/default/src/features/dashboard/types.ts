@@ -47,6 +47,7 @@ export interface UptimeMonitor {
 export interface UptimeGroupResult {
   categoryName: string
   monitors: UptimeMonitor[]
+  embedUrl?: string
 }
 
 // ============================================================================

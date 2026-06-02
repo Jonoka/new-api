@@ -53,6 +53,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       log: true,
       midjourney: true,
       task: true,
+      game_center: true,
     },
     personal: {
       enabled: true,
@@ -68,6 +69,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       redemption: true,
       user: true,
       subscription: true,
+      game_management: true,
       affiliate_admin: true,
       setting: true,
     },
@@ -116,6 +118,7 @@ export default function SettingsSidebarModulesAdmin(props) {
         log: true,
         midjourney: true,
         task: true,
+        game_center: true,
       },
       personal: {
         enabled: true,
@@ -131,6 +134,7 @@ export default function SettingsSidebarModulesAdmin(props) {
         redemption: true,
         user: true,
         subscription: true,
+        game_management: true,
         affiliate_admin: true,
         setting: true,
       },
@@ -191,6 +195,7 @@ export default function SettingsSidebarModulesAdmin(props) {
             log: true,
             midjourney: true,
             task: true,
+            game_center: true,
           },
           personal: {
             enabled: true,
@@ -206,6 +211,7 @@ export default function SettingsSidebarModulesAdmin(props) {
             redemption: true,
             user: true,
             subscription: true,
+            game_management: true,
             affiliate_admin: true,
             setting: true,
           },
@@ -244,6 +250,11 @@ export default function SettingsSidebarModulesAdmin(props) {
           description: t('绘图任务记录'),
         },
         { key: 'task', title: t('任务日志'), description: t('系统任务记录') },
+        {
+          key: 'game_center',
+          title: t('游戏中心'),
+          description: t('游戏钱包、预测局和参与入口'),
+        },
       ],
     },
     {
@@ -283,8 +294,13 @@ export default function SettingsSidebarModulesAdmin(props) {
         },
         {
           key: 'redemption',
-          title: t('兑换码管理'),
-          description: t('兑换码生成管理'),
+          title: t('营销福利'),
+          description: t('兑换码和优惠码管理'),
+        },
+        {
+          key: 'game_management',
+          title: t('游戏管理'),
+          description: t('预测局创建与结算'),
         },
         { key: 'user', title: t('用户管理'), description: t('用户账户管理') },
         {

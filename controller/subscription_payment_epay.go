@@ -64,26 +64,8 @@ func SubscriptionRequestEpay(c *gin.Context) {
 		}
 	}
 
-	callBackAddress := service.GetCallbackAddress()
-	returnUrl, err := url.Parse(callBackAddress + "/api/subscription/epay/return")
-	if err != nil {
-		common.ApiErrorMsg(c, "回调地址配置错误")
-		return
-	}
-	notifyUrl, err := url.Parse(callBackAddress + "/api/subscription/epay/notify")
-	if err != nil {
-		common.ApiErrorMsg(c, "回调地址配置错误")
-		return
-	}
-
 	tradeNo := fmt.Sprintf("%s%d", common.GetRandomString(6), time.Now().Unix())
 	tradeNo = fmt.Sprintf("SUBUSR%dNO%s", userId, tradeNo)
-
-	client := GetEpayClient()
-	if client == nil {
-		common.ApiErrorMsg(c, "当前管理员未配置支付信息")
-		return
-	}
 
 	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetSubscription, plan.Id, plan.PriceAmount)
 	if err != nil {
@@ -94,9 +76,32 @@ func SubscriptionRequestEpay(c *gin.Context) {
 	if discount != nil {
 		payMoney = discount.PaidAmount
 	}
-	if payMoney < 0.01 {
+	if payMoney < 0 {
 		common.ApiErrorMsg(c, "套餐金额过低")
 		return
+	}
+
+	var returnUrl *url.URL
+	var notifyUrl *url.URL
+	var client *epay.Client
+	if payMoney >= 0.01 {
+		callBackAddress := service.GetCallbackAddress()
+		returnUrl, err = url.Parse(callBackAddress + "/api/subscription/epay/return")
+		if err != nil {
+			common.ApiErrorMsg(c, "回调地址配置错误")
+			return
+		}
+		notifyUrl, err = url.Parse(callBackAddress + "/api/subscription/epay/notify")
+		if err != nil {
+			common.ApiErrorMsg(c, "回调地址配置错误")
+			return
+		}
+
+		client = GetEpayClient()
+		if client == nil {
+			common.ApiErrorMsg(c, "当前管理员未配置支付信息")
+			return
+		}
 	}
 
 	order := &model.SubscriptionOrder{
@@ -114,6 +119,23 @@ func SubscriptionRequestEpay(c *gin.Context) {
 		common.ApiErrorMsg(c, "创建订单失败")
 		return
 	}
+	if payMoney < 0.01 {
+		if err := model.CompleteFreeSubscriptionOrder(tradeNo, model.PaymentProviderEpay); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"message":   "success",
+			"completed": true,
+			"data": gin.H{
+				"completed": true,
+				"trade_no":  tradeNo,
+				"discount":  discount,
+			},
+		})
+		return
+	}
+
 	uri, params, err := client.Purchase(&epay.PurchaseArgs{
 		Type:           req.PaymentMethod,
 		ServiceTradeNo: tradeNo,

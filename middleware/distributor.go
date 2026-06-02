@@ -160,6 +160,11 @@ func Distribute() func(c *gin.Context) {
 			}
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
+		if !shouldSelectChannel && channel == nil {
+			common.SetContextKey(c, constant.ContextKeyOriginalModel, modelRequest.Model)
+			c.Next()
+			return
+		}
 		newAPIError := SetupContextForSelectedChannel(c, channel, modelRequest.Model)
 		if newAPIError != nil && !ok && shouldSelectChannel {
 			releaseChannelConcurrencyForContext(c)

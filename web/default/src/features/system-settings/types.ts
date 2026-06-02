@@ -271,6 +271,7 @@ export type BillingSettings = {
   'affiliate_setting.min_withdrawal_amount': number
   'affiliate_setting.trigger_topup_enabled': boolean
   'affiliate_setting.trigger_subscription_enabled': boolean
+  'affiliate_setting.filter_redemption_topup_enabled': boolean
   'affiliate_setting.payout_methods': string
   'affiliate_setting.usdt_chain': string
   'affiliate_setting.promotion_template': string
@@ -306,6 +307,7 @@ export type OperationsSettings = {
   WorkerValidKey: string
   WorkerAllowHttpImageRequestEnabled: boolean
   LogConsumeEnabled: boolean
+  ForceRecordLogIpEnabled: boolean
   'performance_setting.disk_cache_enabled': boolean
   'performance_setting.disk_cache_threshold_mb': number
   'performance_setting.disk_cache_max_size_mb': number

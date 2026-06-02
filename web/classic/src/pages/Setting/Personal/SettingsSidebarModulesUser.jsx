@@ -86,6 +86,7 @@ export default function SettingsSidebarModulesUser() {
         log: isSidebarModuleAllowed('console', 'log'),
         midjourney: isSidebarModuleAllowed('console', 'midjourney'),
         task: isSidebarModuleAllowed('console', 'task'),
+        game_center: isSidebarModuleAllowed('console', 'game_center'),
       };
     }
 
@@ -107,6 +108,7 @@ export default function SettingsSidebarModulesUser() {
         models: isSidebarModuleAllowed('admin', 'models'),
         deployment: isSidebarModuleAllowed('admin', 'deployment'),
         redemption: isSidebarModuleAllowed('admin', 'redemption'),
+        game_management: isSidebarModuleAllowed('admin', 'game_management'),
         user: isSidebarModuleAllowed('admin', 'user'),
         affiliate_admin: isSidebarModuleAllowed('admin', 'affiliate_admin'),
         setting: isSidebarModuleAllowed('admin', 'setting'),
@@ -319,6 +321,11 @@ export default function SettingsSidebarModulesUser() {
           description: t('绘图任务记录'),
         },
         { key: 'task', title: t('任务日志'), description: t('系统任务记录') },
+        {
+          key: 'game_center',
+          title: t('游戏中心'),
+          description: t('游戏钱包、预测局和参与入口'),
+        },
       ],
     },
     {
@@ -353,8 +360,13 @@ export default function SettingsSidebarModulesUser() {
         },
         {
           key: 'redemption',
-          title: t('兑换码管理'),
-          description: t('兑换码生成管理'),
+          title: t('营销福利'),
+          description: t('兑换码和优惠码管理'),
+        },
+        {
+          key: 'game_management',
+          title: t('游戏管理'),
+          description: t('预测局创建与结算'),
         },
         { key: 'user', title: t('用户管理'), description: t('用户账户管理') },
         {

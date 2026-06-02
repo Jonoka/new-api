@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -55,6 +56,14 @@ func insertAffiliateUser(t *testing.T, id int, inviterId int, quota int) {
 		InviterId: inviterId,
 		Quota:     quota,
 	}).Error)
+}
+
+func getAffiliateUserAffCodeForTest(t *testing.T, userId int) string {
+	t.Helper()
+	var user User
+	require.NoError(t, DB.Select("aff_code").Where("id = ?", userId).First(&user).Error)
+	require.NotEmpty(t, user.AffCode)
+	return user.AffCode
 }
 
 func getAffiliateBalanceForTest(t *testing.T, userId int) AffiliateBalance {
@@ -355,6 +364,229 @@ func TestSaveAffiliatePayoutAccountPreservesQrPaths(t *testing.T) {
 	assert.Equal(t, "wechat-id", account.WechatAccount)
 	assert.Equal(t, "/upload/affiliate_qr/alipay-old.png", account.AlipayQrPath)
 	assert.Equal(t, "/upload/affiliate_qr/wechat-old.png", account.WechatQrPath)
+}
+
+func TestBindUserInviterByAffCodeUpdatesInviterAndCounts(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	insertAffiliateUser(t, 70, 0, 0)
+	insertAffiliateUser(t, 71, 0, 0)
+	insertAffiliateUser(t, 72, 0, 0)
+
+	result, err := BindUserInviterByAffCode(72, "", getAffiliateUserAffCodeForTest(t, 70), false)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Updated)
+	assert.Equal(t, 72, result.UserId)
+	assert.Equal(t, 70, result.InviterId)
+	assert.Equal(t, 0, result.PreviousInviterId)
+
+	var invitee User
+	require.NoError(t, DB.Select("id", "inviter_id").Where("id = ?", 72).First(&invitee).Error)
+	assert.Equal(t, 70, invitee.InviterId)
+
+	var inviter User
+	require.NoError(t, DB.Select("aff_count").Where("id = ?", 70).First(&inviter).Error)
+	assert.Equal(t, 1, inviter.AffCount)
+
+	_, err = BindUserInviterByAffCode(72, "", getAffiliateUserAffCodeForTest(t, 71), false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "已有邀请人")
+
+	result, err = BindUserInviterByAffCode(72, "", getAffiliateUserAffCodeForTest(t, 71), true)
+	require.NoError(t, err)
+	assert.True(t, result.Updated)
+	assert.Equal(t, 70, result.PreviousInviterId)
+	assert.Equal(t, 71, result.InviterId)
+
+	require.NoError(t, DB.Select("inviter_id").Where("id = ?", 72).First(&invitee).Error)
+	assert.Equal(t, 71, invitee.InviterId)
+
+	require.NoError(t, DB.Select("aff_count").Where("id = ?", 70).First(&inviter).Error)
+	assert.Equal(t, 0, inviter.AffCount)
+	require.NoError(t, DB.Select("aff_count").Where("id = ?", 71).First(&inviter).Error)
+	assert.Equal(t, 1, inviter.AffCount)
+}
+
+func TestBindUserInviterByAffCodeRejectsSelfAndCycles(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	insertAffiliateUser(t, 73, 0, 0)
+	insertAffiliateUser(t, 74, 73, 0)
+
+	_, err := BindUserInviterByAffCode(73, "", getAffiliateUserAffCodeForTest(t, 73), false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "不能绑定自己")
+
+	_, err = BindUserInviterByAffCode(73, "", getAffiliateUserAffCodeForTest(t, 74), true)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "循环邀请")
+}
+
+func TestBindUserInviterByAffCodeRejectsAmbiguousUserIdentifier(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	require.NoError(t, DB.Create(&User{Id: 75, Username: "target", DisplayName: "same-keyword", Email: "target@example.com", AffCode: "aff75", Status: common.UserStatusEnabled}).Error)
+	require.NoError(t, DB.Create(&User{Id: 76, Username: "other", DisplayName: "same-keyword", Email: "other@example.com", AffCode: "aff76", Status: common.UserStatusEnabled}).Error)
+	require.NoError(t, DB.Create(&User{Id: 77, Username: "inviter", AffCode: "aff77", Status: common.UserStatusEnabled}).Error)
+
+	_, err := BindUserInviterByAffCode(0, "same-keyword", "aff77", false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "匹配到多个用户")
+}
+
+func TestBindUserInviterByAffCodeRejectsDuplicateAffCode(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	require.NoError(t, DB.Exec("DROP INDEX IF EXISTS idx_users_aff_code").Error)
+	t.Cleanup(func() {
+		require.NoError(t, DB.Exec("DELETE FROM users").Error)
+		require.NoError(t, DB.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_aff_code ON users(aff_code)").Error)
+	})
+
+	require.NoError(t, DB.Create(&User{Id: 78, Username: "target", AffCode: "aff78", Status: common.UserStatusEnabled}).Error)
+	require.NoError(t, DB.Create(&User{Id: 79, Username: "inviter-a", AffCode: "dup-aff", Status: common.UserStatusEnabled}).Error)
+	require.NoError(t, DB.Create(&User{Id: 80, Username: "inviter-b", AffCode: "dup-aff", Status: common.UserStatusEnabled}).Error)
+
+	_, err := BindUserInviterByAffCode(78, "", "dup-aff", false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "邀请代码存在冲突")
+}
+
+func TestGetAffiliateRecordsWithDetailsBuildsSourceDetails(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	insertAffiliateUser(t, 80, 0, 0)
+	insertAffiliateUser(t, 81, 80, 0)
+	now := common.GetTimestamp()
+
+	require.NoError(t, DB.Create(&TopUp{
+		UserId:               81,
+		Amount:               100,
+		Money:                50,
+		OriginalMoney:        100,
+		DiscountMoney:        50,
+		ActualMoney:          50,
+		PromoCode:            "TOPHALF",
+		AffiliateSourceQuota: int(50 * common.QuotaPerUnit),
+		TradeNo:              "aff-topup-detail",
+		PaymentProvider:      PaymentProviderEpay,
+		PaymentMethod:        "alipay",
+		CreateTime:           now,
+		CompleteTime:         now,
+		Status:               common.TopUpStatusSuccess,
+	}).Error)
+	require.NoError(t, DB.Create(&AffiliateRecord{
+		UserId:      80,
+		InviteeId:   81,
+		Level:       1,
+		SourceType:  AffiliateSourceTopUp,
+		SourceId:    "aff-topup-detail",
+		SourceQuota: int(50 * common.QuotaPerUnit),
+		RewardQuota: int(5 * common.QuotaPerUnit),
+		Ratio:       10,
+		Status:      AffiliateRecordStatusPending,
+	}).Error)
+
+	plan := &SubscriptionPlan{
+		Id:            9080,
+		Title:         "Pro Monthly",
+		PriceAmount:   120,
+		Currency:      "USD",
+		DurationUnit:  SubscriptionDurationMonth,
+		DurationValue: 1,
+		Enabled:       true,
+		TotalAmount:   999999,
+	}
+	require.NoError(t, DB.Create(plan).Error)
+	require.NoError(t, DB.Create(&SubscriptionOrder{
+		UserId:               81,
+		PlanId:               plan.Id,
+		Money:                90,
+		OriginalMoney:        120,
+		DiscountMoney:        30,
+		ActualMoney:          90,
+		PromoCode:            "SUB25",
+		AffiliateSourceQuota: int(90 * common.QuotaPerUnit),
+		TradeNo:              "aff-sub-detail",
+		PaymentProvider:      PaymentProviderEpay,
+		PaymentMethod:        "alipay",
+		Status:               common.TopUpStatusSuccess,
+		CreateTime:           now,
+		CompleteTime:         now,
+	}).Error)
+	require.NoError(t, DB.Create(&AffiliateRecord{
+		UserId:      80,
+		InviteeId:   81,
+		Level:       1,
+		SourceType:  AffiliateSourceSubscription,
+		SourceId:    "aff-sub-detail",
+		SourceQuota: int(90 * common.QuotaPerUnit),
+		RewardQuota: int(9 * common.QuotaPerUnit),
+		Ratio:       10,
+		Status:      AffiliateRecordStatusPending,
+	}).Error)
+
+	redemption := &Redemption{
+		UserId:         1,
+		Key:            "detail-redemption",
+		Status:         common.RedemptionCodeStatusEnabled,
+		Name:           "VIP Gift",
+		Quota:          1000,
+		CreatedTime:    now,
+		MaxRedeemCount: 1,
+	}
+	require.NoError(t, redemption.Insert())
+	redemptionSourceId := fmt.Sprintf("redemption-%d-user-%d", redemption.Id, 81)
+	require.NoError(t, DB.Create(&AffiliateRecord{
+		UserId:      80,
+		InviteeId:   81,
+		Level:       1,
+		SourceType:  AffiliateSourceRedemption,
+		SourceId:    redemptionSourceId,
+		SourceQuota: 1000,
+		RewardQuota: 100,
+		Ratio:       10,
+		Status:      AffiliateRecordStatusPending,
+	}).Error)
+
+	records, total, err := GetAffiliateRecordsWithDetails(80, "", &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.EqualValues(t, 3, total)
+	require.Len(t, records, 3)
+
+	detailsByType := map[string]*AffiliateSourceDetail{}
+	for _, record := range records {
+		detailsByType[record.SourceType] = record.Detail
+	}
+
+	topupDetail := detailsByType[AffiliateSourceTopUp]
+	require.NotNil(t, topupDetail)
+	assert.Equal(t, "余额充值", topupDetail.Title)
+	assert.Equal(t, "TOPHALF", topupDetail.PromoCode)
+	assert.InDelta(t, 100, topupDetail.OriginalAmount, 0.000001)
+	assert.InDelta(t, 50, topupDetail.DiscountAmount, 0.000001)
+	assert.InDelta(t, 50, topupDetail.PaidAmount, 0.000001)
+
+	subscriptionDetail := detailsByType[AffiliateSourceSubscription]
+	require.NotNil(t, subscriptionDetail)
+	assert.Equal(t, "订阅：Pro Monthly", subscriptionDetail.Title)
+	assert.Equal(t, "Pro Monthly", subscriptionDetail.PlanTitle)
+	assert.Equal(t, "SUB25", subscriptionDetail.PromoCode)
+	assert.InDelta(t, 120, subscriptionDetail.OriginalAmount, 0.000001)
+	assert.InDelta(t, 30, subscriptionDetail.DiscountAmount, 0.000001)
+	assert.InDelta(t, 90, subscriptionDetail.PaidAmount, 0.000001)
+
+	redemptionDetail := detailsByType[AffiliateSourceRedemption]
+	require.NotNil(t, redemptionDetail)
+	assert.Equal(t, "兑换码兑换：VIP Gift", redemptionDetail.Title)
+	assert.Equal(t, "VIP Gift", redemptionDetail.RedemptionName)
+	assert.Equal(t, 1000, redemptionDetail.Quota)
 }
 
 func TestSetAffiliatePayoutQrPathReplacesAndClearsQrPath(t *testing.T) {

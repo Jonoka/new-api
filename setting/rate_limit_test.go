@@ -30,6 +30,31 @@ func TestUpdateModelRequestRateLimitGroupByJSONStringKeepsPreviousValueOnInvalid
 	}
 }
 
+func TestUpdateModelRequestRateLimitGroupByJSONStringRejectsInvalidLimits(t *testing.T) {
+	originalGroup := ModelRequestRateLimitGroup
+	defer func() {
+		ModelRequestRateLimitMutex.Lock()
+		ModelRequestRateLimitGroup = originalGroup
+		ModelRequestRateLimitMutex.Unlock()
+	}()
+
+	if err := UpdateModelRequestRateLimitGroupByJSONString(`{"codex":[0,2000]}`); err != nil {
+		t.Fatalf("expected valid request group limit to update: %v", err)
+	}
+
+	if err := UpdateModelRequestRateLimitGroupByJSONString(`{"broken":[-1,0]}`); err == nil {
+		t.Fatal("expected invalid request group limit to return an error")
+	}
+
+	total, success, found := GetGroupRateLimit("codex")
+	if !found {
+		t.Fatal("expected previous request group limit to be kept")
+	}
+	if total != 0 || success != 2000 {
+		t.Fatalf("expected codex limit [0,2000], got [%d,%d]", total, success)
+	}
+}
+
 func TestModelRequestRateLimitUserGroupConfig(t *testing.T) {
 	originalUserGroup := ModelRequestRateLimitUserGroup
 	defer func() {

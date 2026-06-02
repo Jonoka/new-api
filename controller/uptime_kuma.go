@@ -33,6 +33,7 @@ type Monitor struct {
 type UptimeGroupResult struct {
 	CategoryName string    `json:"categoryName"`
 	Monitors     []Monitor `json:"monitors"`
+	EmbedUrl     string    `json:"embedUrl,omitempty"`
 }
 
 func getAndDecode(ctx context.Context, client *http.Client, url string, dest interface{}) error {
@@ -57,11 +58,17 @@ func getAndDecode(ctx context.Context, client *http.Client, url string, dest int
 func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[string]interface{}) UptimeGroupResult {
 	url, _ := groupConfig["url"].(string)
 	slug, _ := groupConfig["slug"].(string)
+	embedUrl, _ := groupConfig["embedUrl"].(string)
 	categoryName, _ := groupConfig["categoryName"].(string)
 
 	result := UptimeGroupResult{
 		CategoryName: categoryName,
 		Monitors:     []Monitor{},
+		EmbedUrl:     embedUrl,
+	}
+
+	if embedUrl != "" {
+		return result
 	}
 
 	if url == "" || slug == "" {

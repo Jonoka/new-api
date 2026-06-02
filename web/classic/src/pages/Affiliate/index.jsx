@@ -55,6 +55,7 @@ import {
   API,
   copy,
   renderQuota,
+  renderQuotaWithAmount,
   showError,
   showSuccess,
   timestamp2string,
@@ -107,6 +108,74 @@ function methodText(t, method) {
   if (method === 'alipay') return t('支付宝');
   if (method === 'wechat') return t('微信');
   return method;
+}
+
+function sourceFallbackText(record) {
+  if (!record) return '-';
+  return `${record.source_type} #${record.source_id}`;
+}
+
+function sourceDetailTitle(t, record) {
+  const detail = record?.detail || {};
+  if (record?.source_type === 'topup') return t('余额充值');
+  if (record?.source_type === 'subscription') {
+    return detail.plan_title
+      ? `${t('订阅购买')}：${detail.plan_title}`
+      : t('订阅购买');
+  }
+  if (record?.source_type === 'redemption') {
+    return detail.redemption_name
+      ? `${t('兑换码兑换')}：${detail.redemption_name}`
+      : t('兑换码兑换');
+  }
+  if (detail.title) return detail.title;
+  return sourceFallbackText(record);
+}
+
+function renderSourceDetail(t, record) {
+  const detail = record?.detail || {};
+  const parts = [];
+  if (record.source_quota > 0) {
+    parts.push(`${t('返佣基数')} ${renderQuota(record.source_quota)}`);
+  }
+  if (detail.original_amount > 0) {
+    parts.push(`${t('原价')} ${renderQuotaWithAmount(detail.original_amount)}`);
+  }
+  if (detail.discount_amount > 0) {
+    parts.push(
+      `${t('已用优惠')} ${detail.promo_code || ''} -${renderQuotaWithAmount(
+        detail.discount_amount,
+      )}`.trim(),
+    );
+  }
+  if (detail.paid_amount > 0 || detail.discount_amount > 0) {
+    parts.push(
+      `${t('实付')} ${renderQuotaWithAmount(detail.paid_amount || 0)}`,
+    );
+  }
+  if (
+    record.source_type === 'redemption' &&
+    (detail.quota || record.source_quota)
+  ) {
+    parts.push(
+      `${t('兑换额度')} ${renderQuota(detail.quota || record.source_quota)}`,
+    );
+  }
+  if (detail.payment_provider || detail.payment_method) {
+    parts.push(
+      `${t('支付方式')} ${[detail.payment_provider, detail.payment_method]
+        .filter(Boolean)
+        .join('/')}`,
+    );
+  }
+  return (
+    <Space vertical align='start' spacing={2}>
+      <Text strong>{sourceDetailTitle(t, record)}</Text>
+      <Text type='secondary' size='small'>
+        {parts.length > 0 ? parts.join(' · ') : sourceFallbackText(record)}
+      </Text>
+    </Space>
+  );
 }
 
 const Affiliate = () => {
@@ -320,8 +389,8 @@ const Affiliate = () => {
   const recordColumns = [
     { title: t('层级'), dataIndex: 'level', width: 80 },
     {
-      title: t('来源'),
-      render: (_, record) => `${record.source_type} #${record.source_id}`,
+      title: t('购买明细'),
+      render: (_, record) => renderSourceDetail(t, record),
     },
     {
       title: t('返佣额度'),

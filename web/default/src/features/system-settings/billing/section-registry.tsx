@@ -210,6 +210,8 @@ const BILLING_SECTIONS = [
               settings['affiliate_setting.trigger_topup_enabled'],
             trigger_subscription_enabled:
               settings['affiliate_setting.trigger_subscription_enabled'],
+            filter_redemption_topup_enabled:
+              settings['affiliate_setting.filter_redemption_topup_enabled'],
             payout_methods: settings['affiliate_setting.payout_methods'],
             usdt_chain: settings['affiliate_setting.usdt_chain'],
             promotion_template:

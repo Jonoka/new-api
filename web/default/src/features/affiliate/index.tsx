@@ -31,6 +31,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
   formatQuota,
+  formatCurrencyUSD,
   formatTimestampToDate,
   parseQuotaFromDollars,
   quotaUnitsToDollars,
@@ -114,6 +115,84 @@ function methodLabel(method: string) {
   if (method === 'alipay') return 'Alipay'
   if (method === 'wechat') return 'WeChat'
   return method
+}
+
+function sourceFallbackText(record: AffiliateRecord) {
+  return `${record.source_type} #${record.source_id}`
+}
+
+function sourceDetailTitle(
+  t: (key: string) => string,
+  record: AffiliateRecord
+) {
+  const detail = record.detail
+  if (record.source_type === 'topup') return t('Wallet top-up')
+  if (record.source_type === 'subscription') {
+    return detail?.plan_title
+      ? `${t('Subscription purchase')}: ${detail.plan_title}`
+      : t('Subscription purchase')
+  }
+  if (record.source_type === 'redemption') {
+    return detail?.redemption_name
+      ? `${t('Redemption code')}: ${detail.redemption_name}`
+      : t('Redemption code')
+  }
+  if (detail?.title) return detail.title
+  return sourceFallbackText(record)
+}
+
+function SourceDetailCell({
+  record,
+  t,
+}: {
+  record: AffiliateRecord
+  t: (key: string) => string
+}) {
+  const detail = record.detail
+  const parts: string[] = []
+  if (record.source_quota > 0) {
+    parts.push(`${t('Commission base')} ${formatQuota(record.source_quota)}`)
+  }
+  if (detail?.original_amount && detail.original_amount > 0) {
+    parts.push(
+      `${t('Original price')} ${formatCurrencyUSD(detail.original_amount)}`
+    )
+  }
+  if (detail?.discount_amount && detail.discount_amount > 0) {
+    const promo = detail.promo_code ? `${detail.promo_code} ` : ''
+    parts.push(
+      `${t('Discount applied')} ${promo}-${formatCurrencyUSD(detail.discount_amount)}`
+    )
+  }
+  if ((detail?.paid_amount ?? 0) > 0 || (detail?.discount_amount ?? 0) > 0) {
+    parts.push(
+      `${t('Paid amount')} ${formatCurrencyUSD(detail?.paid_amount ?? 0)}`
+    )
+  }
+  if (
+    record.source_type === 'redemption' &&
+    ((detail?.quota ?? 0) > 0 || record.source_quota > 0)
+  ) {
+    parts.push(
+      `${t('Redeemed quota')} ${formatQuota(detail?.quota ?? record.source_quota)}`
+    )
+  }
+  if (detail?.payment_provider || detail?.payment_method) {
+    parts.push(
+      `${t('Payment method')} ${[detail.payment_provider, detail.payment_method]
+        .filter(Boolean)
+        .join('/')}`
+    )
+  }
+
+  return (
+    <div className='min-w-0 space-y-1'>
+      <div className='font-medium'>{sourceDetailTitle(t, record)}</div>
+      <div className='text-muted-foreground text-xs leading-5'>
+        {parts.length > 0 ? parts.join(' · ') : sourceFallbackText(record)}
+      </div>
+    </div>
+  )
 }
 
 export function Affiliate() {
@@ -686,7 +765,7 @@ export function Affiliate() {
                       <TableHeader>
                         <TableRow>
                           <TableHead>{t('Level')}</TableHead>
-                          <TableHead>{t('Source')}</TableHead>
+                          <TableHead>{t('Purchase details')}</TableHead>
                           <TableHead>{t('Commission')}</TableHead>
                           <TableHead>{t('Status')}</TableHead>
                           <TableHead>{t('Available Time')}</TableHead>
@@ -704,7 +783,7 @@ export function Affiliate() {
                             <TableRow key={record.id}>
                               <TableCell>{record.level}</TableCell>
                               <TableCell>
-                                {record.source_type} #{record.source_id}
+                                <SourceDetailCell record={record} t={t} />
                               </TableCell>
                               <TableCell>
                                 {formatQuota(record.reward_quota)}

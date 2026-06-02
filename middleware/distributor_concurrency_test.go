@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -34,4 +35,20 @@ func TestSetupContextForSelectedChannelReleasesConcurrencyWhenKeySelectionFails(
 
 	require.NotNil(t, err)
 	require.True(t, model.IsChannelConcurrencyAvailable(channel))
+}
+
+func TestDistributeSkipsChannelSetupWhenRouteDoesNotSelectChannel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(Distribute())
+	router.GET("/mj/task/:id/fetch", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/mj/task/task_123/fetch", nil)
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusNoContent, recorder.Code)
 }

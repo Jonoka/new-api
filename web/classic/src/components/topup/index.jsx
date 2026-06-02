@@ -96,6 +96,8 @@ const TopUp = () => {
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [payMethods, setPayMethods] = useState([]);
+  const [promoCode, setPromoCode] = useState('');
+  const [promoDiscount, setPromoDiscount] = useState(null);
 
   // 账单Modal状态
   const [openHistory, setOpenHistory] = useState(false);
@@ -140,6 +142,11 @@ const TopUp = () => {
       : minTopUp;
   };
 
+  const buildPromoPayload = () => {
+    const code = promoCode.trim();
+    return code ? { promo_code: code } : {};
+  };
+
   const requestAmountByPayment = async (payment, value) => {
     if (payment === 'stripe') {
       return getStripeAmount(value);
@@ -151,6 +158,33 @@ const TopUp = () => {
       return getWaffoAmount(value);
     }
     return getAmount(value);
+  };
+
+  const updateAmountFromResponse = (response, fallbackError) => {
+    if (response !== undefined) {
+      const { message, data, discount } = response.data;
+      if (message === 'success') {
+        setAmount(parseFloat(data));
+        setPromoDiscount(discount || null);
+        return true;
+      }
+      setAmount(0);
+      setPromoDiscount(null);
+      Toast.error({ content: '错误：' + (data || fallbackError), id: 'getAmount' });
+      return false;
+    }
+    showError(response);
+    return false;
+  };
+
+  const handleCompletedTopUp = async (data) => {
+    showSuccess(t('充值成功'));
+    await getUserQuota();
+    setPromoCode('');
+    setPromoDiscount(null);
+    setOpen(false);
+    setOpenHistory(true);
+    return data;
   };
 
   const topUp = async () => {
@@ -286,18 +320,24 @@ const TopUp = () => {
         res = await API.post('/api/user/stripe/pay', {
           amount: parseInt(topUpCount),
           payment_method: 'stripe',
+          ...buildPromoPayload(),
         });
       } else {
         // 普通支付请求
         res = await API.post('/api/user/pay', {
           amount: parseInt(topUpCount),
           payment_method: payWay,
+          ...buildPromoPayload(),
         });
       }
 
       if (res !== undefined) {
         const { message, data } = res.data;
         if (message === 'success') {
+          if (res.data.completed || data?.completed) {
+            await handleCompletedTopUp(data);
+            return;
+          }
           if (payWay === 'stripe') {
             // Stripe 支付回调处理
             window.open(data.pay_link, '_blank');
@@ -395,6 +435,7 @@ const TopUp = () => {
       setPaymentLoading(true);
       const requestBody = {
         amount: parseInt(topUpCount),
+        ...buildPromoPayload(),
       };
       if (payMethodIndex != null) {
         requestBody.pay_method_index = payMethodIndex;
@@ -402,7 +443,9 @@ const TopUp = () => {
       const res = await API.post('/api/user/waffo/pay', requestBody);
       if (res !== undefined) {
         const { message, data } = res.data;
-        if (message === 'success' && data?.payment_url) {
+        if (message === 'success' && (res.data.completed || data?.completed)) {
+          await handleCompletedTopUp(data);
+        } else if (message === 'success' && data?.payment_url) {
           window.open(data.payment_url, '_blank');
         } else {
           showError(data || t('支付请求失败'));
@@ -425,18 +468,9 @@ const TopUp = () => {
     try {
       const res = await API.post('/api/user/waffo/amount', {
         amount: parseInt(value),
+        ...buildPromoPayload(),
       });
-      if (res !== undefined) {
-        const { message, data } = res.data;
-        if (message === 'success') {
-          setAmount(parseFloat(data));
-        } else {
-          setAmount(0);
-          Toast.error({ content: '错误：' + data, id: 'getAmount' });
-        }
-      } else {
-        showError(res);
-      }
+      updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
       // amount fetch failed silently
     } finally {
@@ -455,10 +489,15 @@ const TopUp = () => {
     try {
       const res = await API.post('/api/user/waffo-pancake/pay', {
         amount: parseInt(topUpCount),
+        ...buildPromoPayload(),
       });
       if (res !== undefined) {
         const { message, data } = res.data;
         if (message === 'success') {
+          if (res.data.completed || data?.completed) {
+            await handleCompletedTopUp(data);
+            return;
+          }
           const checkoutUrl = data?.checkout_url || '';
           if (checkoutUrl && isSafeHttpCheckoutUrl(checkoutUrl)) {
             // In-tab redirect (not window.open) — popup blocker fires after
@@ -492,18 +531,9 @@ const TopUp = () => {
     try {
       const res = await API.post('/api/user/waffo-pancake/amount', {
         amount: parseInt(value),
+        ...buildPromoPayload(),
       });
-      if (res !== undefined) {
-        const { message, data } = res.data;
-        if (message === 'success') {
-          setAmount(parseFloat(data));
-        } else {
-          setAmount(0);
-          Toast.error({ content: '错误：' + data, id: 'getAmount' });
-        }
-      } else {
-        showError(res);
-      }
+      updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
       // amount fetch failed silently
     } finally {
@@ -757,18 +787,9 @@ const TopUp = () => {
     try {
       const res = await API.post('/api/user/amount', {
         amount: parseFloat(value),
+        ...buildPromoPayload(),
       });
-      if (res !== undefined) {
-        const { message, data } = res.data;
-        if (message === 'success') {
-          setAmount(parseFloat(data));
-        } else {
-          setAmount(0);
-          Toast.error({ content: '错误：' + data, id: 'getAmount' });
-        }
-      } else {
-        showError(res);
-      }
+      updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
       // amount fetch failed silently
     }
@@ -783,18 +804,9 @@ const TopUp = () => {
     try {
       const res = await API.post('/api/user/stripe/amount', {
         amount: parseFloat(value),
+        ...buildPromoPayload(),
       });
-      if (res !== undefined) {
-        const { message, data } = res.data;
-        if (message === 'success') {
-          setAmount(parseFloat(data));
-        } else {
-          setAmount(0);
-          Toast.error({ content: '错误：' + data, id: 'getAmount' });
-        }
-      } else {
-        showError(res);
-      }
+      updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
       // amount fetch failed silently
     } finally {
@@ -804,6 +816,8 @@ const TopUp = () => {
 
   const handleCancel = () => {
     setOpen(false);
+    setPromoCode('');
+    setPromoDiscount(null);
   };
 
   const handleTransferCancel = () => {
@@ -827,6 +841,7 @@ const TopUp = () => {
   const selectPresetAmount = (preset) => {
     setTopUpCount(preset.value);
     setSelectedPreset(preset.value);
+    setPromoDiscount(null);
 
     // 计算实际支付金额，考虑折扣
     const discount = preset.discount || topupInfo.discount[preset.value] || 1.0;
@@ -863,7 +878,10 @@ const TopUp = () => {
         payWay={payWay}
         payMethods={confirmPayMethods}
         amountNumber={amount}
-        discountRate={topupInfo?.discount?.[topUpCount] || 1.0}
+        promoCode={promoCode}
+        setPromoCode={setPromoCode}
+        promoDiscount={promoDiscount}
+        onPromoCodeBlur={() => requestAmountByPayment(payWay)}
       />
 
       {/* 充值账单模态框 */}

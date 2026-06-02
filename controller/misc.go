@@ -48,12 +48,13 @@ func getSidebarModulesAdminStatusValue(raw string) string {
 			"chat":       true,
 		},
 		"console": map[string]any{
-			"enabled":    true,
-			"detail":     true,
-			"token":      true,
-			"log":        true,
-			"midjourney": true,
-			"task":       true,
+			"enabled":     true,
+			"detail":      true,
+			"token":       true,
+			"log":         true,
+			"midjourney":  true,
+			"task":        true,
+			"game_center": true,
 		},
 		"personal": map[string]any{
 			"enabled":   true,
@@ -69,13 +70,26 @@ func getSidebarModulesAdminStatusValue(raw string) string {
 			"redemption":      true,
 			"user":            true,
 			"subscription":    true,
+			"game_management": true,
 			"affiliate_admin": true,
 			"setting":         true,
 		},
 	}
 
 	mergeConfig := func(saved map[string]any) map[string]any {
-		merged := defaultConfig
+		merged := map[string]any{}
+		for sectionKey, rawSection := range defaultConfig {
+			if section, ok := rawSection.(map[string]any); ok {
+				copiedSection := map[string]any{}
+				for moduleKey, moduleValue := range section {
+					copiedSection[moduleKey] = moduleValue
+				}
+				merged[sectionKey] = copiedSection
+				continue
+			}
+			merged[sectionKey] = rawSection
+		}
+
 		for sectionKey, rawSection := range saved {
 			section, ok := rawSection.(map[string]any)
 			if !ok {

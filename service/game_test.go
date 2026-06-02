@@ -71,6 +71,11 @@ func getGameWalletBalance(t *testing.T, userID int) int64 {
 	return wallet.Balance
 }
 
+func closeGamePredictionForTest(t *testing.T, predictionID int) {
+	t.Helper()
+	require.NoError(t, model.DB.Model(&model.GamePrediction{}).Where("id = ?", predictionID).Update("close_time", time.Now().Add(-time.Minute).Unix()).Error)
+}
+
 func createSettledGamePredictionFixture(t *testing.T) int {
 	t.Helper()
 	prediction, err := CreateGamePrediction(CreateGamePredictionRequest{
@@ -90,6 +95,7 @@ func createSettledGamePredictionFixture(t *testing.T) int {
 	_, err = PlaceGamePredictionBet(2, prediction.ID, prediction.Options[1].ID, 300)
 	require.NoError(t, err)
 
+	closeGamePredictionForTest(t, prediction.ID)
 	_, err = SetGamePredictionAnswer(prediction.ID, prediction.Options[0].ID, 99)
 	require.NoError(t, err)
 	return prediction.ID
@@ -107,6 +113,41 @@ func TestGameExchangeQuotaToTokensMovesBalance(t *testing.T) {
 	assert.EqualValues(t, 50000, tx.TokenAmount)
 	assert.Equal(t, 500, getGameUserQuota(t, 1))
 	assert.EqualValues(t, 50000, getGameWalletBalance(t, 1))
+}
+
+func TestGameExchangeQuotaToTokensHonorsPendingBatchQuotaUpdates(t *testing.T) {
+	setupGameTest(t)
+	userID := 990001
+	seedGameUser(t, userID, 1000)
+	common.BatchUpdateEnabled = true
+	t.Cleanup(func() {
+		common.BatchUpdateEnabled = false
+	})
+	require.NoError(t, model.DecreaseUserQuota(userID, 800, false))
+	assert.Equal(t, 1000, getGameUserQuota(t, userID))
+
+	_, err := ExchangeQuotaToGameTokens(userID, 500)
+
+	require.ErrorIs(t, err, ErrGameInsufficientQuota)
+	assert.Equal(t, 1000, getGameUserQuota(t, userID))
+}
+
+func TestGameExchangeQuotaToTokensConsumesPendingBatchQuotaOnce(t *testing.T) {
+	setupGameTest(t)
+	userID := 990002
+	seedGameUser(t, userID, 1000)
+	common.BatchUpdateEnabled = true
+	t.Cleanup(func() {
+		common.BatchUpdateEnabled = false
+	})
+	require.NoError(t, model.DecreaseUserQuota(userID, 800, false))
+	assert.Equal(t, 1000, getGameUserQuota(t, userID))
+
+	_, err := ExchangeQuotaToGameTokens(userID, 100)
+
+	require.NoError(t, err)
+	assert.Equal(t, 100, getGameUserQuota(t, userID))
+	assert.EqualValues(t, 10000, getGameWalletBalance(t, userID))
 }
 
 func TestGameExchangeTokensToQuotaMovesBalance(t *testing.T) {
@@ -200,6 +241,52 @@ func TestGameCreatePredictionRejectsInvalidTimes(t *testing.T) {
 		JudgeMode:  model.GamePredictionJudgeModeManual,
 	})
 	require.ErrorIs(t, err, ErrGamePredictionInvalidTime)
+}
+
+func TestGameSetAnswerRejectsBeforeCloseTime(t *testing.T) {
+	setupGameTest(t)
+	prediction, err := CreateGamePrediction(CreateGamePredictionRequest{
+		Title:     "未封盘不能判题",
+		Options:   []string{"会", "不会"},
+		CloseTime: time.Now().Add(time.Hour).Unix(),
+		JudgeMode: model.GamePredictionJudgeModeManual,
+	})
+	require.NoError(t, err)
+
+	_, err = SetGamePredictionAnswer(prediction.ID, prediction.Options[0].ID, 99)
+
+	require.Error(t, err)
+	updated, err := GetGamePrediction(prediction.ID)
+	require.NoError(t, err)
+	assert.Equal(t, model.GamePredictionStatusOpen, updated.Status)
+	assert.Equal(t, 0, updated.AnswerOptionID)
+}
+
+func TestGameSettlePredictionRejectsBeforeCloseTime(t *testing.T) {
+	setupGameTest(t)
+	seedGameUser(t, 1, 0)
+	require.NoError(t, model.DB.Create(&model.GameWallet{UserID: 1, Balance: 100}).Error)
+	prediction, err := CreateGamePrediction(CreateGamePredictionRequest{
+		Title:     "未封盘不能结算",
+		Options:   []string{"会", "不会"},
+		CloseTime: time.Now().Add(time.Hour).Unix(),
+		JudgeMode: model.GamePredictionJudgeModeManual,
+	})
+	require.NoError(t, err)
+	_, err = PlaceGamePredictionBet(1, prediction.ID, prediction.Options[0].ID, 10)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&model.GamePrediction{}).Where("id = ?", prediction.ID).Updates(map[string]interface{}{
+		"answer_option_id": prediction.Options[0].ID,
+		"status":           model.GamePredictionStatusAnswered,
+	}).Error)
+
+	_, err = SettleGamePrediction(prediction.ID, 99)
+
+	require.Error(t, err)
+	updated, err := GetGamePrediction(prediction.ID)
+	require.NoError(t, err)
+	assert.Equal(t, model.GamePredictionStatusAnswered, updated.Status)
+	assert.EqualValues(t, 90, getGameWalletBalance(t, 1))
 }
 
 func TestGamePlaceBetRejectsInsufficientBalanceWithoutChangingPool(t *testing.T) {
@@ -318,6 +405,7 @@ func TestGameSettlePredictionAllocatesRemainderToWinners(t *testing.T) {
 	}
 	_, err = PlaceGamePredictionBet(4, prediction.ID, prediction.Options[1].ID, 97)
 	require.NoError(t, err)
+	closeGamePredictionForTest(t, prediction.ID)
 	_, err = SetGamePredictionAnswer(prediction.ID, prediction.Options[0].ID, 99)
 	require.NoError(t, err)
 
@@ -351,6 +439,7 @@ func TestGameSettlePredictionUsesIntegerMathForLargePools(t *testing.T) {
 	require.NoError(t, err)
 	_, err = PlaceGamePredictionBet(2, prediction.ID, prediction.Options[1].ID, 1)
 	require.NoError(t, err)
+	closeGamePredictionForTest(t, prediction.ID)
 	_, err = SetGamePredictionAnswer(prediction.ID, prediction.Options[0].ID, 99)
 	require.NoError(t, err)
 
@@ -415,6 +504,7 @@ func TestGameSettlePredictionRejectsWalletOverflow(t *testing.T) {
 	require.NoError(t, err)
 	_, err = PlaceGamePredictionBet(2, prediction.ID, prediction.Options[1].ID, 1)
 	require.NoError(t, err)
+	closeGamePredictionForTest(t, prediction.ID)
 	_, err = SetGamePredictionAnswer(prediction.ID, prediction.Options[0].ID, 99)
 	require.NoError(t, err)
 

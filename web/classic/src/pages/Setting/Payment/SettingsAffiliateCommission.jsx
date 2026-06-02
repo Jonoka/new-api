@@ -21,13 +21,16 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Button,
   Card,
+  Checkbox,
   Empty,
   Form,
+  Input,
   Modal,
   Select,
   Space,
   Spin,
   Table,
+  Tabs,
   Tag,
   Typography,
 } from '@douyinfe/semi-ui';
@@ -53,6 +56,7 @@ const DEFAULT_INPUTS = {
   'affiliate_setting.min_withdrawal_amount': 10,
   'affiliate_setting.trigger_topup_enabled': true,
   'affiliate_setting.trigger_subscription_enabled': false,
+  'affiliate_setting.filter_redemption_topup_enabled': false,
   'affiliate_setting.payout_methods': 'usdt,alipay,wechat',
   'affiliate_setting.usdt_chain': 'TRC20',
   'affiliate_setting.promotion_template': '邀请链接：{invite_link}',
@@ -150,6 +154,14 @@ export default function SettingsAffiliateCommission(props) {
   const [withdrawals, setWithdrawals] = useState([]);
   const [withdrawalStatus, setWithdrawalStatus] = useState('');
   const [withdrawalsLoading, setWithdrawalsLoading] = useState(false);
+  const [bindUserKeyword, setBindUserKeyword] = useState('');
+  const [bindUserCandidates, setBindUserCandidates] = useState([]);
+  const [selectedBindUser, setSelectedBindUser] = useState(null);
+  const [bindUserSearching, setBindUserSearching] = useState(false);
+  const [bindAffCode, setBindAffCode] = useState('');
+  const [bindForce, setBindForce] = useState(false);
+  const [bindLoading, setBindLoading] = useState(false);
+  const [bindResult, setBindResult] = useState(null);
   const formApiRef = useRef(null);
 
   const handleFieldChange = (fieldName) => (value) => {
@@ -283,6 +295,97 @@ export default function SettingsAffiliateCommission(props) {
     });
   };
 
+  const searchBindUsers = async () => {
+    const keyword = bindUserKeyword.trim();
+    if (!keyword) {
+      showWarning(t('请先输入用户关键词'));
+      return;
+    }
+    setBindUserSearching(true);
+    setSelectedBindUser(null);
+    try {
+      const res = await API.get('/api/user/search', {
+        params: { keyword, p: 1, page_size: 10 },
+      });
+      if (res.data.success) {
+        setBindUserCandidates(res.data.data?.items || []);
+      } else {
+        showError(res.data.message);
+      }
+    } catch (error) {
+      showError(t('搜索用户失败'));
+    } finally {
+      setBindUserSearching(false);
+    }
+  };
+
+  const bindInviter = async () => {
+    const affCode = bindAffCode.trim();
+    if (!selectedBindUser || !affCode) {
+      showWarning(t('请先搜索并选择被绑定用户，同时填写邀请代码'));
+      return;
+    }
+    setBindLoading(true);
+    try {
+      const res = await API.post('/api/affiliate/admin/bind-inviter', {
+        user_id: selectedBindUser.id,
+        aff_code: affCode,
+        force: bindForce,
+      });
+      if (res.data.success) {
+        setBindResult(res.data.data);
+        showSuccess(t('邀请关系已绑定'));
+      } else {
+        showError(res.data.message);
+      }
+    } catch (error) {
+      showError(t('绑定邀请关系失败'));
+    } finally {
+      setBindLoading(false);
+    }
+  };
+
+  const bindUserColumns = [
+    { title: 'ID', dataIndex: 'id', width: 80, render: (value) => `#${value}` },
+    { title: t('用户名'), dataIndex: 'username', width: 140 },
+    {
+      title: t('显示名'),
+      dataIndex: 'display_name',
+      width: 160,
+      render: (value) => value || '-',
+    },
+    {
+      title: t('邮箱'),
+      dataIndex: 'email',
+      width: 220,
+      render: (value) => value || '-',
+    },
+    {
+      title: t('用户组'),
+      dataIndex: 'group',
+      width: 120,
+      render: (value) => value || '-',
+    },
+    {
+      title: t('操作'),
+      key: 'action',
+      width: 100,
+      render: (_, record) => {
+        const selected = selectedBindUser?.id === record.id;
+        return (
+          <Button
+            size='small'
+            type={selected ? 'primary' : 'tertiary'}
+            theme={selected ? 'solid' : 'outline'}
+            onClick={() => setSelectedBindUser(record)}
+          >
+            {selected ? t('已选择') : t('选择')}
+          </Button>
+        );
+      },
+    },
+  ];
+
   const columns = [
     { title: 'ID', dataIndex: 'id', width: 80 },
     { title: t('用户 ID'), dataIndex: 'user_id', width: 100 },
@@ -361,230 +464,359 @@ export default function SettingsAffiliateCommission(props) {
 
   return (
     <Spin spinning={saving}>
-      <Form
-        values={inputs}
-        getFormApi={(api) => (formApiRef.current = api)}
-        style={{ marginBottom: 16 }}
-      >
-        <div className='space-y-4'>
-          <Text type='secondary'>
-            {t('设置付费后返佣比例、延迟到账、提现门槛和推广文案')}
-          </Text>
+      <Tabs type='line' defaultActiveKey='rules'>
+        <Tabs.TabPane tab={t('返佣规则')} itemKey='rules'>
+          <Form
+            values={inputs}
+            getFormApi={(api) => (formApiRef.current = api)}
+            style={{ marginBottom: 16 }}
+          >
+            <div className='space-y-4'>
+              <Text type='secondary'>
+                {t('设置付费后返佣比例、延迟到账、提现门槛和推广文案')}
+              </Text>
 
-          <div style={PANEL_STYLE}>
-            <SectionHeader
-              title={t('返佣规则')}
-              description={t('设置一级和二级返佣的开关与比例')}
-            />
-            <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
-              <div style={SOFT_PANEL_STYLE}>
-                <div className='mb-3 flex items-center justify-between gap-3'>
-                  <Text strong>{t('启用一级返佣')}</Text>
-                  <Form.Switch
-                    field='affiliate_setting.first_level_enabled'
-                    noLabel
-                    checkedText='｜'
-                    uncheckedText='〇'
-                    onChange={handleFieldChange(
-                      'affiliate_setting.first_level_enabled',
-                    )}
-                  />
+              <div style={PANEL_STYLE}>
+                <SectionHeader
+                  title={t('返佣规则')}
+                  description={t('设置一级和二级返佣的开关与比例')}
+                />
+                <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
+                  <div style={SOFT_PANEL_STYLE}>
+                    <div className='mb-3 flex items-center justify-between gap-3'>
+                      <Text strong>{t('启用一级返佣')}</Text>
+                      <Form.Switch
+                        field='affiliate_setting.first_level_enabled'
+                        noLabel
+                        checkedText='｜'
+                        uncheckedText='〇'
+                        onChange={handleFieldChange(
+                          'affiliate_setting.first_level_enabled',
+                        )}
+                      />
+                    </div>
+                    <Form.InputNumber
+                      field='affiliate_setting.first_level_ratio'
+                      label={t('一级返佣比例（%）')}
+                      min={0}
+                      max={100}
+                      style={COMPACT_INPUT_STYLE}
+                      onChange={handleFieldChange(
+                        'affiliate_setting.first_level_ratio',
+                      )}
+                    />
+                  </div>
+
+                  <div style={SOFT_PANEL_STYLE}>
+                    <div className='mb-3 flex items-center justify-between gap-3'>
+                      <Text strong>{t('启用二级返佣')}</Text>
+                      <Form.Switch
+                        field='affiliate_setting.second_level_enabled'
+                        noLabel
+                        checkedText='｜'
+                        uncheckedText='〇'
+                        onChange={handleFieldChange(
+                          'affiliate_setting.second_level_enabled',
+                        )}
+                      />
+                    </div>
+                    <Form.InputNumber
+                      field='affiliate_setting.second_level_ratio'
+                      label={t('二级返佣比例（%）')}
+                      min={0}
+                      max={100}
+                      style={COMPACT_INPUT_STYLE}
+                      onChange={handleFieldChange(
+                        'affiliate_setting.second_level_ratio',
+                      )}
+                    />
+                  </div>
                 </div>
-                <Form.InputNumber
-                  field='affiliate_setting.first_level_ratio'
-                  label={t('一级返佣比例（%）')}
-                  min={0}
-                  max={100}
-                  style={COMPACT_INPUT_STYLE}
+              </div>
+
+              <div className='grid grid-cols-1 gap-4 xl:grid-cols-2'>
+                <div style={PANEL_STYLE}>
+                  <SectionHeader
+                    title={t('触发与提现')}
+                    description={t('配置返佣触发范围和用户可见的提现渠道')}
+                  />
+                  <div className='space-y-4'>
+                    <SwitchRow
+                      title={t('充值触发返佣')}
+                      description={t('充值成功后按规则生成返佣')}
+                    >
+                      <Form.Switch
+                        field='affiliate_setting.trigger_topup_enabled'
+                        noLabel
+                        checkedText='｜'
+                        uncheckedText='〇'
+                        onChange={handleFieldChange(
+                          'affiliate_setting.trigger_topup_enabled',
+                        )}
+                      />
+                    </SwitchRow>
+
+                    <SwitchRow
+                      title={t('订阅触发返佣')}
+                      description={t('订阅付费后按规则生成返佣')}
+                    >
+                      <Form.Switch
+                        field='affiliate_setting.trigger_subscription_enabled'
+                        noLabel
+                        checkedText='｜'
+                        uncheckedText='〇'
+                        onChange={handleFieldChange(
+                          'affiliate_setting.trigger_subscription_enabled',
+                        )}
+                      />
+                    </SwitchRow>
+
+                    <SwitchRow
+                      title={t('过滤兑换码兑换返佣')}
+                      description={t(
+                        '开启后，用户兑换兑换码增加额度不会生成返佣',
+                      )}
+                    >
+                      <Form.Switch
+                        field='affiliate_setting.filter_redemption_topup_enabled'
+                        noLabel
+                        checkedText='｜'
+                        uncheckedText='〇'
+                        onChange={handleFieldChange(
+                          'affiliate_setting.filter_redemption_topup_enabled',
+                        )}
+                      />
+                    </SwitchRow>
+
+                    <Form.InputNumber
+                      field='affiliate_setting.settlement_delay_seconds'
+                      label={t('延迟到账分钟数')}
+                      min={0}
+                      precision={0}
+                      style={COMPACT_INPUT_STYLE}
+                      onChange={handleFieldChange(
+                        'affiliate_setting.settlement_delay_seconds',
+                      )}
+                    />
+                  </div>
+                </div>
+
+                <div style={PANEL_STYLE}>
+                  <SectionHeader
+                    title={t('支持的提现渠道')}
+                    description={t('未开放的渠道不会在用户返佣页展示')}
+                  />
+                  <div className='space-y-4'>
+                    <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
+                      <Form.InputNumber
+                        field='affiliate_setting.min_withdrawal_amount'
+                        label={t('最低提现额度')}
+                        min={0}
+                        style={COMPACT_INPUT_STYLE}
+                        onChange={handleFieldChange(
+                          'affiliate_setting.min_withdrawal_amount',
+                        )}
+                      />
+                      <Form.Input
+                        field='affiliate_setting.usdt_chain'
+                        label={t('USDT 提现链')}
+                        placeholder='TRC20'
+                        style={COMPACT_INPUT_STYLE}
+                        onChange={handleFieldChange(
+                          'affiliate_setting.usdt_chain',
+                        )}
+                      />
+                    </div>
+
+                    <Space vertical align='start' style={WIDE_INPUT_STYLE}>
+                      <Space wrap>
+                        {PAYOUT_METHOD_OPTIONS.map(([method, label]) => {
+                          const checked =
+                            selectedPayoutMethods.includes(method);
+                          return (
+                            <Button
+                              key={method}
+                              type={checked ? 'primary' : 'tertiary'}
+                              theme={checked ? 'solid' : 'outline'}
+                              onClick={() =>
+                                togglePayoutMethod(method, !checked)
+                              }
+                            >
+                              {t(label)}
+                            </Button>
+                          );
+                        })}
+                      </Space>
+                      <Form.Input
+                        field='affiliate_setting.payout_methods'
+                        noLabel
+                        style={{ display: 'none' }}
+                      />
+                    </Space>
+                  </div>
+                </div>
+              </div>
+
+              <div style={PANEL_STYLE}>
+                <SectionHeader
+                  title={t('推广文案模板')}
+                  description={t('使用 {invite_link} 表示邀请链接变量')}
+                />
+                <Form.TextArea
+                  field='affiliate_setting.promotion_template'
+                  noLabel
+                  autosize={{ minRows: 4, maxRows: 8 }}
+                  style={WIDE_INPUT_STYLE}
                   onChange={handleFieldChange(
-                    'affiliate_setting.first_level_ratio',
+                    'affiliate_setting.promotion_template',
                   )}
                 />
               </div>
 
-              <div style={SOFT_PANEL_STYLE}>
-                <div className='mb-3 flex items-center justify-between gap-3'>
-                  <Text strong>{t('启用二级返佣')}</Text>
-                  <Form.Switch
-                    field='affiliate_setting.second_level_enabled'
-                    noLabel
-                    checkedText='｜'
-                    uncheckedText='〇'
-                    onChange={handleFieldChange(
-                      'affiliate_setting.second_level_enabled',
-                    )}
-                  />
-                </div>
-                <Form.InputNumber
-                  field='affiliate_setting.second_level_ratio'
-                  label={t('二级返佣比例（%）')}
-                  min={0}
-                  max={100}
-                  style={COMPACT_INPUT_STYLE}
-                  onChange={handleFieldChange(
-                    'affiliate_setting.second_level_ratio',
-                  )}
-                />
+              <div className='flex justify-end'>
+                <Button type='primary' loading={saving} onClick={saveSettings}>
+                  {t('保存设置')}
+                </Button>
               </div>
             </div>
-          </div>
+          </Form>
+        </Tabs.TabPane>
 
-          <div className='grid grid-cols-1 gap-4 xl:grid-cols-2'>
-            <div style={PANEL_STYLE}>
+        <Tabs.TabPane tab={t('手动绑定邀请')} itemKey='manual-bind'>
+          <Card>
+            <Space vertical align='start' style={{ width: '100%' }}>
               <SectionHeader
-                title={t('触发与提现')}
-                description={t('配置返佣触发范围和用户可见的提现渠道')}
+                title={t('手动绑定邀请关系')}
+                description={t('给用户补绑注册时未捕获到的 ?aff=xxxx 邀请关系')}
               />
-              <div className='space-y-4'>
-                <SwitchRow
-                  title={t('充值触发返佣')}
-                  description={t('充值成功后按规则生成返佣')}
-                >
-                  <Form.Switch
-                    field='affiliate_setting.trigger_topup_enabled'
-                    noLabel
-                    checkedText='｜'
-                    uncheckedText='〇'
-                    onChange={handleFieldChange(
-                      'affiliate_setting.trigger_topup_enabled',
-                    )}
-                  />
-                </SwitchRow>
-
-                <SwitchRow
-                  title={t('订阅触发返佣')}
-                  description={t('订阅付费后按规则生成返佣')}
-                >
-                  <Form.Switch
-                    field='affiliate_setting.trigger_subscription_enabled'
-                    noLabel
-                    checkedText='｜'
-                    uncheckedText='〇'
-                    onChange={handleFieldChange(
-                      'affiliate_setting.trigger_subscription_enabled',
-                    )}
-                  />
-                </SwitchRow>
-
-                <Form.InputNumber
-                  field='affiliate_setting.settlement_delay_seconds'
-                  label={t('延迟到账分钟数')}
-                  min={0}
-                  precision={0}
-                  style={COMPACT_INPUT_STYLE}
-                  onChange={handleFieldChange(
-                    'affiliate_setting.settlement_delay_seconds',
-                  )}
-                />
-              </div>
-            </div>
-
-            <div style={PANEL_STYLE}>
-              <SectionHeader
-                title={t('支持的提现渠道')}
-                description={t('未开放的渠道不会在用户返佣页展示')}
-              />
-              <div className='space-y-4'>
-                <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-                  <Form.InputNumber
-                    field='affiliate_setting.min_withdrawal_amount'
-                    label={t('最低提现额度')}
-                    min={0}
-                    style={COMPACT_INPUT_STYLE}
-                    onChange={handleFieldChange(
-                      'affiliate_setting.min_withdrawal_amount',
-                    )}
-                  />
-                  <Form.Input
-                    field='affiliate_setting.usdt_chain'
-                    label={t('USDT 提现链')}
-                    placeholder='TRC20'
-                    style={COMPACT_INPUT_STYLE}
-                    onChange={handleFieldChange(
-                      'affiliate_setting.usdt_chain',
-                    )}
-                  />
-                </div>
-
-                <Space vertical align='start' style={WIDE_INPUT_STYLE}>
-                  <Space wrap>
-                    {PAYOUT_METHOD_OPTIONS.map(([method, label]) => {
-                      const checked = selectedPayoutMethods.includes(method);
-                      return (
-                        <Button
-                          key={method}
-                          type={checked ? 'primary' : 'tertiary'}
-                          theme={checked ? 'solid' : 'outline'}
-                          onClick={() => togglePayoutMethod(method, !checked)}
-                        >
-                          {t(label)}
-                        </Button>
-                      );
-                    })}
+              <div className='grid grid-cols-1 gap-4 md:grid-cols-2 w-full'>
+                <Space vertical align='start' style={COMPACT_INPUT_STYLE}>
+                  <Text strong>{t('被绑定用户')}</Text>
+                  <Space style={COMPACT_INPUT_STYLE}>
+                    <Input
+                      placeholder={t('用户 ID、用户名、邮箱或显示名')}
+                      value={bindUserKeyword}
+                      style={COMPACT_INPUT_STYLE}
+                      onChange={(value) => {
+                        setBindUserKeyword(value);
+                        setSelectedBindUser(null);
+                      }}
+                      onEnterPress={searchBindUsers}
+                    />
+                    <Button
+                      theme='outline'
+                      loading={bindUserSearching}
+                      onClick={searchBindUsers}
+                    >
+                      {t('搜索用户')}
+                    </Button>
                   </Space>
-                  <Form.Input
-                    field='affiliate_setting.payout_methods'
-                    noLabel
-                    style={{ display: 'none' }}
+                </Space>
+                <Space vertical align='start' style={COMPACT_INPUT_STYLE}>
+                  <Text strong>{t('邀请代码')}</Text>
+                  <Input
+                    placeholder={t('支持纯代码或包含 ?aff= 的链接')}
+                    value={bindAffCode}
+                    style={COMPACT_INPUT_STYLE}
+                    onChange={setBindAffCode}
                   />
                 </Space>
               </div>
-            </div>
-          </div>
-
-          <div style={PANEL_STYLE}>
-            <SectionHeader
-              title={t('推广文案模板')}
-              description={t('使用 {invite_link} 表示邀请链接变量')}
-            />
-            <Form.TextArea
-              field='affiliate_setting.promotion_template'
-              noLabel
-              autosize={{ minRows: 4, maxRows: 8 }}
-              style={WIDE_INPUT_STYLE}
-              onChange={handleFieldChange(
-                'affiliate_setting.promotion_template',
+              <Table
+                rowKey='id'
+                size='small'
+                columns={bindUserColumns}
+                dataSource={bindUserCandidates}
+                pagination={false}
+                empty={<Empty description={t('暂无匹配用户')} />}
+                scroll={{ x: 820 }}
+                className='w-full'
+              />
+              {selectedBindUser && (
+                <div style={SOFT_PANEL_STYLE} className='w-full'>
+                  <Text>
+                    {t('已选择被绑定用户')}：#{selectedBindUser.id}{' '}
+                    {selectedBindUser.display_name ||
+                      selectedBindUser.username ||
+                      ''}
+                    {selectedBindUser.email ? ` (${selectedBindUser.email})` : ''}
+                  </Text>
+                </div>
               )}
+              <Checkbox
+                checked={bindForce}
+                onChange={(event) => setBindForce(event.target.checked)}
+              >
+                {t('强制覆盖已有邀请人')}
+              </Checkbox>
+              <Text type='secondary'>
+                {t(
+                  '默认不会覆盖已有邀请人；强制覆盖会同步调整新旧邀请人的邀请人数。',
+                )}
+              </Text>
+              <Button
+                type='primary'
+                loading={bindLoading}
+                onClick={bindInviter}
+              >
+                {t('绑定邀请人')}
+              </Button>
+              {bindResult && (
+                <div style={SOFT_PANEL_STYLE} className='w-full'>
+                  <Space vertical align='start'>
+                    <Text strong>{t('绑定结果')}</Text>
+                    <Text>
+                      {t('被绑定用户')}：#{bindResult.user_id}{' '}
+                      {bindResult.display_name || bindResult.username || ''}
+                    </Text>
+                    <Text>
+                      {t('邀请人')}：#{bindResult.inviter_id}{' '}
+                      {bindResult.inviter_username || ''} (
+                      {bindResult.inviter_aff_code || '-'})
+                    </Text>
+                    <Text type='secondary'>
+                      {t('原邀请人')}：
+                      {bindResult.previous_inviter_id || t('无邀请人')}
+                    </Text>
+                  </Space>
+                </div>
+              )}
+            </Space>
+          </Card>
+        </Tabs.TabPane>
+
+        <Tabs.TabPane tab={t('提现审核')} itemKey='withdrawals'>
+          <Card
+            title={
+              <div className='flex items-center justify-between gap-3'>
+                <span>{t('返佣提现审核')}</span>
+                <Select
+                  value={withdrawalStatus}
+                  onChange={setWithdrawalStatus}
+                  style={{ width: 140 }}
+                >
+                  <Select.Option value=''>{t('全部状态')}</Select.Option>
+                  <Select.Option value='pending'>{t('待审核')}</Select.Option>
+                  <Select.Option value='approved'>{t('已通过')}</Select.Option>
+                  <Select.Option value='paid'>{t('已打款')}</Select.Option>
+                  <Select.Option value='rejected'>{t('已驳回')}</Select.Option>
+                </Select>
+              </div>
+            }
+          >
+            <Table
+              rowKey='id'
+              loading={withdrawalsLoading}
+              columns={columns}
+              dataSource={withdrawals}
+              pagination={false}
+              empty={<Empty description={t('暂无提现申请')} />}
+              size='small'
+              scroll={{ x: 1170 }}
             />
-          </div>
-
-          <div className='flex justify-end'>
-            <Button type='primary' loading={saving} onClick={saveSettings}>
-              {t('保存设置')}
-            </Button>
-          </div>
-        </div>
-      </Form>
-
-      <Card
-        title={
-          <div className='flex items-center justify-between gap-3'>
-            <span>{t('返佣提现审核')}</span>
-            <Select
-              value={withdrawalStatus}
-              onChange={setWithdrawalStatus}
-              style={{ width: 140 }}
-            >
-              <Select.Option value=''>{t('全部状态')}</Select.Option>
-              <Select.Option value='pending'>{t('待审核')}</Select.Option>
-              <Select.Option value='approved'>{t('已通过')}</Select.Option>
-              <Select.Option value='paid'>{t('已打款')}</Select.Option>
-              <Select.Option value='rejected'>{t('已驳回')}</Select.Option>
-            </Select>
-          </div>
-        }
-      >
-        <Table
-          rowKey='id'
-          loading={withdrawalsLoading}
-          columns={columns}
-          dataSource={withdrawals}
-          pagination={false}
-          empty={<Empty description={t('暂无提现申请')} />}
-          size='small'
-          scroll={{ x: 1170 }}
-        />
-      </Card>
+          </Card>
+        </Tabs.TabPane>
+      </Tabs>
     </Spin>
   );
 }

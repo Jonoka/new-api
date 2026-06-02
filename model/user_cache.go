@@ -143,6 +143,10 @@ func cacheDecrUserQuota(userId int, delta int64) error {
 	return cacheIncrUserQuota(userId, -delta)
 }
 
+func AdjustUserQuotaCache(userId int, delta int64) error {
+	return cacheIncrUserQuota(userId, delta)
+}
+
 // Helper functions to get individual fields if needed
 func getUserGroupCache(userId int) (string, error) {
 	cache, err := GetUserCache(userId)

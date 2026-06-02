@@ -16,21 +16,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import * as z from 'zod'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ChangeEvent } from 'react'
+import * as z from 'zod'
 import type { Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { Search } from 'lucide-react'
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
-import {
-  getAdminAffiliateWithdrawals,
-  updateAdminAffiliateWithdrawal,
-} from '@/features/affiliate/api'
-import type { AffiliateWithdrawal } from '@/features/affiliate/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Form,
   FormControl,
@@ -41,10 +38,7 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from '@/components/ui/native-select'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Switch } from '@/components/ui/switch'
 import {
   Table,
@@ -54,7 +48,19 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  bindAdminAffiliateInviter,
+  getAdminAffiliateWithdrawals,
+  updateAdminAffiliateWithdrawal,
+} from '@/features/affiliate/api'
+import type {
+  AdminBindAffiliateInviterResult,
+  AffiliateWithdrawal,
+} from '@/features/affiliate/types'
+import { searchUsers } from '@/features/users/api'
+import type { User } from '@/features/users/types'
 import { FormDirtyIndicator } from '../components/form-dirty-indicator'
 import { FormNavigationGuard } from '../components/form-navigation-guard'
 import { SettingsSection } from '../components/settings-section'
@@ -71,6 +77,7 @@ const affiliateSchema = z.object({
     min_withdrawal_amount: z.coerce.number().min(0),
     trigger_topup_enabled: z.boolean(),
     trigger_subscription_enabled: z.boolean(),
+    filter_redemption_topup_enabled: z.boolean(),
     payout_methods: z.string().min(1),
     usdt_chain: z.string().min(1),
     promotion_template: z.string().min(1),
@@ -122,6 +129,15 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
   const [withdrawalStatus, setWithdrawalStatus] = useState('')
   const [withdrawalsLoading, setWithdrawalsLoading] = useState(false)
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null)
+  const [bindUserKeyword, setBindUserKeyword] = useState('')
+  const [bindUserCandidates, setBindUserCandidates] = useState<User[]>([])
+  const [selectedBindUser, setSelectedBindUser] = useState<User | null>(null)
+  const [bindUserSearching, setBindUserSearching] = useState(false)
+  const [bindAffCode, setBindAffCode] = useState('')
+  const [bindForce, setBindForce] = useState(false)
+  const [bindLoading, setBindLoading] = useState(false)
+  const [bindResult, setBindResult] =
+    useState<AdminBindAffiliateInviterResult | null>(null)
   const displayDefaultValues = useMemo<AffiliateFormValues>(
     () => ({
       affiliate_setting: {
@@ -162,7 +178,9 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
       },
     })
 
-  const selectedPayoutMethods = (form.watch('affiliate_setting.payout_methods') || '')
+  const selectedPayoutMethods = (
+    form.watch('affiliate_setting.payout_methods') || ''
+  )
     .split(',')
     .map((method) => method.trim())
     .filter(Boolean)
@@ -175,8 +193,8 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
     const next = checked
       ? [...selectedPayoutMethods, method]
       : selectedPayoutMethods.filter((item) => item !== method)
-    const unique = PAYOUT_METHOD_OPTIONS.map(([value]) => value).filter((value) =>
-      next.includes(value)
+    const unique = PAYOUT_METHOD_OPTIONS.map(([value]) => value).filter(
+      (value) => next.includes(value)
     )
     form.setValue(PAYOUT_METHODS_KEY, unique.join(','), {
       shouldDirty: true,
@@ -215,324 +233,559 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
     }
   }
 
+  const searchBindUsers = async () => {
+    const keyword = bindUserKeyword.trim()
+    if (!keyword) {
+      toast.error(t('Enter a user keyword first'))
+      return
+    }
+    try {
+      setBindUserSearching(true)
+      setSelectedBindUser(null)
+      const res = await searchUsers({ keyword, p: 1, page_size: 10 })
+      if (res.success) {
+        setBindUserCandidates(res.data?.items || [])
+      }
+    } finally {
+      setBindUserSearching(false)
+    }
+  }
+
+  const bindInviter = async () => {
+    const affCode = bindAffCode.trim()
+    if (!selectedBindUser || !affCode) {
+      toast.error(t('Search and select target user first'))
+      return
+    }
+    try {
+      setBindLoading(true)
+      const res = await bindAdminAffiliateInviter({
+        user_id: selectedBindUser.id,
+        aff_code: affCode,
+        force: bindForce,
+      })
+      if (res.success) {
+        setBindResult(res.data)
+        toast.success(t('Referral binding saved'))
+      }
+    } finally {
+      setBindLoading(false)
+    }
+  }
+
   return (
     <SettingsSection title={t('Affiliate Commission')}>
-      <FormNavigationGuard when={isDirty} />
-      <Form {...form}>
-        <form onSubmit={handleSubmit} className='space-y-6'>
-          <FormDirtyIndicator isDirty={isDirty} />
+      <Tabs defaultValue='rules' className='space-y-6'>
+        <TabsList className='grid w-full grid-cols-3'>
+          <TabsTrigger value='rules'>{t('Commission rules')}</TabsTrigger>
+          <TabsTrigger value='manual-bind'>{t('Manual referral')}</TabsTrigger>
+          <TabsTrigger value='withdrawals'>{t('Withdrawals')}</TabsTrigger>
+        </TabsList>
 
-          <div className='grid gap-4 md:grid-cols-2'>
-            <FormField
-              control={form.control}
-              name='affiliate_setting.first_level_enabled'
-              render={({ field }) => (
-                <FormItem className='flex items-center justify-between rounded-lg border p-4'>
-                  <div className='space-y-0.5'>
-                    <FormLabel>{t('Enable level 1 commission')}</FormLabel>
-                    <FormDescription>
-                      {t('Reward the direct inviter after a paid order.')}
-                    </FormDescription>
-                  </div>
-                  <FormControl>
-                    <Switch
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                    />
-                  </FormControl>
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name='affiliate_setting.second_level_enabled'
-              render={({ field }) => (
-                <FormItem className='flex items-center justify-between rounded-lg border p-4'>
-                  <div className='space-y-0.5'>
-                    <FormLabel>{t('Enable level 2 commission')}</FormLabel>
-                    <FormDescription>
-                      {t('Reward the inviter above the direct inviter.')}
-                    </FormDescription>
-                  </div>
-                  <FormControl>
-                    <Switch
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                    />
-                  </FormControl>
-                </FormItem>
-              )}
-            />
-          </div>
+        <TabsContent value='rules'>
+          <FormNavigationGuard when={isDirty} />
+          <Form {...form}>
+            <form onSubmit={handleSubmit} className='space-y-6'>
+              <FormDirtyIndicator isDirty={isDirty} />
 
-          <div className='grid gap-4 md:grid-cols-2'>
-            {[
-              ['affiliate_setting.first_level_ratio', 'Level 1 ratio (%)'],
-              ['affiliate_setting.second_level_ratio', 'Level 2 ratio (%)'],
-              [
-                'affiliate_setting.settlement_delay_seconds',
-                'Settlement delay minutes',
-              ],
-              ['affiliate_setting.min_withdrawal_amount', 'Minimum withdrawal'],
-            ].map(([name, label]) => (
+              <div className='grid gap-4 md:grid-cols-2'>
+                <FormField
+                  control={form.control}
+                  name='affiliate_setting.first_level_enabled'
+                  render={({ field }) => (
+                    <FormItem className='flex items-center justify-between rounded-lg border p-4'>
+                      <div className='space-y-0.5'>
+                        <FormLabel>{t('Enable level 1 commission')}</FormLabel>
+                        <FormDescription>
+                          {t('Reward the direct inviter after a paid order.')}
+                        </FormDescription>
+                      </div>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name='affiliate_setting.second_level_enabled'
+                  render={({ field }) => (
+                    <FormItem className='flex items-center justify-between rounded-lg border p-4'>
+                      <div className='space-y-0.5'>
+                        <FormLabel>{t('Enable level 2 commission')}</FormLabel>
+                        <FormDescription>
+                          {t('Reward the inviter above the direct inviter.')}
+                        </FormDescription>
+                      </div>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className='grid gap-4 md:grid-cols-2'>
+                {[
+                  ['affiliate_setting.first_level_ratio', 'Level 1 ratio (%)'],
+                  ['affiliate_setting.second_level_ratio', 'Level 2 ratio (%)'],
+                  [
+                    'affiliate_setting.settlement_delay_seconds',
+                    'Settlement delay minutes',
+                  ],
+                  [
+                    'affiliate_setting.min_withdrawal_amount',
+                    'Minimum withdrawal',
+                  ],
+                ].map(([name, label]) => (
+                  <FormField
+                    key={name}
+                    control={form.control}
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    name={name as any}
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t(label)}</FormLabel>
+                        <FormControl>
+                          <Input
+                            type='number'
+                            value={field.value ?? ''}
+                            onChange={handleNumberChange(field.onChange)}
+                            name={field.name}
+                            onBlur={field.onBlur}
+                            ref={field.ref}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                ))}
+              </div>
+
+              <div className='grid gap-4 md:grid-cols-2'>
+                <FormField
+                  control={form.control}
+                  name='affiliate_setting.trigger_topup_enabled'
+                  render={({ field }) => (
+                    <FormItem className='flex items-center justify-between rounded-lg border p-4'>
+                      <div className='space-y-0.5'>
+                        <FormLabel>
+                          {t('Top-up orders trigger commission')}
+                        </FormLabel>
+                        <FormDescription>
+                          {t('Generate commission after successful top-ups.')}
+                        </FormDescription>
+                      </div>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name='affiliate_setting.trigger_subscription_enabled'
+                  render={({ field }) => (
+                    <FormItem className='flex items-center justify-between rounded-lg border p-4'>
+                      <div className='space-y-0.5'>
+                        <FormLabel>
+                          {t('Subscription orders trigger commission')}
+                        </FormLabel>
+                        <FormDescription>
+                          {t(
+                            'Generate commission after subscription purchases.'
+                          )}
+                        </FormDescription>
+                      </div>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+              </div>
+
               <FormField
-                key={name}
                 control={form.control}
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                name={name as any}
+                name='affiliate_setting.filter_redemption_topup_enabled'
                 render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t(label)}</FormLabel>
+                  <FormItem className='flex items-center justify-between rounded-lg border p-4'>
+                    <div className='space-y-0.5'>
+                      <FormLabel>
+                        {t('Filter redemption-code top-ups')}
+                      </FormLabel>
+                      <FormDescription>
+                        {t(
+                          'When enabled, quota added by redemption codes does not generate commission.'
+                        )}
+                      </FormDescription>
+                    </div>
                     <FormControl>
-                      <Input
-                        type='number'
-                        value={field.value ?? ''}
-                        onChange={handleNumberChange(field.onChange)}
-                        name={field.name}
-                        onBlur={field.onBlur}
-                        ref={field.ref}
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
                       />
                     </FormControl>
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='affiliate_setting.payout_methods'
+                render={() => (
+                  <FormItem>
+                    <FormLabel>{t('Supported payout methods')}</FormLabel>
+                    <FormDescription>
+                      {t(
+                        'Only enabled methods are shown on the affiliate page.'
+                      )}
+                    </FormDescription>
+                    <div className='grid gap-3 md:grid-cols-3'>
+                      {PAYOUT_METHOD_OPTIONS.map(([method, label]) => (
+                        <label
+                          key={method}
+                          className='flex items-center justify-between rounded-lg border p-4 text-sm'
+                        >
+                          <span>{t(label)}</span>
+                          <Switch
+                            checked={selectedPayoutMethods.includes(method)}
+                            onCheckedChange={(checked) =>
+                              togglePayoutMethod(method, checked)
+                            }
+                          />
+                        </label>
+                      ))}
+                    </div>
                     <FormMessage />
                   </FormItem>
                 )}
               />
-            ))}
-          </div>
 
-          <div className='grid gap-4 md:grid-cols-2'>
-            <FormField
-              control={form.control}
-              name='affiliate_setting.trigger_topup_enabled'
-              render={({ field }) => (
-                <FormItem className='flex items-center justify-between rounded-lg border p-4'>
-                  <div className='space-y-0.5'>
-                    <FormLabel>{t('Top-up orders trigger commission')}</FormLabel>
+              <FormField
+                control={form.control}
+                name='affiliate_setting.usdt_chain'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('USDT payout chain')}</FormLabel>
+                    <FormControl>
+                      <Input placeholder='TRC20' {...field} />
+                    </FormControl>
                     <FormDescription>
-                      {t('Generate commission after successful top-ups.')}
+                      {t('Users see this chain when saving a USDT address.')}
                     </FormDescription>
-                  </div>
-                  <FormControl>
-                    <Switch
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                    />
-                  </FormControl>
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name='affiliate_setting.trigger_subscription_enabled'
-              render={({ field }) => (
-                <FormItem className='flex items-center justify-between rounded-lg border p-4'>
-                  <div className='space-y-0.5'>
-                    <FormLabel>
-                      {t('Subscription orders trigger commission')}
-                    </FormLabel>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='affiliate_setting.promotion_template'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Promotion copy template')}</FormLabel>
+                    <FormControl>
+                      <Textarea className='min-h-28' {...field} />
+                    </FormControl>
                     <FormDescription>
-                      {t('Generate commission after subscription purchases.')}
+                      {t(
+                        'Use {invite_link} where the referral link should appear.'
+                      )}
                     </FormDescription>
-                  </div>
-                  <FormControl>
-                    <Switch
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                    />
-                  </FormControl>
-                </FormItem>
-              )}
-            />
-          </div>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-          <FormField
-            control={form.control}
-            name='affiliate_setting.payout_methods'
-            render={() => (
-              <FormItem>
-                <FormLabel>{t('Supported payout methods')}</FormLabel>
-                <FormDescription>
-                  {t('Only enabled methods are shown on the affiliate page.')}
-                </FormDescription>
-                <div className='grid gap-3 md:grid-cols-3'>
-                  {PAYOUT_METHOD_OPTIONS.map(([method, label]) => (
-                    <label
-                      key={method}
-                      className='flex items-center justify-between rounded-lg border p-4 text-sm'
-                    >
-                      <span>{t(label)}</span>
-                      <Switch
-                        checked={selectedPayoutMethods.includes(method)}
-                        onCheckedChange={(checked) =>
-                          togglePayoutMethod(method, checked)
-                        }
-                      />
-                    </label>
-                  ))}
-                </div>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
+              <Button
+                type='submit'
+                disabled={isSubmitting || updateOption.isPending}
+              >
+                {isSubmitting || updateOption.isPending
+                  ? t('Saving...')
+                  : t('Save affiliate settings')}
+              </Button>
+            </form>
+          </Form>
+        </TabsContent>
 
-          <FormField
-            control={form.control}
-            name='affiliate_setting.usdt_chain'
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>{t('USDT payout chain')}</FormLabel>
-                <FormControl>
-                  <Input placeholder='TRC20' {...field} />
-                </FormControl>
-                <FormDescription>
-                  {t('Users see this chain when saving a USDT address.')}
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          <FormField
-            control={form.control}
-            name='affiliate_setting.promotion_template'
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>{t('Promotion copy template')}</FormLabel>
-                <FormControl>
-                  <Textarea className='min-h-28' {...field} />
-                </FormControl>
-                <FormDescription>
-                  {t('Use {invite_link} where the referral link should appear.')}
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          <Button type='submit' disabled={isSubmitting || updateOption.isPending}>
-            {isSubmitting || updateOption.isPending
-              ? t('Saving...')
-              : t('Save affiliate settings')}
-          </Button>
-        </form>
-      </Form>
-
-      <div className='mt-8 space-y-3'>
-        <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
-          <div>
+        <TabsContent value='manual-bind' className='space-y-4'>
+          <div className='space-y-1'>
             <h3 className='text-base font-semibold'>
-              {t('Affiliate Withdrawals')}
+              {t('Manual referral binding')}
             </h3>
             <p className='text-muted-foreground text-sm'>
-              {t('Review withdrawals and mark offline payouts as paid.')}
+              {t('Bind a user to a missed ?aff=xxxx referral code.')}
             </p>
           </div>
-          <div className='flex gap-2'>
-            <NativeSelect
-              value={withdrawalStatus}
-              onChange={(event) => setWithdrawalStatus(event.target.value)}
-              className='w-36'
-            >
-              <NativeSelectOption value=''>{t('All statuses')}</NativeSelectOption>
-              <NativeSelectOption value='pending'>{t('pending')}</NativeSelectOption>
-              <NativeSelectOption value='approved'>
-                {t('approved')}
-              </NativeSelectOption>
-              <NativeSelectOption value='paid'>{t('paid')}</NativeSelectOption>
-              <NativeSelectOption value='rejected'>
-                {t('rejected')}
-              </NativeSelectOption>
-            </NativeSelect>
-            <Button variant='outline' onClick={loadWithdrawals}>
-              {withdrawalsLoading ? t('Refreshing...') : t('Refresh')}
-            </Button>
+          <div className='grid gap-4 md:grid-cols-2'>
+            <div className='space-y-2'>
+              <FormLabel>{t('Target user')}</FormLabel>
+              <div className='flex gap-2'>
+                <Input
+                  value={bindUserKeyword}
+                  onChange={(event) => {
+                    setBindUserKeyword(event.target.value)
+                    setSelectedBindUser(null)
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      searchBindUsers()
+                    }
+                  }}
+                  placeholder={t('User ID, username, email, or display name')}
+                />
+                <Button
+                  type='button'
+                  variant='outline'
+                  onClick={searchBindUsers}
+                  disabled={bindUserSearching}
+                >
+                  <Search className='size-4' />
+                  {bindUserSearching ? t('Searching...') : t('Search users')}
+                </Button>
+              </div>
+            </div>
+            <div className='space-y-2'>
+              <FormLabel>{t('Affiliate code')}</FormLabel>
+              <Input
+                value={bindAffCode}
+                onChange={(event) => setBindAffCode(event.target.value)}
+                placeholder={t('Code or URL containing ?aff=')}
+              />
+            </div>
           </div>
-        </div>
+          <div className='rounded-lg border'>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>ID</TableHead>
+                  <TableHead>{t('Username')}</TableHead>
+                  <TableHead>{t('Display name')}</TableHead>
+                  <TableHead>{t('Email')}</TableHead>
+                  <TableHead>{t('Group')}</TableHead>
+                  <TableHead className='text-right'>{t('Actions')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {bindUserCandidates.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className='h-20 text-center'>
+                      {t('No matched users')}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  bindUserCandidates.map((user) => {
+                    const selected = selectedBindUser?.id === user.id
+                    return (
+                      <TableRow key={user.id}>
+                        <TableCell>#{user.id}</TableCell>
+                        <TableCell>{user.username || '-'}</TableCell>
+                        <TableCell>{user.display_name || '-'}</TableCell>
+                        <TableCell>{user.email || '-'}</TableCell>
+                        <TableCell>{user.group || '-'}</TableCell>
+                        <TableCell className='text-right'>
+                          <Button
+                            type='button'
+                            size='sm'
+                            variant={selected ? 'default' : 'outline'}
+                            onClick={() => setSelectedBindUser(user)}
+                          >
+                            {selected ? t('Selected') : t('Select')}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          {selectedBindUser && (
+            <div className='bg-muted/40 rounded-lg border p-3 text-sm'>
+              <span className='font-medium'>{t('Selected target user')}:</span>{' '}
+              #{selectedBindUser.id} {selectedBindUser.display_name || selectedBindUser.username}
+              {selectedBindUser.email ? ` (${selectedBindUser.email})` : ''}
+            </div>
+          )}
+          <label className='flex items-start gap-3 rounded-lg border p-4 text-sm'>
+            <Checkbox
+              checked={bindForce}
+              onCheckedChange={(checked) => setBindForce(Boolean(checked))}
+            />
+            <span className='space-y-1'>
+              <span className='block font-medium'>
+                {t('Force overwrite existing inviter')}
+              </span>
+              <span className='text-muted-foreground block'>
+                {t(
+                  'By default existing inviters are not overwritten; force mode also adjusts old and new invite counts.'
+                )}
+              </span>
+            </span>
+          </label>
+          <Button onClick={bindInviter} disabled={bindLoading}>
+            {bindLoading ? t('Binding...') : t('Bind inviter')}
+          </Button>
+          {bindResult && (
+            <div className='bg-muted/40 space-y-2 rounded-lg border p-4 text-sm'>
+              <div className='font-medium'>{t('Binding result')}</div>
+              <div>
+                {t('Target user')}: #{bindResult.user_id}{' '}
+                {bindResult.display_name || bindResult.username || ''}
+              </div>
+              <div>
+                {t('Inviter')}: #{bindResult.inviter_id}{' '}
+                {bindResult.inviter_username} ({bindResult.inviter_aff_code})
+              </div>
+              <div className='text-muted-foreground'>
+                {t('Previous inviter')}:{' '}
+                {bindResult.previous_inviter_id || t('No Inviter')}
+              </div>
+            </div>
+          )}
+        </TabsContent>
 
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>ID</TableHead>
-              <TableHead>{t('User')}</TableHead>
-              <TableHead>{t('Method')}</TableHead>
-              <TableHead>{t('Amount')}</TableHead>
-              <TableHead>{t('Status')}</TableHead>
-              <TableHead>{t('Created At')}</TableHead>
-              <TableHead className='text-right'>{t('Actions')}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {withdrawals.length === 0 ? (
+        <TabsContent value='withdrawals' className='space-y-3'>
+          <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+            <div>
+              <h3 className='text-base font-semibold'>
+                {t('Affiliate Withdrawals')}
+              </h3>
+              <p className='text-muted-foreground text-sm'>
+                {t('Review withdrawals and mark offline payouts as paid.')}
+              </p>
+            </div>
+            <div className='flex gap-2'>
+              <NativeSelect
+                value={withdrawalStatus}
+                onChange={(event) => setWithdrawalStatus(event.target.value)}
+                className='w-36'
+              >
+                <NativeSelectOption value=''>
+                  {t('All statuses')}
+                </NativeSelectOption>
+                <NativeSelectOption value='pending'>
+                  {t('pending')}
+                </NativeSelectOption>
+                <NativeSelectOption value='approved'>
+                  {t('approved')}
+                </NativeSelectOption>
+                <NativeSelectOption value='paid'>
+                  {t('paid')}
+                </NativeSelectOption>
+                <NativeSelectOption value='rejected'>
+                  {t('rejected')}
+                </NativeSelectOption>
+              </NativeSelect>
+              <Button variant='outline' onClick={loadWithdrawals}>
+                {withdrawalsLoading ? t('Refreshing...') : t('Refresh')}
+              </Button>
+            </div>
+          </div>
+
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={7} className='h-24 text-center'>
-                  {withdrawalsLoading
-                    ? t('Loading...')
-                    : t('No withdrawal records')}
-                </TableCell>
+                <TableHead>ID</TableHead>
+                <TableHead>{t('User')}</TableHead>
+                <TableHead>{t('Method')}</TableHead>
+                <TableHead>{t('Amount')}</TableHead>
+                <TableHead>{t('Status')}</TableHead>
+                <TableHead>{t('Created At')}</TableHead>
+                <TableHead className='text-right'>{t('Actions')}</TableHead>
               </TableRow>
-            ) : (
-              withdrawals.map((withdrawal) => (
-                <TableRow key={withdrawal.id}>
-                  <TableCell>{withdrawal.id}</TableCell>
-                  <TableCell>{withdrawal.user_id}</TableCell>
-                  <TableCell>
-                    {withdrawalMethodLabel(withdrawal.method)}
-                  </TableCell>
-                  <TableCell>{formatQuota(withdrawal.quota)}</TableCell>
-                  <TableCell>
-                    <Badge variant={withdrawalStatusVariant(withdrawal.status)}>
-                      {t(withdrawal.status)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {formatTimestampToDate(withdrawal.created_at)}
-                  </TableCell>
-                  <TableCell>
-                    <div className='flex justify-end gap-2'>
-                      {withdrawal.status === 'pending' && (
-                        <>
-                          <Button
-                            size='sm'
-                            variant='outline'
-                            disabled={actionLoadingId === withdrawal.id}
-                            onClick={() =>
-                              updateWithdrawal(withdrawal.id, 'approve')
-                            }
-                          >
-                            {t('Approve')}
-                          </Button>
-                          <Button
-                            size='sm'
-                            variant='destructive'
-                            disabled={actionLoadingId === withdrawal.id}
-                            onClick={() =>
-                              updateWithdrawal(withdrawal.id, 'reject')
-                            }
-                          >
-                            {t('Reject')}
-                          </Button>
-                        </>
-                      )}
-                      {(withdrawal.status === 'pending' ||
-                        withdrawal.status === 'approved') && (
-                        <Button
-                          size='sm'
-                          disabled={actionLoadingId === withdrawal.id}
-                          onClick={() =>
-                            updateWithdrawal(withdrawal.id, 'paid')
-                          }
-                        >
-                          {t('Mark Paid')}
-                        </Button>
-                      )}
-                    </div>
+            </TableHeader>
+            <TableBody>
+              {withdrawals.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className='h-24 text-center'>
+                    {withdrawalsLoading
+                      ? t('Loading...')
+                      : t('No withdrawal records')}
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+              ) : (
+                withdrawals.map((withdrawal) => (
+                  <TableRow key={withdrawal.id}>
+                    <TableCell>{withdrawal.id}</TableCell>
+                    <TableCell>{withdrawal.user_id}</TableCell>
+                    <TableCell>
+                      {withdrawalMethodLabel(withdrawal.method)}
+                    </TableCell>
+                    <TableCell>{formatQuota(withdrawal.quota)}</TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={withdrawalStatusVariant(withdrawal.status)}
+                      >
+                        {t(withdrawal.status)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {formatTimestampToDate(withdrawal.created_at)}
+                    </TableCell>
+                    <TableCell>
+                      <div className='flex justify-end gap-2'>
+                        {withdrawal.status === 'pending' && (
+                          <>
+                            <Button
+                              size='sm'
+                              variant='outline'
+                              disabled={actionLoadingId === withdrawal.id}
+                              onClick={() =>
+                                updateWithdrawal(withdrawal.id, 'approve')
+                              }
+                            >
+                              {t('Approve')}
+                            </Button>
+                            <Button
+                              size='sm'
+                              variant='destructive'
+                              disabled={actionLoadingId === withdrawal.id}
+                              onClick={() =>
+                                updateWithdrawal(withdrawal.id, 'reject')
+                              }
+                            >
+                              {t('Reject')}
+                            </Button>
+                          </>
+                        )}
+                        {(withdrawal.status === 'pending' ||
+                          withdrawal.status === 'approved') && (
+                          <Button
+                            size='sm'
+                            disabled={actionLoadingId === withdrawal.id}
+                            onClick={() =>
+                              updateWithdrawal(withdrawal.id, 'paid')
+                            }
+                          >
+                            {t('Mark Paid')}
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </TabsContent>
+      </Tabs>
     </SettingsSection>
   )
 }

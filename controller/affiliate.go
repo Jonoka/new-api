@@ -17,16 +17,17 @@ import (
 )
 
 type affiliateSettingResponse struct {
-	FirstLevelEnabled          bool     `json:"first_level_enabled"`
-	FirstLevelRatio            int      `json:"first_level_ratio"`
-	SecondLevelEnabled         bool     `json:"second_level_enabled"`
-	SecondLevelRatio           int      `json:"second_level_ratio"`
-	SettlementDelaySeconds     int64    `json:"settlement_delay_seconds"`
-	MinWithdrawalAmount        int      `json:"min_withdrawal_amount"`
-	TriggerTopupEnabled        bool     `json:"trigger_topup_enabled"`
-	TriggerSubscriptionEnabled bool     `json:"trigger_subscription_enabled"`
-	PayoutMethods              []string `json:"payout_methods"`
-	UsdtChain                  string   `json:"usdt_chain"`
+	FirstLevelEnabled            bool     `json:"first_level_enabled"`
+	FirstLevelRatio              int      `json:"first_level_ratio"`
+	SecondLevelEnabled           bool     `json:"second_level_enabled"`
+	SecondLevelRatio             int      `json:"second_level_ratio"`
+	SettlementDelaySeconds       int64    `json:"settlement_delay_seconds"`
+	MinWithdrawalAmount          int      `json:"min_withdrawal_amount"`
+	TriggerTopupEnabled          bool     `json:"trigger_topup_enabled"`
+	TriggerSubscriptionEnabled   bool     `json:"trigger_subscription_enabled"`
+	FilterRedemptionTopupEnabled bool     `json:"filter_redemption_topup_enabled"`
+	PayoutMethods                []string `json:"payout_methods"`
+	UsdtChain                    string   `json:"usdt_chain"`
 }
 
 type affiliateDisplayResponse struct {
@@ -56,19 +57,27 @@ type affiliateAdminWithdrawalRequest struct {
 	Remark string `json:"remark"`
 }
 
+type affiliateAdminBindInviterRequest struct {
+	UserId         int    `json:"user_id"`
+	UserIdentifier string `json:"user_identifier"`
+	AffCode        string `json:"aff_code"`
+	Force          bool   `json:"force"`
+}
+
 func affiliateSettingPayload() affiliateSettingResponse {
 	affiliateSetting := setting.GetAffiliateSetting()
 	return affiliateSettingResponse{
-		FirstLevelEnabled:          affiliateSetting.FirstLevelEnabled,
-		FirstLevelRatio:            affiliateSetting.FirstLevelRatio,
-		SecondLevelEnabled:         affiliateSetting.SecondLevelEnabled,
-		SecondLevelRatio:           affiliateSetting.SecondLevelRatio,
-		SettlementDelaySeconds:     affiliateSetting.SettlementDelaySeconds,
-		MinWithdrawalAmount:        affiliateSetting.MinWithdrawalAmount,
-		TriggerTopupEnabled:        affiliateSetting.TriggerTopupEnabled,
-		TriggerSubscriptionEnabled: affiliateSetting.TriggerSubscriptionEnabled,
-		PayoutMethods:              model.NormalizeAffiliatePayoutMethods(affiliateSetting.PayoutMethods),
-		UsdtChain:                  affiliateSetting.UsdtChain,
+		FirstLevelEnabled:            affiliateSetting.FirstLevelEnabled,
+		FirstLevelRatio:              affiliateSetting.FirstLevelRatio,
+		SecondLevelEnabled:           affiliateSetting.SecondLevelEnabled,
+		SecondLevelRatio:             affiliateSetting.SecondLevelRatio,
+		SettlementDelaySeconds:       affiliateSetting.SettlementDelaySeconds,
+		MinWithdrawalAmount:          affiliateSetting.MinWithdrawalAmount,
+		TriggerTopupEnabled:          affiliateSetting.TriggerTopupEnabled,
+		TriggerSubscriptionEnabled:   affiliateSetting.TriggerSubscriptionEnabled,
+		FilterRedemptionTopupEnabled: affiliateSetting.FilterRedemptionTopupEnabled,
+		PayoutMethods:                model.NormalizeAffiliatePayoutMethods(affiliateSetting.PayoutMethods),
+		UsdtChain:                    affiliateSetting.UsdtChain,
 	}
 }
 
@@ -142,7 +151,7 @@ func GetAffiliateSummary(c *gin.Context) {
 func GetAffiliateRecords(c *gin.Context) {
 	userId := c.GetInt("id")
 	pageInfo := common.GetPageQuery(c)
-	records, total, err := model.GetAffiliateRecords(userId, c.Query("status"), pageInfo)
+	records, total, err := model.GetAffiliateRecordsWithDetails(userId, c.Query("status"), pageInfo)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -354,6 +363,20 @@ func AdminListAffiliateWithdrawals(c *gin.Context) {
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(withdrawals)
 	common.ApiSuccess(c, pageInfo)
+}
+
+func AdminBindAffiliateInviter(c *gin.Context) {
+	req := affiliateAdminBindInviterRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	result, err := model.BindUserInviterByAffCode(req.UserId, req.UserIdentifier, req.AffCode, req.Force)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, result)
 }
 
 func parseAffiliateWithdrawalId(c *gin.Context) (int, bool) {

@@ -186,6 +186,7 @@ const EditChannelModal = (props) => {
     groups: ['default'],
     priority: 0,
     weight: 0,
+    concurrency_limit: 0,
     tag: '',
     multi_key_mode: 'random',
     // 渠道额外设置的默认值
@@ -1093,6 +1094,9 @@ const EditChannelModal = (props) => {
         (data.remark && data.remark.trim()) ||
         (data.priority && data.priority !== 0) ||
         (data.weight && data.weight !== 0) ||
+        (data.concurrency_limit !== undefined &&
+          data.concurrency_limit !== null &&
+          data.concurrency_limit !== 0) ||
         (data.proxy && data.proxy.trim()) ||
         (data.system_prompt && data.system_prompt.trim()) ||
         data.thinking_to_content ||
@@ -2589,7 +2593,7 @@ const EditChannelModal = (props) => {
                   />
 
                   <Row gutter={12}>
-                    <Col span={12}>
+                    <Col span={8}>
                       <Form.InputNumber
                         field='priority'
                         label={t('渠道优先级')}
@@ -2599,7 +2603,7 @@ const EditChannelModal = (props) => {
                         style={{ width: '100%' }}
                       />
                     </Col>
-                    <Col span={12}>
+                    <Col span={8}>
                       <Form.InputNumber
                         field='weight'
                         label={t('渠道权重')}
@@ -2607,6 +2611,19 @@ const EditChannelModal = (props) => {
                         min={0}
                         onNumberChange={(value) => handleInputChange('weight', value)}
                         style={{ width: '100%' }}
+                      />
+                    </Col>
+                    <Col span={8}>
+                      <Form.InputNumber
+                        field='concurrency_limit'
+                        label={t('并发上限')}
+                        placeholder={t('0 表示不限制')}
+                        min={0}
+                        onNumberChange={(value) =>
+                          handleInputChange('concurrency_limit', value ?? 0)
+                        }
+                        style={{ width: '100%' }}
+                        extraText={t('限制该渠道同时处理的请求数，0 表示不限制')}
                       />
                     </Col>
                   </Row>

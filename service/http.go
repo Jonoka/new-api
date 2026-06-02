@@ -45,6 +45,24 @@ func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {
 	if c.Writer == nil {
 		return
 	}
+	statusCode := http.StatusOK
+	contentType := ""
+	if src != nil {
+		statusCode = src.StatusCode
+		contentType = src.Header.Get("Content-Type")
+	}
+	filterResult, filteredData, filterErr := ApplySensitiveFilterToResponseBody(c, contentType, data)
+	if filterErr != nil {
+		logger.LogError(c, fmt.Sprintf("failed to filter sensitive response body: %s", filterErr.Error()))
+	} else if filterResult.Blocked {
+		logger.LogWarn(c, fmt.Sprintf("upstream response blocked by sensitive rules: %s", FormatSensitiveFilterMatches(filterResult.Matches)))
+		data = SensitiveFilterOpenAIErrorBody(c)
+		src = nil
+		statusCode = http.StatusBadRequest
+		c.Writer.Header().Set("Content-Type", "application/json")
+	} else {
+		data = filteredData
+	}
 
 	body := io.NopCloser(bytes.NewBuffer(data))
 
@@ -65,11 +83,7 @@ func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {
 	c.Writer.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 
 	// Write header with status code (this sends the headers)
-	if src != nil {
-		c.Writer.WriteHeader(src.StatusCode)
-	} else {
-		c.Writer.WriteHeader(http.StatusOK)
-	}
+	c.Writer.WriteHeader(statusCode)
 
 	_, err := io.Copy(c.Writer, body)
 	if err != nil {

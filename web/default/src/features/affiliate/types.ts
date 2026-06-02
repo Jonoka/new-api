@@ -48,6 +48,7 @@ export type AffiliateSetting = {
   min_withdrawal_amount: number
   trigger_topup_enabled: boolean
   trigger_subscription_enabled: boolean
+  filter_redemption_topup_enabled: boolean
   payout_methods: string[]
   usdt_chain: string
 }
@@ -75,6 +76,23 @@ export type AffiliateRecord = {
   available_time: number
   settled_time: number
   created_at: number
+  detail?: AffiliateSourceDetail
+}
+
+export type AffiliateSourceDetail = {
+  source_type: string
+  title: string
+  plan_id?: number
+  plan_title?: string
+  redemption_id?: number
+  redemption_name?: string
+  original_amount?: number
+  discount_amount?: number
+  paid_amount?: number
+  promo_code?: string
+  payment_provider?: string
+  payment_method?: string
+  quota?: number
 }
 
 export type AffiliatePayoutAccount = {
@@ -112,4 +130,22 @@ export type AffiliateLeaderboardItem = {
   display_name: string
   invite_count: number
   commission_quota: number
+}
+
+export type AdminBindAffiliateInviterRequest = {
+  user_id?: number
+  user_identifier?: string
+  aff_code: string
+  force?: boolean
+}
+
+export type AdminBindAffiliateInviterResult = {
+  user_id: number
+  username: string
+  display_name: string
+  inviter_id: number
+  inviter_username: string
+  inviter_aff_code: string
+  previous_inviter_id: number
+  updated: boolean
 }

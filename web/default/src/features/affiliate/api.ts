@@ -20,6 +20,8 @@ import { api } from '@/lib/api'
 import type {
   ApiResponse,
   PageResponse,
+  AdminBindAffiliateInviterRequest,
+  AdminBindAffiliateInviterResult,
   AffiliatePayoutAccount,
   AffiliateLeaderboardItem,
   AffiliateRecord,
@@ -101,11 +103,9 @@ export async function uploadAffiliateQr(method: string, file: File) {
   form.append('file', file)
   const res = await api.post<
     ApiResponse<{ path: string; account?: AffiliatePayoutAccount }>
-  >(
-    '/api/affiliate/upload-qr',
-    form,
-    { headers: { 'Content-Type': 'multipart/form-data' } }
-  )
+  >('/api/affiliate/upload-qr', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
   return res.data
 }
 
@@ -137,6 +137,16 @@ export async function updateAdminAffiliateWithdrawal(
   const res = await api.post<ApiResponse<null>>(
     `/api/affiliate/admin/withdrawals/${id}/${action}`,
     { remark }
+  )
+  return res.data
+}
+
+export async function bindAdminAffiliateInviter(
+  payload: AdminBindAffiliateInviterRequest
+) {
+  const res = await api.post<ApiResponse<AdminBindAffiliateInviterResult>>(
+    '/api/affiliate/admin/bind-inviter',
+    payload
   )
   return res.data
 }

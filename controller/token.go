@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/gin-gonic/gin"
@@ -29,6 +30,17 @@ func buildMaskedTokenResponses(tokens []*model.Token) []*model.Token {
 		maskedTokens = append(maskedTokens, buildMaskedTokenResponse(token))
 	}
 	return maskedTokens
+}
+
+func resolveTokenGroupForCreate(requestGroup string, userGroup string) string {
+	requestGroup = strings.TrimSpace(requestGroup)
+	if requestGroup != "" {
+		return requestGroup
+	}
+	if setting.DefaultUseAutoGroup {
+		return "auto"
+	}
+	return strings.TrimSpace(userGroup)
 }
 
 func GetAllTokens(c *gin.Context) {
@@ -219,7 +231,7 @@ func AddToken(c *gin.Context) {
 		ModelLimitsEnabled: token.ModelLimitsEnabled,
 		ModelLimits:        token.ModelLimits,
 		AllowIps:           token.AllowIps,
-		Group:              token.Group,
+		Group:              resolveTokenGroupForCreate(token.Group, c.GetString("group")),
 		CrossGroupRetry:    token.CrossGroupRetry,
 	}
 	err = cleanToken.Insert()

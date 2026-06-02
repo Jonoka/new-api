@@ -110,6 +110,17 @@ export function usePayment() {
           return false
         }
 
+        if (
+          (response as { completed?: boolean }).completed ||
+          (response.data &&
+            typeof response.data === 'object' &&
+            'completed' in response.data &&
+            response.data.completed)
+        ) {
+          toast.success(i18next.t('Order completed successfully'))
+          return true
+        }
+
         // Handle Stripe payment
         if (isStripe && response.data?.pay_link) {
           window.open(response.data.pay_link as string, '_blank')

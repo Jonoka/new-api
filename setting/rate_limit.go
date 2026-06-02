@@ -39,6 +39,11 @@ func UpdateModelRequestRateLimitGroupByJSONString(jsonStr string) error {
 	if err := common.UnmarshalJsonStr(jsonStr, &next); err != nil {
 		return err
 	}
+	for group, limits := range next {
+		if err := validateRateLimitCounts(fmt.Sprintf("group %s", group), limits); err != nil {
+			return err
+		}
+	}
 
 	ModelRequestRateLimitMutex.Lock()
 	defer ModelRequestRateLimitMutex.Unlock()

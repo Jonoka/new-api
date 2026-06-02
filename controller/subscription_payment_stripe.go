@@ -46,14 +46,6 @@ func SubscriptionRequestStripePay(c *gin.Context) {
 		common.ApiErrorMsg(c, "该套餐未配置 StripePriceId")
 		return
 	}
-	if !strings.HasPrefix(setting.StripeApiSecret, "sk_") && !strings.HasPrefix(setting.StripeApiSecret, "rk_") {
-		common.ApiErrorMsg(c, "Stripe 未配置或密钥无效")
-		return
-	}
-	if setting.StripeWebhookSecret == "" {
-		common.ApiErrorMsg(c, "Stripe Webhook 未配置")
-		return
-	}
 
 	userId := c.GetInt("id")
 	user, err := model.GetUserById(userId, false)
@@ -90,7 +82,7 @@ func SubscriptionRequestStripePay(c *gin.Context) {
 	if discount != nil {
 		payMoney = discount.PaidAmount
 	}
-	if payMoney < 0.01 {
+	if payMoney < 0 {
 		common.ApiErrorMsg(c, "套餐金额过低")
 		return
 	}
@@ -99,11 +91,15 @@ func SubscriptionRequestStripePay(c *gin.Context) {
 	if discount != nil {
 		stripePriceId = ""
 	}
-	payLink, err := genStripeSubscriptionLink(referenceId, user.StripeCustomer, user.Email, stripePriceId, plan.Title, payMoney)
-	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Stripe 订阅支付链接创建失败 trade_no=%s plan_id=%d error=%q", referenceId, plan.Id, err.Error()))
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "拉起支付失败"})
-		return
+	if payMoney >= 0.01 {
+		if !strings.HasPrefix(setting.StripeApiSecret, "sk_") && !strings.HasPrefix(setting.StripeApiSecret, "rk_") {
+			common.ApiErrorMsg(c, "Stripe 未配置或密钥无效")
+			return
+		}
+		if setting.StripeWebhookSecret == "" {
+			common.ApiErrorMsg(c, "Stripe Webhook 未配置")
+			return
+		}
 	}
 
 	order := &model.SubscriptionOrder{
@@ -119,6 +115,30 @@ func SubscriptionRequestStripePay(c *gin.Context) {
 	model.ApplyPromoCodeResultToSubscriptionOrder(order, discount)
 	if err := order.Insert(); err != nil {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "创建订单失败"})
+		return
+	}
+	if payMoney < 0.01 {
+		if err := model.CompleteFreeSubscriptionOrder(referenceId, model.PaymentProviderStripe); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"message":   "success",
+			"completed": true,
+			"data": gin.H{
+				"completed": true,
+				"trade_no":  referenceId,
+				"discount":  discount,
+			},
+		})
+		return
+	}
+
+	payLink, err := genStripeSubscriptionLink(referenceId, user.StripeCustomer, user.Email, stripePriceId, plan.Title, payMoney)
+	if err != nil {
+		_ = model.ExpireSubscriptionOrder(referenceId, model.PaymentProviderStripe)
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Stripe 订阅支付链接创建失败 trade_no=%s plan_id=%d error=%q", referenceId, plan.Id, err.Error()))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "拉起支付失败"})
 		return
 	}
 

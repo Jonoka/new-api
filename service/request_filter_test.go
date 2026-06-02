@@ -21,17 +21,20 @@ func withRequestFilterRules(t *testing.T, rules []setting.SensitiveRule) {
 	oldEnabled := setting.CheckSensitiveEnabled
 	oldPromptEnabled := setting.CheckSensitiveOnPromptEnabled
 	oldRules := setting.SensitiveRules
+	oldRulesConfigured := setting.SensitiveRulesConfigured
 	oldChannelIds := setting.SensitiveRuleChannelIds
 	oldWords := setting.SensitiveWords
 	setting.CheckSensitiveEnabled = true
 	setting.CheckSensitiveOnPromptEnabled = true
 	setting.SensitiveRules = rules
+	setting.SensitiveRulesConfigured = false
 	setting.SensitiveRuleChannelIds = nil
 	setting.SensitiveWords = nil
 	t.Cleanup(func() {
 		setting.CheckSensitiveEnabled = oldEnabled
 		setting.CheckSensitiveOnPromptEnabled = oldPromptEnabled
 		setting.SensitiveRules = oldRules
+		setting.SensitiveRulesConfigured = oldRulesConfigured
 		setting.SensitiveRuleChannelIds = oldChannelIds
 		setting.SensitiveWords = oldWords
 	})
@@ -279,4 +282,212 @@ func TestApplySensitiveFilterToRequestBodyMasksWhenChannelSelected(t *testing.T)
 	body := storedBody(t, c)
 	assert.Contains(t, body, "[MASK]")
 	assert.NotContains(t, body, "secret")
+}
+
+func TestApplySensitiveFilterToRequestBodySkipsResponseOnlyRules(t *testing.T) {
+	withRequestFilterRules(t, []setting.SensitiveRule{
+		{
+			ID:       "response",
+			Name:     "Response",
+			Enabled:  true,
+			Action:   setting.SensitiveRuleActionBlock,
+			Scope:    setting.SensitiveRuleScopeResponse,
+			Keywords: []string{"secret"},
+		},
+	})
+	setFilterChannelIds(1)
+
+	c := newJSONFilterContext(t, `{"model":"gpt-test","messages":[{"role":"user","content":"secret"}]}`)
+	common.SetContextKey(c, constant.ContextKeyChannelId, 1)
+
+	result, err := ApplySensitiveFilterToRequestBody(c, types.RelayFormatOpenAI)
+	require.NoError(t, err)
+
+	assert.False(t, result.Blocked)
+	assert.False(t, result.Mutated)
+	assert.Contains(t, storedBody(t, c), "secret")
+}
+
+func TestApplySensitiveFilterToRequestBodySkipsConfiguredResponseOnlyLegacyRule(t *testing.T) {
+	withRequestFilterRules(t, nil)
+	setting.SensitiveWords = []string{"secret"}
+	err := setting.UpdateSensitiveRulesByJSONString(`{
+		"rules": [
+			{
+				"id": "legacy-sensitive-words",
+				"name": "Legacy sensitive words",
+				"enabled": true,
+				"action": "block",
+				"scope": "response",
+				"keywords": ["secret"]
+			}
+		]
+	}`)
+	require.NoError(t, err)
+	setFilterChannelIds(1)
+
+	c := newJSONFilterContext(t, `{"model":"gpt-test","messages":[{"role":"user","content":"secret"}]}`)
+	common.SetContextKey(c, constant.ContextKeyChannelId, 1)
+
+	result, err := ApplySensitiveFilterToRequestBody(c, types.RelayFormatOpenAI)
+	require.NoError(t, err)
+
+	assert.False(t, result.Blocked)
+	assert.False(t, result.Mutated)
+	assert.Contains(t, storedBody(t, c), "secret")
+}
+
+func TestApplySensitiveFilterToRequestBodyAppliesBothScopeRules(t *testing.T) {
+	withRequestFilterRules(t, []setting.SensitiveRule{
+		{
+			ID:          "both",
+			Name:        "Both",
+			Enabled:     true,
+			Action:      setting.SensitiveRuleActionMask,
+			Scope:       setting.SensitiveRuleScopeBoth,
+			Replacement: "[MASK]",
+			Keywords:    []string{"secret"},
+		},
+	})
+	setFilterChannelIds(1)
+
+	c := newJSONFilterContext(t, `{"model":"gpt-test","messages":[{"role":"user","content":"secret"}]}`)
+	common.SetContextKey(c, constant.ContextKeyChannelId, 1)
+
+	result, err := ApplySensitiveFilterToRequestBody(c, types.RelayFormatOpenAI)
+	require.NoError(t, err)
+
+	assert.False(t, result.Blocked)
+	assert.True(t, result.Mutated)
+	body := storedBody(t, c)
+	assert.Contains(t, body, "[MASK]")
+	assert.NotContains(t, body, "secret")
+}
+
+func TestApplySensitiveFilterToResponseBodyMasksJSONText(t *testing.T) {
+	withRequestFilterRules(t, []setting.SensitiveRule{
+		{
+			ID:          "response-mask",
+			Name:        "Response Mask",
+			Enabled:     true,
+			Action:      setting.SensitiveRuleActionMask,
+			Scope:       setting.SensitiveRuleScopeResponse,
+			Replacement: "[MASK]",
+			Keywords:    []string{"Secret", "中文"},
+		},
+	})
+	setFilterChannelIds(1)
+	c := newJSONFilterContext(t, `{}`)
+	common.SetContextKey(c, constant.ContextKeyChannelId, 1)
+	body := []byte(`{
+		"id":"chatcmpl-secret",
+		"model":"gpt-secret",
+		"choices":[{"message":{"content":"Secret 中文"}}],
+		"metadata":{"note":"Secret"},
+		"usage":{"prompt_tokens":1}
+	}`)
+
+	result, filtered, err := ApplySensitiveFilterToResponseBody(c, "application/json", body)
+	require.NoError(t, err)
+
+	assert.False(t, result.Blocked)
+	assert.True(t, result.Mutated)
+	bodyText := string(filtered)
+	assert.Contains(t, bodyText, "[MASK] [MASK]")
+	assert.Contains(t, bodyText, "chatcmpl-secret")
+	assert.Contains(t, bodyText, "gpt-secret")
+	assert.Contains(t, bodyText, `"note":"Secret"`)
+	assert.NotContains(t, bodyText, "Secret 中文")
+}
+
+func TestApplySensitiveFilterToResponseBodyBlocksBeforeMasking(t *testing.T) {
+	withRequestFilterRules(t, []setting.SensitiveRule{
+		{
+			ID:          "mask",
+			Name:        "Mask",
+			Enabled:     true,
+			Action:      setting.SensitiveRuleActionMask,
+			Scope:       setting.SensitiveRuleScopeResponse,
+			Replacement: "[MASK]",
+			Keywords:    []string{"secret"},
+		},
+		{
+			ID:       "block",
+			Name:     "Block",
+			Enabled:  true,
+			Action:   setting.SensitiveRuleActionBlock,
+			Scope:    setting.SensitiveRuleScopeResponse,
+			Keywords: []string{"secret"},
+		},
+	})
+	setFilterChannelIds(1)
+	c := newJSONFilterContext(t, `{}`)
+	common.SetContextKey(c, constant.ContextKeyChannelId, 1)
+
+	result, filtered, err := ApplySensitiveFilterToResponseBody(c, "application/json", []byte(`{"choices":[{"message":{"content":"secret"}}]}`))
+	require.NoError(t, err)
+
+	assert.True(t, result.Blocked)
+	assert.False(t, result.Mutated)
+	assert.Contains(t, string(filtered), "secret")
+}
+
+func TestApplySensitiveFilterToResponseBodySkipsRequestOnlyRules(t *testing.T) {
+	withRequestFilterRules(t, []setting.SensitiveRule{
+		{
+			ID:       "request",
+			Name:     "Request",
+			Enabled:  true,
+			Action:   setting.SensitiveRuleActionBlock,
+			Scope:    setting.SensitiveRuleScopeRequest,
+			Keywords: []string{"secret"},
+		},
+	})
+	setFilterChannelIds(1)
+	c := newJSONFilterContext(t, `{}`)
+	common.SetContextKey(c, constant.ContextKeyChannelId, 1)
+
+	result, filtered, err := ApplySensitiveFilterToResponseBody(c, "application/json", []byte(`{"choices":[{"message":{"content":"secret"}}]}`))
+	require.NoError(t, err)
+
+	assert.False(t, result.Blocked)
+	assert.False(t, result.Mutated)
+	assert.Contains(t, string(filtered), "secret")
+}
+
+func TestApplySensitiveFilterToStreamDataMasksAndBlocks(t *testing.T) {
+	withRequestFilterRules(t, []setting.SensitiveRule{
+		{
+			ID:          "mask",
+			Name:        "Mask",
+			Enabled:     true,
+			Action:      setting.SensitiveRuleActionMask,
+			Scope:       setting.SensitiveRuleScopeBoth,
+			Replacement: "[MASK]",
+			Keywords:    []string{"secret"},
+		},
+		{
+			ID:       "block",
+			Name:     "Block",
+			Enabled:  true,
+			Action:   setting.SensitiveRuleActionBlock,
+			Scope:    setting.SensitiveRuleScopeResponse,
+			Keywords: []string{"forbidden"},
+		},
+	})
+	setFilterChannelIds(1)
+	c := newJSONFilterContext(t, `{}`)
+	common.SetContextKey(c, constant.ContextKeyChannelId, 1)
+
+	result, filtered, err := ApplySensitiveFilterToStreamData(c, `{"choices":[{"delta":{"content":"Secret"}}]}`)
+	require.NoError(t, err)
+	assert.False(t, result.Blocked)
+	assert.True(t, result.Mutated)
+	assert.Contains(t, filtered, "[MASK]")
+	assert.NotContains(t, filtered, "Secret")
+
+	result, filtered, err = ApplySensitiveFilterToStreamData(c, `{"choices":[{"delta":{"content":"forbidden"}}]}`)
+	require.NoError(t, err)
+	assert.True(t, result.Blocked)
+	assert.Equal(t, `{"choices":[{"delta":{"content":"forbidden"}}]}`, filtered)
 }

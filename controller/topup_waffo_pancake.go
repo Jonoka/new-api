@@ -51,7 +51,7 @@ func RequestWaffoPancakeAmount(c *gin.Context) {
 	if discount != nil {
 		payMoney = discount.PaidAmount
 	}
-	if payMoney <= 0.01 {
+	if payMoney < 0 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
 	}
@@ -396,7 +396,7 @@ func RequestWaffoPancakePay(c *gin.Context) {
 	if discount != nil {
 		payMoney = discount.PaidAmount
 	}
-	if payMoney < 0.01 {
+	if payMoney < 0 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
 	}
@@ -416,6 +416,19 @@ func RequestWaffoPancakePay(c *gin.Context) {
 	if err := topUp.Insert(); err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Waffo Pancake 创建充值订单失败 user_id=%d trade_no=%s amount=%d error=%q", id, tradeNo, req.Amount, err.Error()))
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "创建订单失败"})
+		return
+	}
+	if payMoney < 0.01 {
+		completedTopUp, quotaToAdd, completedNow, err := model.CompleteFreeTopUp(tradeNo, model.PaymentProviderWaffoPancake)
+		if err != nil {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("Waffo Pancake 0元优惠充值完成失败 user_id=%d trade_no=%s amount=%d error=%q", id, tradeNo, req.Amount, err.Error()))
+			c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+			return
+		}
+		if completedNow {
+			model.RecordTopupLog(completedTopUp.UserId, fmt.Sprintf("使用优惠码充值成功，充值金额: %v，支付金额：0.00", logger.LogQuota(quotaToAdd)), c.ClientIP(), completedTopUp.PaymentMethod, "promo")
+		}
+		c.JSON(http.StatusOK, freeTopUpResponse(completedTopUp, quotaToAdd, discount))
 		return
 	}
 

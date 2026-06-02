@@ -124,7 +124,6 @@ export function ApiKeysMutateDrawer({
       ratio: info.ratio,
     })
   )
-  const backendHasAuto = groups.some((g) => g.value === 'auto')
   const schema = getApiKeyFormSchema(t)
 
   const form = useForm<ApiKeyFormValues>({
@@ -141,14 +140,13 @@ export function ApiKeysMutateDrawer({
         }
       })
     } else if (open && !isUpdate) {
-      form.reset(
-        getApiKeyFormDefaultValues(defaultUseAutoGroup && backendHasAuto)
-      )
+      form.reset(getApiKeyFormDefaultValues(defaultUseAutoGroup))
     }
-  }, [open, isUpdate, currentRow, form, defaultUseAutoGroup, backendHasAuto])
+  }, [open, isUpdate, currentRow, form, defaultUseAutoGroup])
 
-  // Correct group after groups load: if the form value is not in available groups, fall back
+  // 编辑已有令牌时才校正不可选分组；新建令牌允许交给后端默认分组兜底。
   useEffect(() => {
+    if (!isUpdate) return
     if (groups.length === 0) return
     const currentGroup = form.getValues('group')
     if (currentGroup && !groups.some((g) => g.value === currentGroup)) {
@@ -161,7 +159,7 @@ export function ApiKeysMutateDrawer({
         form.setValue('cross_group_retry', false)
       }
     }
-  }, [groups, form])
+  }, [groups, form, isUpdate])
 
   const onSubmit = async (data: ApiKeyFormValues) => {
     setIsSubmitting(true)

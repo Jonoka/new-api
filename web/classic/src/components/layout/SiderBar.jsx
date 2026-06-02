@@ -47,8 +47,10 @@ const routerMap = {
   detail: '/console',
   pricing: '/pricing',
   task: '/console/task',
+  game_center: '/console/game-center',
   models: '/console/models',
   deployment: '/console/deployment',
+  game_management: '/console/game-management',
   playground: '/console/playground',
   personal: '/console/personal',
 };
@@ -106,6 +108,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         to: '/task',
         className:
           localStorage.getItem('enable_task') === 'true' ? '' : 'tableHiddle',
+      },
+      {
+        text: t('游戏中心'),
+        itemKey: 'game_center',
+        to: '/game-center',
       },
     ];
 
@@ -179,9 +186,15 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {
-        text: t('兑换码管理'),
+        text: t('营销福利'),
         itemKey: 'redemption',
         to: '/redemption',
+        className: isAdmin() ? '' : 'tableHiddle',
+      },
+      {
+        text: t('游戏管理'),
+        itemKey: 'game_management',
+        to: '/game-management',
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {

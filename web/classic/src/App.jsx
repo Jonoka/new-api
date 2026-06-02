@@ -47,6 +47,8 @@ import ModelPage from './pages/Model';
 import ModelDeploymentPage from './pages/ModelDeployment';
 import Playground from './pages/Playground';
 import Subscription from './pages/Subscription';
+import GameCenter from './pages/GameCenter';
+import GameManagement from './pages/GameManagement';
 import OAuth2Callback from './components/auth/OAuth2Callback';
 import PersonalSetting from './components/settings/PersonalSetting';
 import Setup from './pages/Setup';
@@ -130,6 +132,22 @@ function App() {
           element={
             <AdminRoute>
               <Subscription />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/game-center'
+          element={
+            <PrivateRoute>
+              <GameCenter />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/game-management'
+          element={
+            <AdminRoute>
+              <GameManagement />
             </AdminRoute>
           }
         />

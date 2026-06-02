@@ -59,6 +59,16 @@ export function useWaffoPayment() {
         })
 
         if (isApiSuccess(response)) {
+          if (
+            response.data &&
+            typeof response.data === 'object' &&
+            'completed' in response.data &&
+            response.data.completed
+          ) {
+            toast.success(i18next.t('Order completed successfully'))
+            return true
+          }
+
           const paymentUrl = getPaymentUrl(response.data)
 
           if (paymentUrl) {

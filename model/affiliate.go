@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 const (
 	AffiliateSourceTopUp        = "topup"
 	AffiliateSourceSubscription = "subscription"
+	AffiliateSourceRedemption   = "redemption"
 )
 
 const (
@@ -109,6 +111,38 @@ type AffiliateLeaderboardItem struct {
 	CommissionQuota int    `json:"commission_quota"`
 }
 
+type AffiliateSourceDetail struct {
+	SourceType      string  `json:"source_type"`
+	Title           string  `json:"title"`
+	PlanId          int     `json:"plan_id,omitempty"`
+	PlanTitle       string  `json:"plan_title,omitempty"`
+	RedemptionId    int     `json:"redemption_id,omitempty"`
+	RedemptionName  string  `json:"redemption_name,omitempty"`
+	OriginalAmount  float64 `json:"original_amount,omitempty"`
+	DiscountAmount  float64 `json:"discount_amount,omitempty"`
+	PaidAmount      float64 `json:"paid_amount,omitempty"`
+	PromoCode       string  `json:"promo_code,omitempty"`
+	PaymentProvider string  `json:"payment_provider,omitempty"`
+	PaymentMethod   string  `json:"payment_method,omitempty"`
+	Quota           int     `json:"quota,omitempty"`
+}
+
+type AffiliateRecordWithDetail struct {
+	AffiliateRecord
+	Detail *AffiliateSourceDetail `json:"detail,omitempty"`
+}
+
+type AffiliateInviterBindResult struct {
+	UserId            int    `json:"user_id"`
+	Username          string `json:"username"`
+	DisplayName       string `json:"display_name"`
+	InviterId         int    `json:"inviter_id"`
+	InviterUsername   string `json:"inviter_username"`
+	InviterAffCode    string `json:"inviter_aff_code"`
+	PreviousInviterId int    `json:"previous_inviter_id"`
+	Updated           bool   `json:"updated"`
+}
+
 func isAffiliateSourceEnabled(sourceType string) bool {
 	affiliateSetting := setting.GetAffiliateSetting()
 	switch sourceType {
@@ -116,6 +150,8 @@ func isAffiliateSourceEnabled(sourceType string) bool {
 		return affiliateSetting.TriggerTopupEnabled
 	case AffiliateSourceSubscription:
 		return affiliateSetting.TriggerSubscriptionEnabled
+	case AffiliateSourceRedemption:
+		return affiliateSetting.TriggerTopupEnabled && !affiliateSetting.FilterRedemptionTopupEnabled
 	default:
 		return false
 	}
@@ -367,6 +403,393 @@ func GetAffiliateRecords(userId int, status string, pageInfo *common.PageInfo) (
 	var records []*AffiliateRecord
 	err := query.Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&records).Error
 	return records, total, err
+}
+
+func GetAffiliateRecordsWithDetails(userId int, status string, pageInfo *common.PageInfo) ([]*AffiliateRecordWithDetail, int64, error) {
+	records, total, err := GetAffiliateRecords(userId, status, pageInfo)
+	if err != nil {
+		return nil, 0, err
+	}
+	items := make([]*AffiliateRecordWithDetail, 0, len(records))
+	for _, record := range records {
+		if record == nil {
+			continue
+		}
+		items = append(items, &AffiliateRecordWithDetail{AffiliateRecord: *record})
+	}
+	if len(items) == 0 {
+		return items, total, nil
+	}
+	if err := attachAffiliateSourceDetails(items); err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
+func attachAffiliateSourceDetails(records []*AffiliateRecordWithDetail) error {
+	topupSourceIds := make([]string, 0)
+	subscriptionSourceIds := make([]string, 0)
+	redemptionIds := make([]int, 0)
+	redemptionSourceIdsById := make(map[int][]string)
+
+	for _, record := range records {
+		if record == nil {
+			continue
+		}
+		switch record.SourceType {
+		case AffiliateSourceTopUp:
+			topupSourceIds = append(topupSourceIds, record.SourceId)
+		case AffiliateSourceSubscription:
+			subscriptionSourceIds = append(subscriptionSourceIds, record.SourceId)
+		case AffiliateSourceRedemption:
+			redemptionId, _, ok := parseAffiliateRedemptionSourceId(record.SourceId)
+			if ok {
+				redemptionIds = append(redemptionIds, redemptionId)
+				redemptionSourceIdsById[redemptionId] = append(redemptionSourceIdsById[redemptionId], record.SourceId)
+			}
+		}
+	}
+
+	details := make(map[string]*AffiliateSourceDetail)
+	if len(topupSourceIds) > 0 {
+		var topups []TopUp
+		if err := DB.Where("trade_no IN ?", uniqueStrings(topupSourceIds)).Find(&topups).Error; err != nil {
+			return err
+		}
+		for _, topup := range topups {
+			original, discount, paid := affiliateMoneySnapshot(topup.OriginalMoney, topup.DiscountMoney, topup.ActualMoney, topup.Money)
+			details[affiliateSourceDetailKey(AffiliateSourceTopUp, topup.TradeNo)] = &AffiliateSourceDetail{
+				SourceType:      AffiliateSourceTopUp,
+				Title:           "余额充值",
+				OriginalAmount:  original,
+				DiscountAmount:  discount,
+				PaidAmount:      paid,
+				PromoCode:       topup.PromoCode,
+				PaymentProvider: topup.PaymentProvider,
+				PaymentMethod:   topup.PaymentMethod,
+				Quota:           int(topup.Amount),
+			}
+		}
+	}
+	if len(subscriptionSourceIds) > 0 {
+		var orders []SubscriptionOrder
+		if err := DB.Where("trade_no IN ?", uniqueStrings(subscriptionSourceIds)).Find(&orders).Error; err != nil {
+			return err
+		}
+		planIds := make([]int, 0, len(orders))
+		for _, order := range orders {
+			if order.PlanId > 0 {
+				planIds = append(planIds, order.PlanId)
+			}
+		}
+		plans := make(map[int]SubscriptionPlan)
+		if len(planIds) > 0 {
+			var planRows []SubscriptionPlan
+			if err := DB.Select("id", "title").Where("id IN ?", uniqueInts(planIds)).Find(&planRows).Error; err != nil {
+				return err
+			}
+			for _, plan := range planRows {
+				plans[plan.Id] = plan
+			}
+		}
+		for _, order := range orders {
+			planTitle := ""
+			if plan, ok := plans[order.PlanId]; ok {
+				planTitle = plan.Title
+			}
+			title := "订阅"
+			if planTitle != "" {
+				title = "订阅：" + planTitle
+			}
+			original, discount, paid := affiliateMoneySnapshot(order.OriginalMoney, order.DiscountMoney, order.ActualMoney, order.Money)
+			details[affiliateSourceDetailKey(AffiliateSourceSubscription, order.TradeNo)] = &AffiliateSourceDetail{
+				SourceType:      AffiliateSourceSubscription,
+				Title:           title,
+				PlanId:          order.PlanId,
+				PlanTitle:       planTitle,
+				OriginalAmount:  original,
+				DiscountAmount:  discount,
+				PaidAmount:      paid,
+				PromoCode:       order.PromoCode,
+				PaymentProvider: order.PaymentProvider,
+				PaymentMethod:   order.PaymentMethod,
+			}
+		}
+	}
+	if len(redemptionIds) > 0 {
+		var redemptions []Redemption
+		if err := DB.Select("id", "name", "quota").Where("id IN ?", uniqueInts(redemptionIds)).Find(&redemptions).Error; err != nil {
+			return err
+		}
+		for _, redemption := range redemptions {
+			title := "兑换码兑换"
+			if redemption.Name != "" {
+				title += "：" + redemption.Name
+			}
+			for _, sourceId := range redemptionSourceIdsById[redemption.Id] {
+				details[affiliateSourceDetailKey(AffiliateSourceRedemption, sourceId)] = &AffiliateSourceDetail{
+					SourceType:     AffiliateSourceRedemption,
+					Title:          title,
+					RedemptionId:   redemption.Id,
+					RedemptionName: redemption.Name,
+					Quota:          redemption.Quota,
+				}
+			}
+		}
+	}
+
+	for _, record := range records {
+		if record == nil {
+			continue
+		}
+		detail := details[affiliateSourceDetailKey(record.SourceType, record.SourceId)]
+		if detail == nil {
+			detail = fallbackAffiliateSourceDetail(record)
+		}
+		record.Detail = detail
+	}
+	return nil
+}
+
+func affiliateSourceDetailKey(sourceType string, sourceId string) string {
+	return sourceType + "\x00" + sourceId
+}
+
+func affiliateMoneySnapshot(originalAmount float64, discountAmount float64, paidAmount float64, fallbackPaidAmount float64) (float64, float64, float64) {
+	if originalAmount <= 0 {
+		if paidAmount > 0 || discountAmount > 0 {
+			originalAmount = paidAmount + discountAmount
+		} else if fallbackPaidAmount > 0 {
+			originalAmount = fallbackPaidAmount
+		}
+	}
+	if paidAmount <= 0 && discountAmount <= 0 && fallbackPaidAmount > 0 {
+		paidAmount = fallbackPaidAmount
+	}
+	if discountAmount <= 0 && originalAmount > 0 && paidAmount > 0 && originalAmount > paidAmount {
+		discountAmount = originalAmount - paidAmount
+	}
+	return originalAmount, discountAmount, paidAmount
+}
+
+func fallbackAffiliateSourceDetail(record *AffiliateRecordWithDetail) *AffiliateSourceDetail {
+	detail := &AffiliateSourceDetail{SourceType: record.SourceType}
+	switch record.SourceType {
+	case AffiliateSourceTopUp:
+		detail.Title = "余额充值"
+	case AffiliateSourceSubscription:
+		detail.Title = "订阅"
+	case AffiliateSourceRedemption:
+		detail.Title = "兑换码兑换"
+		detail.Quota = record.SourceQuota
+	default:
+		detail.Title = record.SourceType
+	}
+	return detail
+}
+
+func parseAffiliateRedemptionSourceId(sourceId string) (int, int, bool) {
+	var redemptionId int
+	var userId int
+	n, err := fmt.Sscanf(sourceId, "redemption-%d-user-%d", &redemptionId, &userId)
+	return redemptionId, userId, err == nil && n == 2 && redemptionId > 0 && userId > 0
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		unique = append(unique, value)
+	}
+	return unique
+}
+
+func uniqueInts(values []int) []int {
+	seen := make(map[int]bool, len(values))
+	unique := make([]int, 0, len(values))
+	for _, value := range values {
+		if value <= 0 || seen[value] {
+			continue
+		}
+		seen[value] = true
+		unique = append(unique, value)
+	}
+	return unique
+}
+
+func BindUserInviterByAffCode(userId int, userIdentifier string, affCode string, force bool) (*AffiliateInviterBindResult, error) {
+	affCode = normalizeAffiliateBindAffCode(affCode)
+	if affCode == "" {
+		return nil, errors.New("邀请代码不能为空")
+	}
+	var result *AffiliateInviterBindResult
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		invitee, err := findAffiliateBindUserTx(tx, userId, userIdentifier)
+		if err != nil {
+			return err
+		}
+		inviter, err := findAffiliateInviterByAffCodeTx(tx, affCode)
+		if err != nil {
+			return err
+		}
+		if invitee.Id == inviter.Id {
+			return errors.New("不能绑定自己为邀请人")
+		}
+		if invitee.InviterId == inviter.Id {
+			result = buildAffiliateBindResult(invitee, inviter, invitee.InviterId, false)
+			return nil
+		}
+		if invitee.InviterId > 0 && !force {
+			return errors.New("该用户已有邀请人，如需改绑请开启强制覆盖")
+		}
+		if err := ensureNoAffiliateInviteCycleTx(tx, invitee.Id, inviter.Id); err != nil {
+			return err
+		}
+
+		previousInviterId := invitee.InviterId
+		if err := tx.Model(&User{}).Where("id = ?", invitee.Id).Update("inviter_id", inviter.Id).Error; err != nil {
+			return err
+		}
+		if previousInviterId > 0 {
+			if err := tx.Model(&User{}).
+				Where("id = ? AND aff_count > 0", previousInviterId).
+				Update("aff_count", gorm.Expr("aff_count - ?", 1)).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Model(&User{}).Where("id = ?", inviter.Id).Update("aff_count", gorm.Expr("aff_count + ?", 1)).Error; err != nil {
+			return err
+		}
+		result = buildAffiliateBindResult(invitee, inviter, previousInviterId, true)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if result != nil && result.Updated {
+		_ = invalidateUserCache(result.UserId)
+		if result.InviterId > 0 {
+			_ = invalidateUserCache(result.InviterId)
+		}
+		if result.PreviousInviterId > 0 {
+			_ = invalidateUserCache(result.PreviousInviterId)
+		}
+	}
+	return result, nil
+}
+
+func findAffiliateInviterByAffCodeTx(tx *gorm.DB, affCode string) (*User, error) {
+	var users []User
+	if err := tx.Set("gorm:query_option", "FOR UPDATE").
+		Select("id", "username", "display_name", "aff_code", "inviter_id", "aff_count").
+		Where("aff_code = ?", affCode).
+		Limit(2).
+		Find(&users).Error; err != nil {
+		return nil, err
+	}
+	if len(users) == 0 {
+		return nil, errors.New("邀请代码对应的用户不存在")
+	}
+	if len(users) > 1 {
+		return nil, errors.New("邀请代码存在冲突，请先检查用户的邀请码配置")
+	}
+	return &users[0], nil
+}
+
+func normalizeAffiliateBindAffCode(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if strings.Contains(raw, "aff=") {
+		idx := strings.Index(raw, "aff=")
+		raw = raw[idx+len("aff="):]
+		for _, separator := range []string{"&", "#", "?", " "} {
+			if pos := strings.Index(raw, separator); pos >= 0 {
+				raw = raw[:pos]
+			}
+		}
+	}
+	return strings.TrimSpace(raw)
+}
+
+func findAffiliateBindUserTx(tx *gorm.DB, userId int, userIdentifier string) (*User, error) {
+	query := tx.Set("gorm:query_option", "FOR UPDATE").
+		Select("id", "username", "display_name", "email", "inviter_id")
+	if userId > 0 {
+		user := &User{}
+		if err := query.Where("id = ?", userId).First(user).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, errors.New("被绑定用户不存在")
+			}
+			return nil, err
+		}
+		return user, nil
+	}
+	userIdentifier = strings.TrimSpace(userIdentifier)
+	if userIdentifier == "" {
+		return nil, errors.New("被绑定用户不能为空")
+	}
+	if parsedId, err := strconv.Atoi(userIdentifier); err == nil && parsedId > 0 {
+		query = query.Where("id = ? OR username = ? OR email = ? OR display_name = ?", parsedId, userIdentifier, userIdentifier, userIdentifier)
+	} else {
+		query = query.Where("username = ? OR email = ? OR display_name = ?", userIdentifier, userIdentifier, userIdentifier)
+	}
+	var users []User
+	if err := query.Limit(2).Find(&users).Error; err != nil {
+		return nil, err
+	}
+	if len(users) == 0 {
+		return nil, errors.New("被绑定用户不存在")
+	}
+	if len(users) > 1 {
+		return nil, errors.New("匹配到多个用户，请先搜索并选择具体用户")
+	}
+	return &users[0], nil
+}
+
+func ensureNoAffiliateInviteCycleTx(tx *gorm.DB, inviteeId int, inviterId int) error {
+	visited := make(map[int]bool)
+	currentId := inviterId
+	for depth := 0; currentId > 0 && depth < 64; depth++ {
+		if currentId == inviteeId {
+			return errors.New("不能形成循环邀请关系")
+		}
+		if visited[currentId] {
+			return errors.New("不能形成循环邀请关系")
+		}
+		visited[currentId] = true
+		parent := &User{}
+		if err := tx.Select("id", "inviter_id").Where("id = ?", currentId).First(parent).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("邀请链用户不存在")
+			}
+			return err
+		}
+		currentId = parent.InviterId
+	}
+	if currentId > 0 {
+		return errors.New("邀请链层级过深")
+	}
+	return nil
+}
+
+func buildAffiliateBindResult(invitee *User, inviter *User, previousInviterId int, updated bool) *AffiliateInviterBindResult {
+	return &AffiliateInviterBindResult{
+		UserId:            invitee.Id,
+		Username:          invitee.Username,
+		DisplayName:       invitee.DisplayName,
+		InviterId:         inviter.Id,
+		InviterUsername:   inviter.Username,
+		InviterAffCode:    inviter.AffCode,
+		PreviousInviterId: previousInviterId,
+		Updated:           updated,
+	}
 }
 
 func GetAffiliateWithdrawals(userId int, pageInfo *common.PageInfo) ([]*AffiliateWithdrawal, int64, error) {

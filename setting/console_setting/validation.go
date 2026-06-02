@@ -255,25 +255,35 @@ func validateUptimeKumaGroups(groupsStr string) error {
 			return fmt.Errorf("第%d个分组的分类名称与其他分组重复", i+1)
 		}
 		nameSet[categoryName] = true
-		urlStr, ok := group["url"].(string)
-		if !ok || urlStr == "" {
-			return fmt.Errorf("第%d个分组缺少URL字段", i+1)
-		}
-		slug, ok := group["slug"].(string)
-		if !ok || slug == "" {
-			return fmt.Errorf("第%d个分组缺少Slug字段", i+1)
+		urlStr, _ := group["url"].(string)
+		slug, _ := group["slug"].(string)
+		embedUrl, _ := group["embedUrl"].(string)
+		if embedUrl == "" {
+			if urlStr == "" {
+				return fmt.Errorf("第%d个分组缺少URL字段", i+1)
+			}
+			if slug == "" {
+				return fmt.Errorf("第%d个分组缺少Slug字段", i+1)
+			}
 		}
 		description, ok := group["description"].(string)
 		if !ok {
 			description = ""
 		}
 
-		if err := validateURL(urlStr, i+1, "分组"); err != nil {
-			return err
+		if urlStr != "" {
+			if err := validateURL(urlStr, i+1, "分组"); err != nil {
+				return err
+			}
+		}
+		if embedUrl != "" {
+			if err := validateURL(embedUrl, i+1, "嵌入地址"); err != nil {
+				return err
+			}
 		}
 
-		if len(categoryName) > 50 {
-			return fmt.Errorf("第%d个分组的分类名称长度不能超过50字符", i+1)
+		if len(embedUrl) > 1000 {
+			return fmt.Errorf("第%d个分组的嵌入地址长度不能超过1000字符", i+1)
 		}
 		if len(urlStr) > 500 {
 			return fmt.Errorf("第%d个分组的URL长度不能超过500字符", i+1)
@@ -281,12 +291,18 @@ func validateUptimeKumaGroups(groupsStr string) error {
 		if len(slug) > 100 {
 			return fmt.Errorf("第%d个分组的Slug长度不能超过100字符", i+1)
 		}
-		if len(description) > 200 {
-			return fmt.Errorf("第%d个分组的描述长度不能超过200字符", i+1)
+		if slug != "" && !slugRegex.MatchString(slug) {
+			return fmt.Errorf("第%d个分组的Slug只能包含字母、数字、下划线和连字符", i+1)
+		}
+		if err := checkDangerousContent(embedUrl, i+1, "嵌入地址"); err != nil {
+			return err
 		}
 
-		if !slugRegex.MatchString(slug) {
-			return fmt.Errorf("第%d个分组的Slug只能包含字母、数字、下划线和连字符", i+1)
+		if len(categoryName) > 50 {
+			return fmt.Errorf("第%d个分组的分类名称长度不能超过50字符", i+1)
+		}
+		if len(description) > 200 {
+			return fmt.Errorf("第%d个分组的描述长度不能超过200字符", i+1)
 		}
 
 		if err := checkDangerousContent(description, i+1, "分组"); err != nil {

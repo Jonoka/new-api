@@ -53,15 +53,23 @@ import type { UpstreamChannel } from '../types'
 
 const ACTION_MASK = 'mask'
 const ACTION_BLOCK = 'block'
+const SCOPE_REQUEST = 'request'
+const SCOPE_RESPONSE = 'response'
+const SCOPE_BOTH = 'both'
 const DEFAULT_REPLACEMENT = '[REDACTED]'
 
 type SensitiveRuleAction = typeof ACTION_MASK | typeof ACTION_BLOCK
+type SensitiveRuleScope =
+  | typeof SCOPE_REQUEST
+  | typeof SCOPE_RESPONSE
+  | typeof SCOPE_BOTH
 
 type SensitiveRule = {
   id: string
   name: string
   enabled: boolean
   action: SensitiveRuleAction
+  scope?: SensitiveRuleScope
   replacement?: string
   keywords: string[]
 }
@@ -147,6 +155,7 @@ function createRule(): SensitiveRuleDraft {
     name: '',
     enabled: true,
     action: ACTION_MASK,
+    scope: SCOPE_REQUEST,
     replacement: DEFAULT_REPLACEMENT,
     keywordsText: '',
   }
@@ -157,6 +166,10 @@ function normalizeRule(rule: SensitiveRuleDraft): SensitiveRule | null {
   if (keywords.length === 0) return null
 
   const action = rule.action === ACTION_BLOCK ? ACTION_BLOCK : ACTION_MASK
+  const scope =
+    rule.scope === SCOPE_RESPONSE || rule.scope === SCOPE_BOTH
+      ? rule.scope
+      : SCOPE_REQUEST
   const fallbackName = keywords[0] ?? ''
 
   return {
@@ -164,6 +177,7 @@ function normalizeRule(rule: SensitiveRuleDraft): SensitiveRule | null {
     name: rule.name.trim() || fallbackName,
     enabled: rule.enabled,
     action,
+    scope,
     replacement:
       action === ACTION_MASK
         ? rule.replacement?.trim() || DEFAULT_REPLACEMENT
@@ -178,6 +192,10 @@ function rulesToDrafts(rules: SensitiveRule[]): SensitiveRuleDraft[] {
     name: rule.name ?? '',
     enabled: rule.enabled ?? true,
     action: rule.action === ACTION_BLOCK ? ACTION_BLOCK : ACTION_MASK,
+    scope:
+      rule.scope === SCOPE_RESPONSE || rule.scope === SCOPE_BOTH
+        ? rule.scope
+        : SCOPE_REQUEST,
     replacement: rule.replacement || DEFAULT_REPLACEMENT,
     keywordsText: (rule.keywords ?? []).join('\n'),
   }))
@@ -336,6 +354,9 @@ export function SensitiveWordsSection({
     }
     if (currentRulesValue !== initialRulesValue) {
       updates.push({ key: 'SensitiveRules', value: currentRulesValue })
+      if ((defaultValues.SensitiveWords ?? '').trim() !== '') {
+        updates.push({ key: 'SensitiveWords', value: '' })
+      }
     }
     if (currentChannelIdsValue !== initialChannelIdsValue) {
       updates.push({
@@ -494,7 +515,9 @@ export function SensitiveWordsSection({
             <div className='min-w-0'>
               <h3 className='text-sm font-medium'>{t('Filter rules')}</h3>
               <p className='text-muted-foreground text-xs'>
-                {t('Each rule can mask or block matching request text.')}
+                {t(
+                  'Each rule can mask or block matching request or response text.'
+                )}
               </p>
             </div>
             <Button
@@ -551,7 +574,7 @@ export function SensitiveWordsSection({
                     </div>
                   </div>
 
-                  <div className='grid gap-3 md:grid-cols-[minmax(0,1fr)_150px]'>
+                  <div className='grid gap-3 md:grid-cols-[minmax(0,1fr)_150px_150px]'>
                     <div className='space-y-1.5'>
                       <Label htmlFor={`${rule.id}-name`}>
                         {t('Rule name')}
@@ -592,6 +615,39 @@ export function SensitiveWordsSection({
                             </SelectItem>
                             <SelectItem value={ACTION_BLOCK}>
                               {t('Block')}
+                            </SelectItem>
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className='space-y-1.5'>
+                      <Label>{t('Scope')}</Label>
+                      <Select
+                        value={rule.scope}
+                        onValueChange={(value) => {
+                          if (
+                            value !== SCOPE_REQUEST &&
+                            value !== SCOPE_RESPONSE &&
+                            value !== SCOPE_BOTH
+                          ) {
+                            return
+                          }
+                          updateRule(rule.id, { scope: value })
+                        }}
+                      >
+                        <SelectTrigger className='w-full'>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent alignItemWithTrigger={false}>
+                          <SelectGroup>
+                            <SelectItem value={SCOPE_REQUEST}>
+                              {t('Request')}
+                            </SelectItem>
+                            <SelectItem value={SCOPE_RESPONSE}>
+                              {t('Response')}
+                            </SelectItem>
+                            <SelectItem value={SCOPE_BOTH}>
+                              {t('Both')}
                             </SelectItem>
                           </SelectGroup>
                         </SelectContent>

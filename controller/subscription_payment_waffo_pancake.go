@@ -41,17 +41,6 @@ func SubscriptionRequestWaffoPancakePay(c *gin.Context) {
 		common.ApiErrorMsg(c, "套餐未启用")
 		return
 	}
-	if strings.TrimSpace(plan.WaffoPancakeProductId) == "" {
-		common.ApiErrorMsg(c, "该套餐未配置 WaffoPancakeProductId")
-		return
-	}
-	// Plan targets its own Pancake product, so we only require credentials
-	// here — not the gateway-level WaffoPancakeProductID.
-	if strings.TrimSpace(setting.WaffoPancakeMerchantID) == "" ||
-		strings.TrimSpace(setting.WaffoPancakePrivateKey) == "" {
-		common.ApiErrorMsg(c, "Waffo Pancake 未配置或密钥无效")
-		return
-	}
 
 	userId := c.GetInt("id")
 	user, err := model.GetUserById(userId, false)
@@ -88,9 +77,23 @@ func SubscriptionRequestWaffoPancakePay(c *gin.Context) {
 	if discount != nil {
 		payMoney = discount.PaidAmount
 	}
-	if payMoney < 0.01 {
+	if payMoney < 0 {
 		common.ApiErrorMsg(c, "套餐金额过低")
 		return
+	}
+
+	if payMoney >= 0.01 {
+		if strings.TrimSpace(plan.WaffoPancakeProductId) == "" {
+			common.ApiErrorMsg(c, "该套餐未配置 WaffoPancakeProductId")
+			return
+		}
+		// Plan targets its own Pancake product, so we only require credentials
+		// here — not the gateway-level WaffoPancakeProductID.
+		if strings.TrimSpace(setting.WaffoPancakeMerchantID) == "" ||
+			strings.TrimSpace(setting.WaffoPancakePrivateKey) == "" {
+			common.ApiErrorMsg(c, "Waffo Pancake 未配置或密钥无效")
+			return
+		}
 	}
 
 	order := &model.SubscriptionOrder{
@@ -107,6 +110,22 @@ func SubscriptionRequestWaffoPancakePay(c *gin.Context) {
 	if err := order.Insert(); err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Waffo Pancake 订阅订单创建失败 user_id=%d plan_id=%d trade_no=%s error=%q", userId, plan.Id, tradeNo, err.Error()))
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "创建订单失败"})
+		return
+	}
+	if payMoney < 0.01 {
+		if err := model.CompleteFreeSubscriptionOrder(tradeNo, model.PaymentProviderWaffoPancake); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"message":   "success",
+			"completed": true,
+			"data": gin.H{
+				"completed": true,
+				"trade_no":  tradeNo,
+				"discount":  discount,
+			},
+		})
 		return
 	}
 

@@ -38,6 +38,7 @@ export const DEFAULT_ADMIN_CONFIG = {
     log: true,
     midjourney: true,
     task: true,
+    game_center: true,
   },
   personal: {
     enabled: true,
@@ -53,6 +54,7 @@ export const DEFAULT_ADMIN_CONFIG = {
     redemption: true,
     user: true,
     subscription: true,
+    game_management: true,
     affiliate_admin: true,
     setting: true,
   },

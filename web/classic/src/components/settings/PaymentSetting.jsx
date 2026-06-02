@@ -64,6 +64,7 @@ const PaymentSetting = ({
     'affiliate_setting.min_withdrawal_amount': 10,
     'affiliate_setting.trigger_topup_enabled': true,
     'affiliate_setting.trigger_subscription_enabled': false,
+    'affiliate_setting.filter_redemption_topup_enabled': false,
     'affiliate_setting.payout_methods': 'usdt,alipay,wechat',
     'affiliate_setting.usdt_chain': 'TRC20',
     'affiliate_setting.promotion_template': '邀请链接：{invite_link}',
@@ -186,6 +187,7 @@ const PaymentSetting = ({
           case 'affiliate_setting.second_level_enabled':
           case 'affiliate_setting.trigger_topup_enabled':
           case 'affiliate_setting.trigger_subscription_enabled':
+          case 'affiliate_setting.filter_redemption_topup_enabled':
             newInputs[item.key] = toBoolean(item.value);
             break;
           case 'affiliate_setting.usdt_chain':
