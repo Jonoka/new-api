@@ -220,6 +220,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.pass_through_body_enabled ||
     values.system_prompt_override ||
     values.claude_beta_query ||
+    values.claude_code_fingerprint_enabled ||
     values.upstream_model_update_check_enabled ||
     values.upstream_model_update_auto_sync_enabled ||
     values.upstream_model_update_ignored_models?.trim() ||
@@ -3366,6 +3367,33 @@ export function ChannelMutateDrawer({
                                         <FormDescription>
                                           {t(
                                             'Pass through the anthropic-beta header for beta features'
+                                          )}
+                                        </FormDescription>
+                                      </div>
+                                      <FormControl>
+                                        <Switch
+                                          checked={field.value}
+                                          onCheckedChange={field.onChange}
+                                        />
+                                      </FormControl>
+                                    </FormItem>
+                                  )}
+                                />
+
+                                <FormField
+                                  control={form.control}
+                                  name='claude_code_fingerprint_enabled'
+                                  render={({ field }) => (
+                                    <FormItem className='flex items-center justify-between gap-3 px-4 py-3'>
+                                      <div className='space-y-0.5'>
+                                        <FormLabel className='text-sm'>
+                                          {t(
+                                            'Use Claude Code fingerprint access'
+                                          )}
+                                        </FormLabel>
+                                        <FormDescription>
+                                          {t(
+                                            'Send Anthropic requests with Claude Code headers, system marker, and metadata'
                                           )}
                                         </FormDescription>
                                       </div>

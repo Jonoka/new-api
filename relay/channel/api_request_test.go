@@ -191,3 +191,19 @@ func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.
 	require.Equal(t, "sess-123", upstreamReq.Header.Get("Session_id"))
 	require.Empty(t, upstreamReq.Header.Get("X-Codex-Beta-Features"))
 }
+
+func TestApplyHeaderOverrideKeepsUserHeadersHighestPriority(t *testing.T) {
+	t.Parallel()
+
+	upstreamReq := httptest.NewRequest(http.MethodPost, "https://example.com/v1/messages", nil)
+	upstreamReq.Header.Set("anthropic-beta", "claude-code-20250219")
+	upstreamReq.Header.Set("User-Agent", "claude-cli/2.1.114 (external, sdk-cli)")
+
+	applyHeaderOverrideToRequest(upstreamReq, map[string]string{
+		"anthropic-beta": "custom-beta",
+		"user-agent":     "custom-agent",
+	})
+
+	require.Equal(t, "custom-beta", upstreamReq.Header.Get("anthropic-beta"))
+	require.Equal(t, "custom-agent", upstreamReq.Header.Get("User-Agent"))
+}

@@ -213,6 +213,7 @@ export const channelFormSchema = z
     allow_inference_geo: z.boolean().optional(), // OpenAI/Anthropic: inference geography
     allow_speed: z.boolean().optional(), // Anthropic: speed mode control
     claude_beta_query: z.boolean().optional(), // Anthropic: beta query passthrough
+    claude_code_fingerprint_enabled: z.boolean().optional(), // Anthropic: Claude Code fingerprint
     // Upstream model update settings (stored in settings JSON)
     upstream_model_update_check_enabled: z.boolean().optional(),
     upstream_model_update_auto_sync_enabled: z.boolean().optional(),
@@ -355,6 +356,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   allow_inference_geo: false,
   allow_speed: false,
   claude_beta_query: false,
+  claude_code_fingerprint_enabled: false,
   upstream_model_update_check_enabled: false,
   upstream_model_update_auto_sync_enabled: false,
   upstream_model_update_ignored_models: '',
@@ -416,6 +418,7 @@ export function transformChannelToFormDefaults(
   let allowInferenceGeo = false
   let allowSpeed = false
   let claudeBetaQuery = false
+  let claudeCodeFingerprintEnabled = false
   let upstreamModelUpdateCheckEnabled = false
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
@@ -441,6 +444,8 @@ export function transformChannelToFormDefaults(
       allowInferenceGeo = parsed.allow_inference_geo === true
       allowSpeed = parsed.allow_speed === true
       claudeBetaQuery = parsed.claude_beta_query === true
+      claudeCodeFingerprintEnabled =
+        parsed.claude_code_fingerprint_enabled === true
       upstreamModelUpdateCheckEnabled =
         parsed.upstream_model_update_check_enabled === true
       upstreamModelUpdateAutoSyncEnabled =
@@ -530,6 +535,7 @@ export function transformChannelToFormDefaults(
     allow_inference_geo: allowInferenceGeo,
     allow_speed: allowSpeed,
     claude_beta_query: claudeBetaQuery,
+    claude_code_fingerprint_enabled: claudeCodeFingerprintEnabled,
     allow_safety_identifier: allowSafetyIdentifier,
     upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
@@ -634,9 +640,13 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     settingsObj.allow_inference_geo = formData.allow_inference_geo === true
     settingsObj.allow_speed = formData.allow_speed === true
     settingsObj.claude_beta_query = formData.claude_beta_query === true
+    settingsObj.claude_code_fingerprint_enabled =
+      formData.claude_code_fingerprint_enabled === true
   } else {
     if ('allow_speed' in settingsObj) delete settingsObj.allow_speed
     if ('claude_beta_query' in settingsObj) delete settingsObj.claude_beta_query
+    if ('claude_code_fingerprint_enabled' in settingsObj)
+      delete settingsObj.claude_code_fingerprint_enabled
   }
 
   // Upstream model update settings (for model-fetchable channel types)
