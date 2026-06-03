@@ -21,10 +21,17 @@ import type { ChangeEvent } from 'react'
 import * as z from 'zod'
 import type { Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
+import {
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Search,
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { Search } from 'lucide-react'
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
+import { getPageNumbers } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -103,6 +110,17 @@ const PAYOUT_METHOD_OPTIONS = [
   ['alipay', 'Alipay'],
   ['wechat', 'WeChat'],
 ] as const
+const ADMIN_PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
+const DEFAULT_ADMIN_PAGE_SIZE = 50
+
+type AdminPaginationProps = {
+  page: number
+  pageSize: number
+  total: number
+  loading?: boolean
+  onPageChange: (page: number) => void
+  onPageSizeChange: (pageSize: number) => void
+}
 
 function secondsToMinutes(value: number) {
   return Math.max(0, Math.round((Number(value) || 0) / 60))
@@ -171,6 +189,130 @@ function adminRecordDetailLine(record: AffiliateAdminRecord) {
   )
 }
 
+function AdminTablePagination({
+  page,
+  pageSize,
+  total,
+  loading,
+  onPageChange,
+  onPageSizeChange,
+}: AdminPaginationProps) {
+  const { t } = useTranslation()
+  const totalPages = Math.max(1, Math.ceil(total / Math.max(1, pageSize)))
+  const currentPage = Math.min(Math.max(1, page), totalPages)
+  const pageNumbers = getPageNumbers(currentPage, totalPages)
+  const start = total === 0 ? 0 : (currentPage - 1) * pageSize + 1
+  const end = Math.min(currentPage * pageSize, total)
+
+  if (total <= 0) return null
+
+  return (
+    <div className='flex flex-col gap-3 border-t pt-3 sm:flex-row sm:items-center sm:justify-between'>
+      <div className='text-muted-foreground text-sm'>
+        {t('Showing')} {start}-{end} {t('of')} {total}
+      </div>
+      <div className='flex flex-wrap items-center gap-3'>
+        <div className='flex items-center gap-2'>
+          <NativeSelect
+            size='sm'
+            value={String(pageSize)}
+            onChange={(event) => {
+              onPageSizeChange(Number(event.target.value))
+            }}
+            disabled={loading}
+            className='w-[72px]'
+          >
+            {ADMIN_PAGE_SIZE_OPTIONS.map((size) => (
+              <NativeSelectOption key={size} value={size}>
+                {size}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+          <span className='text-muted-foreground text-sm'>
+            {t('Rows per page')}
+          </span>
+        </div>
+        <div className='flex items-center gap-1'>
+          <Button
+            type='button'
+            variant='outline'
+            size='sm'
+            className='h-8 min-w-8 px-2'
+            onClick={() => onPageChange(1)}
+            disabled={loading || currentPage <= 1}
+            aria-label={t('Go to first page')}
+          >
+            <ChevronsLeft className='size-4' />
+          </Button>
+          <Button
+            type='button'
+            variant='outline'
+            size='sm'
+            className='h-8 min-w-8 px-2'
+            onClick={() => onPageChange(currentPage - 1)}
+            disabled={loading || currentPage <= 1}
+            aria-label={t('Go to previous page')}
+          >
+            <ChevronLeft className='size-4' />
+          </Button>
+          <div className='hidden items-center gap-1 sm:flex'>
+            {pageNumbers.map((pageNumber, index) =>
+              pageNumber === '...' ? (
+                <span
+                  key={`${pageNumber}-${index}`}
+                  className='text-muted-foreground px-1 text-sm'
+                >
+                  ...
+                </span>
+              ) : (
+                <Button
+                  key={pageNumber}
+                  type='button'
+                  variant={currentPage === pageNumber ? 'default' : 'outline'}
+                  size='sm'
+                  className='h-8 min-w-8 px-2'
+                  onClick={() => onPageChange(pageNumber as number)}
+                  disabled={loading}
+                >
+                  {pageNumber}
+                </Button>
+              )
+            )}
+          </div>
+          <div className='text-muted-foreground px-2 text-sm sm:hidden'>
+            {t('Page {{current}} of {{total}}', {
+              current: currentPage,
+              total: totalPages,
+            })}
+          </div>
+          <Button
+            type='button'
+            variant='outline'
+            size='sm'
+            className='h-8 min-w-8 px-2'
+            onClick={() => onPageChange(currentPage + 1)}
+            disabled={loading || currentPage >= totalPages}
+            aria-label={t('Go to next page')}
+          >
+            <ChevronRight className='size-4' />
+          </Button>
+          <Button
+            type='button'
+            variant='outline'
+            size='sm'
+            className='h-8 min-w-8 px-2'
+            onClick={() => onPageChange(totalPages)}
+            disabled={loading || currentPage >= totalPages}
+            aria-label={t('Go to last page')}
+          >
+            <ChevronsRight className='size-4' />
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function AffiliateSettingsSection({ defaultValues }: Props) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
@@ -178,13 +320,26 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
   const [invitationKeyword, setInvitationKeyword] = useState('')
   const [invitationSearch, setInvitationSearch] = useState('')
   const [invitationsLoading, setInvitationsLoading] = useState(false)
+  const [invitationPage, setInvitationPage] = useState(1)
+  const [invitationPageSize, setInvitationPageSize] = useState(
+    DEFAULT_ADMIN_PAGE_SIZE
+  )
+  const [invitationTotal, setInvitationTotal] = useState(0)
   const [records, setRecords] = useState<AffiliateAdminRecord[]>([])
   const [recordSourceType, setRecordSourceType] = useState('topup')
   const [recordStatus, setRecordStatus] = useState('')
   const [recordsLoading, setRecordsLoading] = useState(false)
+  const [recordPage, setRecordPage] = useState(1)
+  const [recordPageSize, setRecordPageSize] = useState(DEFAULT_ADMIN_PAGE_SIZE)
+  const [recordTotal, setRecordTotal] = useState(0)
   const [withdrawals, setWithdrawals] = useState<AffiliateWithdrawal[]>([])
   const [withdrawalStatus, setWithdrawalStatus] = useState('')
   const [withdrawalsLoading, setWithdrawalsLoading] = useState(false)
+  const [withdrawalPage, setWithdrawalPage] = useState(1)
+  const [withdrawalPageSize, setWithdrawalPageSize] = useState(
+    DEFAULT_ADMIN_PAGE_SIZE
+  )
+  const [withdrawalTotal, setWithdrawalTotal] = useState(0)
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null)
   const [bindUserKeyword, setBindUserKeyword] = useState('')
   const [bindUserCandidates, setBindUserCandidates] = useState<User[]>([])
@@ -262,32 +417,54 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
   const loadInvitations = useCallback(async () => {
     try {
       setInvitationsLoading(true)
-      const res = await getAdminAffiliateInvitations(invitationSearch)
-      if (res.success) setInvitations(res.data.items || [])
+      const res = await getAdminAffiliateInvitations(
+        invitationSearch,
+        invitationPage,
+        invitationPageSize
+      )
+      if (res.success) {
+        setInvitations(res.data.items || [])
+        setInvitationTotal(res.data.total || 0)
+      }
     } finally {
       setInvitationsLoading(false)
     }
-  }, [invitationSearch])
+  }, [invitationPage, invitationPageSize, invitationSearch])
 
   const loadRecords = useCallback(async () => {
     try {
       setRecordsLoading(true)
-      const res = await getAdminAffiliateRecords(recordSourceType, recordStatus)
-      if (res.success) setRecords(res.data.items || [])
+      const res = await getAdminAffiliateRecords(
+        recordSourceType,
+        recordStatus,
+        recordPage,
+        recordPageSize
+      )
+      if (res.success) {
+        setRecords(res.data.items || [])
+        setRecordTotal(res.data.total || 0)
+      }
     } finally {
       setRecordsLoading(false)
     }
-  }, [recordSourceType, recordStatus])
+  }, [recordPage, recordPageSize, recordSourceType, recordStatus])
 
   const loadWithdrawals = useCallback(async () => {
     try {
       setWithdrawalsLoading(true)
-      const res = await getAdminAffiliateWithdrawals(withdrawalStatus)
-      if (res.success) setWithdrawals(res.data.items || [])
+      const res = await getAdminAffiliateWithdrawals(
+        withdrawalStatus,
+        withdrawalPage,
+        withdrawalPageSize
+      )
+      if (res.success) {
+        setWithdrawals(res.data.items || [])
+        setWithdrawalTotal(res.data.total || 0)
+      }
     } finally {
       setWithdrawalsLoading(false)
     }
-  }, [withdrawalStatus])
+  }, [withdrawalPage, withdrawalPageSize, withdrawalStatus])
 
   useEffect(() => {
     loadInvitations()
@@ -706,7 +883,8 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
           {selectedBindUser && (
             <div className='bg-muted/40 rounded-lg border p-3 text-sm'>
               <span className='font-medium'>{t('Selected target user')}:</span>{' '}
-              #{selectedBindUser.id} {selectedBindUser.display_name || selectedBindUser.username}
+              #{selectedBindUser.id}{' '}
+              {selectedBindUser.display_name || selectedBindUser.username}
               {selectedBindUser.email ? ` (${selectedBindUser.email})` : ''}
             </div>
           )}
@@ -765,6 +943,7 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
                     event.preventDefault()
+                    setInvitationPage(1)
                     setInvitationSearch(invitationKeyword.trim())
                   }
                 }}
@@ -773,7 +952,10 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
               />
               <Button
                 variant='outline'
-                onClick={() => setInvitationSearch(invitationKeyword.trim())}
+                onClick={() => {
+                  setInvitationPage(1)
+                  setInvitationSearch(invitationKeyword.trim())
+                }}
                 disabled={invitationsLoading}
               >
                 <Search className='size-4' />
@@ -847,6 +1029,17 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
               </TableBody>
             </Table>
           </div>
+          <AdminTablePagination
+            page={invitationPage}
+            pageSize={invitationPageSize}
+            total={invitationTotal}
+            loading={invitationsLoading}
+            onPageChange={setInvitationPage}
+            onPageSizeChange={(pageSize) => {
+              setInvitationPageSize(pageSize)
+              setInvitationPage(1)
+            }}
+          />
         </TabsContent>
 
         <TabsContent value='records' className='space-y-3'>
@@ -862,7 +1055,10 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
             <div className='flex flex-col gap-2 sm:flex-row'>
               <NativeSelect
                 value={recordSourceType}
-                onChange={(event) => setRecordSourceType(event.target.value)}
+                onChange={(event) => {
+                  setRecordPage(1)
+                  setRecordSourceType(event.target.value)
+                }}
                 className='sm:w-44'
               >
                 <NativeSelectOption value=''>
@@ -880,7 +1076,10 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
               </NativeSelect>
               <NativeSelect
                 value={recordStatus}
-                onChange={(event) => setRecordStatus(event.target.value)}
+                onChange={(event) => {
+                  setRecordPage(1)
+                  setRecordStatus(event.target.value)
+                }}
                 className='sm:w-36'
               >
                 <NativeSelectOption value=''>
@@ -967,6 +1166,17 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
               </TableBody>
             </Table>
           </div>
+          <AdminTablePagination
+            page={recordPage}
+            pageSize={recordPageSize}
+            total={recordTotal}
+            loading={recordsLoading}
+            onPageChange={setRecordPage}
+            onPageSizeChange={(pageSize) => {
+              setRecordPageSize(pageSize)
+              setRecordPage(1)
+            }}
+          />
         </TabsContent>
 
         <TabsContent value='withdrawals' className='space-y-3'>
@@ -982,7 +1192,10 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
             <div className='flex gap-2'>
               <NativeSelect
                 value={withdrawalStatus}
-                onChange={(event) => setWithdrawalStatus(event.target.value)}
+                onChange={(event) => {
+                  setWithdrawalPage(1)
+                  setWithdrawalStatus(event.target.value)
+                }}
                 className='w-36'
               >
                 <NativeSelectOption value=''>
@@ -1092,6 +1305,17 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
               )}
             </TableBody>
           </Table>
+          <AdminTablePagination
+            page={withdrawalPage}
+            pageSize={withdrawalPageSize}
+            total={withdrawalTotal}
+            loading={withdrawalsLoading}
+            onPageChange={setWithdrawalPage}
+            onPageSizeChange={(pageSize) => {
+              setWithdrawalPageSize(pageSize)
+              setWithdrawalPage(1)
+            }}
+          />
         </TabsContent>
       </Tabs>
     </SettingsSection>
