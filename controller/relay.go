@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -229,7 +230,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 
-		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
+		retryDecision := shouldRetryWithReason(c, newAPIError, common.RetryTimes-retryParam.GetRetry())
+		if !retryDecision.Retry {
+			logger.LogInfo(c, fmt.Sprintf("不重试：%s", retryDecision.Reason))
 			break
 		}
 	}
@@ -257,6 +260,28 @@ func addUsedChannel(c *gin.Context, channelId int) {
 	useChannel := c.GetStringSlice("use_channel")
 	useChannel = append(useChannel, fmt.Sprintf("%d", channelId))
 	c.Set("use_channel", useChannel)
+}
+
+func usedChannelIDSet(c *gin.Context) map[int]struct{} {
+	if c == nil {
+		return nil
+	}
+	useChannel := c.GetStringSlice("use_channel")
+	if len(useChannel) == 0 {
+		return nil
+	}
+	used := make(map[int]struct{}, len(useChannel))
+	for _, raw := range useChannel {
+		id, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil || id <= 0 {
+			continue
+		}
+		used[id] = struct{}{}
+	}
+	if len(used) == 0 {
+		return nil
+	}
+	return used
 }
 
 func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
@@ -302,6 +327,11 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 			AutoBan: &autoBanInt,
 		}, nil
 	}
+	if retryParam.GetRetry() > 0 {
+		retryParam.ExcludedChannelIDs = usedChannelIDSet(c)
+	} else {
+		retryParam.ExcludedChannelIDs = nil
+	}
 	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
 
 	info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
@@ -326,36 +356,48 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 	return channel, nil
 }
 
+type retryDecision struct {
+	Retry  bool
+	Reason string
+}
+
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
+	return shouldRetryWithReason(c, openaiErr, retryTimes).Retry
+}
+
+func shouldRetryWithReason(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) retryDecision {
 	if openaiErr == nil {
-		return false
+		return retryDecision{Reason: "nil_error"}
 	}
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
-		return false
+		return retryDecision{Reason: "channel_affinity_skip"}
 	}
 	if types.IsChannelError(openaiErr) {
-		return true
+		return retryDecision{Retry: true, Reason: "channel_error"}
 	}
 	if types.IsSkipRetryError(openaiErr) {
-		return false
+		return retryDecision{Reason: "skip_retry_error"}
 	}
 	if retryTimes <= 0 {
-		return false
+		return retryDecision{Reason: "retry_exhausted"}
 	}
 	if _, ok := c.Get("specific_channel_id"); ok {
-		return false
+		return retryDecision{Reason: "specific_channel"}
 	}
 	code := openaiErr.StatusCode
 	if code >= 200 && code < 300 {
-		return false
+		return retryDecision{Reason: "success_status_code"}
 	}
 	if code < 100 || code > 599 {
-		return true
+		return retryDecision{Retry: true, Reason: "invalid_status_code_retry"}
 	}
 	if operation_setting.IsAlwaysSkipRetryCode(openaiErr.GetErrorCode()) {
-		return false
+		return retryDecision{Reason: "always_skip_error_code"}
 	}
-	return operation_setting.ShouldRetryByStatusCode(code)
+	if operation_setting.ShouldRetryByStatusCode(code) {
+		return retryDecision{Retry: true, Reason: "status_code_retry"}
+	}
+	return retryDecision{Reason: "status_code_not_configured"}
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
