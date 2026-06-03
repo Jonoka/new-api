@@ -91,7 +91,9 @@ func CommonClaudeHeadersOperation(c *gin.Context, req *http.Header, info *relayc
 }
 
 func shouldUseClaudeCodeFingerprint(info *relaycommon.RelayInfo) bool {
-	return info != nil && info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled
+	return info != nil &&
+		(info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled ||
+			info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled)
 }
 
 func applyClaudeCodeHeaderFingerprint(req *http.Header, info *relaycommon.RelayInfo) {
@@ -103,6 +105,9 @@ func applyClaudeCodeHeaderFingerprint(req *http.Header, info *relaycommon.RelayI
 	req.Set("anthropic-version", "2023-06-01")
 	req.Set("anthropic-beta", claudeCodeAnthropicBeta)
 	req.Set("anthropic-dangerous-direct-browser-access", "true")
+	if info.ApiKey != "" {
+		req.Set("Authorization", "Bearer "+info.ApiKey)
+	}
 }
 
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {

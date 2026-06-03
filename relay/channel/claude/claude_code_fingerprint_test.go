@@ -70,6 +70,31 @@ func TestConvertClaudeRequestAddsClaudeCodeSystemAndMetadata(t *testing.T) {
 	require.JSONEq(t, `{"user_id":"user_0000000000000000000000000000000000000000000000000000000000000000_account_00000000-0000-0000-0000-000000000000_session_00000000-0000-0000-0000-000000000000"}`, string(claudeReq.Metadata))
 }
 
+func TestConvertClaudeRequestAddsClaudeCodeFingerprintWhenTransportFingerprintEnabled(t *testing.T) {
+	t.Parallel()
+
+	adaptor := &Adaptor{}
+	req := &dto.ClaudeRequest{
+		Model: "claude-sonnet-4-20250514",
+	}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeTransportFingerprintEnabled: true,
+			},
+		},
+	}
+
+	converted, err := adaptor.ConvertClaudeRequest(newClaudeFingerprintTestContext(), info, req)
+	require.NoError(t, err)
+
+	claudeReq := converted.(*dto.ClaudeRequest)
+	system := claudeReq.ParseSystem()
+	require.Len(t, system, 1)
+	require.Contains(t, system[0].GetText(), "Claude Code")
+	require.JSONEq(t, `{"user_id":"user_0000000000000000000000000000000000000000000000000000000000000000_account_00000000-0000-0000-0000-000000000000_session_00000000-0000-0000-0000-000000000000"}`, string(claudeReq.Metadata))
+}
+
 func TestConvertClaudeRequestReplacesEmptyStringSystemWithClaudeCodeSystem(t *testing.T) {
 	t.Parallel()
 
@@ -170,6 +195,35 @@ func TestSetupRequestHeaderAddsClaudeCodeFingerprintHeaders(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, "sk-test", headers.Get("x-api-key"))
+	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
+	require.Equal(t, "claude-cli/2.1.114 (external, sdk-cli)", headers.Get("User-Agent"))
+	require.Equal(t, "cli", headers.Get("X-App"))
+	require.Equal(t, "2023-06-01", headers.Get("anthropic-version"))
+	require.Equal(t, "true", headers.Get("anthropic-dangerous-direct-browser-access"))
+	require.Contains(t, headers.Get("anthropic-beta"), "claude-code-20250219")
+	require.Contains(t, headers.Get("anthropic-beta"), "advisor-tool-2026-03-01")
+}
+
+func TestSetupRequestHeaderAddsClaudeCodeFingerprintHeadersWhenTransportFingerprintEnabled(t *testing.T) {
+	t.Parallel()
+
+	ctx := newClaudeFingerprintTestContext()
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "claude-sonnet-4-20250514",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiKey: "sk-test",
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeTransportFingerprintEnabled: true,
+			},
+		},
+	}
+
+	headers := http.Header{}
+	err := (&Adaptor{}).SetupRequestHeader(ctx, &headers, info)
+	require.NoError(t, err)
+
+	require.Equal(t, "sk-test", headers.Get("x-api-key"))
+	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
 	require.Equal(t, "claude-cli/2.1.114 (external, sdk-cli)", headers.Get("User-Agent"))
 	require.Equal(t, "cli", headers.Get("X-App"))
 	require.Equal(t, "2023-06-01", headers.Get("anthropic-version"))
