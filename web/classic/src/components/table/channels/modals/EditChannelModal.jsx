@@ -212,6 +212,7 @@ const EditChannelModal = (props) => {
     allow_speed: false,
     claude_beta_query: false,
     claude_code_fingerprint_enabled: false,
+    claude_code_transport_fingerprint_enabled: false,
     upstream_model_update_check_enabled: false,
     upstream_model_update_auto_sync_enabled: false,
     upstream_model_update_last_check_time: 0,
@@ -929,6 +930,8 @@ const EditChannelModal = (props) => {
           data.claude_beta_query = parsedSettings.claude_beta_query || false;
           data.claude_code_fingerprint_enabled =
             parsedSettings.claude_code_fingerprint_enabled === true;
+          data.claude_code_transport_fingerprint_enabled =
+            parsedSettings.claude_code_transport_fingerprint_enabled === true;
           data.upstream_model_update_check_enabled =
             parsedSettings.upstream_model_update_check_enabled === true;
           data.upstream_model_update_auto_sync_enabled =
@@ -994,6 +997,7 @@ const EditChannelModal = (props) => {
           data.allow_speed = false;
           data.claude_beta_query = false;
           data.claude_code_fingerprint_enabled = false;
+          data.claude_code_transport_fingerprint_enabled = false;
           data.upstream_model_update_check_enabled = false;
           data.upstream_model_update_auto_sync_enabled = false;
           data.upstream_model_update_last_check_time = 0;
@@ -1020,6 +1024,7 @@ const EditChannelModal = (props) => {
         data.allow_speed = false;
         data.claude_beta_query = false;
         data.claude_code_fingerprint_enabled = false;
+        data.claude_code_transport_fingerprint_enabled = false;
         data.upstream_model_update_check_enabled = false;
         data.upstream_model_update_auto_sync_enabled = false;
         data.upstream_model_update_last_check_time = 0;
@@ -1109,6 +1114,7 @@ const EditChannelModal = (props) => {
         data.force_format ||
         data.claude_beta_query ||
         data.claude_code_fingerprint_enabled ||
+        data.claude_code_transport_fingerprint_enabled ||
         data.system_prompt_override ||
         data.monitor_enabled !== 'inherit' ||
         (data.monitor_test_interval_minutes && data.monitor_test_interval_minutes.trim()) ||
@@ -1878,6 +1884,7 @@ const EditChannelModal = (props) => {
         delete settings.allow_speed;
         delete settings.claude_beta_query;
         delete settings.claude_code_fingerprint_enabled;
+        delete settings.claude_code_transport_fingerprint_enabled;
       }
       if (localInputs.type === 14) {
         delete settings.disable_store;
@@ -1888,6 +1895,8 @@ const EditChannelModal = (props) => {
         settings.claude_beta_query = localInputs.claude_beta_query === true;
         settings.claude_code_fingerprint_enabled =
           localInputs.claude_code_fingerprint_enabled === true;
+        settings.claude_code_transport_fingerprint_enabled =
+          localInputs.claude_code_transport_fingerprint_enabled === true;
       }
     } else {
       delete settings.allow_service_tier;
@@ -1898,6 +1907,7 @@ const EditChannelModal = (props) => {
       delete settings.allow_speed;
       delete settings.claude_beta_query;
       delete settings.claude_code_fingerprint_enabled;
+      delete settings.claude_code_transport_fingerprint_enabled;
     }
 
     settings.upstream_model_update_check_enabled =
@@ -1996,6 +2006,7 @@ const EditChannelModal = (props) => {
     delete localInputs.allow_speed;
     delete localInputs.claude_beta_query;
     delete localInputs.claude_code_fingerprint_enabled;
+    delete localInputs.claude_code_transport_fingerprint_enabled;
     delete localInputs.upstream_model_update_check_enabled;
     delete localInputs.upstream_model_update_auto_sync_enabled;
     delete localInputs.upstream_model_update_last_check_time;
@@ -2823,6 +2834,7 @@ const EditChannelModal = (props) => {
                     <>
                       <Form.Switch field='claude_beta_query' label={t('Claude 强制 beta=true')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelOtherSettingsChange('claude_beta_query', value)} extraText={t('开启后，该渠道请求 Claude 时将强制追加 ?beta=true（无需客户端手动传参）')} />
                       <Form.Switch field='claude_code_fingerprint_enabled' label={t('Claude Code 指纹访问')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelOtherSettingsChange('claude_code_fingerprint_enabled', value)} extraText={t('开启后，该渠道请求 Claude 时会注入 Claude Code 请求头、系统标识和 metadata；Header Override 仍可覆盖默认指纹头')} />
+                      <Form.Switch field='claude_code_transport_fingerprint_enabled' label={t('Claude Code Transport 指纹')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelOtherSettingsChange('claude_code_transport_fingerprint_enabled', value)} extraText={t('开启后，该渠道请求 Claude 时会使用内置 HTTP/2 TLS Transport 指纹；不改变 Header Override 优先级')} />
                     </>
                   )}
 

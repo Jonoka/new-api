@@ -12,6 +12,7 @@ import (
 	"time"
 
 	common2 "github.com/QuantumNous/new-api/common"
+	rootconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
@@ -484,16 +485,32 @@ func sendPingData(c *gin.Context, mutex *sync.Mutex) error {
 func DoRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	return doRequest(c, req, info)
 }
-func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
-	var client *http.Client
-	var err error
-	if info.ChannelSetting.Proxy != "" {
-		client, err = service.NewProxyHttpClient(info.ChannelSetting.Proxy)
+
+func shouldUseClaudeCodeTransportFingerprint(info *common.RelayInfo) bool {
+	return info != nil &&
+		info.ChannelMeta != nil &&
+		info.ApiType == rootconstant.APITypeAnthropic &&
+		info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled
+}
+
+func selectRelayHTTPClient(info *common.RelayInfo) (*http.Client, error) {
+	if shouldUseClaudeCodeTransportFingerprint(info) {
+		return service.NewClaudeCodeTransportHttpClient(info.ChannelSetting.Proxy)
+	}
+	if info != nil && info.ChannelSetting.Proxy != "" {
+		client, err := service.NewProxyHttpClient(info.ChannelSetting.Proxy)
 		if err != nil {
 			return nil, fmt.Errorf("new proxy http client failed: %w", err)
 		}
-	} else {
-		client = service.GetHttpClient()
+		return client, nil
+	}
+	return service.GetHttpClient(), nil
+}
+
+func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
+	client, err := selectRelayHTTPClient(info)
+	if err != nil {
+		return nil, err
 	}
 
 	var stopPinger context.CancelFunc

@@ -5,7 +5,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -206,4 +209,98 @@ func TestApplyHeaderOverrideKeepsUserHeadersHighestPriority(t *testing.T) {
 
 	require.Equal(t, "custom-beta", upstreamReq.Header.Get("anthropic-beta"))
 	require.Equal(t, "custom-agent", upstreamReq.Header.Get("User-Agent"))
+}
+
+func TestShouldUseClaudeCodeTransportFingerprint(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		info *relaycommon.RelayInfo
+		want bool
+	}{
+		{
+			name: "nil info",
+			info: nil,
+			want: false,
+		},
+		{
+			name: "non anthropic keeps normal transport",
+			info: &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
+				ApiType: constant.APITypeOpenAI,
+				ChannelOtherSettings: dto.ChannelOtherSettings{
+					ClaudeCodeTransportFingerprintEnabled: true,
+				},
+			}},
+			want: false,
+		},
+		{
+			name: "anthropic without switch keeps normal transport",
+			info: &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
+				ApiType: constant.APITypeAnthropic,
+			}},
+			want: false,
+		},
+		{
+			name: "anthropic with switch uses claude code transport",
+			info: &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
+				ApiType: constant.APITypeAnthropic,
+				ChannelOtherSettings: dto.ChannelOtherSettings{
+					ClaudeCodeTransportFingerprintEnabled: true,
+				},
+			}},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, shouldUseClaudeCodeTransportFingerprint(tt.info))
+		})
+	}
+}
+
+func TestSelectRelayHTTPClientUsesClaudeCodeTransportFingerprint(t *testing.T) {
+	service.InitHttpClient()
+
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
+		ApiType: constant.APITypeAnthropic,
+		ChannelOtherSettings: dto.ChannelOtherSettings{
+			ClaudeCodeTransportFingerprintEnabled: true,
+		},
+	}}
+
+	client, err := selectRelayHTTPClient(info)
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	require.NotSame(t, service.GetHttpClient(), client)
+
+	transport, ok := client.Transport.(*http.Transport)
+	require.True(t, ok)
+	require.NotNil(t, transport.TLSClientConfig)
+	require.Contains(t, transport.TLSClientConfig.NextProtos, "h2")
+}
+
+func TestSelectRelayHTTPClientKeepsProxyWithClaudeCodeTransportFingerprint(t *testing.T) {
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
+		ApiType: constant.APITypeAnthropic,
+		ChannelSetting: dto.ChannelSettings{
+			Proxy: "http://127.0.0.1:18080",
+		},
+		ChannelOtherSettings: dto.ChannelOtherSettings{
+			ClaudeCodeTransportFingerprintEnabled: true,
+		},
+	}}
+
+	client, err := selectRelayHTTPClient(info)
+	require.NoError(t, err)
+	require.NotNil(t, client)
+
+	transport, ok := client.Transport.(*http.Transport)
+	require.True(t, ok)
+	require.NotNil(t, transport.Proxy)
+	require.NotNil(t, transport.TLSClientConfig)
+	require.Contains(t, transport.TLSClientConfig.NextProtos, "h2")
 }
