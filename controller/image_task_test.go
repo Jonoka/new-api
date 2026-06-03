@@ -3,6 +3,7 @@ package controller
 import (
 	"testing"
 
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
@@ -111,4 +112,20 @@ func TestImageTaskPersistedQuotaFallsBackToBillingSession(t *testing.T) {
 	}
 
 	assert.Equal(t, 90000, imageTaskPersistedQuota(relayInfo))
+}
+
+func TestNormalizeOpenAIImageGenerationQuality(t *testing.T) {
+	cases := map[string]string{
+		"":         "auto",
+		"auto":     "auto",
+		"LOW":      "low",
+		" medium ": "medium",
+		"high":     "high",
+		"4k":       "auto",
+		"ultra":    "auto",
+	}
+
+	for input, want := range cases {
+		assert.Equal(t, want, dto.NormalizeOpenAIImageGenerationQuality(input), input)
+	}
 }

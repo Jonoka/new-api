@@ -39,6 +39,23 @@ type ImageRequest struct {
 	Extra map[string]json.RawMessage `json:"-"`
 }
 
+func NormalizeOpenAIImageGenerationQuality(quality string) string {
+	normalized := strings.ToLower(strings.TrimSpace(quality))
+	switch normalized {
+	case "auto", "low", "medium", "high":
+		return normalized
+	default:
+		return "auto"
+	}
+}
+
+func (i *ImageRequest) NormalizeOpenAIImageGenerationQuality() {
+	if i == nil {
+		return
+	}
+	i.Quality = NormalizeOpenAIImageGenerationQuality(i.Quality)
+}
+
 func (i *ImageRequest) UnmarshalJSON(data []byte) error {
 	// 先解析成 map[string]interface{}
 	var rawMap map[string]json.RawMessage

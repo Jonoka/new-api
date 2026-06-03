@@ -43,6 +43,21 @@ func RelayImageTaskSubmit(c *gin.Context) {
 		return
 	}
 
+	imageRequest, ok := request.(*dto.ImageRequest)
+	if !ok {
+		apiErr := types.NewErrorWithStatusCode(fmt.Errorf("invalid request type, expected dto.ImageRequest, got %T", request), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+		c.JSON(apiErr.StatusCode, gin.H{"error": apiErr.ToOpenAIError()})
+		return
+	}
+	imageRequest.NormalizeOpenAIImageGenerationQuality()
+	if billingInput, inputErr := helper.BuildBillingExprRequestInputFromRequest(imageRequest, relayInfo.RequestHeaders); inputErr != nil {
+		apiErr := types.NewErrorWithStatusCode(inputErr, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+		c.JSON(apiErr.StatusCode, gin.H{"error": apiErr.ToOpenAIError()})
+		return
+	} else {
+		relayInfo.BillingRequestInput = &billingInput
+	}
+
 	meta := request.GetTokenCountMeta()
 	tokens, err := service.EstimateRequestToken(c, meta, relayInfo)
 	if err != nil {
