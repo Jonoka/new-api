@@ -64,6 +64,7 @@ import {
   displayAmountToQuota,
   quotaToDisplayAmount,
 } from '../../helpers/quota';
+import { ITEMS_PER_PAGE } from '../../constants';
 
 const { Text, Title } = Typography;
 
@@ -82,7 +83,13 @@ const EMPTY_ACCOUNT = {
 const DEFAULT_PAYOUT_METHODS = ['usdt', 'alipay', 'wechat'];
 
 function getItems(pageData) {
+  if (Array.isArray(pageData)) return pageData;
   return pageData?.items || pageData?.Items || [];
+}
+
+function getTotal(pageData) {
+  if (Array.isArray(pageData)) return pageData.length;
+  return pageData?.total || pageData?.Total || 0;
 }
 
 function statusText(t, status) {
@@ -178,15 +185,50 @@ function renderSourceDetail(t, record) {
   );
 }
 
+function renderUserName(t, user, fallbackId) {
+  if (!user && !fallbackId) return '-';
+  const display =
+    user?.display_name || user?.username || (fallbackId ? `ID ${fallbackId}` : '');
+  return (
+    <Space vertical align='start' spacing={2}>
+      <Text strong>{display || '-'}</Text>
+      {(user?.id || fallbackId) && (
+        <Text type='secondary' size='small'>
+          ID {user?.id || fallbackId}
+        </Text>
+      )}
+    </Space>
+  );
+}
+
 const Affiliate = () => {
   const { t } = useTranslation();
   const [summary, setSummary] = useState(null);
   const [account, setAccount] = useState(EMPTY_ACCOUNT);
+  const [invitations, setInvitations] = useState([]);
   const [records, setRecords] = useState([]);
   const [withdrawals, setWithdrawals] = useState([]);
-  const [leaderboard, setLeaderboard] = useState([]);
+  const [inviteLeaderboard, setInviteLeaderboard] = useState([]);
+  const [commissionLeaderboard, setCommissionLeaderboard] = useState([]);
   const [leaderboardPeriod, setLeaderboardPeriod] = useState('month');
-  const [leaderboardSort, setLeaderboardSort] = useState('commission');
+  const [inviteLeaderboardPage, setInviteLeaderboardPage] = useState(1);
+  const [inviteLeaderboardPageSize, setInviteLeaderboardPageSize] =
+    useState(ITEMS_PER_PAGE);
+  const [inviteLeaderboardTotal, setInviteLeaderboardTotal] = useState(0);
+  const [commissionLeaderboardPage, setCommissionLeaderboardPage] = useState(1);
+  const [commissionLeaderboardPageSize, setCommissionLeaderboardPageSize] =
+    useState(ITEMS_PER_PAGE);
+  const [commissionLeaderboardTotal, setCommissionLeaderboardTotal] =
+    useState(0);
+  const [invitationPage, setInvitationPage] = useState(1);
+  const [invitationPageSize, setInvitationPageSize] = useState(ITEMS_PER_PAGE);
+  const [invitationTotal, setInvitationTotal] = useState(0);
+  const [recordPage, setRecordPage] = useState(1);
+  const [recordPageSize, setRecordPageSize] = useState(ITEMS_PER_PAGE);
+  const [recordTotal, setRecordTotal] = useState(0);
+  const [withdrawalPage, setWithdrawalPage] = useState(1);
+  const [withdrawalPageSize, setWithdrawalPageSize] = useState(ITEMS_PER_PAGE);
+  const [withdrawalTotal, setWithdrawalTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [savingAccount, setSavingAccount] = useState(false);
   const [uploadingMethod, setUploadingMethod] = useState('');
@@ -219,42 +261,105 @@ const Affiliate = () => {
       const [
         summaryRes,
         accountRes,
+        invitationsRes,
         recordsRes,
         withdrawalsRes,
-        leaderboardRes,
+        inviteLeaderboardRes,
+        commissionLeaderboardRes,
       ] = await Promise.all([
         API.get('/api/affiliate/summary'),
         API.get('/api/affiliate/payout-account'),
+        API.get('/api/affiliate/invitations', {
+          params: { p: invitationPage, page_size: invitationPageSize },
+        }),
         API.get('/api/affiliate/records', {
-          params: { p: 1, page_size: 20 },
+          params: { p: recordPage, page_size: recordPageSize },
         }),
         API.get('/api/affiliate/withdrawals', {
-          params: { p: 1, page_size: 20 },
+          params: { p: withdrawalPage, page_size: withdrawalPageSize },
         }),
         API.get('/api/affiliate/leaderboard', {
           params: {
             period: leaderboardPeriod,
-            sort: leaderboardSort,
-            limit: 20,
+            sort: 'invites',
+            metric: 'invites',
+            p: inviteLeaderboardPage,
+            page_size: inviteLeaderboardPageSize,
+          },
+        }),
+        API.get('/api/affiliate/leaderboard', {
+          params: {
+            period: leaderboardPeriod,
+            sort: 'commission',
+            metric: 'commission',
+            p: commissionLeaderboardPage,
+            page_size: commissionLeaderboardPageSize,
           },
         }),
       ]);
 
       if (summaryRes.data.success) setSummary(summaryRes.data.data);
       if (accountRes.data.success) setAccount(accountRes.data.data);
-      if (recordsRes.data.success) setRecords(getItems(recordsRes.data.data));
-      if (withdrawalsRes.data.success) {
-        setWithdrawals(getItems(withdrawalsRes.data.data));
+      if (invitationsRes.data.success) {
+        const pageData = invitationsRes.data.data;
+        setInvitations(getItems(pageData));
+        setInvitationPage(pageData?.page || invitationPage);
+        setInvitationPageSize(pageData?.page_size || invitationPageSize);
+        setInvitationTotal(getTotal(pageData));
       }
-      if (leaderboardRes.data.success) {
-        setLeaderboard(leaderboardRes.data.data || []);
+      if (recordsRes.data.success) {
+        const pageData = recordsRes.data.data;
+        setRecords(getItems(pageData));
+        setRecordPage(pageData?.page || recordPage);
+        setRecordPageSize(pageData?.page_size || recordPageSize);
+        setRecordTotal(getTotal(pageData));
+      }
+      if (withdrawalsRes.data.success) {
+        const pageData = withdrawalsRes.data.data;
+        setWithdrawals(getItems(pageData));
+        setWithdrawalPage(pageData?.page || withdrawalPage);
+        setWithdrawalPageSize(pageData?.page_size || withdrawalPageSize);
+        setWithdrawalTotal(getTotal(pageData));
+      }
+      if (inviteLeaderboardRes.data.success) {
+        const pageData = inviteLeaderboardRes.data.data;
+        setInviteLeaderboard(getItems(pageData));
+        setInviteLeaderboardPage(pageData?.page || inviteLeaderboardPage);
+        setInviteLeaderboardPageSize(
+          pageData?.page_size || inviteLeaderboardPageSize,
+        );
+        setInviteLeaderboardTotal(getTotal(pageData));
+      }
+      if (commissionLeaderboardRes.data.success) {
+        const pageData = commissionLeaderboardRes.data.data;
+        setCommissionLeaderboard(getItems(pageData));
+        setCommissionLeaderboardPage(
+          pageData?.page || commissionLeaderboardPage,
+        );
+        setCommissionLeaderboardPageSize(
+          pageData?.page_size || commissionLeaderboardPageSize,
+        );
+        setCommissionLeaderboardTotal(getTotal(pageData));
       }
     } catch (error) {
       showError(t('获取返佣数据失败'));
     } finally {
       setLoading(false);
     }
-  }, [leaderboardPeriod, leaderboardSort, t]);
+  }, [
+    commissionLeaderboardPage,
+    commissionLeaderboardPageSize,
+    invitationPage,
+    invitationPageSize,
+    inviteLeaderboardPage,
+    inviteLeaderboardPageSize,
+    leaderboardPeriod,
+    recordPage,
+    recordPageSize,
+    t,
+    withdrawalPage,
+    withdrawalPageSize,
+  ]);
 
   useEffect(() => {
     refresh();
@@ -389,6 +494,11 @@ const Affiliate = () => {
   const recordColumns = [
     { title: t('层级'), dataIndex: 'level', width: 80 },
     {
+      title: t('购买用户'),
+      width: 160,
+      render: (_, record) => renderUserName(t, record.invitee, record.invitee_id),
+    },
+    {
       title: t('购买明细'),
       render: (_, record) => renderSourceDetail(t, record),
     },
@@ -407,6 +517,38 @@ const Affiliate = () => {
     {
       title: t('可提现时间'),
       dataIndex: 'available_time',
+      render: (value) => (value ? timestamp2string(value) : '-'),
+    },
+  ];
+
+  const invitationColumns = [
+    {
+      title: t('被邀请用户'),
+      render: (_, record) => renderUserName(t, record.invitee),
+    },
+    {
+      title: t('注册时间'),
+      dataIndex: ['invitee', 'created_at'],
+      render: (value) => (value ? timestamp2string(value) : '-'),
+    },
+    {
+      title: t('充值次数'),
+      dataIndex: 'topup_count',
+      render: (value) => value || 0,
+    },
+    {
+      title: t('充值金额'),
+      dataIndex: 'topup_quota',
+      render: (value) => renderQuota(value || 0),
+    },
+    {
+      title: t('贡献返利'),
+      dataIndex: 'commission_quota',
+      render: (value) => renderQuota(value || 0),
+    },
+    {
+      title: t('最近充值'),
+      dataIndex: 'last_topup_time',
       render: (value) => (value ? timestamp2string(value) : '-'),
     },
   ];
@@ -436,7 +578,7 @@ const Affiliate = () => {
     },
   ];
 
-  const leaderboardColumns = [
+  const inviteLeaderboardColumns = [
     {
       title: t('排名'),
       dataIndex: 'rank',
@@ -446,9 +588,23 @@ const Affiliate = () => {
     {
       title: t('用户'),
       render: (_, record) =>
-        record.display_name || record.username || `ID ${record.user_id}`,
+        record.masked_name || `ID ${record.user_id}`,
     },
     { title: t('邀请人数'), dataIndex: 'invite_count' },
+  ];
+
+  const commissionLeaderboardColumns = [
+    {
+      title: t('排名'),
+      dataIndex: 'rank',
+      width: 80,
+      render: (rank) => `#${rank}`,
+    },
+    {
+      title: t('用户'),
+      render: (_, record) =>
+        record.masked_name || `ID ${record.user_id}`,
+    },
     {
       title: t('返利金额'),
       dataIndex: 'commission_quota',
@@ -785,34 +941,89 @@ const Affiliate = () => {
                 <Space wrap style={{ marginBottom: 12 }}>
                   <Select
                     value={leaderboardPeriod}
-                    onChange={setLeaderboardPeriod}
+                    onChange={(value) => {
+                      setLeaderboardPeriod(value);
+                      setInviteLeaderboardPage(1);
+                      setCommissionLeaderboardPage(1);
+                    }}
                     style={{ width: 130 }}
                   >
                     <Select.Option value='day'>{t('今日')}</Select.Option>
                     <Select.Option value='week'>{t('本周')}</Select.Option>
                     <Select.Option value='month'>{t('本月')}</Select.Option>
                   </Select>
-                  <Select
-                    value={leaderboardSort}
-                    onChange={setLeaderboardSort}
-                    style={{ width: 150 }}
-                  >
-                    <Select.Option value='commission'>
-                      {t('按返利金额')}
-                    </Select.Option>
-                    <Select.Option value='invites'>
-                      {t('按邀请人数')}
-                    </Select.Option>
-                  </Select>
                 </Space>
+                <div className='grid gap-4 xl:grid-cols-2'>
+                  <div>
+                    <Text strong>{t('邀请人数榜')}</Text>
+                    <Table
+                      rowKey='user_id'
+                      columns={inviteLeaderboardColumns}
+                      dataSource={inviteLeaderboard}
+                      pagination={{
+                        currentPage: inviteLeaderboardPage,
+                        pageSize: inviteLeaderboardPageSize,
+                        total: inviteLeaderboardTotal,
+                        pageSizeOpts: [10, 20, 50, 100],
+                        showSizeChanger: true,
+                        onPageChange: setInviteLeaderboardPage,
+                        onPageSizeChange: (pageSize) => {
+                          setInviteLeaderboardPageSize(pageSize);
+                          setInviteLeaderboardPage(1);
+                        },
+                      }}
+                      size='small'
+                      scroll={{ x: 420 }}
+                      empty={<Empty description={t('暂无邀请人数榜数据')} />}
+                      style={{ marginTop: 8 }}
+                    />
+                  </div>
+                  <div>
+                    <Text strong>{t('返利金额榜')}</Text>
+                    <Table
+                      rowKey='user_id'
+                      columns={commissionLeaderboardColumns}
+                      dataSource={commissionLeaderboard}
+                      pagination={{
+                        currentPage: commissionLeaderboardPage,
+                        pageSize: commissionLeaderboardPageSize,
+                        total: commissionLeaderboardTotal,
+                        pageSizeOpts: [10, 20, 50, 100],
+                        showSizeChanger: true,
+                        onPageChange: setCommissionLeaderboardPage,
+                        onPageSizeChange: (pageSize) => {
+                          setCommissionLeaderboardPageSize(pageSize);
+                          setCommissionLeaderboardPage(1);
+                        },
+                      }}
+                      size='small'
+                      scroll={{ x: 420 }}
+                      empty={<Empty description={t('暂无返利金额榜数据')} />}
+                      style={{ marginTop: 8 }}
+                    />
+                  </div>
+                </div>
+              </Tabs.TabPane>
+              <Tabs.TabPane tab={t('邀请动态')} itemKey='invitations'>
                 <Table
-                  rowKey='user_id'
-                  columns={leaderboardColumns}
-                  dataSource={leaderboard}
-                  pagination={false}
+                  rowKey={(record) => record.invitee?.id}
+                  columns={invitationColumns}
+                  dataSource={invitations}
+                  pagination={{
+                    currentPage: invitationPage,
+                    pageSize: invitationPageSize,
+                    total: invitationTotal,
+                    pageSizeOpts: [10, 20, 50, 100],
+                    showSizeChanger: true,
+                    onPageChange: setInvitationPage,
+                    onPageSizeChange: (pageSize) => {
+                      setInvitationPageSize(pageSize);
+                      setInvitationPage(1);
+                    },
+                  }}
                   size='small'
-                  scroll={{ x: 520 }}
-                  empty={<Empty description={t('暂无排行榜数据')} />}
+                  scroll={{ x: 840 }}
+                  empty={<Empty description={t('暂无邀请动态')} />}
                 />
               </Tabs.TabPane>
               <Tabs.TabPane tab={t('返佣明细')} itemKey='records'>
@@ -820,9 +1031,20 @@ const Affiliate = () => {
                   rowKey='id'
                   columns={recordColumns}
                   dataSource={records}
-                  pagination={false}
+                  pagination={{
+                    currentPage: recordPage,
+                    pageSize: recordPageSize,
+                    total: recordTotal,
+                    pageSizeOpts: [10, 20, 50, 100],
+                    showSizeChanger: true,
+                    onPageChange: setRecordPage,
+                    onPageSizeChange: (pageSize) => {
+                      setRecordPageSize(pageSize);
+                      setRecordPage(1);
+                    },
+                  }}
                   size='small'
-                  scroll={{ x: 680 }}
+                  scroll={{ x: 820 }}
                   empty={<Empty description={t('暂无返佣记录')} />}
                 />
               </Tabs.TabPane>
@@ -831,7 +1053,18 @@ const Affiliate = () => {
                   rowKey='id'
                   columns={withdrawalColumns}
                   dataSource={withdrawals}
-                  pagination={false}
+                  pagination={{
+                    currentPage: withdrawalPage,
+                    pageSize: withdrawalPageSize,
+                    total: withdrawalTotal,
+                    pageSizeOpts: [10, 20, 50, 100],
+                    showSizeChanger: true,
+                    onPageChange: setWithdrawalPage,
+                    onPageSizeChange: (pageSize) => {
+                      setWithdrawalPageSize(pageSize);
+                      setWithdrawalPage(1);
+                    },
+                  }}
                   size='small'
                   scroll={{ x: 560 }}
                   empty={<Empty description={t('暂无提现记录')} />}

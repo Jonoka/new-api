@@ -107,6 +107,7 @@ type AffiliateLeaderboardItem struct {
 	UserId          int    `json:"user_id"`
 	Username        string `json:"username"`
 	DisplayName     string `json:"display_name"`
+	MaskedName      string `json:"masked_name"`
 	InviteCount     int    `json:"invite_count"`
 	CommissionQuota int    `json:"commission_quota"`
 }
@@ -129,7 +130,60 @@ type AffiliateSourceDetail struct {
 
 type AffiliateRecordWithDetail struct {
 	AffiliateRecord
-	Detail *AffiliateSourceDetail `json:"detail,omitempty"`
+	Invitee AffiliateUserInfo      `json:"invitee"`
+	Detail  *AffiliateSourceDetail `json:"detail,omitempty"`
+}
+
+type AffiliateUserInfo struct {
+	Id          int    `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	Status      int    `json:"status"`
+	CreatedAt   int64  `json:"created_at"`
+}
+
+type AffiliateInvitationItem struct {
+	Invitee         AffiliateUserInfo `json:"invitee"`
+	TopUpCount      int               `json:"topup_count"`
+	TopUpQuota      int               `json:"topup_quota"`
+	LastTopUpTime   int64             `json:"last_topup_time"`
+	CommissionQuota int               `json:"commission_quota"`
+}
+
+type AffiliateAdminUserInfo struct {
+	Id          int    `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	Email       string `json:"email"`
+	AffCode     string `json:"aff_code"`
+	Status      int    `json:"status"`
+	InviterId   int    `json:"inviter_id"`
+	CreatedAt   int64  `json:"created_at"`
+}
+
+type AffiliateAdminInvitationItem struct {
+	InviterId        int    `json:"inviter_id"`
+	InviterUsername  string `json:"inviter_username"`
+	InviterName      string `json:"inviter_name"`
+	InviterEmail     string `json:"inviter_email"`
+	InviterAffCode   string `json:"inviter_aff_code"`
+	InviteeId        int    `json:"invitee_id"`
+	InviteeUsername  string `json:"invitee_username"`
+	InviteeName      string `json:"invitee_name"`
+	InviteeEmail     string `json:"invitee_email"`
+	InviteeStatus    int    `json:"invitee_status"`
+	InviteeCreatedAt int64  `json:"invitee_created_at"`
+	TopUpCount       int    `json:"topup_count"`
+	TopUpQuota       int    `json:"topup_quota"`
+	LastTopUpTime    int64  `json:"last_topup_time"`
+	CommissionQuota  int    `json:"commission_quota"`
+}
+
+type AffiliateAdminRecordWithDetail struct {
+	AffiliateRecord
+	Inviter AffiliateAdminUserInfo `json:"inviter"`
+	Invitee AffiliateAdminUserInfo `json:"invitee"`
+	Detail  *AffiliateSourceDetail `json:"detail,omitempty"`
 }
 
 type AffiliateInviterBindResult struct {
@@ -411,11 +465,13 @@ func GetAffiliateRecordsWithDetails(userId int, status string, pageInfo *common.
 		return nil, 0, err
 	}
 	items := make([]*AffiliateRecordWithDetail, 0, len(records))
+	inviteeIds := make([]int, 0, len(records))
 	for _, record := range records {
 		if record == nil {
 			continue
 		}
 		items = append(items, &AffiliateRecordWithDetail{AffiliateRecord: *record})
+		inviteeIds = append(inviteeIds, record.InviteeId)
 	}
 	if len(items) == 0 {
 		return items, total, nil
@@ -423,7 +479,346 @@ func GetAffiliateRecordsWithDetails(userId int, status string, pageInfo *common.
 	if err := attachAffiliateSourceDetails(items); err != nil {
 		return nil, 0, err
 	}
+	usersById, err := getAffiliateUsersByIds(uniqueInts(inviteeIds))
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		item.Invitee = usersById[item.InviteeId]
+	}
 	return items, total, nil
+}
+
+func GetAffiliateInvitations(userId int, pageInfo *common.PageInfo) ([]*AffiliateInvitationItem, int64, error) {
+	query := DB.Model(&User{}).Where("inviter_id = ?", userId)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var invitees []User
+	if err := query.
+		Select("id", "username", "display_name", "status", "created_at").
+		Order("id desc").
+		Limit(pageInfo.GetPageSize()).
+		Offset(pageInfo.GetStartIdx()).
+		Find(&invitees).Error; err != nil {
+		return nil, 0, err
+	}
+	if len(invitees) == 0 {
+		return []*AffiliateInvitationItem{}, total, nil
+	}
+
+	inviteeIds := make([]int, 0, len(invitees))
+	for _, invitee := range invitees {
+		inviteeIds = append(inviteeIds, invitee.Id)
+	}
+
+	topupByInvitee, err := getAffiliateTopUpAggByInviteeIds(inviteeIds)
+	if err != nil {
+		return nil, 0, err
+	}
+	commissionByInvitee, err := getAffiliateCommissionQuotaByInviteeIds(inviteeIds, userId)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	items := make([]*AffiliateInvitationItem, 0, len(invitees))
+	for _, invitee := range invitees {
+		topup := topupByInvitee[invitee.Id]
+		items = append(items, &AffiliateInvitationItem{
+			Invitee: AffiliateUserInfo{
+				Id:          invitee.Id,
+				Username:    invitee.Username,
+				DisplayName: invitee.DisplayName,
+				Status:      invitee.Status,
+				CreatedAt:   invitee.CreatedAt,
+			},
+			TopUpCount:      topup.TopUpCount,
+			TopUpQuota:      topup.TopUpQuota,
+			LastTopUpTime:   topup.LastTopUpTime,
+			CommissionQuota: commissionByInvitee[invitee.Id],
+		})
+	}
+	return items, total, nil
+}
+
+func GetAdminAffiliateInvitations(keyword string, pageInfo *common.PageInfo) ([]*AffiliateAdminInvitationItem, int64, error) {
+	query := DB.Model(&User{}).Where("inviter_id > 0")
+	keyword = strings.TrimSpace(keyword)
+	if keyword != "" {
+		userIds, err := findAffiliateAdminMatchedUserIds(keyword)
+		if err != nil {
+			return nil, 0, err
+		}
+		if len(userIds) == 0 {
+			return []*AffiliateAdminInvitationItem{}, 0, nil
+		}
+		query = query.Where("id IN ? OR inviter_id IN ?", userIds, userIds)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var invitees []User
+	if err := query.
+		Select("id", "username", "display_name", "email", "aff_code", "status", "inviter_id", "created_at").
+		Order("id desc").
+		Limit(pageInfo.GetPageSize()).
+		Offset(pageInfo.GetStartIdx()).
+		Find(&invitees).Error; err != nil {
+		return nil, 0, err
+	}
+	if len(invitees) == 0 {
+		return []*AffiliateAdminInvitationItem{}, total, nil
+	}
+
+	inviteeIds := make([]int, 0, len(invitees))
+	inviterIds := make([]int, 0, len(invitees))
+	for _, invitee := range invitees {
+		inviteeIds = append(inviteeIds, invitee.Id)
+		inviterIds = append(inviterIds, invitee.InviterId)
+	}
+
+	usersById, err := getAffiliateAdminUsersByIds(uniqueInts(append(inviteeIds, inviterIds...)))
+	if err != nil {
+		return nil, 0, err
+	}
+
+	topupByInvitee, err := getAffiliateTopUpAggByInviteeIds(inviteeIds)
+	if err != nil {
+		return nil, 0, err
+	}
+	commissionByInvitee, err := getAffiliateCommissionQuotaByInviteeIds(inviteeIds, 0)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	items := make([]*AffiliateAdminInvitationItem, 0, len(invitees))
+	for _, invitee := range invitees {
+		inviter := usersById[invitee.InviterId]
+		topup := topupByInvitee[invitee.Id]
+		items = append(items, &AffiliateAdminInvitationItem{
+			InviterId:        inviter.Id,
+			InviterUsername:  inviter.Username,
+			InviterName:      inviter.DisplayName,
+			InviterEmail:     inviter.Email,
+			InviterAffCode:   inviter.AffCode,
+			InviteeId:        invitee.Id,
+			InviteeUsername:  invitee.Username,
+			InviteeName:      invitee.DisplayName,
+			InviteeEmail:     invitee.Email,
+			InviteeStatus:    invitee.Status,
+			InviteeCreatedAt: invitee.CreatedAt,
+			TopUpCount:       topup.TopUpCount,
+			TopUpQuota:       topup.TopUpQuota,
+			LastTopUpTime:    topup.LastTopUpTime,
+			CommissionQuota:  commissionByInvitee[invitee.Id],
+		})
+	}
+	return items, total, nil
+}
+
+type affiliateAdminTopUpAgg struct {
+	TopUpCount    int
+	TopUpQuota    int
+	LastTopUpTime int64
+}
+
+func getAffiliateTopUpAggByInviteeIds(inviteeIds []int) (map[int]affiliateAdminTopUpAgg, error) {
+	topupByInvitee := make(map[int]affiliateAdminTopUpAgg)
+	inviteeIds = uniqueInts(inviteeIds)
+	if len(inviteeIds) == 0 {
+		return topupByInvitee, nil
+	}
+	var topups []TopUp
+	if err := DB.Select("user_id", "amount", "affiliate_source_quota", "complete_time").
+		Where("user_id IN ? AND status = ?", inviteeIds, common.TopUpStatusSuccess).
+		Find(&topups).Error; err != nil {
+		return nil, err
+	}
+	for _, topup := range topups {
+		row := topupByInvitee[topup.UserId]
+		row.TopUpCount++
+		row.TopUpQuota += affiliateAdminTopUpQuota(&topup)
+		if topup.CompleteTime > row.LastTopUpTime {
+			row.LastTopUpTime = topup.CompleteTime
+		}
+		topupByInvitee[topup.UserId] = row
+	}
+	return topupByInvitee, nil
+}
+
+func affiliateAdminTopUpQuota(topup *TopUp) int {
+	if topup == nil {
+		return 0
+	}
+	if topup.AffiliateSourceQuota > 0 {
+		return topup.AffiliateSourceQuota
+	}
+	return int(topup.Amount)
+}
+
+func getAffiliateCommissionQuotaByInviteeIds(inviteeIds []int, userId int) (map[int]int, error) {
+	commissionByInvitee := make(map[int]int)
+	inviteeIds = uniqueInts(inviteeIds)
+	if len(inviteeIds) == 0 {
+		return commissionByInvitee, nil
+	}
+	type commissionAggRow struct {
+		InviteeId       int
+		CommissionQuota int
+	}
+	var commissionRows []commissionAggRow
+	query := DB.Model(&AffiliateRecord{}).
+		Select("invitee_id, COALESCE(SUM(reward_quota), 0) AS commission_quota").
+		Where("invitee_id IN ?", inviteeIds)
+	if userId > 0 {
+		query = query.Where("user_id = ?", userId)
+	}
+	if err := query.Group("invitee_id").Scan(&commissionRows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range commissionRows {
+		commissionByInvitee[row.InviteeId] = row.CommissionQuota
+	}
+	return commissionByInvitee, nil
+}
+
+func GetAdminAffiliateRecordsWithDetails(sourceType string, status string, pageInfo *common.PageInfo) ([]*AffiliateAdminRecordWithDetail, int64, error) {
+	if err := SettleMatureAffiliateRecords(0); err != nil {
+		return nil, 0, err
+	}
+
+	query := DB.Model(&AffiliateRecord{})
+	if sourceType = strings.TrimSpace(sourceType); sourceType != "" {
+		query = query.Where("source_type = ?", sourceType)
+	}
+	if status = strings.TrimSpace(status); status != "" {
+		query = query.Where("status = ?", status)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var records []*AffiliateRecord
+	if err := query.Order("id desc").
+		Limit(pageInfo.GetPageSize()).
+		Offset(pageInfo.GetStartIdx()).
+		Find(&records).Error; err != nil {
+		return nil, 0, err
+	}
+	if len(records) == 0 {
+		return []*AffiliateAdminRecordWithDetail{}, total, nil
+	}
+
+	userIds := make([]int, 0, len(records)*2)
+	detailItems := make([]*AffiliateRecordWithDetail, 0, len(records))
+	for _, record := range records {
+		if record == nil {
+			continue
+		}
+		userIds = append(userIds, record.UserId, record.InviteeId)
+		detailItems = append(detailItems, &AffiliateRecordWithDetail{AffiliateRecord: *record})
+	}
+	if err := attachAffiliateSourceDetails(detailItems); err != nil {
+		return nil, 0, err
+	}
+	usersById, err := getAffiliateAdminUsersByIds(uniqueInts(userIds))
+	if err != nil {
+		return nil, 0, err
+	}
+
+	items := make([]*AffiliateAdminRecordWithDetail, 0, len(detailItems))
+	for _, item := range detailItems {
+		if item == nil {
+			continue
+		}
+		items = append(items, &AffiliateAdminRecordWithDetail{
+			AffiliateRecord: item.AffiliateRecord,
+			Inviter:         usersById[item.UserId],
+			Invitee:         usersById[item.InviteeId],
+			Detail:          item.Detail,
+		})
+	}
+	return items, total, nil
+}
+
+func findAffiliateAdminMatchedUserIds(keyword string) ([]int, error) {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return []int{}, nil
+	}
+	query := DB.Model(&User{}).Select("id")
+	likeCondition := "username LIKE ? OR email LIKE ? OR display_name LIKE ? OR aff_code LIKE ?"
+	likeArgs := []interface{}{"%" + keyword + "%", "%" + keyword + "%", "%" + keyword + "%", "%" + keyword + "%"}
+	if keywordInt, err := strconv.Atoi(keyword); err == nil && keywordInt > 0 {
+		likeCondition = "id = ? OR " + likeCondition
+		likeArgs = append([]interface{}{keywordInt}, likeArgs...)
+	}
+	var ids []int
+	if err := query.Where("("+likeCondition+")", likeArgs...).Pluck("id", &ids).Error; err != nil {
+		return nil, err
+	}
+	return uniqueInts(ids), nil
+}
+
+func getAffiliateAdminUsersByIds(userIds []int) (map[int]AffiliateAdminUserInfo, error) {
+	usersById := make(map[int]AffiliateAdminUserInfo, len(userIds))
+	userIds = uniqueInts(userIds)
+	if len(userIds) == 0 {
+		return usersById, nil
+	}
+	var users []User
+	if err := DB.Select("id", "username", "display_name", "email", "aff_code", "status", "inviter_id", "created_at").
+		Where("id IN ?", userIds).
+		Find(&users).Error; err != nil {
+		return nil, err
+	}
+	for _, user := range users {
+		usersById[user.Id] = AffiliateAdminUserInfo{
+			Id:          user.Id,
+			Username:    user.Username,
+			DisplayName: user.DisplayName,
+			Email:       user.Email,
+			AffCode:     user.AffCode,
+			Status:      user.Status,
+			InviterId:   user.InviterId,
+			CreatedAt:   user.CreatedAt,
+		}
+	}
+	return usersById, nil
+}
+
+func getAffiliateUsersByIds(userIds []int) (map[int]AffiliateUserInfo, error) {
+	usersById := make(map[int]AffiliateUserInfo, len(userIds))
+	userIds = uniqueInts(userIds)
+	if len(userIds) == 0 {
+		return usersById, nil
+	}
+	var users []User
+	if err := DB.Select("id", "username", "display_name", "status", "created_at").
+		Where("id IN ?", userIds).
+		Find(&users).Error; err != nil {
+		return nil, err
+	}
+	for _, user := range users {
+		usersById[user.Id] = AffiliateUserInfo{
+			Id:          user.Id,
+			Username:    user.Username,
+			DisplayName: user.DisplayName,
+			Status:      user.Status,
+			CreatedAt:   user.CreatedAt,
+		}
+	}
+	return usersById, nil
 }
 
 func attachAffiliateSourceDetails(records []*AffiliateRecordWithDetail) error {
@@ -1150,12 +1545,87 @@ func normalizeAffiliateLeaderboardSort(sortBy string) string {
 	}
 }
 
+func normalizeAffiliateLeaderboardMetric(metric string) string {
+	switch strings.ToLower(strings.TrimSpace(metric)) {
+	case "invite", "invites", "invite_count", "invite_count_desc":
+		return "invites"
+	case "commission", "reward", "reward_quota", "commission_quota":
+		return "commission"
+	default:
+		return ""
+	}
+}
+
+func maskAffiliatePublicName(name string, userId int) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Sprintf("User #%d", userId)
+	}
+	runes := []rune(name)
+	switch len(runes) {
+	case 0:
+		return fmt.Sprintf("User #%d", userId)
+	case 1:
+		return string(runes[0]) + "*"
+	case 2:
+		return string(runes[0]) + "*"
+	case 3:
+		return string(runes[0]) + "*" + string(runes[2])
+	case 4, 5, 6:
+		return string(runes[:2]) + "***" + string(runes[len(runes)-1:])
+	default:
+		return string(runes[:3]) + "***" + string(runes[len(runes)-3:])
+	}
+}
+
 func GetAffiliateLeaderboard(period string, limit int, sortBy string) ([]AffiliateLeaderboardItem, error) {
+	return GetAffiliateLeaderboardByMetric(period, limit, sortBy, "")
+}
+
+func GetAffiliateLeaderboardByMetric(period string, limit int, sortBy string, metric string) ([]AffiliateLeaderboardItem, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
+	items, err := buildAffiliateLeaderboardByMetric(period, sortBy, metric)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return items, nil
+}
+
+func GetAffiliateLeaderboardByMetricPage(period string, page int, pageSize int, sortBy string, metric string) ([]AffiliateLeaderboardItem, int, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = common.ItemsPerPage
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	items, err := buildAffiliateLeaderboardByMetric(period, sortBy, metric)
+	if err != nil {
+		return nil, 0, err
+	}
+	total := len(items)
+	start := (page - 1) * pageSize
+	if start >= total {
+		return []AffiliateLeaderboardItem{}, total, nil
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	return items[start:end], total, nil
+}
+
+func buildAffiliateLeaderboardByMetric(period string, sortBy string, metric string) ([]AffiliateLeaderboardItem, error) {
 	startTime := affiliateLeaderboardPeriodStart(period)
 	normalizedSort := normalizeAffiliateLeaderboardSort(sortBy)
+	normalizedMetric := normalizeAffiliateLeaderboardMetric(metric)
 
 	type inviteRow struct {
 		UserId      int
@@ -1167,21 +1637,25 @@ func GetAffiliateLeaderboard(period string, limit int, sortBy string) ([]Affilia
 	}
 
 	var inviteRows []inviteRow
-	if err := DB.Model(&User{}).
-		Select("inviter_id AS user_id, COUNT(*) AS invite_count").
-		Where("inviter_id > 0 AND created_at >= ?", startTime).
-		Group("inviter_id").
-		Scan(&inviteRows).Error; err != nil {
-		return nil, err
+	if normalizedMetric == "" || normalizedMetric == "invites" {
+		if err := DB.Model(&User{}).
+			Select("inviter_id AS user_id, COUNT(*) AS invite_count").
+			Where("inviter_id > 0 AND created_at >= ?", startTime).
+			Group("inviter_id").
+			Scan(&inviteRows).Error; err != nil {
+			return nil, err
+		}
 	}
 
 	var commissionRows []commissionRow
-	if err := DB.Model(&AffiliateRecord{}).
-		Select("user_id, COALESCE(SUM(reward_quota), 0) AS commission_quota").
-		Where("created_at >= ?", startTime).
-		Group("user_id").
-		Scan(&commissionRows).Error; err != nil {
-		return nil, err
+	if normalizedMetric == "" || normalizedMetric == "commission" {
+		if err := DB.Model(&AffiliateRecord{}).
+			Select("user_id, COALESCE(SUM(reward_quota), 0) AS commission_quota").
+			Where("created_at >= ?", startTime).
+			Group("user_id").
+			Scan(&commissionRows).Error; err != nil {
+			return nil, err
+		}
 	}
 
 	itemMap := make(map[int]*AffiliateLeaderboardItem)
@@ -1222,8 +1696,13 @@ func GetAffiliateLeaderboard(period string, limit int, sortBy string) ([]Affilia
 	}
 	for _, user := range users {
 		if item := itemMap[user.Id]; item != nil {
-			item.Username = user.Username
-			item.DisplayName = user.DisplayName
+			name := user.DisplayName
+			if strings.TrimSpace(name) == "" {
+				name = user.Username
+			}
+			item.MaskedName = maskAffiliatePublicName(name, user.Id)
+			item.Username = ""
+			item.DisplayName = ""
 		}
 	}
 
@@ -1249,9 +1728,6 @@ func GetAffiliateLeaderboard(period string, limit int, sortBy string) ([]Affilia
 		}
 		return items[i].UserId < items[j].UserId
 	})
-	if len(items) > limit {
-		items = items[:limit]
-	}
 	for i := range items {
 		items[i].Rank = i + 1
 	}

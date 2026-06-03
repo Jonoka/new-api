@@ -39,11 +39,13 @@ import {
   API,
   compareObjects,
   renderQuota,
+  renderQuotaWithAmount,
   showError,
   showSuccess,
   showWarning,
   timestamp2string,
 } from '../../../helpers';
+import { ITEMS_PER_PAGE } from '../../../constants';
 
 const { Text } = Typography;
 
@@ -107,15 +109,65 @@ function statusText(t, status) {
     approved: t('已通过'),
     paid: t('已打款'),
     rejected: t('已驳回'),
+    available: t('已结算'),
   };
   return map[status] || status;
 }
 
 function statusColor(status) {
-  if (status === 'paid') return 'green';
+  if (status === 'paid' || status === 'available') return 'green';
   if (status === 'rejected') return 'red';
   if (status === 'approved') return 'blue';
   return 'orange';
+}
+
+function sourceTypeText(t, sourceType) {
+  if (sourceType === 'topup') return t('余额充值');
+  if (sourceType === 'subscription') return t('订阅购买');
+  if (sourceType === 'redemption') return t('兑换码兑换');
+  return sourceType || '-';
+}
+
+function renderAdminUser(userId, username, displayName, email) {
+  const name = displayName || username || '-';
+  return (
+    <div className='min-w-0'>
+      <Text strong ellipsis={{ showTooltip: true }}>
+        #{userId} {name}
+      </Text>
+      <br />
+      <Text type='secondary' ellipsis={{ showTooltip: true }}>
+        {email || username || '-'}
+      </Text>
+    </div>
+  );
+}
+
+function renderAdminRecordDetail(record) {
+  const detail = record.detail || {};
+  const title = detail.title || `${record.source_type} #${record.source_id}`;
+  const parts = [record.source_id];
+  if (detail.paid_amount > 0) {
+    parts.push(renderQuotaWithAmount(detail.paid_amount));
+  }
+  if (detail.payment_method) {
+    parts.push(detail.payment_method);
+  }
+  return (
+    <div className='min-w-0'>
+      <Text strong ellipsis={{ showTooltip: true }}>
+        {title}
+      </Text>
+      <br />
+      <Text type='secondary' ellipsis={{ showTooltip: true }}>
+        {parts.filter(Boolean).join(' · ') || '-'}
+      </Text>
+    </div>
+  );
+}
+
+function getPageTotal(pageData) {
+  return pageData?.total || pageData?.Total || 0;
 }
 
 function SectionHeader({ title, description }) {
@@ -151,9 +203,26 @@ export default function SettingsAffiliateCommission(props) {
   const [inputs, setInputs] = useState(DEFAULT_INPUTS);
   const [originInputs, setOriginInputs] = useState(DEFAULT_INPUTS);
   const [saving, setSaving] = useState(false);
+  const [invitations, setInvitations] = useState([]);
+  const [invitationKeyword, setInvitationKeyword] = useState('');
+  const [invitationSearch, setInvitationSearch] = useState('');
+  const [invitationsLoading, setInvitationsLoading] = useState(false);
+  const [invitationPage, setInvitationPage] = useState(1);
+  const [invitationPageSize, setInvitationPageSize] = useState(ITEMS_PER_PAGE);
+  const [invitationTotal, setInvitationTotal] = useState(0);
+  const [records, setRecords] = useState([]);
+  const [recordSourceType, setRecordSourceType] = useState('topup');
+  const [recordStatus, setRecordStatus] = useState('');
+  const [recordsLoading, setRecordsLoading] = useState(false);
+  const [recordPage, setRecordPage] = useState(1);
+  const [recordPageSize, setRecordPageSize] = useState(ITEMS_PER_PAGE);
+  const [recordTotal, setRecordTotal] = useState(0);
   const [withdrawals, setWithdrawals] = useState([]);
   const [withdrawalStatus, setWithdrawalStatus] = useState('');
   const [withdrawalsLoading, setWithdrawalsLoading] = useState(false);
+  const [withdrawalPage, setWithdrawalPage] = useState(1);
+  const [withdrawalPageSize, setWithdrawalPageSize] = useState(ITEMS_PER_PAGE);
+  const [withdrawalTotal, setWithdrawalTotal] = useState(0);
   const [bindUserKeyword, setBindUserKeyword] = useState('');
   const [bindUserCandidates, setBindUserCandidates] = useState([]);
   const [selectedBindUser, setSelectedBindUser] = useState(null);
@@ -193,14 +262,75 @@ export default function SettingsAffiliateCommission(props) {
     );
   };
 
+  const loadInvitations = async () => {
+    setInvitationsLoading(true);
+    try {
+      const res = await API.get('/api/affiliate/admin/invitations', {
+        params: {
+          p: invitationPage,
+          page_size: invitationPageSize,
+          keyword: invitationSearch || undefined,
+        },
+      });
+      if (res.data.success) {
+        const pageData = res.data.data || {};
+        setInvitations(pageData.items || []);
+        setInvitationPage(pageData.page || invitationPage);
+        setInvitationPageSize(pageData.page_size || invitationPageSize);
+        setInvitationTotal(getPageTotal(pageData));
+      } else {
+        showError(res.data.message);
+      }
+    } catch (error) {
+      showError(t('获取邀请记录失败'));
+    } finally {
+      setInvitationsLoading(false);
+    }
+  };
+
+  const loadRecords = async () => {
+    setRecordsLoading(true);
+    try {
+      const res = await API.get('/api/affiliate/admin/records', {
+        params: {
+          p: recordPage,
+          page_size: recordPageSize,
+          source_type: recordSourceType || undefined,
+          status: recordStatus || undefined,
+        },
+      });
+      if (res.data.success) {
+        const pageData = res.data.data || {};
+        setRecords(pageData.items || []);
+        setRecordPage(pageData.page || recordPage);
+        setRecordPageSize(pageData.page_size || recordPageSize);
+        setRecordTotal(getPageTotal(pageData));
+      } else {
+        showError(res.data.message);
+      }
+    } catch (error) {
+      showError(t('获取返佣记录失败'));
+    } finally {
+      setRecordsLoading(false);
+    }
+  };
+
   const loadWithdrawals = async () => {
     setWithdrawalsLoading(true);
     try {
       const res = await API.get('/api/affiliate/admin/withdrawals', {
-        params: { p: 1, page_size: 50, status: withdrawalStatus || undefined },
+        params: {
+          p: withdrawalPage,
+          page_size: withdrawalPageSize,
+          status: withdrawalStatus || undefined,
+        },
       });
       if (res.data.success) {
-        setWithdrawals(res.data.data?.items || []);
+        const pageData = res.data.data || {};
+        setWithdrawals(pageData.items || []);
+        setWithdrawalPage(pageData.page || withdrawalPage);
+        setWithdrawalPageSize(pageData.page_size || withdrawalPageSize);
+        setWithdrawalTotal(getPageTotal(pageData));
       } else {
         showError(res.data.message);
       }
@@ -212,8 +342,16 @@ export default function SettingsAffiliateCommission(props) {
   };
 
   useEffect(() => {
+    loadInvitations();
+  }, [invitationPage, invitationPageSize, invitationSearch]);
+
+  useEffect(() => {
+    loadRecords();
+  }, [recordPage, recordPageSize, recordSourceType, recordStatus]);
+
+  useEffect(() => {
     loadWithdrawals();
-  }, [withdrawalStatus]);
+  }, [withdrawalPage, withdrawalPageSize, withdrawalStatus]);
 
   useEffect(() => {
     if (!props.options) return;
@@ -383,6 +521,131 @@ export default function SettingsAffiliateCommission(props) {
           </Button>
         );
       },
+    },
+  ];
+
+  const invitationColumns = [
+    {
+      title: t('邀请人'),
+      dataIndex: 'inviter_id',
+      width: 220,
+      render: (_, record) =>
+        renderAdminUser(
+          record.inviter_id,
+          record.inviter_username,
+          record.inviter_name,
+          record.inviter_email,
+        ),
+    },
+    {
+      title: t('下级用户'),
+      dataIndex: 'invitee_id',
+      width: 220,
+      render: (_, record) =>
+        renderAdminUser(
+          record.invitee_id,
+          record.invitee_username,
+          record.invitee_name,
+          record.invitee_email,
+        ),
+    },
+    {
+      title: t('邀请代码'),
+      dataIndex: 'inviter_aff_code',
+      width: 120,
+      render: (value) => value || '-',
+    },
+    { title: t('充值次数'), dataIndex: 'topup_count', width: 100 },
+    {
+      title: t('充值额度'),
+      dataIndex: 'topup_quota',
+      width: 140,
+      render: (value) => renderQuota(value || 0),
+    },
+    {
+      title: t('返佣额度'),
+      dataIndex: 'commission_quota',
+      width: 140,
+      render: (value) => renderQuota(value || 0),
+    },
+    {
+      title: t('邀请时间'),
+      dataIndex: 'invitee_created_at',
+      width: 170,
+      render: (value) => (value ? timestamp2string(value) : '-'),
+    },
+    {
+      title: t('最近充值'),
+      dataIndex: 'last_topup_time',
+      width: 170,
+      render: (value) => (value ? timestamp2string(value) : '-'),
+    },
+  ];
+
+  const recordColumns = [
+    { title: 'ID', dataIndex: 'id', width: 80 },
+    {
+      title: t('邀请人'),
+      dataIndex: 'user_id',
+      width: 220,
+      render: (_, record) =>
+        renderAdminUser(
+          record.inviter?.id,
+          record.inviter?.username,
+          record.inviter?.display_name,
+          record.inviter?.email,
+        ),
+    },
+    {
+      title: t('下级用户'),
+      dataIndex: 'invitee_id',
+      width: 220,
+      render: (_, record) =>
+        renderAdminUser(
+          record.invitee?.id,
+          record.invitee?.username,
+          record.invitee?.display_name,
+          record.invitee?.email,
+        ),
+    },
+    {
+      title: t('来源'),
+      dataIndex: 'source_type',
+      width: 120,
+      render: (value) => sourceTypeText(t, value),
+    },
+    {
+      title: t('订单详情'),
+      dataIndex: 'source_id',
+      width: 260,
+      render: (_, record) => renderAdminRecordDetail(record),
+    },
+    { title: t('层级'), dataIndex: 'level', width: 80 },
+    {
+      title: t('比例'),
+      dataIndex: 'ratio',
+      width: 80,
+      render: (value) => `${value || 0}%`,
+    },
+    {
+      title: t('返佣额度'),
+      dataIndex: 'reward_quota',
+      width: 140,
+      render: (value) => renderQuota(value || 0),
+    },
+    {
+      title: t('状态'),
+      dataIndex: 'status',
+      width: 100,
+      render: (value) => (
+        <Tag color={statusColor(value)}>{statusText(t, value)}</Tag>
+      ),
+    },
+    {
+      title: t('创建时间'),
+      dataIndex: 'created_at',
+      width: 170,
+      render: (value) => (value ? timestamp2string(value) : '-'),
     },
   ];
 
@@ -785,6 +1048,133 @@ export default function SettingsAffiliateCommission(props) {
           </Card>
         </Tabs.TabPane>
 
+        <Tabs.TabPane tab={t('用户邀请')} itemKey='invitations'>
+          <Card>
+            <Space vertical align='start' style={{ width: '100%' }}>
+              <SectionHeader
+                title={t('用户邀请')}
+                description={t('核查邀请关系和下级充值记录')}
+              />
+              <Space wrap>
+                <Input
+                  placeholder={t('搜索邀请人或下级用户')}
+                  value={invitationKeyword}
+                  style={{ width: 260 }}
+                  onChange={setInvitationKeyword}
+                  onEnterPress={() => {
+                    setInvitationPage(1);
+                    setInvitationSearch(invitationKeyword.trim());
+                  }}
+                />
+                <Button
+                  theme='outline'
+                  loading={invitationsLoading}
+                  onClick={() => {
+                    setInvitationPage(1);
+                    setInvitationSearch(invitationKeyword.trim());
+                  }}
+                >
+                  {t('搜索')}
+                </Button>
+                <Button theme='outline' onClick={loadInvitations}>
+                  {t('刷新')}
+                </Button>
+              </Space>
+              <Table
+                rowKey={(record) =>
+                  `${record.inviter_id}-${record.invitee_id}`
+                }
+                loading={invitationsLoading}
+                columns={invitationColumns}
+                dataSource={invitations}
+                pagination={{
+                  currentPage: invitationPage,
+                  pageSize: invitationPageSize,
+                  total: invitationTotal,
+                  pageSizeOpts: [10, 20, 50, 100],
+                  showSizeChanger: true,
+                  onPageChange: setInvitationPage,
+                  onPageSizeChange: (pageSize) => {
+                    setInvitationPageSize(pageSize);
+                    setInvitationPage(1);
+                  },
+                }}
+                empty={<Empty description={t('暂无邀请记录')} />}
+                size='small'
+                scroll={{ x: 1230 }}
+                className='w-full'
+              />
+            </Space>
+          </Card>
+        </Tabs.TabPane>
+
+        <Tabs.TabPane tab={t('返佣记录')} itemKey='records'>
+          <Card>
+            <Space vertical align='start' style={{ width: '100%' }}>
+              <SectionHeader
+                title={t('返佣记录')}
+                description={t('核查产生返佣的下级订单')}
+              />
+              <Space wrap>
+                <Select
+                  value={recordSourceType}
+                  onChange={(value) => {
+                    setRecordPage(1);
+                    setRecordSourceType(value);
+                  }}
+                  style={{ width: 170 }}
+                >
+                  <Select.Option value=''>{t('全部来源')}</Select.Option>
+                  <Select.Option value='topup'>{t('余额充值')}</Select.Option>
+                  <Select.Option value='subscription'>
+                    {t('订阅购买')}
+                  </Select.Option>
+                  <Select.Option value='redemption'>
+                    {t('兑换码兑换')}
+                  </Select.Option>
+                </Select>
+                <Select
+                  value={recordStatus}
+                  onChange={(value) => {
+                    setRecordPage(1);
+                    setRecordStatus(value);
+                  }}
+                  style={{ width: 140 }}
+                >
+                  <Select.Option value=''>{t('全部状态')}</Select.Option>
+                  <Select.Option value='pending'>{t('待结算')}</Select.Option>
+                  <Select.Option value='available'>{t('已结算')}</Select.Option>
+                </Select>
+                <Button theme='outline' onClick={loadRecords}>
+                  {t('刷新')}
+                </Button>
+              </Space>
+              <Table
+                rowKey='id'
+                loading={recordsLoading}
+                columns={recordColumns}
+                dataSource={records}
+                pagination={{
+                  currentPage: recordPage,
+                  pageSize: recordPageSize,
+                  total: recordTotal,
+                  pageSizeOpts: [10, 20, 50, 100],
+                  showSizeChanger: true,
+                  onPageChange: setRecordPage,
+                  onPageSizeChange: (pageSize) => {
+                    setRecordPageSize(pageSize);
+                    setRecordPage(1);
+                  },
+                }}
+                empty={<Empty description={t('暂无返佣记录')} />}
+                size='small'
+                scroll={{ x: 1390 }}
+                className='w-full'
+              />
+            </Space>
+          </Card>
+        </Tabs.TabPane>
+
         <Tabs.TabPane tab={t('提现审核')} itemKey='withdrawals'>
           <Card
             title={
@@ -792,7 +1182,10 @@ export default function SettingsAffiliateCommission(props) {
                 <span>{t('返佣提现审核')}</span>
                 <Select
                   value={withdrawalStatus}
-                  onChange={setWithdrawalStatus}
+                  onChange={(value) => {
+                    setWithdrawalPage(1);
+                    setWithdrawalStatus(value);
+                  }}
                   style={{ width: 140 }}
                 >
                   <Select.Option value=''>{t('全部状态')}</Select.Option>
@@ -809,7 +1202,18 @@ export default function SettingsAffiliateCommission(props) {
               loading={withdrawalsLoading}
               columns={columns}
               dataSource={withdrawals}
-              pagination={false}
+              pagination={{
+                currentPage: withdrawalPage,
+                pageSize: withdrawalPageSize,
+                total: withdrawalTotal,
+                pageSizeOpts: [10, 20, 50, 100],
+                showSizeChanger: true,
+                onPageChange: setWithdrawalPage,
+                onPageSizeChange: (pageSize) => {
+                  setWithdrawalPageSize(pageSize);
+                  setWithdrawalPage(1);
+                },
+              }}
               empty={<Empty description={t('暂无提现申请')} />}
               size='small'
               scroll={{ x: 1170 }}

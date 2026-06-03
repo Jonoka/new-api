@@ -340,6 +340,294 @@ func TestGetAffiliateLeaderboardAggregatesInvitesAndCommissionByPeriod(t *testin
 	assert.Equal(t, 2000, items[1].CommissionQuota)
 }
 
+func TestGetAffiliateLeaderboardKeepsInviteAndCommissionMetricsSeparate(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	now := common.GetTimestamp()
+	old := now - 90*24*3600
+	require.NoError(t, DB.Create(&User{Id: 58, Username: "historical", AffCode: "aff58", Status: common.UserStatusEnabled, CreatedAt: old}).Error)
+	require.NoError(t, DB.Create(&User{Id: 59, Username: "historical-invitee", AffCode: "aff59", Status: common.UserStatusEnabled, InviterId: 58, CreatedAt: old}).Error)
+	require.NoError(t, DB.Create(&AffiliateRecord{UserId: 58, InviteeId: 59, Level: 1, SourceType: AffiliateSourceTopUp, SourceId: "lb-month-current", RewardQuota: 1000, Status: AffiliateRecordStatusAvailable, CreatedAt: now}).Error)
+	require.NoError(t, DB.Create(&AffiliateRecord{UserId: 58, InviteeId: 59, Level: 1, SourceType: AffiliateSourceTopUp, SourceId: "lb-month-old", RewardQuota: 9000, Status: AffiliateRecordStatusAvailable, CreatedAt: old}).Error)
+
+	monthlyItems, err := GetAffiliateLeaderboardByMetric("month", 10, "commission", "commission")
+	require.NoError(t, err)
+	require.Len(t, monthlyItems, 1)
+	assert.Equal(t, 58, monthlyItems[0].UserId)
+	assert.Equal(t, 0, monthlyItems[0].InviteCount)
+	assert.Equal(t, 1000, monthlyItems[0].CommissionQuota)
+
+	inviteItems, err := GetAffiliateLeaderboardByMetric("month", 10, "invites", "invites")
+	require.NoError(t, err)
+	assert.Empty(t, inviteItems)
+}
+
+func TestGetAffiliateLeaderboardByMetricPageKeepsGlobalRank(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	now := common.GetTimestamp()
+	for i := 0; i < 3; i++ {
+		userId := 70 + i
+		require.NoError(t, DB.Create(&User{
+			Id:        userId,
+			Username:  fmt.Sprintf("rank-user-%d", i),
+			AffCode:   fmt.Sprintf("aff%d", userId),
+			Status:    common.UserStatusEnabled,
+			CreatedAt: now,
+		}).Error)
+		require.NoError(t, DB.Create(&AffiliateRecord{
+			UserId:      userId,
+			InviteeId:   100 + i,
+			Level:       1,
+			SourceType:  AffiliateSourceTopUp,
+			SourceId:    fmt.Sprintf("rank-%d", i),
+			RewardQuota: (3 - i) * 1000,
+			Status:      AffiliateRecordStatusAvailable,
+			CreatedAt:   now,
+		}).Error)
+	}
+
+	items, total, err := GetAffiliateLeaderboardByMetricPage("month", 2, 1, "commission", "commission")
+	require.NoError(t, err)
+	assert.Equal(t, 3, total)
+	require.Len(t, items, 1)
+	assert.Equal(t, 2, items[0].Rank)
+	assert.Equal(t, 71, items[0].UserId)
+}
+
+func TestGetAffiliateLeaderboardMasksPublicUserNames(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	now := common.GetTimestamp()
+	require.NoError(t, DB.Create(&User{
+		Id:          90,
+		Username:    "private-alice",
+		DisplayName: "Alice Wang",
+		AffCode:     "aff90",
+		Status:      common.UserStatusEnabled,
+		CreatedAt:   now,
+	}).Error)
+	require.NoError(t, DB.Create(&AffiliateRecord{
+		UserId:      90,
+		InviteeId:   91,
+		Level:       1,
+		SourceType:  AffiliateSourceTopUp,
+		SourceId:    "masked-lb",
+		RewardQuota: 1000,
+		Status:      AffiliateRecordStatusAvailable,
+		CreatedAt:   now,
+	}).Error)
+
+	items, err := GetAffiliateLeaderboard("day", 10, "commission")
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+
+	assert.Equal(t, 90, items[0].UserId)
+	assert.Empty(t, items[0].Username)
+	assert.Empty(t, items[0].DisplayName)
+	assert.Equal(t, "Ali***ang", items[0].MaskedName)
+	assert.NotContains(t, items[0].MaskedName, "Alice Wang")
+}
+
+func TestGetAffiliateInvitationsForUserAggregatesInviteePurchases(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	now := common.GetTimestamp()
+	require.NoError(t, DB.Create(&User{Id: 92, Username: "owner", DisplayName: "Owner", AffCode: "aff92", Status: common.UserStatusEnabled, CreatedAt: now - 100}).Error)
+	require.NoError(t, DB.Create(&User{Id: 93, Username: "buyer-a", DisplayName: "Buyer A", AffCode: "aff93", Status: common.UserStatusEnabled, InviterId: 92, CreatedAt: now - 90}).Error)
+	require.NoError(t, DB.Create(&User{Id: 94, Username: "buyer-b", DisplayName: "Buyer B", AffCode: "aff94", Status: common.UserStatusEnabled, InviterId: 92, CreatedAt: now - 80}).Error)
+	require.NoError(t, DB.Create(&User{Id: 95, Username: "other-buyer", DisplayName: "Other", AffCode: "aff95", Status: common.UserStatusEnabled, InviterId: 96, CreatedAt: now - 70}).Error)
+	require.NoError(t, DB.Create(&TopUp{
+		UserId:               93,
+		Amount:               7000,
+		Money:                70,
+		ActualMoney:          70,
+		AffiliateSourceQuota: 7000,
+		TradeNo:              "invite-user-topup",
+		PaymentProvider:      PaymentProviderStripe,
+		PaymentMethod:        PaymentMethodStripe,
+		CreateTime:           now - 30,
+		CompleteTime:         now - 20,
+		Status:               common.TopUpStatusSuccess,
+	}).Error)
+	require.NoError(t, DB.Create(&AffiliateRecord{UserId: 92, InviteeId: 93, Level: 1, SourceType: AffiliateSourceTopUp, SourceId: "invite-user-topup", SourceQuota: 7000, RewardQuota: 700, Ratio: 10, Status: AffiliateRecordStatusAvailable, CreatedAt: now - 10}).Error)
+	require.NoError(t, DB.Create(&AffiliateRecord{UserId: 96, InviteeId: 95, Level: 1, SourceType: AffiliateSourceTopUp, SourceId: "other-topup", SourceQuota: 9000, RewardQuota: 900, Ratio: 10, Status: AffiliateRecordStatusAvailable, CreatedAt: now - 9}).Error)
+
+	items, total, err := GetAffiliateInvitations(92, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, total)
+	require.Len(t, items, 2)
+
+	byInviteeId := map[int]*AffiliateInvitationItem{}
+	for _, item := range items {
+		byInviteeId[item.Invitee.Id] = item
+	}
+	require.Contains(t, byInviteeId, 93)
+	require.Contains(t, byInviteeId, 94)
+	assert.NotContains(t, byInviteeId, 95)
+	assert.Equal(t, "buyer-a", byInviteeId[93].Invitee.Username)
+	assert.Equal(t, "Buyer A", byInviteeId[93].Invitee.DisplayName)
+	assert.Equal(t, 1, byInviteeId[93].TopUpCount)
+	assert.Equal(t, 7000, byInviteeId[93].TopUpQuota)
+	assert.Equal(t, now-20, byInviteeId[93].LastTopUpTime)
+	assert.Equal(t, 700, byInviteeId[93].CommissionQuota)
+	assert.Equal(t, 0, byInviteeId[94].TopUpCount)
+	assert.Equal(t, 0, byInviteeId[94].CommissionQuota)
+}
+
+func TestGetAffiliateRecordsWithDetailsIncludesInviteeUser(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	now := common.GetTimestamp()
+	require.NoError(t, DB.Create(&User{Id: 97, Username: "seller", DisplayName: "Seller", AffCode: "aff97", Status: common.UserStatusEnabled, CreatedAt: now - 100}).Error)
+	require.NoError(t, DB.Create(&User{Id: 98, Username: "purchase-user", DisplayName: "Purchase User", AffCode: "aff98", Status: common.UserStatusEnabled, InviterId: 97, CreatedAt: now - 90}).Error)
+	require.NoError(t, DB.Create(&TopUp{
+		UserId:               98,
+		Amount:               6000,
+		Money:                60,
+		ActualMoney:          60,
+		AffiliateSourceQuota: 6000,
+		TradeNo:              "record-invitee-topup",
+		PaymentProvider:      PaymentProviderStripe,
+		PaymentMethod:        PaymentMethodStripe,
+		CreateTime:           now - 30,
+		CompleteTime:         now - 20,
+		Status:               common.TopUpStatusSuccess,
+	}).Error)
+	require.NoError(t, DB.Create(&AffiliateRecord{UserId: 97, InviteeId: 98, Level: 1, SourceType: AffiliateSourceTopUp, SourceId: "record-invitee-topup", SourceQuota: 6000, RewardQuota: 600, Ratio: 10, Status: AffiliateRecordStatusAvailable, CreatedAt: now - 10}).Error)
+
+	items, total, err := GetAffiliateRecordsWithDetails(97, "", &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, total)
+	require.Len(t, items, 1)
+	assert.Equal(t, 98, items[0].Invitee.Id)
+	assert.Equal(t, "purchase-user", items[0].Invitee.Username)
+	assert.Equal(t, "Purchase User", items[0].Invitee.DisplayName)
+	require.NotNil(t, items[0].Detail)
+	assert.Equal(t, "余额充值", items[0].Detail.Title)
+}
+
+func TestGetAdminAffiliateInvitationsAggregatesInviteeRechargeAndCommission(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	now := common.GetTimestamp()
+	require.NoError(t, DB.Create(&User{Id: 100, Username: "inviter", DisplayName: "Inviter", Email: "inviter@example.com", AffCode: "aff100", Status: common.UserStatusEnabled, CreatedAt: now - 100}).Error)
+	require.NoError(t, DB.Create(&User{Id: 101, Username: "invitee", DisplayName: "Invitee", Email: "invitee@example.com", AffCode: "aff101", Status: common.UserStatusEnabled, InviterId: 100, CreatedAt: now - 50}).Error)
+	require.NoError(t, DB.Create(&User{Id: 102, Username: "other", DisplayName: "Other", Email: "other@example.com", AffCode: "aff102", Status: common.UserStatusEnabled, CreatedAt: now - 40}).Error)
+	require.NoError(t, DB.Create(&TopUp{
+		UserId:               101,
+		Amount:               100,
+		Money:                50,
+		ActualMoney:          50,
+		AffiliateSourceQuota: 5000,
+		TradeNo:              "admin-invite-topup",
+		PaymentProvider:      PaymentProviderEpay,
+		PaymentMethod:        "alipay",
+		CreateTime:           now - 20,
+		CompleteTime:         now - 10,
+		Status:               common.TopUpStatusSuccess,
+	}).Error)
+	require.NoError(t, DB.Create(&AffiliateRecord{
+		UserId:      100,
+		InviteeId:   101,
+		Level:       1,
+		SourceType:  AffiliateSourceTopUp,
+		SourceId:    "admin-invite-topup",
+		SourceQuota: 5000,
+		RewardQuota: 500,
+		Ratio:       10,
+		Status:      AffiliateRecordStatusAvailable,
+		CreatedAt:   now - 5,
+	}).Error)
+
+	items, total, err := GetAdminAffiliateInvitations("", &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, total)
+	require.Len(t, items, 1)
+
+	assert.Equal(t, 100, items[0].InviterId)
+	assert.Equal(t, "inviter", items[0].InviterUsername)
+	assert.Equal(t, "aff100", items[0].InviterAffCode)
+	assert.Equal(t, 101, items[0].InviteeId)
+	assert.Equal(t, "invitee", items[0].InviteeUsername)
+	assert.Equal(t, "invitee@example.com", items[0].InviteeEmail)
+	assert.EqualValues(t, 1, items[0].TopUpCount)
+	assert.Equal(t, 5000, items[0].TopUpQuota)
+	assert.Equal(t, 500, items[0].CommissionQuota)
+}
+
+func TestGetAdminAffiliateRecordsWithDetailsIncludesUsersAndSourceFilter(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	now := common.GetTimestamp()
+	require.NoError(t, DB.Create(&User{Id: 110, Username: "parent", DisplayName: "Parent", Email: "parent@example.com", AffCode: "aff110", Status: common.UserStatusEnabled, CreatedAt: now - 100}).Error)
+	require.NoError(t, DB.Create(&User{Id: 111, Username: "child", DisplayName: "Child", Email: "child@example.com", AffCode: "aff111", Status: common.UserStatusEnabled, InviterId: 110, CreatedAt: now - 90}).Error)
+	require.NoError(t, DB.Create(&TopUp{
+		UserId:               111,
+		Amount:               8000,
+		Money:                80,
+		OriginalMoney:        100,
+		DiscountMoney:        20,
+		ActualMoney:          80,
+		AffiliateSourceQuota: 8000,
+		TradeNo:              "admin-record-topup",
+		PaymentProvider:      PaymentProviderStripe,
+		PaymentMethod:        PaymentMethodStripe,
+		CreateTime:           now - 20,
+		CompleteTime:         now - 10,
+		Status:               common.TopUpStatusSuccess,
+	}).Error)
+	require.NoError(t, DB.Create(&AffiliateRecord{
+		UserId:      110,
+		InviteeId:   111,
+		Level:       1,
+		SourceType:  AffiliateSourceTopUp,
+		SourceId:    "admin-record-topup",
+		SourceQuota: 8000,
+		RewardQuota: 800,
+		Ratio:       10,
+		Status:      AffiliateRecordStatusAvailable,
+		CreatedAt:   now - 5,
+	}).Error)
+	require.NoError(t, DB.Create(&AffiliateRecord{
+		UserId:      110,
+		InviteeId:   111,
+		Level:       1,
+		SourceType:  AffiliateSourceSubscription,
+		SourceId:    "admin-record-subscription",
+		SourceQuota: 9000,
+		RewardQuota: 900,
+		Ratio:       10,
+		Status:      AffiliateRecordStatusAvailable,
+		CreatedAt:   now - 4,
+	}).Error)
+
+	items, total, err := GetAdminAffiliateRecordsWithDetails(AffiliateSourceTopUp, "", &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, total)
+	require.Len(t, items, 1)
+
+	assert.Equal(t, AffiliateSourceTopUp, items[0].SourceType)
+	assert.Equal(t, 110, items[0].Inviter.Id)
+	assert.Equal(t, "parent", items[0].Inviter.Username)
+	assert.Equal(t, "parent@example.com", items[0].Inviter.Email)
+	assert.Equal(t, 111, items[0].Invitee.Id)
+	assert.Equal(t, "child", items[0].Invitee.Username)
+	assert.Equal(t, "child@example.com", items[0].Invitee.Email)
+	require.NotNil(t, items[0].Detail)
+	assert.Equal(t, "余额充值", items[0].Detail.Title)
+	assert.InDelta(t, 100, items[0].Detail.OriginalAmount, 0.000001)
+	assert.InDelta(t, 20, items[0].Detail.DiscountAmount, 0.000001)
+	assert.InDelta(t, 80, items[0].Detail.PaidAmount, 0.000001)
+}
+
 func TestSaveAffiliatePayoutAccountPreservesQrPaths(t *testing.T) {
 	truncateTables(t)
 	resetAffiliateSettingForTest(t)

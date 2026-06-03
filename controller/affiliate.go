@@ -161,6 +161,19 @@ func GetAffiliateRecords(c *gin.Context) {
 	common.ApiSuccess(c, pageInfo)
 }
 
+func GetAffiliateInvitations(c *gin.Context) {
+	userId := c.GetInt("id")
+	pageInfo := common.GetPageQuery(c)
+	items, total, err := model.GetAffiliateInvitations(userId, pageInfo)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(items)
+	common.ApiSuccess(c, pageInfo)
+}
+
 func GetAffiliateWithdrawals(c *gin.Context) {
 	userId := c.GetInt("id")
 	pageInfo := common.GetPageQuery(c)
@@ -176,11 +189,30 @@ func GetAffiliateWithdrawals(c *gin.Context) {
 
 func GetAffiliateLeaderboard(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	items, err := model.GetAffiliateLeaderboard(
-		c.DefaultQuery("period", "month"),
-		limit,
-		c.DefaultQuery("sort", "commission"),
+	period := c.DefaultQuery("period", "month")
+	sortBy := c.DefaultQuery("sort", "commission")
+	metric := c.Query("metric")
+	if c.Query("p") != "" || c.Query("page_size") != "" {
+		pageInfo := common.GetPageQuery(c)
+		items, total, err := model.GetAffiliateLeaderboardByMetricPage(period, pageInfo.Page, pageInfo.PageSize, sortBy, metric)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		pageInfo.SetTotal(total)
+		pageInfo.SetItems(items)
+		common.ApiSuccess(c, pageInfo)
+		return
+	}
+	var (
+		items []model.AffiliateLeaderboardItem
+		err   error
 	)
+	if c.Query("metric") != "" {
+		items, err = model.GetAffiliateLeaderboardByMetric(period, limit, sortBy, metric)
+	} else {
+		items, err = model.GetAffiliateLeaderboard(period, limit, sortBy)
+	}
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -362,6 +394,30 @@ func AdminListAffiliateWithdrawals(c *gin.Context) {
 	}
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(withdrawals)
+	common.ApiSuccess(c, pageInfo)
+}
+
+func AdminListAffiliateInvitations(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	items, total, err := model.GetAdminAffiliateInvitations(c.Query("keyword"), pageInfo)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(items)
+	common.ApiSuccess(c, pageInfo)
+}
+
+func AdminListAffiliateRecords(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	items, total, err := model.GetAdminAffiliateRecordsWithDetails(c.Query("source_type"), c.Query("status"), pageInfo)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(items)
 	common.ApiSuccess(c, pageInfo)
 }
 

@@ -188,6 +188,7 @@ func SetApiRouter(router *gin.Engine) {
 		affiliateRoute.Use(middleware.UserAuth())
 		{
 			affiliateRoute.GET("/summary", controller.GetAffiliateSummary)
+			affiliateRoute.GET("/invitations", controller.GetAffiliateInvitations)
 			affiliateRoute.GET("/records", controller.GetAffiliateRecords)
 			affiliateRoute.GET("/withdrawals", controller.GetAffiliateWithdrawals)
 			affiliateRoute.GET("/leaderboard", controller.GetAffiliateLeaderboard)
@@ -201,6 +202,8 @@ func SetApiRouter(router *gin.Engine) {
 		affiliateAdminRoute := apiRouter.Group("/affiliate/admin")
 		affiliateAdminRoute.Use(middleware.AdminAuth())
 		{
+			affiliateAdminRoute.GET("/invitations", controller.AdminListAffiliateInvitations)
+			affiliateAdminRoute.GET("/records", controller.AdminListAffiliateRecords)
 			affiliateAdminRoute.GET("/withdrawals", controller.AdminListAffiliateWithdrawals)
 			affiliateAdminRoute.POST("/bind-inviter", controller.AdminBindAffiliateInviter)
 			affiliateAdminRoute.POST("/withdrawals/:id/approve", controller.AdminApproveAffiliateWithdrawal)
