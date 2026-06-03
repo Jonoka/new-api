@@ -140,17 +140,17 @@ func Redeem(key string, userId int) (quota int, err error) {
 		if err != nil {
 			return errors.New("无效的兑换码")
 		}
-		if redemption.Status != common.RedemptionCodeStatusEnabled {
-			return errors.New("该兑换码已被使用")
-		}
-		if redemption.ExpiredTime != 0 && redemption.ExpiredTime < common.GetTimestamp() {
-			return errors.New("该兑换码已过期")
-		}
 		if redemption.MaxRedeemCount <= 0 {
 			redemption.MaxRedeemCount = 1
 		}
 		if redemption.RedeemedCount >= redemption.MaxRedeemCount {
 			return errors.New("该兑换码已达兑换次数上限")
+		}
+		if redemption.Status != common.RedemptionCodeStatusEnabled {
+			return errors.New("该兑换码已被使用")
+		}
+		if redemption.ExpiredTime != 0 && redemption.ExpiredTime < common.GetTimestamp() {
+			return errors.New("该兑换码已过期")
 		}
 		var existingUsage int64
 		if err := tx.Model(&RedemptionUsage{}).
@@ -188,7 +188,7 @@ func Redeem(key string, userId int) (quota int, err error) {
 	})
 	if err != nil {
 		common.SysError("redemption failed: " + err.Error())
-		return 0, ErrRedeemFailed
+		return 0, err
 	}
 	RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码充值 %s，兑换码ID %d", logger.LogQuota(redemption.Quota), redemption.Id))
 	return redemption.Quota, nil

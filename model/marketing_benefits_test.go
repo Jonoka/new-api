@@ -50,7 +50,7 @@ func TestRedeem_AllowsMultipleUsersUntilMaxRedeemCount(t *testing.T) {
 
 	_, err = Redeem(code.Key, 703)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrRedeemFailed)
+	assert.EqualError(t, err, "该兑换码已达兑换次数上限")
 
 	var saved Redemption
 	require.NoError(t, DB.Where("id = ?", code.Id).First(&saved).Error)
@@ -79,7 +79,7 @@ func TestRedeem_PreventsSameUserRedeemingSharedCodeTwice(t *testing.T) {
 
 	_, err = Redeem(code.Key, 711)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrRedeemFailed)
+	assert.EqualError(t, err, "该兑换码已兑换过")
 
 	var user User
 	require.NoError(t, DB.Select("quota").Where("id = ?", 711).First(&user).Error)
