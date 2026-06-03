@@ -745,9 +745,7 @@ export function Affiliate() {
                                 #{item.rank}
                               </TableCell>
                               <TableCell>
-                                {item.display_name ||
-                                  item.username ||
-                                  item.user_id}
+                                {item.masked_name || `User #${item.user_id}`}
                               </TableCell>
                               <TableCell>{item.invite_count}</TableCell>
                               <TableCell>

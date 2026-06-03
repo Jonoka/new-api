@@ -128,8 +128,43 @@ export type AffiliateLeaderboardItem = {
   user_id: number
   username: string
   display_name: string
+  masked_name: string
   invite_count: number
   commission_quota: number
+}
+
+export type AffiliateAdminUserInfo = {
+  id: number
+  username: string
+  display_name: string
+  email: string
+  aff_code: string
+  status: number
+  inviter_id: number
+  created_at: number
+}
+
+export type AffiliateAdminInvitation = {
+  inviter_id: number
+  inviter_username: string
+  inviter_name: string
+  inviter_email: string
+  inviter_aff_code: string
+  invitee_id: number
+  invitee_username: string
+  invitee_name: string
+  invitee_email: string
+  invitee_status: number
+  invitee_created_at: number
+  topup_count: number
+  topup_quota: number
+  last_topup_time: number
+  commission_quota: number
+}
+
+export type AffiliateAdminRecord = AffiliateRecord & {
+  inviter: AffiliateAdminUserInfo
+  invitee: AffiliateAdminUserInfo
 }
 
 export type AdminBindAffiliateInviterRequest = {

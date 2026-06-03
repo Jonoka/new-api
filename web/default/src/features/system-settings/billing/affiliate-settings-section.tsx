@@ -52,11 +52,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import {
   bindAdminAffiliateInviter,
+  getAdminAffiliateInvitations,
+  getAdminAffiliateRecords,
   getAdminAffiliateWithdrawals,
   updateAdminAffiliateWithdrawal,
 } from '@/features/affiliate/api'
 import type {
   AdminBindAffiliateInviterResult,
+  AffiliateAdminInvitation,
+  AffiliateAdminRecord,
   AffiliateWithdrawal,
 } from '@/features/affiliate/types'
 import { searchUsers } from '@/features/users/api'
@@ -122,9 +126,62 @@ function withdrawalMethodLabel(method: string) {
   return method
 }
 
+function sourceTypeLabel(t: (key: string) => string, sourceType: string) {
+  if (sourceType === 'topup') return t('Wallet top-up')
+  if (sourceType === 'subscription') return t('Subscription purchase')
+  if (sourceType === 'redemption') return t('Redemption code')
+  return sourceType || '-'
+}
+
+function adminUserLine(
+  userId: number,
+  username?: string,
+  displayName?: string,
+  email?: string
+) {
+  const name = displayName || username || '-'
+  return (
+    <div className='min-w-0'>
+      <div className='truncate font-medium'>
+        #{userId} {name}
+      </div>
+      <div className='text-muted-foreground truncate text-xs'>
+        {email || username || '-'}
+      </div>
+    </div>
+  )
+}
+
+function adminRecordDetailLine(record: AffiliateAdminRecord) {
+  const detail = record.detail
+  const title = detail?.title || `${record.source_type} #${record.source_id}`
+  const paidAmount =
+    detail?.paid_amount && detail.paid_amount > 0
+      ? `$${detail.paid_amount.toFixed(2)}`
+      : ''
+  return (
+    <div className='min-w-0'>
+      <div className='truncate font-medium'>{title}</div>
+      <div className='text-muted-foreground truncate text-xs'>
+        {[record.source_id, paidAmount, detail?.payment_method]
+          .filter(Boolean)
+          .join(' · ') || '-'}
+      </div>
+    </div>
+  )
+}
+
 export function AffiliateSettingsSection({ defaultValues }: Props) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const [invitations, setInvitations] = useState<AffiliateAdminInvitation[]>([])
+  const [invitationKeyword, setInvitationKeyword] = useState('')
+  const [invitationSearch, setInvitationSearch] = useState('')
+  const [invitationsLoading, setInvitationsLoading] = useState(false)
+  const [records, setRecords] = useState<AffiliateAdminRecord[]>([])
+  const [recordSourceType, setRecordSourceType] = useState('topup')
+  const [recordStatus, setRecordStatus] = useState('')
+  const [recordsLoading, setRecordsLoading] = useState(false)
   const [withdrawals, setWithdrawals] = useState<AffiliateWithdrawal[]>([])
   const [withdrawalStatus, setWithdrawalStatus] = useState('')
   const [withdrawalsLoading, setWithdrawalsLoading] = useState(false)
@@ -202,6 +259,26 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
     })
   }
 
+  const loadInvitations = useCallback(async () => {
+    try {
+      setInvitationsLoading(true)
+      const res = await getAdminAffiliateInvitations(invitationSearch)
+      if (res.success) setInvitations(res.data.items || [])
+    } finally {
+      setInvitationsLoading(false)
+    }
+  }, [invitationSearch])
+
+  const loadRecords = useCallback(async () => {
+    try {
+      setRecordsLoading(true)
+      const res = await getAdminAffiliateRecords(recordSourceType, recordStatus)
+      if (res.success) setRecords(res.data.items || [])
+    } finally {
+      setRecordsLoading(false)
+    }
+  }, [recordSourceType, recordStatus])
+
   const loadWithdrawals = useCallback(async () => {
     try {
       setWithdrawalsLoading(true)
@@ -211,6 +288,14 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
       setWithdrawalsLoading(false)
     }
   }, [withdrawalStatus])
+
+  useEffect(() => {
+    loadInvitations()
+  }, [loadInvitations])
+
+  useEffect(() => {
+    loadRecords()
+  }, [loadRecords])
 
   useEffect(() => {
     loadWithdrawals()
@@ -276,9 +361,11 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
   return (
     <SettingsSection title={t('Affiliate Commission')}>
       <Tabs defaultValue='rules' className='space-y-6'>
-        <TabsList className='grid w-full grid-cols-3'>
+        <TabsList className='max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto'>
           <TabsTrigger value='rules'>{t('Commission rules')}</TabsTrigger>
           <TabsTrigger value='manual-bind'>{t('Manual referral')}</TabsTrigger>
+          <TabsTrigger value='invitations'>{t('User Invitations')}</TabsTrigger>
+          <TabsTrigger value='records'>{t('Commission Records')}</TabsTrigger>
           <TabsTrigger value='withdrawals'>{t('Withdrawals')}</TabsTrigger>
         </TabsList>
 
@@ -659,6 +746,227 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
               </div>
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value='invitations' className='space-y-3'>
+          <div className='flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between'>
+            <div>
+              <h3 className='text-base font-semibold'>
+                {t('User Invitations')}
+              </h3>
+              <p className='text-muted-foreground text-sm'>
+                {t('Review inviter relationships and downstream top-ups.')}
+              </p>
+            </div>
+            <div className='flex flex-col gap-2 sm:flex-row'>
+              <Input
+                value={invitationKeyword}
+                onChange={(event) => setInvitationKeyword(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    setInvitationSearch(invitationKeyword.trim())
+                  }
+                }}
+                placeholder={t('Search inviter or invitee')}
+                className='sm:w-64'
+              />
+              <Button
+                variant='outline'
+                onClick={() => setInvitationSearch(invitationKeyword.trim())}
+                disabled={invitationsLoading}
+              >
+                <Search className='size-4' />
+                {invitationsLoading ? t('Searching...') : t('Search')}
+              </Button>
+              <Button variant='outline' onClick={loadInvitations}>
+                {invitationsLoading ? t('Refreshing...') : t('Refresh')}
+              </Button>
+            </div>
+          </div>
+
+          <div className='overflow-x-auto rounded-lg border'>
+            <Table className='min-w-[920px]'>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t('Inviter')}</TableHead>
+                  <TableHead>{t('Invitee')}</TableHead>
+                  <TableHead>{t('Affiliate code')}</TableHead>
+                  <TableHead>{t('Top-up count')}</TableHead>
+                  <TableHead>{t('Top-up quota')}</TableHead>
+                  <TableHead>{t('Commission')}</TableHead>
+                  <TableHead>{t('Invited At')}</TableHead>
+                  <TableHead>{t('Last top-up')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {invitations.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className='h-24 text-center'>
+                      {invitationsLoading
+                        ? t('Loading...')
+                        : t('No invitation records')}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  invitations.map((item) => (
+                    <TableRow key={`${item.inviter_id}-${item.invitee_id}`}>
+                      <TableCell className='max-w-[190px]'>
+                        {adminUserLine(
+                          item.inviter_id,
+                          item.inviter_username,
+                          item.inviter_name,
+                          item.inviter_email
+                        )}
+                      </TableCell>
+                      <TableCell className='max-w-[190px]'>
+                        {adminUserLine(
+                          item.invitee_id,
+                          item.invitee_username,
+                          item.invitee_name,
+                          item.invitee_email
+                        )}
+                      </TableCell>
+                      <TableCell className='font-mono text-xs'>
+                        {item.inviter_aff_code || '-'}
+                      </TableCell>
+                      <TableCell>{item.topup_count}</TableCell>
+                      <TableCell>{formatQuota(item.topup_quota)}</TableCell>
+                      <TableCell>
+                        {formatQuota(item.commission_quota)}
+                      </TableCell>
+                      <TableCell>
+                        {formatTimestampToDate(item.invitee_created_at)}
+                      </TableCell>
+                      <TableCell>
+                        {formatTimestampToDate(item.last_topup_time)}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+
+        <TabsContent value='records' className='space-y-3'>
+          <div className='flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between'>
+            <div>
+              <h3 className='text-base font-semibold'>
+                {t('Commission Records')}
+              </h3>
+              <p className='text-muted-foreground text-sm'>
+                {t('Audit downstream orders that generated commission.')}
+              </p>
+            </div>
+            <div className='flex flex-col gap-2 sm:flex-row'>
+              <NativeSelect
+                value={recordSourceType}
+                onChange={(event) => setRecordSourceType(event.target.value)}
+                className='sm:w-44'
+              >
+                <NativeSelectOption value=''>
+                  {t('All sources')}
+                </NativeSelectOption>
+                <NativeSelectOption value='topup'>
+                  {t('Wallet top-up')}
+                </NativeSelectOption>
+                <NativeSelectOption value='subscription'>
+                  {t('Subscription purchase')}
+                </NativeSelectOption>
+                <NativeSelectOption value='redemption'>
+                  {t('Redemption code')}
+                </NativeSelectOption>
+              </NativeSelect>
+              <NativeSelect
+                value={recordStatus}
+                onChange={(event) => setRecordStatus(event.target.value)}
+                className='sm:w-36'
+              >
+                <NativeSelectOption value=''>
+                  {t('All statuses')}
+                </NativeSelectOption>
+                <NativeSelectOption value='pending'>
+                  {t('pending')}
+                </NativeSelectOption>
+                <NativeSelectOption value='available'>
+                  {t('available')}
+                </NativeSelectOption>
+              </NativeSelect>
+              <Button variant='outline' onClick={loadRecords}>
+                {recordsLoading ? t('Refreshing...') : t('Refresh')}
+              </Button>
+            </div>
+          </div>
+
+          <div className='overflow-x-auto rounded-lg border'>
+            <Table className='min-w-[1040px]'>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>ID</TableHead>
+                  <TableHead>{t('Inviter')}</TableHead>
+                  <TableHead>{t('Invitee')}</TableHead>
+                  <TableHead>{t('Source')}</TableHead>
+                  <TableHead>{t('Order details')}</TableHead>
+                  <TableHead>{t('Level')}</TableHead>
+                  <TableHead>{t('Ratio')}</TableHead>
+                  <TableHead>{t('Commission')}</TableHead>
+                  <TableHead>{t('Status')}</TableHead>
+                  <TableHead>{t('Created At')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {records.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={10} className='h-24 text-center'>
+                      {recordsLoading
+                        ? t('Loading...')
+                        : t('No commission records')}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  records.map((record) => (
+                    <TableRow key={record.id}>
+                      <TableCell>{record.id}</TableCell>
+                      <TableCell className='max-w-[190px]'>
+                        {adminUserLine(
+                          record.inviter.id,
+                          record.inviter.username,
+                          record.inviter.display_name,
+                          record.inviter.email
+                        )}
+                      </TableCell>
+                      <TableCell className='max-w-[190px]'>
+                        {adminUserLine(
+                          record.invitee.id,
+                          record.invitee.username,
+                          record.invitee.display_name,
+                          record.invitee.email
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {sourceTypeLabel(t, record.source_type)}
+                      </TableCell>
+                      <TableCell className='max-w-[240px]'>
+                        {adminRecordDetailLine(record)}
+                      </TableCell>
+                      <TableCell>{record.level}</TableCell>
+                      <TableCell>{record.ratio}%</TableCell>
+                      <TableCell>{formatQuota(record.reward_quota)}</TableCell>
+                      <TableCell>
+                        <Badge variant={withdrawalStatusVariant(record.status)}>
+                          {t(record.status)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {formatTimestampToDate(record.created_at)}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </TabsContent>
 
         <TabsContent value='withdrawals' className='space-y-3'>

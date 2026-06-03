@@ -22,6 +22,8 @@ import type {
   PageResponse,
   AdminBindAffiliateInviterRequest,
   AdminBindAffiliateInviterResult,
+  AffiliateAdminInvitation,
+  AffiliateAdminRecord,
   AffiliatePayoutAccount,
   AffiliateLeaderboardItem,
   AffiliateRecord,
@@ -125,6 +127,31 @@ export async function getAdminAffiliateWithdrawals(
   const res = await api.get<ApiResponse<PageResponse<AffiliateWithdrawal>>>(
     '/api/affiliate/admin/withdrawals',
     { params: { status, p: page, page_size: pageSize } }
+  )
+  return res.data
+}
+
+export async function getAdminAffiliateInvitations(
+  keyword = '',
+  page = 1,
+  pageSize = 50
+) {
+  const res = await api.get<ApiResponse<PageResponse<AffiliateAdminInvitation>>>(
+    '/api/affiliate/admin/invitations',
+    { params: { keyword, p: page, page_size: pageSize } }
+  )
+  return res.data
+}
+
+export async function getAdminAffiliateRecords(
+  sourceType = '',
+  status = '',
+  page = 1,
+  pageSize = 50
+) {
+  const res = await api.get<ApiResponse<PageResponse<AffiliateAdminRecord>>>(
+    '/api/affiliate/admin/records',
+    { params: { source_type: sourceType, status, p: page, page_size: pageSize } }
   )
   return res.data
 }
