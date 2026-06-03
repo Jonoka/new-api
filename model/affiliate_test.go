@@ -562,6 +562,58 @@ func TestGetAdminAffiliateInvitationsAggregatesInviteeRechargeAndCommission(t *t
 	assert.Equal(t, 500, items[0].CommissionQuota)
 }
 
+func TestGetAffiliateInvitationsUsesRecordSourceQuotaForLegacyTopUpAmount(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	now := common.GetTimestamp()
+	sourceQuota := int(10 * common.QuotaPerUnit)
+	rewardQuota := int(1 * common.QuotaPerUnit)
+	require.NoError(t, DB.Create(&User{Id: 103, Username: "legacy-inviter", DisplayName: "Legacy Inviter", Email: "legacy-inviter@example.com", AffCode: "aff103", Status: common.UserStatusEnabled, CreatedAt: now - 100}).Error)
+	require.NoError(t, DB.Create(&User{Id: 104, Username: "legacy-invitee", DisplayName: "Legacy Invitee", Email: "legacy-invitee@example.com", AffCode: "aff104", Status: common.UserStatusEnabled, InviterId: 103, CreatedAt: now - 80}).Error)
+	require.NoError(t, DB.Create(&TopUp{
+		UserId:               104,
+		Amount:               10,
+		Money:                10,
+		ActualMoney:          10,
+		AffiliateSourceQuota: 0,
+		TradeNo:              "legacy-epay-topup",
+		PaymentProvider:      PaymentProviderEpay,
+		PaymentMethod:        "alipay",
+		CreateTime:           now - 40,
+		CompleteTime:         now - 30,
+		Status:               common.TopUpStatusSuccess,
+	}).Error)
+	require.NoError(t, DB.Create(&AffiliateRecord{
+		UserId:      103,
+		InviteeId:   104,
+		Level:       1,
+		SourceType:  AffiliateSourceTopUp,
+		SourceId:    "legacy-epay-topup",
+		SourceQuota: sourceQuota,
+		RewardQuota: rewardQuota,
+		Ratio:       10,
+		Status:      AffiliateRecordStatusAvailable,
+		CreatedAt:   now - 20,
+	}).Error)
+
+	userItems, userTotal, err := GetAffiliateInvitations(103, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, userTotal)
+	require.Len(t, userItems, 1)
+	assert.Equal(t, 1, userItems[0].TopUpCount)
+	assert.Equal(t, sourceQuota, userItems[0].TopUpQuota)
+	assert.Equal(t, rewardQuota, userItems[0].CommissionQuota)
+
+	adminItems, adminTotal, err := GetAdminAffiliateInvitations("", &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, adminTotal)
+	require.Len(t, adminItems, 1)
+	assert.EqualValues(t, 1, adminItems[0].TopUpCount)
+	assert.Equal(t, sourceQuota, adminItems[0].TopUpQuota)
+	assert.Equal(t, rewardQuota, adminItems[0].CommissionQuota)
+}
+
 func TestGetAdminAffiliateRecordsWithDetailsIncludesUsersAndSourceFilter(t *testing.T) {
 	truncateTables(t)
 	resetAffiliateSettingForTest(t)
@@ -860,6 +912,7 @@ func TestGetAffiliateRecordsWithDetailsBuildsSourceDetails(t *testing.T) {
 	assert.InDelta(t, 100, topupDetail.OriginalAmount, 0.000001)
 	assert.InDelta(t, 50, topupDetail.DiscountAmount, 0.000001)
 	assert.InDelta(t, 50, topupDetail.PaidAmount, 0.000001)
+	assert.Equal(t, int(50*common.QuotaPerUnit), topupDetail.Quota)
 
 	subscriptionDetail := detailsByType[AffiliateSourceSubscription]
 	require.NotNil(t, subscriptionDetail)

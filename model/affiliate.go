@@ -637,15 +637,25 @@ func getAffiliateTopUpAggByInviteeIds(inviteeIds []int) (map[int]affiliateAdminT
 		return topupByInvitee, nil
 	}
 	var topups []TopUp
-	if err := DB.Select("user_id", "amount", "affiliate_source_quota", "complete_time").
+	if err := DB.Select("user_id", "amount", "affiliate_source_quota", "trade_no", "complete_time").
 		Where("user_id IN ? AND status = ?", inviteeIds, common.TopUpStatusSuccess).
 		Find(&topups).Error; err != nil {
+		return nil, err
+	}
+	legacyTradeNos := make([]string, 0)
+	for _, topup := range topups {
+		if topup.AffiliateSourceQuota <= 0 {
+			legacyTradeNos = append(legacyTradeNos, topup.TradeNo)
+		}
+	}
+	recordSourceQuotaByTradeNo, err := getAffiliateRecordSourceQuotaByTopUpTradeNos(legacyTradeNos)
+	if err != nil {
 		return nil, err
 	}
 	for _, topup := range topups {
 		row := topupByInvitee[topup.UserId]
 		row.TopUpCount++
-		row.TopUpQuota += affiliateAdminTopUpQuota(&topup)
+		row.TopUpQuota += affiliateAdminTopUpQuota(&topup, recordSourceQuotaByTradeNo[topup.TradeNo])
 		if topup.CompleteTime > row.LastTopUpTime {
 			row.LastTopUpTime = topup.CompleteTime
 		}
@@ -654,12 +664,39 @@ func getAffiliateTopUpAggByInviteeIds(inviteeIds []int) (map[int]affiliateAdminT
 	return topupByInvitee, nil
 }
 
-func affiliateAdminTopUpQuota(topup *TopUp) int {
+func getAffiliateRecordSourceQuotaByTopUpTradeNos(tradeNos []string) (map[string]int, error) {
+	sourceQuotaByTradeNo := make(map[string]int)
+	tradeNos = uniqueStrings(tradeNos)
+	if len(tradeNos) == 0 {
+		return sourceQuotaByTradeNo, nil
+	}
+	type sourceQuotaRow struct {
+		SourceId    string
+		SourceQuota int
+	}
+	var rows []sourceQuotaRow
+	if err := DB.Model(&AffiliateRecord{}).
+		Select("source_id, MAX(source_quota) AS source_quota").
+		Where("source_type = ? AND source_id IN ? AND source_quota > 0", AffiliateSourceTopUp, tradeNos).
+		Group("source_id").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		sourceQuotaByTradeNo[row.SourceId] = row.SourceQuota
+	}
+	return sourceQuotaByTradeNo, nil
+}
+
+func affiliateAdminTopUpQuota(topup *TopUp, recordSourceQuota int) int {
 	if topup == nil {
 		return 0
 	}
 	if topup.AffiliateSourceQuota > 0 {
 		return topup.AffiliateSourceQuota
+	}
+	if recordSourceQuota > 0 {
+		return recordSourceQuota
 	}
 	return int(topup.Amount)
 }
@@ -940,6 +977,11 @@ func attachAffiliateSourceDetails(records []*AffiliateRecordWithDetail) error {
 		detail := details[affiliateSourceDetailKey(record.SourceType, record.SourceId)]
 		if detail == nil {
 			detail = fallbackAffiliateSourceDetail(record)
+		}
+		if record.SourceQuota > 0 && (record.SourceType == AffiliateSourceTopUp || record.SourceType == AffiliateSourceSubscription) {
+			detailCopy := *detail
+			detailCopy.Quota = record.SourceQuota
+			detail = &detailCopy
 		}
 		record.Detail = detail
 	}
