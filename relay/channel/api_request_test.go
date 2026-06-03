@@ -279,8 +279,9 @@ func TestSelectRelayHTTPClientUsesClaudeCodeTransportFingerprint(t *testing.T) {
 
 	transport, ok := client.Transport.(*http.Transport)
 	require.True(t, ok)
-	require.NotNil(t, transport.TLSClientConfig)
-	require.Contains(t, transport.TLSClientConfig.NextProtos, "h2")
+	require.False(t, transport.ForceAttemptHTTP2)
+	require.NotNil(t, transport.DialTLSContext)
+	require.Nil(t, transport.TLSClientConfig)
 }
 
 func TestSelectRelayHTTPClientKeepsProxyWithClaudeCodeTransportFingerprint(t *testing.T) {
@@ -301,6 +302,7 @@ func TestSelectRelayHTTPClientKeepsProxyWithClaudeCodeTransportFingerprint(t *te
 	transport, ok := client.Transport.(*http.Transport)
 	require.True(t, ok)
 	require.NotNil(t, transport.Proxy)
-	require.NotNil(t, transport.TLSClientConfig)
-	require.Contains(t, transport.TLSClientConfig.NextProtos, "h2")
+	require.False(t, transport.ForceAttemptHTTP2)
+	require.NotNil(t, transport.DialTLSContext)
+	require.Nil(t, transport.TLSClientConfig)
 }

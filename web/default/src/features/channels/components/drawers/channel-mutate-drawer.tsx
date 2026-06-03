@@ -3421,7 +3421,7 @@ export function ChannelMutateDrawer({
                                         </FormLabel>
                                         <FormDescription>
                                           {t(
-                                            'Send Anthropic requests with the built-in HTTP/2 TLS transport fingerprint while keeping Header Override priority'
+                                            'Send Anthropic requests with the built-in uTLS Claude Code Node24 transport fingerprint while keeping Header Override priority'
                                           )}
                                         </FormDescription>
                                       </div>

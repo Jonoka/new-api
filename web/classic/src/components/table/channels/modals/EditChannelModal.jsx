@@ -2834,7 +2834,7 @@ const EditChannelModal = (props) => {
                     <>
                       <Form.Switch field='claude_beta_query' label={t('Claude 强制 beta=true')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelOtherSettingsChange('claude_beta_query', value)} extraText={t('开启后，该渠道请求 Claude 时将强制追加 ?beta=true（无需客户端手动传参）')} />
                       <Form.Switch field='claude_code_fingerprint_enabled' label={t('Claude Code 指纹访问')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelOtherSettingsChange('claude_code_fingerprint_enabled', value)} extraText={t('开启后，该渠道请求 Claude 时会注入 Claude Code 请求头、系统标识和 metadata；Header Override 仍可覆盖默认指纹头')} />
-                      <Form.Switch field='claude_code_transport_fingerprint_enabled' label={t('Claude Code Transport 指纹')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelOtherSettingsChange('claude_code_transport_fingerprint_enabled', value)} extraText={t('开启后，该渠道请求 Claude 时会使用内置 HTTP/2 TLS Transport 指纹；不改变 Header Override 优先级')} />
+                      <Form.Switch field='claude_code_transport_fingerprint_enabled' label={t('Claude Code Transport 指纹')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelOtherSettingsChange('claude_code_transport_fingerprint_enabled', value)} extraText={t('开启后，该渠道请求 Claude 时会使用内置 uTLS Claude Code Node24 Transport 指纹；不改变 Header Override 优先级')} />
                     </>
                   )}
 

@@ -3851,7 +3851,7 @@
     "Send": "发送",
     "Send a request": "发送请求",
     "Send Anthropic requests with Claude Code headers, system marker, and metadata": "使用 Claude Code 请求头、系统标记和 metadata 发送 Anthropic 请求",
-    "Send Anthropic requests with the built-in HTTP/2 TLS transport fingerprint while keeping Header Override priority": "使用内置 HTTP/2 TLS Transport 指纹发送 Anthropic 请求，并保持 Header Override 优先级",
+    "Send Anthropic requests with the built-in uTLS Claude Code Node24 transport fingerprint while keeping Header Override priority": "使用内置 uTLS Claude Code Node24 Transport 指纹发送 Anthropic 请求，并保持 Header Override 优先级",
     "Send code": "发送验证码",
     "Send email alerts when a user falls below this quota": "当用户低于此配额时发送电子邮件警报",
     "Sending...": "发送中...",

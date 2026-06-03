@@ -1194,7 +1194,7 @@
     "开启「默认使用 auto 分组」后，新建令牌和初始令牌都会自动设为 auto。": "開啟「預設使用 auto 分組」後，新建令牌和初始令牌都會自動設為 auto。",
     "开启后，当前分组渠道失败时会按顺序尝试下一个分组的渠道": "開啟後，當前分組管道失敗時會按順序嘗試下一個分組的管道",
     "开启后，对免费模型（倍率为0，或者价格为0）的模型也会预消耗额度": "開啟後，對免費模型（倍率為0，或者價格為0）的模型也會預消耗額度",
-    "开启后，该渠道请求 Claude 时会使用内置 HTTP/2 TLS Transport 指纹；不改变 Header Override 优先级": "啟用後，此渠道請求 Claude 時會使用內建 HTTP/2 TLS Transport 指紋；不改變 Header Override 優先級。",
+    "开启后，该渠道请求 Claude 时会使用内置 uTLS Claude Code Node24 Transport 指纹；不改变 Header Override 优先级": "啟用後，此渠道請求 Claude 時會使用內建 uTLS Claude Code Node24 Transport 指紋；不改變 Header Override 優先級。",
     "开启后，该渠道请求 Claude 时会注入 Claude Code 请求头、系统标识和 metadata；Header Override 仍可覆盖默认指纹头": "啟用後，此渠道請求 Claude 時會注入 Claude Code 請求標頭、系統標識與 metadata；Header Override 仍可覆蓋預設指紋標頭。",
     "开启后，该渠道请求 Claude 时将强制追加 ?beta=true（无需客户端手动传参）": "",
     "开启后，规则名称会参与 cache key（不同规则隔离）。": "",

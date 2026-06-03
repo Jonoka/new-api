@@ -1182,7 +1182,7 @@
     "开启「默认使用 auto 分组」后，新建令牌和初始令牌都会自动设为 auto。": "「デフォルトでautoグループを使用」を有効にすると、新規トークンと初期トークンが自動的にautoに設定されます。",
     "开启后，当前分组渠道失败时会按顺序尝试下一个分组的渠道": "有効にすると、現在のグループチャネルが失敗した場合、次のグループのチャネルを順番に試行します",
     "开启后，对免费模型（倍率为0，或者价格为0）的模型也会预消耗额度": "After enabling, free models (ratio 0 or price 0) will also pre-consume quota",
-    "开启后，该渠道请求 Claude 时会使用内置 HTTP/2 TLS Transport 指纹；不改变 Header Override 优先级": "有効にすると、このチャネルの Claude リクエストに内蔵 HTTP/2 TLS Transport フィンガープリントを使用します。Header Override の優先度は変更されません。",
+    "开启后，该渠道请求 Claude 时会使用内置 uTLS Claude Code Node24 Transport 指纹；不改变 Header Override 优先级": "有効にすると、このチャネルの Claude リクエストに内蔵 uTLS Claude Code Node24 Transport フィンガープリントを使用します。Header Override の優先度は変更されません。",
     "开启后，该渠道请求 Claude 时会注入 Claude Code 请求头、系统标识和 metadata；Header Override 仍可覆盖默认指纹头": "有効にすると、このチャネルの Claude リクエストに Claude Code ヘッダー、システム識別子、metadata を注入します。Header Override で既定のフィンガープリントヘッダーを引き続き上書きできます。",
     "开启后，该渠道请求 Claude 时将强制追加 ?beta=true（无需客户端手动传参）": "有効にすると、このチャネルでClaudeにリクエストする際に?beta=trueが強制追加されます（クライアント側で手動パラメータ渡し不要）",
     "开启后，规则名称会参与 cache key（不同规则隔离）。": "有効にすると、ルール名がキャッシュキーに含まれます（ルールごとに隔離）。",

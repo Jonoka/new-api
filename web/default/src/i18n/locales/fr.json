@@ -3851,7 +3851,7 @@
     "Send": "Envoyer",
     "Send a request": "Envoyer une requête",
     "Send Anthropic requests with Claude Code headers, system marker, and metadata": "Envoyer les requêtes Anthropic avec les en-têtes Claude Code, le marqueur système et les métadonnées",
-    "Send Anthropic requests with the built-in HTTP/2 TLS transport fingerprint while keeping Header Override priority": "Envoyer les requêtes Anthropic avec l'empreinte Transport HTTP/2 TLS intégrée tout en conservant la priorité de Header Override",
+    "Send Anthropic requests with the built-in uTLS Claude Code Node24 transport fingerprint while keeping Header Override priority": "Envoyer les requêtes Anthropic avec l'empreinte Transport uTLS Claude Code Node24 intégrée tout en conservant la priorité de Header Override",
     "Send code": "Envoyer le code",
     "Send email alerts when a user falls below this quota": "Envoyer des alertes par e-mail lorsqu'un utilisateur descend en dessous de ce quota",
     "Sending...": "Envoi en cours...",

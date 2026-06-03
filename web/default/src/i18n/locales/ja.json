@@ -3851,7 +3851,7 @@
     "Send": "送信",
     "Send a request": "リクエストを送信",
     "Send Anthropic requests with Claude Code headers, system marker, and metadata": "Claude Code ヘッダー、システムマーカー、メタデータ付きで Anthropic リクエストを送信",
-    "Send Anthropic requests with the built-in HTTP/2 TLS transport fingerprint while keeping Header Override priority": "Header Override の優先度を保ったまま、内蔵 HTTP/2 TLS Transport フィンガープリントで Anthropic リクエストを送信",
+    "Send Anthropic requests with the built-in uTLS Claude Code Node24 transport fingerprint while keeping Header Override priority": "Header Override の優先度を保ったまま、内蔵 uTLS Claude Code Node24 Transport フィンガープリントで Anthropic リクエストを送信",
     "Send code": "コードを送信",
     "Send email alerts when a user falls below this quota": "ユーザーがこのクォータを下回ったときにメールアラートを送信",
     "Sending...": "送信中...",

@@ -3851,7 +3851,7 @@
     "Send": "Gửi",
     "Send a request": "Gửi yêu cầu",
     "Send Anthropic requests with Claude Code headers, system marker, and metadata": "Gửi yêu cầu Anthropic với header Claude Code, dấu hệ thống và metadata",
-    "Send Anthropic requests with the built-in HTTP/2 TLS transport fingerprint while keeping Header Override priority": "Gửi yêu cầu Anthropic bằng dấu vân tay Transport HTTP/2 TLS tích hợp và vẫn giữ ưu tiên Header Override",
+    "Send Anthropic requests with the built-in uTLS Claude Code Node24 transport fingerprint while keeping Header Override priority": "Gửi yêu cầu Anthropic bằng dấu vân tay Transport uTLS Claude Code Node24 tích hợp và vẫn giữ ưu tiên Header Override",
     "Send code": "Gửi mã",
     "Send email alerts when a user falls below this quota": "Gửi cảnh báo email khi người dùng xuống dưới hạn mức này",
     "Sending...": "Đang gửi...",
