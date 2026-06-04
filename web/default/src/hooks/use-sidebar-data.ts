@@ -21,6 +21,7 @@ import {
   Box,
   Brush,
   CreditCard,
+  ExternalLink,
   Gamepad2,
   FileText,
   FlaskConical,
@@ -37,6 +38,13 @@ import {
   Wallet,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import {
+  getCustomNavIcon,
+  getSidebarCustomModuleKey,
+  parseCustomNavItems,
+} from '@/lib/custom-nav'
+import { parseSidebarModulesFromStatus } from '@/lib/nav-modules'
+import { useStatus } from '@/hooks/use-status'
 import { type SidebarData } from '@/components/layout/types'
 
 /**
@@ -47,8 +55,13 @@ import { type SidebarData } from '@/components/layout/types'
  */
 export function useSidebarData(): SidebarData {
   const { t } = useTranslation()
+  const { status } = useStatus()
+  const sidebarModules = parseSidebarModulesFromStatus(
+    status as Record<string, unknown> | null
+  )
+  const customItems = parseCustomNavItems(sidebarModules.customItems)
 
-  return {
+  const sidebarData: SidebarData = {
     navGroups: [
       {
         id: 'chat',
@@ -180,4 +193,21 @@ export function useSidebarData(): SidebarData {
       },
     ],
   }
+
+  customItems.forEach((item) => {
+    const group = sidebarData.navGroups.find(
+      (navGroup) => navGroup.id === item.section
+    )
+    if (!group) return
+
+    group.items.push({
+      title: item.title,
+      url: item.url,
+      icon: getCustomNavIcon(item.icon) ?? ExternalLink,
+      external: item.external,
+      configUrls: [getSidebarCustomModuleKey(item.id)],
+    })
+  })
+
+  return sidebarData
 }

@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Link } from '@tanstack/react-router'
+import { getCustomNavIcon } from '@/lib/custom-nav'
 import { cn } from '@/lib/utils'
 import type { TopNavLink } from '../types'
 
@@ -30,8 +31,9 @@ interface NavLinkItemProps {
  * Handles routing and proper link attributes
  */
 export function NavLinkItem({ link, className }: NavLinkItemProps) {
+  const Icon = getCustomNavIcon(link.icon)
   const linkClassName = cn(
-    'text-muted-foreground hover:text-foreground transition-colors',
+    'text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 transition-colors',
     link.disabled && 'pointer-events-none opacity-50',
     className
   )
@@ -45,6 +47,7 @@ export function NavLinkItem({ link, className }: NavLinkItemProps) {
         className={linkClassName}
         aria-disabled={link.disabled}
       >
+        {Icon ? <Icon className='size-4' /> : null}
         {link.title}
       </a>
     )
@@ -52,6 +55,7 @@ export function NavLinkItem({ link, className }: NavLinkItemProps) {
 
   return (
     <Link to={link.href} className={linkClassName} disabled={link.disabled}>
+      {Icon ? <Icon className='size-4' /> : null}
       {link.title}
     </Link>
   )

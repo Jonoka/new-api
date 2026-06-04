@@ -45,6 +45,7 @@ func getSidebarModulesAdminStatusValue(raw string) string {
 		"chat": map[string]any{
 			"enabled":    true,
 			"playground": true,
+			"canvas":     true,
 			"chat":       true,
 		},
 		"console": map[string]any{
@@ -91,6 +92,12 @@ func getSidebarModulesAdminStatusValue(raw string) string {
 		}
 
 		for sectionKey, rawSection := range saved {
+			if sectionKey == "customItems" {
+				if items, ok := rawSection.([]any); ok {
+					merged[sectionKey] = items
+				}
+				continue
+			}
 			section, ok := rawSection.(map[string]any)
 			if !ok {
 				continue

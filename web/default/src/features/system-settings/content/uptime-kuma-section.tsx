@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useEffect, useState } from 'react'
 import * as z from 'zod'
-import { useForm } from 'react-hook-form'
+import { useForm, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Plus, Edit, Trash2, Save } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -202,7 +202,11 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
   const [deleteTarget, setDeleteTarget] = useState<'single' | 'batch'>('single')
 
   const form = useForm<UptimeKumaFormValues>({
-    resolver: zodResolver(uptimeKumaSchema),
+    resolver: zodResolver(uptimeKumaSchema) as Resolver<
+      UptimeKumaFormValues,
+      unknown,
+      UptimeKumaFormValues
+    >,
     defaultValues: {
       categoryName: '',
       url: '',

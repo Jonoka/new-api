@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/auth-store'
+import { parseCustomNavItems } from '@/lib/custom-nav'
 import { parseHeaderNavModulesFromStatus } from '@/lib/nav-modules'
 import { useStatus } from '@/hooks/use-status'
 
@@ -28,6 +29,7 @@ export type TopNavLink = {
   disabled?: boolean
   requiresAuth?: boolean
   external?: boolean
+  icon?: string
 }
 
 /**
@@ -98,6 +100,17 @@ export function useTopNavLinks(): TopNavLink[] {
   if (modules?.about !== false) {
     links.push({ title: t('About'), href: '/about' })
   }
+
+  parseCustomNavItems(modules?.customItems).forEach((item) => {
+    const requiresAuth = Boolean(item.requireAuth && !isAuthed)
+    links.push({
+      title: item.title,
+      href: item.url,
+      external: item.external,
+      requiresAuth,
+      icon: item.icon,
+    })
+  })
 
   return links
 }

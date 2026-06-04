@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Link } from '@tanstack/react-router'
+import { getCustomNavIcon } from '@/lib/custom-nav'
 import { cn } from '@/lib/utils'
 import { useTopNavLinks } from '@/hooks/use-top-nav-links'
 import { defaultTopNavLinks } from '../config/top-nav.config'
@@ -50,6 +51,14 @@ export function PublicNavigation({
   return (
     <nav className={cn('hidden items-center gap-1 md:flex', className)}>
       {links.map((link, index) => {
+        const Icon = getCustomNavIcon(link.icon)
+        const content = (
+          <>
+            {Icon ? <Icon className='size-4 shrink-0' /> : null}
+            <span>{link.title}</span>
+          </>
+        )
+
         // Handle external links
         if (link.external) {
           return (
@@ -59,11 +68,11 @@ export function PublicNavigation({
               target='_blank'
               rel='noopener noreferrer'
               className={cn(
-                'text-muted-foreground hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground inline-flex h-9 w-max items-center justify-center rounded-md bg-transparent px-4 py-2 text-sm font-medium transition-colors focus:outline-none',
+                'text-muted-foreground hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground inline-flex h-9 w-max items-center justify-center gap-1.5 rounded-md bg-transparent px-4 py-2 text-sm font-medium transition-colors focus:outline-none',
                 link.disabled && 'pointer-events-none opacity-50'
               )}
             >
-              {link.title}
+              {content}
             </a>
           )
         }
@@ -73,11 +82,11 @@ export function PublicNavigation({
             key={index}
             to={link.href}
             className={cn(
-              'text-muted-foreground hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground inline-flex h-9 w-max items-center justify-center rounded-md bg-transparent px-4 py-2 text-sm font-medium transition-colors focus:outline-none',
+              'text-muted-foreground hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground inline-flex h-9 w-max items-center justify-center gap-1.5 rounded-md bg-transparent px-4 py-2 text-sm font-medium transition-colors focus:outline-none',
               link.disabled && 'pointer-events-none opacity-50'
             )}
           >
-            {link.title}
+            {content}
           </Link>
         )
       })}

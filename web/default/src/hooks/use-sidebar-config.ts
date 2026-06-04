@@ -18,6 +18,10 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useMemo } from 'react'
 import { useAuthStore } from '@/stores/auth-store'
+import {
+  getSidebarCustomModuleKey,
+  parseCustomNavItems,
+} from '@/lib/custom-nav'
 import { useStatus } from '@/hooks/use-status'
 import type { NavGroup, NavItem } from '@/components/layout/types'
 
@@ -132,6 +136,8 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/system-settings/games': { section: 'admin', module: 'setting' },
 }
 
+const CUSTOM_MODULE_PREFIX = 'custom:'
+
 /**
  * Parse backend SidebarModulesAdmin configuration
  */
@@ -144,8 +150,18 @@ function parseSidebarConfig(
   }
 
   try {
-    const parsed = JSON.parse(value) as SidebarModulesAdminConfig
-    return mergeWithDefaultSidebarModules(parsed)
+    const parsed = JSON.parse(value) as SidebarModulesAdminConfig & {
+      customItems?: unknown
+    }
+    const merged = mergeWithDefaultSidebarModules(parsed)
+    const customItems = parseCustomNavItems(parsed.customItems)
+    if (customItems.length > 0) {
+      merged.custom = { enabled: true }
+      customItems.forEach((item) => {
+        merged.custom[getSidebarCustomModuleKey(item.id)] = true
+      })
+    }
+    return merged
   } catch {
     // eslint-disable-next-line no-console
     console.error('Failed to parse sidebar modules configuration')
@@ -185,6 +201,20 @@ function isModuleEnabled(
   userConfig: SidebarModulesUserConfig,
   permissionConfig: SidebarModulesPermissionConfig
 ): boolean {
+  if (url.startsWith(CUSTOM_MODULE_PREFIX)) {
+    const adminCustom = adminConfig.custom
+    const adminAllowed = Boolean(
+      !adminCustom ||
+        (adminCustom.enabled !== false && adminCustom[url] !== false)
+    )
+    if (!adminAllowed) return false
+
+    const userCustom = userConfig?.custom
+    if (!userCustom) return true
+    if (userCustom.enabled === false) return false
+    return userCustom[url] !== false
+  }
+
   const normalizedUrl =
     url.endsWith('/') && url !== '/' ? url.slice(0, -1) : url
   const mapping =

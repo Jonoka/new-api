@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -45,6 +45,7 @@ import {
   type HeaderNavModulesConfig,
   serializeHeaderNavModules,
 } from './config'
+import { CustomMenuItemsEditor } from './custom-menu-items-editor'
 
 const headerNavSchema = z.object({
   home: z.boolean(),
@@ -102,6 +103,7 @@ export function HeaderNavigationSection({
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
   const formDefaults = useMemo(() => toFormValues(config), [config])
+  const [customItems, setCustomItems] = useState(config.customItems ?? [])
 
   const form = useForm<HeaderNavFormValues>({
     resolver: zodResolver(headerNavSchema),
@@ -110,7 +112,8 @@ export function HeaderNavigationSection({
 
   useEffect(() => {
     form.reset(formDefaults)
-  }, [formDefaults, form])
+    setCustomItems(config.customItems ?? [])
+  }, [config.customItems, formDefaults, form])
 
   const onSubmit = async (values: HeaderNavFormValues) => {
     const payload: HeaderNavModulesConfig = {
@@ -129,6 +132,7 @@ export function HeaderNavigationSection({
         enabled: values.rankingsEnabled,
         requireAuth: values.rankingsRequireAuth,
       },
+      customItems,
     }
 
     const serialized = serializeHeaderNavModules(payload)
@@ -144,6 +148,7 @@ export function HeaderNavigationSection({
 
   const resetToDefault = () => {
     form.reset(toFormValues(HEADER_NAV_DEFAULT))
+    setCustomItems([])
   }
 
   const simpleModules: Array<{
@@ -292,6 +297,12 @@ export function HeaderNavigationSection({
               </SettingsControlGroup>
             ))}
           </div>
+
+          <CustomMenuItemsEditor
+            items={customItems}
+            onChange={setCustomItems}
+            showRequireAuth
+          />
         </SettingsForm>
       </Form>
     </SettingsSection>

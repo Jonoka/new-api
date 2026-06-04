@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import {
@@ -40,8 +40,10 @@ import { useUpdateOption } from '../hooks/use-update-option'
 import {
   SIDEBAR_MODULES_DEFAULT,
   type SidebarModulesAdminConfig,
+  type SidebarSectionConfig,
   serializeSidebarModulesAdmin,
 } from './config'
+import { CustomMenuItemsEditor } from './custom-menu-items-editor'
 
 type SidebarModulesSectionProps = {
   config: SidebarModulesAdminConfig
@@ -53,12 +55,18 @@ type SidebarFormValues = SidebarModulesAdminConfig
 const toTitleCase = (value: string) =>
   value.replace(/[_-]+/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())
 
+const isSidebarSectionConfig = (
+  value: SidebarModulesAdminConfig[string]
+): value is SidebarSectionConfig =>
+  Boolean(value && typeof value === 'object' && !Array.isArray(value))
+
 export function SidebarModulesSection({
   config,
   initialSerialized,
 }: SidebarModulesSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const [customItems, setCustomItems] = useState(config.customItems ?? [])
 
   const sectionMeta: Record<string, { title: string; description: string }> = {
     chat: {
@@ -182,10 +190,14 @@ export function SidebarModulesSection({
 
   useEffect(() => {
     form.reset(formDefaults)
-  }, [formDefaults, form])
+    setCustomItems(config.customItems ?? [])
+  }, [config.customItems, formDefaults, form])
 
   const onSubmit = async (values: SidebarFormValues) => {
-    const serialized = serializeSidebarModulesAdmin(values)
+    const serialized = serializeSidebarModulesAdmin({
+      ...values,
+      customItems,
+    })
     if (serialized === initialSerialized) {
       return
     }
@@ -198,9 +210,12 @@ export function SidebarModulesSection({
 
   const resetToDefault = () => {
     form.reset(SIDEBAR_MODULES_DEFAULT)
+    setCustomItems([])
   }
 
-  const sections = Object.entries(config)
+  const sections = Object.entries(config).filter(([sectionKey, sectionConfig]) =>
+    sectionKey === 'customItems' ? false : isSidebarSectionConfig(sectionConfig)
+  )
 
   return (
     <SettingsSection title={t('Sidebar modules')}>
@@ -218,6 +233,7 @@ export function SidebarModulesSection({
               title: toTitleCase(sectionKey),
               description: t('Custom sidebar section'),
             }
+            if (!isSidebarSectionConfig(sectionConfig)) return null
             const modules = Object.entries(sectionConfig).filter(
               ([moduleKey]) => moduleKey !== 'enabled'
             )
@@ -285,6 +301,12 @@ export function SidebarModulesSection({
               </SettingsControlGroup>
             )
           })}
+
+          <CustomMenuItemsEditor
+            items={customItems}
+            onChange={setCustomItems}
+            showSection
+          />
         </SettingsForm>
       </Form>
     </SettingsSection>
