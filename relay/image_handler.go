@@ -106,6 +106,11 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 			if httpResp.StatusCode == http.StatusCreated && info.ApiType == constant.APITypeReplicate {
 				// replicate channel returns 201 Created when using Prefer: wait, treat it as success.
 				httpResp.StatusCode = http.StatusOK
+			} else if shouldTreatOpenAIImageAcceptedAsSuccess(info, httpResp.StatusCode) {
+				// Some OpenAI-compatible image upstreams still return 202 Accepted
+				// with a task_id even when async=false was requested. Treat that as
+				// a successful async fallback so the caller can persist the task and
+				// later poll it instead of refunding a job that is already running.
 			} else {
 				newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
 				// reset status code 重置状态码
@@ -163,4 +168,11 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 
 	service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), logContent)
 	return nil
+}
+
+func shouldTreatOpenAIImageAcceptedAsSuccess(info *relaycommon.RelayInfo, statusCode int) bool {
+	if statusCode != http.StatusAccepted || info == nil {
+		return false
+	}
+	return info.RelayMode == relayconstant.RelayModeImagesGenerations
 }

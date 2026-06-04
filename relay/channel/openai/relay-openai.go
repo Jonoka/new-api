@@ -563,8 +563,10 @@ func OpenaiHandlerWithUsage(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 
 	// Honor OpenAI image response_format=b64_json even when an OpenAI-compatible
 	// upstream returns only transient image URLs. Keep this in-memory only and do
-	// not leak the upstream URL if conversion was requested.
-	if shouldConvertImageResponseURLToB64(info) {
+	// not leak the upstream URL if conversion was requested. For 202 async
+	// fallback submit responses, defer URL->b64 conversion until the task result
+	// is polled; the submit response has only task metadata.
+	if resp.StatusCode == http.StatusOK && shouldConvertImageResponseURLToB64(info) {
 		convertedBody, converted, convertErr := imageutil.ConvertImageURLResponseToB64(c.Request.Context(), responseBody)
 		if convertErr != nil {
 			return nil, types.NewOpenAIError(convertErr, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
@@ -583,10 +585,6 @@ func OpenaiHandlerWithUsage(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	// 写入新的 response body
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
-	// Once we've written to the client, we should not return errors anymore
-	// because the upstream has already consumed resources and returned content
-	// We should still perform billing even if parsing fails
-	// format
 	if usageResp.InputTokens > 0 {
 		usageResp.PromptTokens += usageResp.InputTokens
 	}
