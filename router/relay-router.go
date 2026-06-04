@@ -66,6 +66,31 @@ func SetRelayRouter(router *gin.Engine) {
 	{
 		playgroundRouter.POST("/chat/completions", controller.Playground)
 	}
+	canvasRouter := router.Group("/canvas/v1")
+	canvasRouter.Use(middleware.RouteTag("relay"))
+	canvasRouter.Use(middleware.SystemPerformanceCheck())
+	canvasRouter.Use(middleware.UserSessionAuth(), controller.CanvasPrepareRequest)
+	{
+		canvasRouter.GET("/models", controller.CanvasListModels)
+
+		canvasRelayRouter := canvasRouter.Group("")
+		canvasRelayRouter.Use(middleware.Distribute(), middleware.ModelRequestRateLimit())
+		canvasRelayRouter.POST("/chat/completions", func(c *gin.Context) {
+			controller.Relay(c, types.RelayFormatOpenAI)
+		})
+		canvasRelayRouter.POST("/images/generations", func(c *gin.Context) {
+			controller.Relay(c, types.RelayFormatOpenAIImage)
+		})
+		canvasRelayRouter.POST("/images/edits", func(c *gin.Context) {
+			controller.Relay(c, types.RelayFormatOpenAIImage)
+		})
+		canvasRelayRouter.POST("/audio/speech", func(c *gin.Context) {
+			controller.Relay(c, types.RelayFormatOpenAIAudio)
+		})
+		canvasRelayRouter.POST("/videos", controller.RelayTask)
+		canvasRelayRouter.GET("/videos/:task_id", controller.RelayTaskFetch)
+		canvasRelayRouter.GET("/videos/:task_id/content", controller.VideoProxy)
+	}
 	relayV1Router := router.Group("/v1")
 	relayV1Router.Use(middleware.RouteTag("relay"))
 	relayV1Router.Use(middleware.SystemPerformanceCheck())

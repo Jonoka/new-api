@@ -1,9 +1,11 @@
 package common
 
 import (
+	"net/http/httptest"
 	"testing"
 
 	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,4 +39,16 @@ func TestRelayInfoGetFinalRequestRelayFormatFallsBackToRelayFormat(t *testing.T)
 func TestRelayInfoGetFinalRequestRelayFormatNilReceiver(t *testing.T) {
 	var info *RelayInfo
 	require.Equal(t, types.RelayFormat(""), info.GetFinalRequestRelayFormat())
+}
+
+func TestGenRelayInfoCanvasProxySkipsTokenQuotaWithoutPlaygroundFlag(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("POST", "/canvas/v1/chat/completions?group=vip", nil)
+
+	info := GenRelayInfoOpenAI(ctx, nil)
+
+	require.False(t, info.IsPlayground)
+	require.True(t, info.SkipTokenQuota)
+	require.Equal(t, "/v1/chat/completions?group=vip", info.RequestURLPath)
 }

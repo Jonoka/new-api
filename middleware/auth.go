@@ -173,6 +173,59 @@ func UserAuth() func(c *gin.Context) {
 	}
 }
 
+func UserSessionAuth() func(c *gin.Context) {
+	return func(c *gin.Context) {
+		session := sessions.Default(c)
+		username := session.Get("username")
+		role := session.Get("role")
+		id := session.Get("id")
+		status := session.Get("status")
+		group := session.Get("group")
+
+		if username == nil || role == nil || id == nil || status == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"success": false,
+				"message": common.TranslateMessage(c, i18n.MsgAuthNotLoggedIn),
+			})
+			c.Abort()
+			return
+		}
+		if status.(int) == common.UserStatusDisabled {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": common.TranslateMessage(c, i18n.MsgAuthUserBanned),
+			})
+			c.Abort()
+			return
+		}
+		if role.(int) < common.RoleCommonUser {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": common.TranslateMessage(c, i18n.MsgAuthInsufficientPrivilege),
+			})
+			c.Abort()
+			return
+		}
+		if !validUserInfo(username.(string), role.(int)) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": common.TranslateMessage(c, i18n.MsgAuthUserInfoInvalid),
+			})
+			c.Abort()
+			return
+		}
+
+		c.Header("Auth-Version", "864b7076dbcd0a3c01b5520316720ebf")
+		c.Set("username", username)
+		c.Set("role", role)
+		c.Set("id", id)
+		c.Set("group", group)
+		c.Set("user_group", group)
+		c.Set("use_access_token", false)
+		c.Next()
+	}
+}
+
 func AdminAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		authHelper(c, common.RoleAdminUser)

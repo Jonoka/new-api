@@ -65,6 +65,11 @@ export function SidebarModulesCard() {
           description: t('AI model testing environment'),
         },
         {
+          key: 'canvas',
+          title: t('Infinite Canvas'),
+          description: t('Open Infinite Canvas with selected group'),
+        },
+        {
           key: 'chat',
           title: t('Chat'),
           description: t('Chat session management'),

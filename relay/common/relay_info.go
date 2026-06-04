@@ -100,6 +100,7 @@ type RelayInfo struct {
 	IsStream               bool
 	IsGeminiBatchEmbedding bool
 	IsPlayground           bool
+	SkipTokenQuota         bool
 	UsePrice               bool
 	RelayMode              int
 	OriginModelName        string
@@ -503,6 +504,9 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		info.IsPlayground = true
 		info.RequestURLPath = strings.TrimPrefix(info.RequestURLPath, "/pg")
 		info.RequestURLPath = "/v1" + info.RequestURLPath
+	} else if strings.HasPrefix(c.Request.URL.Path, "/canvas") {
+		info.SkipTokenQuota = true
+		info.RequestURLPath = strings.TrimPrefix(info.RequestURLPath, "/canvas")
 	}
 
 	userSetting, ok := common.GetContextKeyType[dto.UserSetting](c, constant.ContextKeyUserSetting)

@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import {
   Activity,
   Box,
+  Brush,
   CreditCard,
   Gamepad2,
   FileText,
@@ -57,6 +58,11 @@ export function useSidebarData(): SidebarData {
             title: t('Playground'),
             url: '/playground',
             icon: FlaskConical,
+          },
+          {
+            title: t('Infinite Canvas'),
+            url: '/canvas',
+            icon: Brush,
           },
           {
             title: t('Chat'),

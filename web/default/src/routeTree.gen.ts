@@ -50,6 +50,7 @@ import { Route as AuthenticatedGameManagementIndexRouteImport } from './routes/_
 import { Route as AuthenticatedGameCenterIndexRouteImport } from './routes/_authenticated/game-center/index'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
 import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
+import { Route as AuthenticatedCanvasIndexRouteImport } from './routes/_authenticated/canvas/index'
 import { Route as AuthenticatedAffiliateIndexRouteImport } from './routes/_authenticated/affiliate/index'
 import { Route as AuthenticatedUsageLogsSectionRouteImport } from './routes/_authenticated/usage-logs/$section'
 import { Route as AuthenticatedModelsSectionRouteImport } from './routes/_authenticated/models/$section'
@@ -290,6 +291,12 @@ const AuthenticatedChannelsIndexRoute =
     path: '/channels/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedCanvasIndexRoute =
+  AuthenticatedCanvasIndexRouteImport.update({
+    id: '/canvas/',
+    path: '/canvas/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedAffiliateIndexRoute =
   AuthenticatedAffiliateIndexRouteImport.update({
     id: '/affiliate/',
@@ -459,6 +466,7 @@ export interface FileRoutesByFullPath {
   '/models/$section': typeof AuthenticatedModelsSectionRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/affiliate/': typeof AuthenticatedAffiliateIndexRoute
+  '/canvas/': typeof AuthenticatedCanvasIndexRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/game-center/': typeof AuthenticatedGameCenterIndexRoute
@@ -522,6 +530,7 @@ export interface FileRoutesByTo {
   '/models/$section': typeof AuthenticatedModelsSectionRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/affiliate': typeof AuthenticatedAffiliateIndexRoute
+  '/canvas': typeof AuthenticatedCanvasIndexRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
   '/game-center': typeof AuthenticatedGameCenterIndexRoute
@@ -589,6 +598,7 @@ export interface FileRoutesById {
   '/_authenticated/models/$section': typeof AuthenticatedModelsSectionRoute
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/_authenticated/affiliate/': typeof AuthenticatedAffiliateIndexRoute
+  '/_authenticated/canvas/': typeof AuthenticatedCanvasIndexRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/_authenticated/game-center/': typeof AuthenticatedGameCenterIndexRoute
@@ -655,6 +665,7 @@ export interface FileRouteTypes {
     | '/models/$section'
     | '/usage-logs/$section'
     | '/affiliate/'
+    | '/canvas/'
     | '/channels/'
     | '/dashboard/'
     | '/game-center/'
@@ -718,6 +729,7 @@ export interface FileRouteTypes {
     | '/models/$section'
     | '/usage-logs/$section'
     | '/affiliate'
+    | '/canvas'
     | '/channels'
     | '/dashboard'
     | '/game-center'
@@ -784,6 +796,7 @@ export interface FileRouteTypes {
     | '/_authenticated/models/$section'
     | '/_authenticated/usage-logs/$section'
     | '/_authenticated/affiliate/'
+    | '/_authenticated/canvas/'
     | '/_authenticated/channels/'
     | '/_authenticated/dashboard/'
     | '/_authenticated/game-center/'
@@ -1127,6 +1140,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedChannelsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/canvas/': {
+      id: '/_authenticated/canvas/'
+      path: '/canvas'
+      fullPath: '/canvas/'
+      preLoaderRoute: typeof AuthenticatedCanvasIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/affiliate/': {
       id: '/_authenticated/affiliate/'
       path: '/affiliate'
@@ -1386,6 +1406,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedModelsSectionRoute: typeof AuthenticatedModelsSectionRoute
   AuthenticatedUsageLogsSectionRoute: typeof AuthenticatedUsageLogsSectionRoute
   AuthenticatedAffiliateIndexRoute: typeof AuthenticatedAffiliateIndexRoute
+  AuthenticatedCanvasIndexRoute: typeof AuthenticatedCanvasIndexRoute
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
   AuthenticatedGameCenterIndexRoute: typeof AuthenticatedGameCenterIndexRoute
@@ -1412,6 +1433,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedModelsSectionRoute: AuthenticatedModelsSectionRoute,
   AuthenticatedUsageLogsSectionRoute: AuthenticatedUsageLogsSectionRoute,
   AuthenticatedAffiliateIndexRoute: AuthenticatedAffiliateIndexRoute,
+  AuthenticatedCanvasIndexRoute: AuthenticatedCanvasIndexRoute,
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
   AuthenticatedGameCenterIndexRoute: AuthenticatedGameCenterIndexRoute,
