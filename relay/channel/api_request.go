@@ -238,6 +238,9 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 			if shouldSkipPassthroughHeader(name) {
 				continue
 			}
+			if common.IsClaudeCodeFingerprintEnabled(info) && common.IsClaudeCodeProtectedHeader(name) {
+				continue
+			}
 			if !passAll {
 				matched := false
 				for _, re := range passthroughRegex {

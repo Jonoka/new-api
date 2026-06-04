@@ -141,6 +141,39 @@ func TestProcessHeaderOverride_PassthroughSkipsAcceptEncoding(t *testing.T) {
 	require.False(t, hasAcceptEncoding)
 }
 
+func TestProcessHeaderOverride_ClaudeCodeFingerprintSkipsPassiveProtectedHeaders(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Set("User-Agent", "CherryStudio/1.0")
+	ctx.Request.Header.Set("Anthropic-Beta", "client-beta")
+	ctx.Request.Header.Set("X-App", "browser")
+	ctx.Request.Header.Set("X-Trace-Id", "trace-123")
+
+	info := &relaycommon.RelayInfo{
+		IsChannelTest: false,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeFingerprintEnabled: true,
+			},
+			HeadersOverride: map[string]any{
+				"*": "",
+			},
+		},
+	}
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	require.Equal(t, "trace-123", headers["x-trace-id"])
+	require.NotContains(t, headers, "user-agent")
+	require.NotContains(t, headers, "anthropic-beta")
+	require.NotContains(t, headers, "x-app")
+}
+
 func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.T) {
 	t.Parallel()
 
@@ -193,6 +226,91 @@ func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.
 	require.Equal(t, "Codex CLI", upstreamReq.Header.Get("Originator"))
 	require.Equal(t, "sess-123", upstreamReq.Header.Get("Session_id"))
 	require.Empty(t, upstreamReq.Header.Get("X-Codex-Beta-Features"))
+}
+
+func TestProcessHeaderOverride_ClaudeCodeFingerprintSkipsPassHeadersProtectedHeaders(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Set("User-Agent", "CherryStudio/1.0")
+	ctx.Request.Header.Set("Anthropic-Beta", "client-beta")
+	ctx.Request.Header.Set("X-App", "browser")
+	ctx.Request.Header.Set("X-Trace-Id", "trace-123")
+
+	info := &relaycommon.RelayInfo{
+		IsChannelTest: false,
+		RequestHeaders: map[string]string{
+			"User-Agent":     "CherryStudio/1.0",
+			"Anthropic-Beta": "client-beta",
+			"X-App":          "browser",
+			"X-Trace-Id":     "trace-123",
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeFingerprintEnabled: true,
+			},
+			ParamOverride: map[string]any{
+				"operations": []any{
+					map[string]any{
+						"mode":  "pass_headers",
+						"value": []any{"User-Agent", "Anthropic-Beta", "X-App", "X-Trace-Id"},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := relaycommon.ApplyParamOverrideWithRelayInfo([]byte(`{"model":"claude-sonnet-4-6"}`), info)
+	require.NoError(t, err)
+	require.True(t, info.UseRuntimeHeadersOverride)
+	require.Equal(t, "trace-123", info.RuntimeHeadersOverride["x-trace-id"])
+	require.NotContains(t, info.RuntimeHeadersOverride, "user-agent")
+	require.NotContains(t, info.RuntimeHeadersOverride, "anthropic-beta")
+	require.NotContains(t, info.RuntimeHeadersOverride, "x-app")
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	require.Equal(t, "trace-123", headers["x-trace-id"])
+	require.NotContains(t, headers, "user-agent")
+	require.NotContains(t, headers, "anthropic-beta")
+	require.NotContains(t, headers, "x-app")
+}
+
+func TestProcessHeaderOverride_ClaudeCodeFingerprintAllowsExplicitProtectedHeaderOverride(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Set("User-Agent", "CherryStudio/1.0")
+
+	info := &relaycommon.RelayInfo{
+		IsChannelTest: false,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeFingerprintEnabled: true,
+			},
+			HeadersOverride: map[string]any{
+				"User-Agent":      "custom-agent",
+				"Anthropic-Beta":  "custom-beta",
+				"X-App":           "custom-app",
+				"X-Custom-Header": "custom-value",
+			},
+		},
+	}
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	require.Equal(t, "custom-agent", headers["user-agent"])
+	require.Equal(t, "custom-beta", headers["anthropic-beta"])
+	require.Equal(t, "custom-app", headers["x-app"])
+	require.Equal(t, "custom-value", headers["x-custom-header"])
 }
 
 func TestApplyHeaderOverrideKeepsUserHeadersHighestPriority(t *testing.T) {
