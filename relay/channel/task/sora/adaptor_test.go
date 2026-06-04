@@ -88,6 +88,52 @@ func TestParseTaskResultImageResponseWithArtifact(t *testing.T) {
 	assert.Equal(t, "https://example.com/generated.png", info.Url)
 }
 
+func TestParseTaskResultImageResponseWithNestedResultArtifact(t *testing.T) {
+	adaptor := &TaskAdaptor{}
+	info, err := adaptor.ParseTaskResult([]byte(`{
+		"status":"succeeded",
+		"data":[{"url":"https://example.com/top-level.png"}],
+		"result":{"data":[{"url":"https://example.com/nested.png"}]},
+		"task_id":"upstream_img_task"
+	}`))
+
+	require.NoError(t, err)
+	require.NotNil(t, info)
+	assert.Equal(t, model.TaskStatusSuccess, info.Status)
+	assert.Equal(t, "100%", info.Progress)
+	assert.Equal(t, "https://example.com/top-level.png", info.Url)
+}
+
+func TestParseTaskResultImageResponseWithOnlyNestedResultArtifact(t *testing.T) {
+	adaptor := &TaskAdaptor{}
+	info, err := adaptor.ParseTaskResult([]byte(`{
+		"status":"succeeded",
+		"result":{"data":[{"url":"https://example.com/nested.png"}]},
+		"task_id":"upstream_img_task"
+	}`))
+
+	require.NoError(t, err)
+	require.NotNil(t, info)
+	assert.Equal(t, model.TaskStatusSuccess, info.Status)
+	assert.Equal(t, "100%", info.Progress)
+	assert.Equal(t, "https://example.com/nested.png", info.Url)
+}
+
+func TestParseTaskResultImageResponseWithOnlyNestedResultB64Artifact(t *testing.T) {
+	adaptor := &TaskAdaptor{}
+	info, err := adaptor.ParseTaskResult([]byte(`{
+		"status":"succeeded",
+		"result":{"data":[{"b64_json":"aGVsbG8="}]},
+		"task_id":"upstream_img_task"
+	}`))
+
+	require.NoError(t, err)
+	require.NotNil(t, info)
+	assert.Equal(t, model.TaskStatusSuccess, info.Status)
+	assert.Equal(t, "100%", info.Progress)
+	assert.Equal(t, "data:image/png;base64,aGVsbG8=", info.Url)
+}
+
 func TestParseTaskResultImageQueuedTask(t *testing.T) {
 	adaptor := &TaskAdaptor{}
 	info, err := adaptor.ParseTaskResult([]byte(`{"object":"image.generation.task","status":"queued","progress":0,"task_id":"upstream_img_task"}`))

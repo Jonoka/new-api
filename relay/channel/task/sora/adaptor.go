@@ -366,17 +366,29 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+type imageArtifact struct {
+	Url     string `json:"url"`
+	B64Json string `json:"b64_json"`
+}
+
 func firstImageArtifactURL(respBody []byte) string {
 	var raw struct {
-		Data []struct {
-			Url     string `json:"url"`
-			B64Json string `json:"b64_json"`
-		} `json:"data"`
+		Data   []imageArtifact `json:"data"`
+		Result struct {
+			Data []imageArtifact `json:"data"`
+		} `json:"result"`
 	}
 	if err := common.Unmarshal(respBody, &raw); err != nil {
 		return ""
 	}
-	for _, item := range raw.Data {
+	if url := firstImageArtifactURLFromItems(raw.Data); url != "" {
+		return url
+	}
+	return firstImageArtifactURLFromItems(raw.Result.Data)
+}
+
+func firstImageArtifactURLFromItems(items []imageArtifact) string {
+	for _, item := range items {
 		if item.Url != "" {
 			return item.Url
 		}

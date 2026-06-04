@@ -550,8 +550,29 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		return &requestBody, nil
 
 	default:
+		if shouldDefaultOpenAIImageRequestToSync(info, request) {
+			async := false
+			request.Async = &async
+		}
 		return request, nil
 	}
+}
+
+func shouldDefaultOpenAIImageRequestToSync(info *relaycommon.RelayInfo, request dto.ImageRequest) bool {
+	if info == nil || info.RelayMode != relayconstant.RelayModeImagesGenerations || request.Async != nil {
+		return false
+	}
+	modelName := strings.ToLower(strings.TrimSpace(firstNonEmpty(info.UpstreamModelName, info.OriginModelName, request.Model)))
+	return modelName == "gpt-image-2"
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func isJSONRequest(c *gin.Context) bool {
