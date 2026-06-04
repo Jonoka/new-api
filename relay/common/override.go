@@ -45,6 +45,7 @@ var claudeCodeProtectedHeaderNames = map[string]struct{}{
 	"x-stainless-retry-count":                   {},
 	"x-stainless-timeout":                       {},
 	"x-client-request-id":                       {},
+	"x-claude-code-session-id":                  {},
 }
 
 func IsClaudeCodeFingerprintEnabled(info *RelayInfo) bool {

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	rootconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -41,6 +42,17 @@ const (
 
 // 旧版 sub2api 的 Claude Code 限制只识别空 account 的 legacy user_id。
 var claudeCodeLegacySub2APIUserIDPattern = regexp.MustCompile(`^user_[a-fA-F0-9]{64}_account__session_[\w-]+$`)
+var claudeCodeUserAgentPattern = regexp.MustCompile(`(?i)^claude-cli/\d+\.\d+\.\d+`)
+
+var realClaudeCodeHeaderPassthroughNames = []string{
+	"User-Agent",
+	"X-App",
+	"anthropic-version",
+	"anthropic-beta",
+	"anthropic-dangerous-direct-browser-access",
+	"X-Client-Request-Id",
+	"X-Claude-Code-Session-Id",
+}
 
 func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dto.GeminiChatRequest) (any, error) {
 	//TODO implement me
@@ -134,6 +146,38 @@ func applyClaudeCodeHeaderFingerprint(req *http.Header, info *relaycommon.RelayI
 	}
 }
 
+func applyRealClaudeCodeHeaderPassthrough(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) {
+	if req == nil || !shouldPassThroughRealClaudeCodeHeaders(c, info) {
+		return
+	}
+	for _, name := range realClaudeCodeHeaderPassthroughNames {
+		passIncomingHeader(c.Request.Header, req, name)
+	}
+	for name := range c.Request.Header {
+		if strings.HasPrefix(strings.ToLower(name), "x-stainless-") {
+			passIncomingHeader(c.Request.Header, req, name)
+		}
+	}
+}
+
+func shouldPassThroughRealClaudeCodeHeaders(c *gin.Context, info *relaycommon.RelayInfo) bool {
+	if c == nil || c.Request == nil || info == nil || info.ChannelMeta == nil {
+		return false
+	}
+	if info.ApiType != rootconstant.APITypeAnthropic || shouldUseClaudeCodeFingerprint(info) {
+		return false
+	}
+	return claudeCodeUserAgentPattern.MatchString(c.Request.Header.Get("User-Agent"))
+}
+
+func passIncomingHeader(src http.Header, dst *http.Header, name string) {
+	value := strings.TrimSpace(src.Get(name))
+	if value == "" {
+		return
+	}
+	dst.Set(name, value)
+}
+
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {
 	channel.SetupApiRequestHeader(info, c, req)
 	req.Set("x-api-key", info.ApiKey)
@@ -142,6 +186,7 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 		anthropicVersion = "2023-06-01"
 	}
 	req.Set("anthropic-version", anthropicVersion)
+	applyRealClaudeCodeHeaderPassthrough(c, req, info)
 	CommonClaudeHeadersOperation(c, req, info)
 	applyClaudeCodeHeaderFingerprint(req, info)
 	return nil
