@@ -156,6 +156,7 @@ func TestConvertToOpenAIVideoConvertsURLToB64WhenRequested(t *testing.T) {
 	body, err := adaptor.ConvertToOpenAIVideo(&model.Task{
 		TaskID: "public_task",
 		PrivateData: model.TaskPrivateData{
+			RequestPath:    "/v1/images/generations",
 			ResponseFormat: "b64_json",
 		},
 		Data: []byte(`{"created":1,"data":[{"url":"` + imageServer.URL + `/img.png"}],"task_id":"upstream_task"}`),
@@ -169,5 +170,43 @@ func TestConvertToOpenAIVideoConvertsURLToB64WhenRequested(t *testing.T) {
 	assert.Equal(t, "aW1hZ2UtYnl0ZXM=", item["b64_json"])
 	_, hasURL := item["url"]
 	assert.False(t, hasURL)
+	result := got["result"].(map[string]any)
+	resultData := result["data"].([]any)
+	resultItem := resultData[0].(map[string]any)
+	assert.Equal(t, "aW1hZ2UtYnl0ZXM=", resultItem["b64_json"])
+	_, resultHasURL := resultItem["url"]
+	assert.False(t, resultHasURL)
+	assert.Equal(t, "public_task", got["task_id"])
+}
+
+func TestConvertToOpenAIVideoAddsTopLevelDataFromNestedImageResult(t *testing.T) {
+	adaptor := &TaskAdaptor{}
+	body, err := adaptor.ConvertToOpenAIVideo(&model.Task{
+		TaskID: "public_task",
+		PrivateData: model.TaskPrivateData{
+			RequestPath: "/v1/images/generations",
+		},
+		Data: []byte(`{
+			"created":1780590448,
+			"error":null,
+			"id":"upstream_task",
+			"object":"image.generation.task",
+			"status":"succeeded",
+			"result":{"data":[{"height":2560,"url":"https://example.com/nested.png","width":1440}]},
+			"task_id":"upstream_task"
+		}`),
+	})
+
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, common.Unmarshal(body, &got))
+	assert.Equal(t, "succeeded", got["status"])
+	data := got["data"].([]any)
+	item := data[0].(map[string]any)
+	assert.Equal(t, "https://example.com/nested.png", item["url"])
+	result := got["result"].(map[string]any)
+	resultData := result["data"].([]any)
+	resultItem := resultData[0].(map[string]any)
+	assert.Equal(t, "https://example.com/nested.png", resultItem["url"])
 	assert.Equal(t, "public_task", got["task_id"])
 }

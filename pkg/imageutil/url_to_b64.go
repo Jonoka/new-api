@@ -30,33 +30,13 @@ func ConvertImageURLResponseToB64WithClient(ctx context.Context, body []byte, cl
 	if err := common.Unmarshal(body, &payload); err != nil {
 		return nil, false, err
 	}
-	data, _ := payload["data"].([]any)
-	if len(data) == 0 {
-		return body, false, nil
-	}
-	for _, item := range data {
-		m, _ := item.(map[string]any)
-		if b64, _ := m["b64_json"].(string); strings.TrimSpace(b64) != "" {
-			return body, false, nil
-		}
-	}
 	changed := false
-	for _, item := range data {
-		m, _ := item.(map[string]any)
-		if m == nil {
-			continue
-		}
-		rawURL, _ := m["url"].(string)
-		if strings.TrimSpace(rawURL) == "" {
-			continue
-		}
-		b64, err := DownloadImageAsB64(ctx, client, rawURL, maxBytes)
+	for _, data := range imageResponseDataArrays(payload) {
+		arrayChanged, err := convertImageArtifactsToB64(ctx, data, client, maxBytes)
 		if err != nil {
 			return nil, false, err
 		}
-		m["b64_json"] = b64
-		delete(m, "url")
-		changed = true
+		changed = changed || arrayChanged
 	}
 	if !changed {
 		return body, false, nil
@@ -66,6 +46,44 @@ func ConvertImageURLResponseToB64WithClient(ctx context.Context, body []byte, cl
 		return nil, false, err
 	}
 	return out, true, nil
+}
+
+func imageResponseDataArrays(payload map[string]any) [][]any {
+	arrays := make([][]any, 0, 2)
+	if data, ok := payload["data"].([]any); ok && len(data) > 0 {
+		arrays = append(arrays, data)
+	}
+	if result, ok := payload["result"].(map[string]any); ok {
+		if data, ok := result["data"].([]any); ok && len(data) > 0 {
+			arrays = append(arrays, data)
+		}
+	}
+	return arrays
+}
+
+func convertImageArtifactsToB64(ctx context.Context, data []any, client *http.Client, maxBytes int64) (bool, error) {
+	changed := false
+	for _, item := range data {
+		m, _ := item.(map[string]any)
+		if m == nil {
+			continue
+		}
+		if b64, _ := m["b64_json"].(string); strings.TrimSpace(b64) != "" {
+			continue
+		}
+		rawURL, _ := m["url"].(string)
+		if strings.TrimSpace(rawURL) == "" {
+			continue
+		}
+		b64, err := DownloadImageAsB64(ctx, client, rawURL, maxBytes)
+		if err != nil {
+			return false, err
+		}
+		m["b64_json"] = b64
+		delete(m, "url")
+		changed = true
+	}
+	return changed, nil
 }
 
 func DownloadImageAsB64(ctx context.Context, client *http.Client, rawURL string, maxBytes int64) (string, error) {

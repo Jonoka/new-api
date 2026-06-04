@@ -403,6 +403,13 @@ func firstImageArtifactURLFromItems(items []imageArtifact) string {
 
 func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 	data := task.Data
+	if strings.HasPrefix(strings.TrimSpace(task.PrivateData.RequestPath), "/v1/images/generations") {
+		converted, err := convertImageGenerationTaskResponse(data)
+		if err != nil {
+			return nil, errors.Wrap(err, "convert image generation task response failed")
+		}
+		data = converted
+	}
 	if strings.EqualFold(strings.TrimSpace(task.PrivateData.ResponseFormat), "b64_json") {
 		converted, _, err := imageutil.ConvertImageURLResponseToB64(context.Background(), data)
 		if err != nil {
@@ -418,4 +425,28 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 		return nil, errors.Wrap(err, "set task_id failed")
 	}
 	return data, nil
+}
+
+func convertImageGenerationTaskResponse(data []byte) ([]byte, error) {
+	var payload map[string]any
+	if err := common.Unmarshal(data, &payload); err != nil {
+		return nil, err
+	}
+	if _, hasData := payload["data"]; !hasData {
+		if result, ok := payload["result"].(map[string]any); ok {
+			if resultData, ok := result["data"]; ok {
+				payload["data"] = resultData
+			}
+		}
+	}
+	if result, ok := payload["result"].(map[string]any); ok {
+		if _, hasResultData := result["data"]; !hasResultData {
+			if topData, ok := payload["data"]; ok {
+				result["data"] = topData
+			}
+		}
+	} else if topData, ok := payload["data"]; ok {
+		payload["result"] = map[string]any{"data": topData}
+	}
+	return common.Marshal(payload)
 }

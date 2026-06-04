@@ -42,6 +42,27 @@ func TestConvertImageURLResponseToB64DownloadsURLAndRemovesIt(t *testing.T) {
 	assert.Equal(t, float64(720), item["width"])
 }
 
+func TestConvertImageURLResponseToB64DownloadsNestedResultURLAndRemovesIt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("nested-png"))
+	}))
+	defer server.Close()
+
+	body := []byte(`{"status":"succeeded","result":{"data":[{"height":2560,"url":"` + server.URL + `/nested.png","width":1440}]}}`)
+	got, changed, err := ConvertImageURLResponseToB64WithClient(context.Background(), body, server.Client(), 20<<20)
+	require.NoError(t, err)
+	assert.True(t, changed)
+	var payload map[string]any
+	require.NoError(t, common.Unmarshal(got, &payload))
+	result := payload["result"].(map[string]any)
+	data := result["data"].([]any)
+	item := data[0].(map[string]any)
+	assert.Equal(t, "bmVzdGVkLXBuZw==", item["b64_json"])
+	_, hasURL := item["url"]
+	assert.False(t, hasURL)
+}
+
 func TestConvertImageURLResponseToB64RejectsTooLargeImage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
