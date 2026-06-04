@@ -13,7 +13,19 @@ func CORS() gin.HandlerFunc {
 	config := cors.DefaultConfig()
 	config.AllowCredentials = true
 	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
-	config.AllowHeaders = []string{"*"}
+	config.AllowHeaders = []string{
+		"Accept",
+		"Authorization",
+		"Cache-Control",
+		"Content-Length",
+		"Content-Type",
+		"New-API-User",
+		"Origin",
+		"X-API-Key",
+		"X-Requested-With",
+		"anthropic-beta",
+		"anthropic-version",
+	}
 	config.AllowOriginWithContextFunc = func(c *gin.Context, origin string) bool {
 		return isAllowedCredentialOrigin(c, origin)
 	}
