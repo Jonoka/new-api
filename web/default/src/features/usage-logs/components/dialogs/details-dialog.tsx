@@ -311,7 +311,7 @@ function BillingBreakdown(props: {
 
   rows.push({
     label: t('Total Cost'),
-    value: formatLogQuota(log.quota),
+    value: formatLogQuota(log.type === 6 ? -Math.abs(log.quota) : log.quota),
   })
 
   if (rows.length === 0) return null
