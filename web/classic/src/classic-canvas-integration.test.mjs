@@ -51,3 +51,11 @@ test('classic canvas launcher builds session based New API URL', () => {
   assert.match(source, /baseUrl['"]?,\s*`\$\{normalizedOrigin\}\/canvas`/);
   assert.match(source, /group['"]?,\s*group/);
 });
+
+test('classic group selector displays group names instead of descriptions', () => {
+  const source = readSource('helpers/api.js');
+
+  assert.match(source, /label:\s*group/);
+  assert.match(source, /value:\s*group/);
+  assert.doesNotMatch(source, /label:\s*\n\s*info\.desc/);
+});
