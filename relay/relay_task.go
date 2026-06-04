@@ -385,6 +385,7 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 	}
 
 	isOpenAIVideoAPI := strings.HasPrefix(c.Request.RequestURI, "/v1/videos/") || strings.HasPrefix(c.Request.RequestURI, "/v1/video/generations/")
+	isOpenAIImageTaskAPI := strings.HasPrefix(c.Request.RequestURI, "/v1/images/generations/")
 
 	// Gemini/Vertex 支持实时查询：用户 fetch 时直接从上游拉取最新状态
 	if realtimeResp := tryRealtimeFetch(originTask, isOpenAIVideoAPI); len(realtimeResp) > 0 {
@@ -392,8 +393,8 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		return
 	}
 
-	// OpenAI Video API 格式: 走各 adaptor 的 ConvertToOpenAIVideo
-	if isOpenAIVideoAPI {
+	// OpenAI Video/Image task API 格式: 走各 adaptor 的 OpenAI 兼容转换器
+	if isOpenAIVideoAPI || isOpenAIImageTaskAPI {
 		adaptor := GetTaskAdaptor(originTask.Platform)
 		if adaptor == nil {
 			taskResp = service.TaskErrorWrapperLocal(fmt.Errorf("invalid channel id: %d", originTask.ChannelId), "invalid_channel_id", http.StatusBadRequest)

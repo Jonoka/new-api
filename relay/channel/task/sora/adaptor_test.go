@@ -1,6 +1,9 @@
 package sora
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/QuantumNous/new-api/model"
@@ -30,4 +33,67 @@ func TestParseTaskResultSuccessAliases(t *testing.T) {
 			assert.Equal(t, "100%", info.Progress)
 		})
 	}
+}
+
+func TestFetchTaskUsesImageGenerationsPath(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "Bearer test-key", r.Header.Get("Authorization"))
+		_, _ = io.WriteString(w, `{"id":"upstream_img_task","status":"succeeded","progress":100}`)
+	}))
+	defer server.Close()
+
+	adaptor := &TaskAdaptor{}
+	resp, err := adaptor.FetchTask(server.URL, "test-key", map[string]any{
+		"task_id":      "upstream_img_task",
+		"request_path": "/v1/images/generations",
+	}, "")
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	_ = resp.Body.Close()
+	assert.Equal(t, "/v1/images/generations/upstream_img_task", gotPath)
+}
+
+func TestFetchTaskUsesSingularVideoGenerationsPath(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = io.WriteString(w, `{"id":"upstream_video_task","status":"succeeded","progress":100}`)
+	}))
+	defer server.Close()
+
+	adaptor := &TaskAdaptor{}
+	resp, err := adaptor.FetchTask(server.URL, "test-key", map[string]any{
+		"task_id":      "upstream_video_task",
+		"request_path": "/v1/video/generations",
+	}, "")
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	_ = resp.Body.Close()
+	assert.Equal(t, "/v1/video/generations/upstream_video_task", gotPath)
+}
+
+func TestParseTaskResultImageResponseWithArtifact(t *testing.T) {
+	adaptor := &TaskAdaptor{}
+	info, err := adaptor.ParseTaskResult([]byte(`{"created":1780226859,"data":[{"url":"https://example.com/generated.png"}],"task_id":"upstream_img_task"}`))
+
+	require.NoError(t, err)
+	require.NotNil(t, info)
+	assert.Equal(t, model.TaskStatusSuccess, info.Status)
+	assert.Equal(t, "100%", info.Progress)
+	assert.Equal(t, "https://example.com/generated.png", info.Url)
+}
+
+func TestParseTaskResultImageQueuedTask(t *testing.T) {
+	adaptor := &TaskAdaptor{}
+	info, err := adaptor.ParseTaskResult([]byte(`{"object":"image.generation.task","status":"queued","progress":0,"task_id":"upstream_img_task"}`))
+
+	require.NoError(t, err)
+	require.NotNil(t, info)
+	assert.Equal(t, model.TaskStatusQueued, info.Status)
+	assert.Equal(t, "0%", info.Progress)
 }

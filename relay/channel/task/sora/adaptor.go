@@ -276,7 +276,9 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	}
 
 	uriPath := fmt.Sprintf("/v1/videos/%s", taskID)
-	if rawPath, _ := body["request_path"].(string); strings.HasPrefix(rawPath, "/v1/video/generations") {
+	if rawPath, _ := body["request_path"].(string); strings.HasPrefix(rawPath, "/v1/images/generations") {
+		uriPath = path.Join("/v1/images/generations", taskID)
+	} else if strings.HasPrefix(rawPath, "/v1/video/generations") {
 		uriPath = path.Join("/v1/video/generations", taskID)
 	}
 	uri := baseUrl + uriPath
@@ -291,6 +293,9 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	client, err := service.GetHttpClientWithProxy(proxy)
 	if err != nil {
 		return nil, fmt.Errorf("new proxy http client failed: %w", err)
+	}
+	if client == nil {
+		client = http.DefaultClient
 	}
 	return client.Do(req)
 }
@@ -310,12 +315,20 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 	}
 
 	taskResult := relaycommon.TaskInfo{
-		Code: 0,
+		Code:   0,
+		TaskID: firstNonEmpty(resTask.TaskID, resTask.ID),
+	}
+	if imageURL := firstImageArtifactURL(respBody); imageURL != "" {
+		taskResult.Status = model.TaskStatusSuccess
+		taskResult.Progress = "100%"
+		taskResult.Url = imageURL
+		return &taskResult, nil
 	}
 
 	switch resTask.Status {
 	case "queued", "pending":
 		taskResult.Status = model.TaskStatusQueued
+		taskResult.Progress = "0%"
 	case "processing", "in_progress", "running":
 		taskResult.Status = model.TaskStatusInProgress
 	case "completed", "succeeded", "success":
@@ -324,6 +337,7 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 		// Url intentionally left empty — the caller constructs the proxy URL using the public task ID
 	case "failed", "cancelled":
 		taskResult.Status = model.TaskStatusFailure
+		taskResult.Progress = "100%"
 		if resTask.Error != nil {
 			taskResult.Reason = resTask.Error.Message
 		} else {
@@ -331,11 +345,46 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 		}
 	default:
 	}
-	if resTask.Progress > 0 && resTask.Progress < 100 {
-		taskResult.Progress = fmt.Sprintf("%d%%", resTask.Progress)
+	if resTask.Progress >= 0 && resTask.Progress <= 100 {
+		if resTask.Progress > 0 || taskResult.Status != "" {
+			taskResult.Progress = fmt.Sprintf("%d%%", resTask.Progress)
+		}
+	}
+	if taskResult.Status == model.TaskStatusSuccess && taskResult.Progress == "0%" {
+		taskResult.Progress = "100%"
 	}
 
 	return &taskResult, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func firstImageArtifactURL(respBody []byte) string {
+	var raw struct {
+		Data []struct {
+			Url     string `json:"url"`
+			B64Json string `json:"b64_json"`
+		} `json:"data"`
+	}
+	if err := common.Unmarshal(respBody, &raw); err != nil {
+		return ""
+	}
+	for _, item := range raw.Data {
+		if item.Url != "" {
+			return item.Url
+		}
+		if item.B64Json != "" {
+			return "data:image/png;base64," + item.B64Json
+		}
+	}
+	return ""
 }
 
 func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
@@ -343,6 +392,9 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 	var err error
 	if data, err = sjson.SetBytes(data, "id", task.TaskID); err != nil {
 		return nil, errors.Wrap(err, "set id failed")
+	}
+	if data, err = sjson.SetBytes(data, "task_id", task.TaskID); err != nil {
+		return nil, errors.Wrap(err, "set task_id failed")
 	}
 	return data, nil
 }
