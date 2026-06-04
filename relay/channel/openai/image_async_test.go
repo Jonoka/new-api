@@ -1,8 +1,10 @@
 package openai
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -58,6 +60,88 @@ func TestConvertImageRequestPreservesExplicitGPTImage2Async(t *testing.T) {
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(body, &got))
 	assert.Equal(t, true, got["async"])
+}
+
+func TestConvertImageRequestDefaultsGPTImage2EditToSync(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", strings.NewReader(`{"model":"gpt-image-2","prompt":"test"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	adaptor := &Adaptor{}
+	converted, err := adaptor.ConvertImageRequest(c, &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeImagesEdits,
+		OriginModelName: "gpt-image-2",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType:           constant.APITypeOpenAI,
+			UpstreamModelName: "gpt-image-2",
+		},
+	}, dto.ImageRequest{Model: "gpt-image-2", Prompt: "test"})
+
+	require.NoError(t, err)
+	body, err := json.Marshal(converted)
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(body, &got))
+	assert.Equal(t, false, got["async"])
+}
+
+func TestConvertImageRequestMapsChannel23OpenAIQualityToGPT2APITier(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	adaptor := &Adaptor{}
+	converted, err := adaptor.ConvertImageRequest(c, &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeImagesGenerations,
+		OriginModelName: "nano-banana-v2",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:         23,
+			ApiType:           constant.APITypeOpenAI,
+			UpstreamModelName: "nano-banana-v2",
+		},
+	}, dto.ImageRequest{Model: "nano-banana-v2", Prompt: "test", Size: "3840x2160", Quality: "high"})
+
+	require.NoError(t, err)
+	body, err := json.Marshal(converted)
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(body, &got))
+	assert.Equal(t, "4K", got["quality"])
+}
+
+func TestConvertImageEditMultipartMapsChannel23QualityAndAsync(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	require.NoError(t, writer.WriteField("model", "nano-banana-v2"))
+	require.NoError(t, writer.WriteField("prompt", "test"))
+	require.NoError(t, writer.WriteField("quality", "medium"))
+	require.NoError(t, writer.WriteField("async", "true"))
+	part, err := writer.CreateFormFile("image", "input.png")
+	require.NoError(t, err)
+	_, _ = part.Write([]byte("png"))
+	require.NoError(t, writer.Close())
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", &buf)
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+	require.NoError(t, c.Request.ParseMultipartForm(32<<20))
+	adaptor := &Adaptor{}
+	converted, err := adaptor.ConvertImageRequest(c, &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeImagesEdits,
+		OriginModelName: "nano-banana-v2",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:         23,
+			ApiType:           constant.APITypeOpenAI,
+			UpstreamModelName: "nano-banana-v2",
+		},
+	}, dto.ImageRequest{Model: "nano-banana-v2", Prompt: "test", Quality: "medium", Async: func() *bool { v := true; return &v }()})
+
+	require.NoError(t, err)
+	body, ok := converted.(*bytes.Buffer)
+	require.True(t, ok)
+	multipartBody := body.String()
+	assert.Contains(t, multipartBody, "2K")
+	assert.Contains(t, multipartBody, "true")
+	assert.NotContains(t, multipartBody, "medium")
 }
 
 func TestConvertImageRequestDoesNotAddAsyncForOtherModels(t *testing.T) {

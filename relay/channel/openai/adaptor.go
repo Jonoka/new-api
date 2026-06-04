@@ -424,6 +424,13 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
+	if shouldDefaultOpenAIImageRequestToSync(info, request) {
+		async := false
+		request.Async = &async
+	}
+	if shouldMapOpenAIImageQualityToGPT2APITier(info, request) {
+		request.MapOpenAIImageQualityToGPT2APITier()
+	}
 	switch info.RelayMode {
 	case relayconstant.RelayModeImagesEdits:
 		if isJSONRequest(c) {
@@ -434,6 +441,12 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		writer := multipart.NewWriter(&requestBody)
 
 		writer.WriteField("model", request.Model)
+		if request.Quality != "" {
+			writer.WriteField("quality", request.Quality)
+		}
+		if request.Async != nil {
+			writer.WriteField("async", fmt.Sprintf("%t", *request.Async))
+		}
 		// 使用已解析的 multipart 表单，避免重复解析
 		mf := c.Request.MultipartForm
 		if mf == nil {
@@ -446,7 +459,7 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		// 写入所有非文件字段
 		if mf != nil {
 			for key, values := range mf.Value {
-				if key == "model" {
+				if key == "model" || key == "quality" || key == "async" {
 					continue
 				}
 				for _, value := range values {
@@ -550,20 +563,29 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		return &requestBody, nil
 
 	default:
-		if shouldDefaultOpenAIImageRequestToSync(info, request) {
-			async := false
-			request.Async = &async
-		}
 		return request, nil
 	}
 }
 
 func shouldDefaultOpenAIImageRequestToSync(info *relaycommon.RelayInfo, request dto.ImageRequest) bool {
-	if info == nil || info.RelayMode != relayconstant.RelayModeImagesGenerations || request.Async != nil {
+	if info == nil || (info.RelayMode != relayconstant.RelayModeImagesGenerations && info.RelayMode != relayconstant.RelayModeImagesEdits) || request.Async != nil {
 		return false
 	}
 	modelName := strings.ToLower(strings.TrimSpace(firstNonEmpty(info.UpstreamModelName, info.OriginModelName, request.Model)))
 	return modelName == "gpt-image-2"
+}
+
+func shouldMapOpenAIImageQualityToGPT2APITier(info *relaycommon.RelayInfo, request dto.ImageRequest) bool {
+	if info == nil || info.ChannelMeta == nil {
+		return false
+	}
+	if info.ChannelMeta.ChannelId != 23 {
+		return false
+	}
+	if info.RelayMode != relayconstant.RelayModeImagesGenerations && info.RelayMode != relayconstant.RelayModeImagesEdits {
+		return false
+	}
+	return strings.TrimSpace(request.Quality) != ""
 }
 
 func firstNonEmpty(values ...string) string {

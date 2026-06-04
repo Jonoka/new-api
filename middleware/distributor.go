@@ -300,7 +300,7 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 			shouldSelectChannel = false
 		}
 		c.Set("relay_mode", relayMode)
-	} else if strings.Contains(c.Request.URL.Path, "/v1/images/generations/") {
+	} else if strings.Contains(c.Request.URL.Path, "/v1/images/generations/") || strings.Contains(c.Request.URL.Path, "/v1/images/edits/") || strings.Contains(c.Request.URL.Path, "/v1/images/edit/") {
 		relayMode := relayconstant.RelayModeVideoFetchByID
 		shouldSelectChannel = false
 		c.Set("relay_mode", relayMode)
@@ -349,12 +349,12 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 			modelRequest.Model = c.Param("model")
 		}
 	}
-	if strings.HasPrefix(c.Request.URL.Path, "/v1/images/generations/") {
+	if strings.HasPrefix(c.Request.URL.Path, "/v1/images/generations/") || strings.HasPrefix(c.Request.URL.Path, "/v1/images/edits/") || strings.HasPrefix(c.Request.URL.Path, "/v1/images/edit/") {
 		// image task polling has no request body model; keep channel selection disabled
 		// and do not fall back to the legacy dall-e default.
 	} else if strings.HasPrefix(c.Request.URL.Path, "/v1/images/generations") {
 		modelRequest.Model = common.GetStringIfEmpty(modelRequest.Model, "dall-e")
-	} else if strings.HasPrefix(c.Request.URL.Path, "/v1/images/edits") {
+	} else if strings.HasPrefix(c.Request.URL.Path, "/v1/images/edits") || strings.HasPrefix(c.Request.URL.Path, "/v1/images/edit") {
 		//modelRequest.Model = common.GetStringIfEmpty(c.PostForm("model"), "gpt-image-1")
 		contentType := c.ContentType()
 		if slices.Contains([]string{gin.MIMEPOSTForm, gin.MIMEMultipartPOSTForm}, contentType) {

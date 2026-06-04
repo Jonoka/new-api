@@ -57,6 +57,26 @@ func (i *ImageRequest) NormalizeOpenAIImageGenerationQuality() {
 	i.Quality = NormalizeOpenAIImageGenerationQuality(i.Quality)
 }
 
+func MapOpenAIImageQualityToGPT2APITier(quality string) string {
+	switch strings.ToLower(strings.TrimSpace(quality)) {
+	case "low", "1k":
+		return "1K"
+	case "medium", "2k", "hd":
+		return "2K"
+	case "high", "4k", "ultra":
+		return "4K"
+	default:
+		return quality
+	}
+}
+
+func (i *ImageRequest) MapOpenAIImageQualityToGPT2APITier() {
+	if i == nil {
+		return
+	}
+	i.Quality = MapOpenAIImageQualityToGPT2APITier(i.Quality)
+}
+
 func (i *ImageRequest) UnmarshalJSON(data []byte) error {
 	// 先解析成 map[string]interface{}
 	var rawMap map[string]json.RawMessage

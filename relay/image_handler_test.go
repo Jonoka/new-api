@@ -13,6 +13,9 @@ func TestShouldTreatOpenAIImageAcceptedAsSuccess(t *testing.T) {
 	assert.True(t, shouldTreatOpenAIImageAcceptedAsSuccess(&relaycommon.RelayInfo{
 		RelayMode: relayconstant.RelayModeImagesGenerations,
 	}, http.StatusAccepted))
+	assert.True(t, shouldTreatOpenAIImageAcceptedAsSuccess(&relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeImagesEdits,
+	}, http.StatusAccepted))
 	assert.False(t, shouldTreatOpenAIImageAcceptedAsSuccess(&relaycommon.RelayInfo{
 		RelayMode: relayconstant.RelayModeChatCompletions,
 	}, http.StatusAccepted))
@@ -20,4 +23,17 @@ func TestShouldTreatOpenAIImageAcceptedAsSuccess(t *testing.T) {
 		RelayMode: relayconstant.RelayModeImagesGenerations,
 	}, http.StatusOK))
 	assert.False(t, shouldTreatOpenAIImageAcceptedAsSuccess(nil, http.StatusAccepted))
+}
+
+func TestShouldNormalizeOpenAIImageGenerationQuality(t *testing.T) {
+	assert.True(t, shouldNormalizeOpenAIImageGenerationQuality(&relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeImagesGenerations,
+	}))
+	assert.False(t, shouldNormalizeOpenAIImageGenerationQuality(&relaycommon.RelayInfo{
+		RelayMode:   relayconstant.RelayModeImagesGenerations,
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 23},
+	}))
+	assert.False(t, shouldNormalizeOpenAIImageGenerationQuality(&relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeImagesEdits,
+	}))
 }

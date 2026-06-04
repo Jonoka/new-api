@@ -58,6 +58,28 @@ func TestFetchTaskUsesImageGenerationsPath(t *testing.T) {
 	assert.Equal(t, "/v1/images/generations/upstream_img_task", gotPath)
 }
 
+func TestFetchTaskUsesImageEditsPath(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "Bearer test-key", r.Header.Get("Authorization"))
+		_, _ = io.WriteString(w, `{"id":"upstream_img_edit_task","status":"succeeded","progress":100}`)
+	}))
+	defer server.Close()
+
+	adaptor := &TaskAdaptor{}
+	resp, err := adaptor.FetchTask(server.URL, "test-key", map[string]any{
+		"task_id":      "upstream_img_edit_task",
+		"request_path": "/v1/images/edits",
+	}, "")
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	_ = resp.Body.Close()
+	assert.Equal(t, "/v1/images/edits/upstream_img_edit_task", gotPath)
+}
+
 func TestFetchTaskUsesSingularVideoGenerationsPath(t *testing.T) {
 	var gotPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -209,4 +231,35 @@ func TestConvertToOpenAIVideoAddsTopLevelDataFromNestedImageResult(t *testing.T)
 	resultItem := resultData[0].(map[string]any)
 	assert.Equal(t, "https://example.com/nested.png", resultItem["url"])
 	assert.Equal(t, "public_task", got["task_id"])
+}
+
+func TestConvertToOpenAIVideoAddsTopLevelDataFromNestedImageEditResult(t *testing.T) {
+	adaptor := &TaskAdaptor{}
+	body, err := adaptor.ConvertToOpenAIVideo(&model.Task{
+		TaskID: "public_edit_task",
+		PrivateData: model.TaskPrivateData{
+			RequestPath: "/v1/images/edits",
+		},
+		Data: []byte(`{
+			"created":1780590448,
+			"error":null,
+			"id":"upstream_edit_task",
+			"object":"image.generation.task",
+			"status":"succeeded",
+			"result":{"data":[{"height":1024,"url":"https://example.com/edit.png","width":1024}]},
+			"task_id":"upstream_edit_task"
+		}`),
+	})
+
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, common.Unmarshal(body, &got))
+	data := got["data"].([]any)
+	item := data[0].(map[string]any)
+	assert.Equal(t, "https://example.com/edit.png", item["url"])
+	result := got["result"].(map[string]any)
+	resultData := result["data"].([]any)
+	resultItem := resultData[0].(map[string]any)
+	assert.Equal(t, "https://example.com/edit.png", resultItem["url"])
+	assert.Equal(t, "public_edit_task", got["task_id"])
 }

@@ -33,7 +33,7 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	if err != nil {
 		return types.NewError(fmt.Errorf("failed to copy request to ImageRequest: %w", err), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
-	if info.RelayMode == relayconstant.RelayModeImagesGenerations {
+	if shouldNormalizeOpenAIImageGenerationQuality(info) {
 		request.NormalizeOpenAIImageGenerationQuality()
 	}
 
@@ -170,9 +170,19 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	return nil
 }
 
+func shouldNormalizeOpenAIImageGenerationQuality(info *relaycommon.RelayInfo) bool {
+	if info == nil || info.RelayMode != relayconstant.RelayModeImagesGenerations {
+		return false
+	}
+	// Channel 23 (GPT2API) is OpenAI-compatible, but its upstream image quality
+	// values are 1K/2K/4K rather than official OpenAI low/medium/high. Preserve
+	// those values for the adaptor to map aliases explicitly before forwarding.
+	return info.ChannelMeta == nil || info.ChannelMeta.ChannelId != 23
+}
+
 func shouldTreatOpenAIImageAcceptedAsSuccess(info *relaycommon.RelayInfo, statusCode int) bool {
 	if statusCode != http.StatusAccepted || info == nil {
 		return false
 	}
-	return info.RelayMode == relayconstant.RelayModeImagesGenerations
+	return info.RelayMode == relayconstant.RelayModeImagesGenerations || info.RelayMode == relayconstant.RelayModeImagesEdits
 }

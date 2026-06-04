@@ -20,10 +20,11 @@ import (
 )
 
 // RelayImageTaskSubmit handles upstreams that expose async image jobs through
-// the OpenAI-compatible /v1/images/generations submit path.  The normal image
+// OpenAI-compatible image submit paths such as /v1/images/generations and
+// /v1/images/edits. The normal image
 // relay path writes the submit response and charges the request, but it does
-// not persist a row in tasks, so later GET /v1/images/generations/{task_id}
-// cannot find the returned public task id.  This task-shaped submit path keeps
+// not persist a row in tasks, so later GET /v1/images/{operation}/{task_id}
+// cannot find the returned public task id. This task-shaped submit path keeps
 // billing and response behavior in ImageHelper, then persists the returned task
 // metadata for polling.
 func RelayImageTaskSubmit(c *gin.Context) {
@@ -50,7 +51,6 @@ func RelayImageTaskSubmit(c *gin.Context) {
 		c.JSON(apiErr.StatusCode, gin.H{"error": apiErr.ToOpenAIError()})
 		return
 	}
-	imageRequest.NormalizeOpenAIImageGenerationQuality()
 	if billingInput, inputErr := helper.BuildBillingExprRequestInputFromRequest(imageRequest, relayInfo.RequestHeaders); inputErr != nil {
 		apiErr := types.NewErrorWithStatusCode(inputErr, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		c.JSON(apiErr.StatusCode, gin.H{"error": apiErr.ToOpenAIError()})

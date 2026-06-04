@@ -556,7 +556,7 @@ func truncateBase64(s string) string {
 }
 
 func convertImageTaskResponseToB64IfRequested(ctx context.Context, task *model.Task, responseBody []byte) ([]byte, error) {
-	if task == nil || !strings.EqualFold(strings.TrimSpace(task.PrivateData.ResponseFormat), "b64_json") || !strings.HasPrefix(strings.TrimSpace(task.PrivateData.RequestPath), "/v1/images/generations") {
+	if task == nil || !strings.EqualFold(strings.TrimSpace(task.PrivateData.ResponseFormat), "b64_json") || !isOpenAIImageTaskRequestPath(task.PrivateData.RequestPath) {
 		return responseBody, nil
 	}
 	convertedBody, changed, err := imageutil.ConvertImageURLResponseToB64(ctx, responseBody)
@@ -567,6 +567,11 @@ func convertImageTaskResponseToB64IfRequested(ctx context.Context, task *model.T
 		return convertedBody, nil
 	}
 	return responseBody, nil
+}
+
+func isOpenAIImageTaskRequestPath(requestPath string) bool {
+	path := strings.TrimSpace(requestPath)
+	return strings.HasPrefix(path, "/v1/images/generations") || strings.HasPrefix(path, "/v1/images/edits") || strings.HasPrefix(path, "/v1/images/edit")
 }
 
 // settleTaskBillingOnComplete 结算任务完成后的费用差额。
