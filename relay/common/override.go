@@ -36,6 +36,15 @@ var claudeCodeProtectedHeaderNames = map[string]struct{}{
 	"anthropic-version": {},
 	"anthropic-beta":    {},
 	"anthropic-dangerous-direct-browser-access": {},
+	"x-stainless-lang":                          {},
+	"x-stainless-package-version":               {},
+	"x-stainless-os":                            {},
+	"x-stainless-arch":                          {},
+	"x-stainless-runtime":                       {},
+	"x-stainless-runtime-version":               {},
+	"x-stainless-retry-count":                   {},
+	"x-stainless-timeout":                       {},
+	"x-client-request-id":                       {},
 }
 
 func IsClaudeCodeFingerprintEnabled(info *RelayInfo) bool {

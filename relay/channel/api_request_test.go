@@ -151,6 +151,8 @@ func TestProcessHeaderOverride_ClaudeCodeFingerprintSkipsPassiveProtectedHeaders
 	ctx.Request.Header.Set("User-Agent", "CherryStudio/1.0")
 	ctx.Request.Header.Set("Anthropic-Beta", "client-beta")
 	ctx.Request.Header.Set("X-App", "browser")
+	ctx.Request.Header.Set("X-Stainless-Lang", "python")
+	ctx.Request.Header.Set("X-Client-Request-Id", "client-request-id")
 	ctx.Request.Header.Set("X-Trace-Id", "trace-123")
 
 	info := &relaycommon.RelayInfo{
@@ -172,6 +174,8 @@ func TestProcessHeaderOverride_ClaudeCodeFingerprintSkipsPassiveProtectedHeaders
 	require.NotContains(t, headers, "user-agent")
 	require.NotContains(t, headers, "anthropic-beta")
 	require.NotContains(t, headers, "x-app")
+	require.NotContains(t, headers, "x-stainless-lang")
+	require.NotContains(t, headers, "x-client-request-id")
 }
 
 func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.T) {
@@ -238,15 +242,19 @@ func TestProcessHeaderOverride_ClaudeCodeFingerprintSkipsPassHeadersProtectedHea
 	ctx.Request.Header.Set("User-Agent", "CherryStudio/1.0")
 	ctx.Request.Header.Set("Anthropic-Beta", "client-beta")
 	ctx.Request.Header.Set("X-App", "browser")
+	ctx.Request.Header.Set("X-Stainless-Lang", "python")
+	ctx.Request.Header.Set("X-Client-Request-Id", "client-request-id")
 	ctx.Request.Header.Set("X-Trace-Id", "trace-123")
 
 	info := &relaycommon.RelayInfo{
 		IsChannelTest: false,
 		RequestHeaders: map[string]string{
-			"User-Agent":     "CherryStudio/1.0",
-			"Anthropic-Beta": "client-beta",
-			"X-App":          "browser",
-			"X-Trace-Id":     "trace-123",
+			"User-Agent":          "CherryStudio/1.0",
+			"Anthropic-Beta":      "client-beta",
+			"X-App":               "browser",
+			"X-Stainless-Lang":    "python",
+			"X-Client-Request-Id": "client-request-id",
+			"X-Trace-Id":          "trace-123",
 		},
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ApiType: constant.APITypeAnthropic,
@@ -257,7 +265,7 @@ func TestProcessHeaderOverride_ClaudeCodeFingerprintSkipsPassHeadersProtectedHea
 				"operations": []any{
 					map[string]any{
 						"mode":  "pass_headers",
-						"value": []any{"User-Agent", "Anthropic-Beta", "X-App", "X-Trace-Id"},
+						"value": []any{"User-Agent", "Anthropic-Beta", "X-App", "X-Stainless-Lang", "X-Client-Request-Id", "X-Trace-Id"},
 					},
 				},
 			},
@@ -271,6 +279,8 @@ func TestProcessHeaderOverride_ClaudeCodeFingerprintSkipsPassHeadersProtectedHea
 	require.NotContains(t, info.RuntimeHeadersOverride, "user-agent")
 	require.NotContains(t, info.RuntimeHeadersOverride, "anthropic-beta")
 	require.NotContains(t, info.RuntimeHeadersOverride, "x-app")
+	require.NotContains(t, info.RuntimeHeadersOverride, "x-stainless-lang")
+	require.NotContains(t, info.RuntimeHeadersOverride, "x-client-request-id")
 
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
@@ -278,6 +288,8 @@ func TestProcessHeaderOverride_ClaudeCodeFingerprintSkipsPassHeadersProtectedHea
 	require.NotContains(t, headers, "user-agent")
 	require.NotContains(t, headers, "anthropic-beta")
 	require.NotContains(t, headers, "x-app")
+	require.NotContains(t, headers, "x-stainless-lang")
+	require.NotContains(t, headers, "x-client-request-id")
 }
 
 func TestProcessHeaderOverride_ClaudeCodeFingerprintAllowsExplicitProtectedHeaderOverride(t *testing.T) {
@@ -297,10 +309,12 @@ func TestProcessHeaderOverride_ClaudeCodeFingerprintAllowsExplicitProtectedHeade
 				ClaudeCodeFingerprintEnabled: true,
 			},
 			HeadersOverride: map[string]any{
-				"User-Agent":      "custom-agent",
-				"Anthropic-Beta":  "custom-beta",
-				"X-App":           "custom-app",
-				"X-Custom-Header": "custom-value",
+				"User-Agent":          "custom-agent",
+				"Anthropic-Beta":      "custom-beta",
+				"X-App":               "custom-app",
+				"X-Stainless-Lang":    "custom-lang",
+				"X-Client-Request-Id": "custom-request-id",
+				"X-Custom-Header":     "custom-value",
 			},
 		},
 	}
@@ -310,6 +324,8 @@ func TestProcessHeaderOverride_ClaudeCodeFingerprintAllowsExplicitProtectedHeade
 	require.Equal(t, "custom-agent", headers["user-agent"])
 	require.Equal(t, "custom-beta", headers["anthropic-beta"])
 	require.Equal(t, "custom-app", headers["x-app"])
+	require.Equal(t, "custom-lang", headers["x-stainless-lang"])
+	require.Equal(t, "custom-request-id", headers["x-client-request-id"])
 	require.Equal(t, "custom-value", headers["x-custom-header"])
 }
 

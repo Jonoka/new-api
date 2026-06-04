@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -16,16 +17,30 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type Adaptor struct {
 }
 
 const (
-	claudeCodeSystemText    = "You are Claude Code, Anthropic's official CLI for Claude."
-	claudeCodeUserID        = "user_0000000000000000000000000000000000000000000000000000000000000000_account_00000000-0000-0000-0000-000000000000_session_00000000-0000-0000-0000-000000000000"
-	claudeCodeAnthropicBeta = "claude-code-20250219,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advisor-tool-2026-03-01"
+	claudeCodeSystemText           = "You are Claude Code, Anthropic's official CLI for Claude."
+	claudeCodeUserDeviceID         = "0000000000000000000000000000000000000000000000000000000000000000"
+	claudeCodeUserAccountID        = "00000000-0000-0000-0000-000000000000"
+	claudeCodeUserSessionID        = "00000000-0000-0000-0000-000000000000"
+	claudeCodeUserID               = "user_" + claudeCodeUserDeviceID + "_account_" + claudeCodeUserAccountID + "_session_" + claudeCodeUserSessionID
+	claudeCodeAnthropicBeta        = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05,effort-2025-11-24,context-management-2025-06-27,extended-cache-ttl-2025-04-11"
+	claudeCodeUserAgent            = "claude-cli/2.1.92 (external, cli)"
+	claudeCodeStainlessVersion     = "0.70.0"
+	claudeCodeStainlessRuntime     = "node"
+	claudeCodeStainlessRuntimeVer  = "v24.13.0"
+	claudeCodeStainlessOS          = "Linux"
+	claudeCodeStainlessArch        = "arm64"
+	claudeCodeStainlessRetryCount  = "0"
+	claudeCodeStainlessTimeoutSecs = "600"
 )
+
+var claudeCodeLegacyUserIDPattern = regexp.MustCompile(`^user_[a-fA-F0-9]{64}_account_[a-fA-F0-9-]*_session_[a-fA-F0-9-]{36}$`)
 
 func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dto.GeminiChatRequest) (any, error) {
 	//TODO implement me
@@ -100,11 +115,20 @@ func applyClaudeCodeHeaderFingerprint(req *http.Header, info *relaycommon.RelayI
 	if req == nil || !shouldUseClaudeCodeFingerprint(info) {
 		return
 	}
-	req.Set("User-Agent", "claude-cli/2.1.114 (external, sdk-cli)")
+	req.Set("User-Agent", claudeCodeUserAgent)
+	req.Set("X-Stainless-Lang", "js")
+	req.Set("X-Stainless-Package-Version", claudeCodeStainlessVersion)
+	req.Set("X-Stainless-OS", claudeCodeStainlessOS)
+	req.Set("X-Stainless-Arch", claudeCodeStainlessArch)
+	req.Set("X-Stainless-Runtime", claudeCodeStainlessRuntime)
+	req.Set("X-Stainless-Runtime-Version", claudeCodeStainlessRuntimeVer)
+	req.Set("X-Stainless-Retry-Count", claudeCodeStainlessRetryCount)
+	req.Set("X-Stainless-Timeout", claudeCodeStainlessTimeoutSecs)
 	req.Set("X-App", "cli")
 	req.Set("anthropic-version", "2023-06-01")
 	req.Set("anthropic-beta", claudeCodeAnthropicBeta)
 	req.Set("anthropic-dangerous-direct-browser-access", "true")
+	req.Set("x-client-request-id", uuid.NewString())
 	if info.ApiKey != "" {
 		req.Set("Authorization", "Bearer "+info.ApiKey)
 	}
@@ -185,18 +209,22 @@ func ensureClaudeCodeSystem(request *dto.ClaudeRequest) {
 		request.System = []dto.ClaudeMediaMessage{newClaudeCodeSystemBlock()}
 		return
 	}
-	if containsClaudeCodeMarker(request.System) {
-		return
-	}
 	if request.IsStringSystem() {
 		if strings.TrimSpace(request.GetStringSystem()) == "" {
 			request.System = []dto.ClaudeMediaMessage{newClaudeCodeSystemBlock()}
+			return
+		}
+		if containsClaudeCodeMarker(request.GetStringSystem()) {
+			request.System = []dto.ClaudeMediaMessage{newTextSystemBlock(request.GetStringSystem())}
 			return
 		}
 		request.System = []dto.ClaudeMediaMessage{
 			newClaudeCodeSystemBlock(),
 			newTextSystemBlock(request.GetStringSystem()),
 		}
+		return
+	}
+	if containsClaudeCodeMarker(request.System) {
 		return
 	}
 	systemContents := request.ParseSystem()
@@ -214,7 +242,8 @@ func ensureClaudeCodeMetadata(request *dto.ClaudeRequest) error {
 			return err
 		}
 	}
-	if _, ok := metadata["user_id"]; !ok || metadata["user_id"] == nil || strings.TrimSpace(common.Interface2String(metadata["user_id"])) == "" {
+	userID := strings.TrimSpace(common.Interface2String(metadata["user_id"]))
+	if userID == "" || !isClaudeCodeMetadataUserID(userID) {
 		metadata["user_id"] = claudeCodeUserID
 	}
 	metadataBytes, err := common.Marshal(metadata)
@@ -263,4 +292,24 @@ func containsClaudeCodeMarker(value any) bool {
 		}
 	}
 	return false
+}
+
+func isClaudeCodeMetadataUserID(userID string) bool {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return false
+	}
+	if claudeCodeLegacyUserIDPattern.MatchString(userID) {
+		return true
+	}
+
+	var parsed struct {
+		DeviceID    string `json:"device_id"`
+		AccountUUID string `json:"account_uuid"`
+		SessionID   string `json:"session_id"`
+	}
+	if err := common.Unmarshal([]byte(userID), &parsed); err != nil {
+		return false
+	}
+	return strings.TrimSpace(parsed.DeviceID) != "" && strings.TrimSpace(parsed.SessionID) != ""
 }
