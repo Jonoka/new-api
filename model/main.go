@@ -1,6 +1,7 @@
 package model
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -194,6 +195,7 @@ func InitDB() (err error) {
 		sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
 		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
 		sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
+		configureSQLiteConnectionPool(DB, sqlDB)
 
 		if !common.IsMasterNode {
 			return nil
@@ -234,6 +236,7 @@ func InitLogDB() (err error) {
 		sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
 		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
 		sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
+		configureSQLiteConnectionPool(LOG_DB, sqlDB)
 
 		if !common.IsMasterNode {
 			return nil
@@ -245,6 +248,21 @@ func InitLogDB() (err error) {
 		common.FatalLog(err)
 	}
 	return err
+}
+
+func configureSQLiteConnectionPool(db *gorm.DB, sqlDB *sql.DB) {
+	if !common.UsingSQLite || db == nil || sqlDB == nil {
+		return
+	}
+	maxOpenConns := common.GetEnvOrDefault("SQLITE_MAX_OPEN_CONNS", 1)
+	if maxOpenConns <= 0 {
+		maxOpenConns = 1
+	}
+	sqlDB.SetMaxOpenConns(maxOpenConns)
+	sqlDB.SetMaxIdleConns(maxOpenConns)
+	sqlDB.SetConnMaxLifetime(0)
+	_ = db.Exec("PRAGMA journal_mode=WAL").Error
+	_ = db.Exec("PRAGMA busy_timeout=30000").Error
 }
 
 func migrateDB() error {

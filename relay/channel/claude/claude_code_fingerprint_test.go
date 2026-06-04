@@ -95,6 +95,34 @@ func TestConvertClaudeRequestAddsClaudeCodeFingerprintWhenTransportFingerprintEn
 	require.JSONEq(t, `{"user_id":"user_0000000000000000000000000000000000000000000000000000000000000000_account_00000000-0000-0000-0000-000000000000_session_00000000-0000-0000-0000-000000000000"}`, string(claudeReq.Metadata))
 }
 
+func TestConvertOpenAIRequestAddsClaudeCodeFingerprint(t *testing.T) {
+	t.Parallel()
+
+	adaptor := &Adaptor{}
+	req := &dto.GeneralOpenAIRequest{
+		Model: "claude-haiku-4-5-20251001",
+		Messages: []dto.Message{
+			{Role: "user", Content: "hi"},
+		},
+	}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeFingerprintEnabled: true,
+			},
+		},
+	}
+
+	converted, err := adaptor.ConvertOpenAIRequest(newClaudeFingerprintTestContext(), info, req)
+	require.NoError(t, err)
+
+	claudeReq := converted.(*dto.ClaudeRequest)
+	system := claudeReq.ParseSystem()
+	require.Len(t, system, 1)
+	require.Contains(t, system[0].GetText(), "Claude Code")
+	require.JSONEq(t, `{"user_id":"user_0000000000000000000000000000000000000000000000000000000000000000_account_00000000-0000-0000-0000-000000000000_session_00000000-0000-0000-0000-000000000000"}`, string(claudeReq.Metadata))
+}
+
 func TestConvertClaudeRequestReplacesEmptyStringSystemWithClaudeCodeSystem(t *testing.T) {
 	t.Parallel()
 
