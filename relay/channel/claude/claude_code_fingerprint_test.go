@@ -103,6 +103,102 @@ func TestConvertClaudeRequestNormalizesExistingClaudeCodeStringSystem(t *testing
 	require.Equal(t, "You are Claude Code, Anthropic's official CLI for Claude.", system[0].GetText())
 }
 
+func TestConvertClaudeRequestNormalizesObjectSystemWithClaudeCodeMarker(t *testing.T) {
+	t.Parallel()
+
+	adaptor := &Adaptor{}
+	req := &dto.ClaudeRequest{
+		Model: "claude-sonnet-4-20250514",
+		System: map[string]interface{}{
+			"type": "text",
+			"text": "You are Claude Code, Anthropic's official CLI for Claude.",
+		},
+	}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeFingerprintEnabled: true,
+			},
+		},
+	}
+
+	converted, err := adaptor.ConvertClaudeRequest(newClaudeFingerprintTestContext(), info, req)
+	require.NoError(t, err)
+
+	claudeReq := converted.(*dto.ClaudeRequest)
+	system := claudeReq.ParseSystem()
+	require.Len(t, system, 1)
+	require.Equal(t, "text", system[0].Type)
+	require.Contains(t, system[0].GetText(), "Claude Code")
+	requireClaudeCodeSystemInJSON(t, converted)
+}
+
+func TestConvertClaudeRequestNormalizesContentStringSystemWithClaudeCodeMarker(t *testing.T) {
+	t.Parallel()
+
+	adaptor := &Adaptor{}
+	req := &dto.ClaudeRequest{
+		Model: "claude-sonnet-4-20250514",
+		System: []interface{}{
+			map[string]interface{}{
+				"type":    "text",
+				"content": "You are Claude Code, Anthropic's official CLI for Claude.",
+			},
+		},
+	}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeFingerprintEnabled: true,
+			},
+		},
+	}
+
+	converted, err := adaptor.ConvertClaudeRequest(newClaudeFingerprintTestContext(), info, req)
+	require.NoError(t, err)
+
+	claudeReq := converted.(*dto.ClaudeRequest)
+	system := claudeReq.ParseSystem()
+	require.Len(t, system, 1)
+	require.Equal(t, "text", system[0].Type)
+	require.Contains(t, system[0].GetText(), "Claude Code")
+	requireClaudeCodeSystemInJSON(t, converted)
+}
+
+func TestConvertClaudeRequestPrependsClaudeCodeSystemWhenMarkerIsNotTextBlock(t *testing.T) {
+	t.Parallel()
+
+	adaptor := &Adaptor{}
+	req := &dto.ClaudeRequest{
+		Model: "claude-sonnet-4-20250514",
+		System: []interface{}{
+			map[string]interface{}{
+				"type":  "tool_result",
+				"input": "You are Claude Code, Anthropic's official CLI for Claude.",
+			},
+		},
+	}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeFingerprintEnabled: true,
+			},
+		},
+	}
+
+	converted, err := adaptor.ConvertClaudeRequest(newClaudeFingerprintTestContext(), info, req)
+	require.NoError(t, err)
+
+	claudeReq := converted.(*dto.ClaudeRequest)
+	system := claudeReq.ParseSystem()
+	require.Len(t, system, 2)
+	require.Equal(t, "text", system[0].Type)
+	require.Contains(t, system[0].GetText(), "Claude Code")
+	require.Equal(t, "tool_result", system[1].Type)
+	require.Empty(t, system[1].GetText())
+	requireClaudeCodeSystemInJSON(t, converted)
+}
+
 func TestConvertClaudeRequestRewritesInvalidMetadataUserID(t *testing.T) {
 	t.Parallel()
 
@@ -666,6 +762,25 @@ func requireClaudeCodeLegacyMetadata(t *testing.T, raw []byte) {
 	userID, ok := metadata["user_id"].(string)
 	require.True(t, ok)
 	require.Equal(t, "user_0000000000000000000000000000000000000000000000000000000000000000_account__session_00000000-0000-0000-0000-000000000000", userID)
+}
+
+func requireClaudeCodeSystemInJSON(t *testing.T, request any) {
+	t.Helper()
+
+	bodyBytes, err := common.Marshal(request)
+	require.NoError(t, err)
+
+	var body map[string]interface{}
+	require.NoError(t, common.Unmarshal(bodyBytes, &body))
+
+	systemEntries, ok := body["system"].([]interface{})
+	require.True(t, ok)
+	require.NotEmpty(t, systemEntries)
+
+	firstSystem, ok := systemEntries[0].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "text", firstSystem["type"])
+	require.Contains(t, firstSystem["text"], "Claude Code")
 }
 
 var legacySub2APIClaudeCodeUserIDPattern = regexp.MustCompile(`^user_[a-fA-F0-9]{64}_account__session_[\w-]+$`)

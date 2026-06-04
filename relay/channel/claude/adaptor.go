@@ -269,10 +269,11 @@ func ensureClaudeCodeSystem(request *dto.ClaudeRequest) {
 		}
 		return
 	}
-	if containsClaudeCodeMarker(request.System) {
+	systemContents := normalizeClaudeSystemBlocks(request.System)
+	if containsClaudeCodeTextBlock(systemContents) {
+		request.System = systemContents
 		return
 	}
-	systemContents := request.ParseSystem()
 	if len(systemContents) == 0 {
 		request.System = []dto.ClaudeMediaMessage{newClaudeCodeSystemBlock()}
 		return
@@ -307,6 +308,89 @@ func newTextSystemBlock(text string) dto.ClaudeMediaMessage {
 	block := dto.ClaudeMediaMessage{Type: "text"}
 	block.SetText(text)
 	return block
+}
+
+func normalizeClaudeSystemBlocks(value any) []dto.ClaudeMediaMessage {
+	switch v := value.(type) {
+	case nil:
+		return nil
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return nil
+		}
+		return []dto.ClaudeMediaMessage{newTextSystemBlock(v)}
+	case dto.ClaudeMediaMessage:
+		if block, ok := normalizeClaudeSystemBlock(v); ok {
+			return []dto.ClaudeMediaMessage{block}
+		}
+		return nil
+	case []dto.ClaudeMediaMessage:
+		blocks := make([]dto.ClaudeMediaMessage, 0, len(v))
+		for _, item := range v {
+			if block, ok := normalizeClaudeSystemBlock(item); ok {
+				blocks = append(blocks, block)
+			}
+		}
+		return blocks
+	case []interface{}:
+		blocks := make([]dto.ClaudeMediaMessage, 0, len(v))
+		for _, item := range v {
+			blocks = append(blocks, normalizeClaudeSystemBlocks(item)...)
+		}
+		return blocks
+	case map[string]interface{}:
+		block, err := common.Any2Type[dto.ClaudeMediaMessage](v)
+		if err != nil {
+			return nil
+		}
+		if normalized, ok := normalizeClaudeSystemBlock(block); ok {
+			return []dto.ClaudeMediaMessage{normalized}
+		}
+	}
+
+	blocks, err := common.Any2Type[[]dto.ClaudeMediaMessage](value)
+	if err == nil {
+		return normalizeClaudeSystemBlocks(blocks)
+	}
+	block, err := common.Any2Type[dto.ClaudeMediaMessage](value)
+	if err != nil {
+		return nil
+	}
+	if normalized, ok := normalizeClaudeSystemBlock(block); ok {
+		return []dto.ClaudeMediaMessage{normalized}
+	}
+	return nil
+}
+
+func normalizeClaudeSystemBlock(block dto.ClaudeMediaMessage) (dto.ClaudeMediaMessage, bool) {
+	if strings.TrimSpace(block.Type) == "" && strings.TrimSpace(block.GetText()) != "" {
+		block.Type = dto.ContentTypeText
+	}
+	if block.Type == dto.ContentTypeText && strings.TrimSpace(block.GetText()) == "" {
+		if content, ok := block.Content.(string); ok {
+			content = strings.TrimSpace(content)
+			if content != "" {
+				block.SetText(content)
+				block.Content = nil
+			}
+		}
+	}
+	if strings.TrimSpace(block.Type) == "" && strings.TrimSpace(block.GetText()) != "" {
+		block.Type = dto.ContentTypeText
+	}
+	if strings.TrimSpace(block.Type) == "" && strings.TrimSpace(block.GetText()) == "" {
+		return dto.ClaudeMediaMessage{}, false
+	}
+	return block, true
+}
+
+func containsClaudeCodeTextBlock(blocks []dto.ClaudeMediaMessage) bool {
+	for _, block := range blocks {
+		if block.Type == dto.ContentTypeText && containsClaudeCodeMarker(block.GetText()) {
+			return true
+		}
+	}
+	return false
 }
 
 func containsClaudeCodeMarker(value any) bool {
