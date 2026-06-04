@@ -2,6 +2,7 @@ package sora
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -15,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/imageutil"
 	"github.com/QuantumNous/new-api/relay/channel"
 	taskcommon "github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -401,6 +403,13 @@ func firstImageArtifactURLFromItems(items []imageArtifact) string {
 
 func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 	data := task.Data
+	if strings.EqualFold(strings.TrimSpace(task.PrivateData.ResponseFormat), "b64_json") {
+		converted, _, err := imageutil.ConvertImageURLResponseToB64(context.Background(), data)
+		if err != nil {
+			return nil, errors.Wrap(err, "convert image url response to b64 failed")
+		}
+		data = converted
+	}
 	var err error
 	if data, err = sjson.SetBytes(data, "id", task.TaskID); err != nil {
 		return nil, errors.Wrap(err, "set id failed")

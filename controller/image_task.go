@@ -105,6 +105,7 @@ func RelayImageTaskSubmit(c *gin.Context) {
 	task.TaskID = taskID
 	task.PrivateData.UpstreamTaskID = upstreamTaskID
 	task.PrivateData.RequestPath = c.Request.URL.Path
+	task.PrivateData.ResponseFormat = imageRequest.ResponseFormat
 	task.PrivateData.BillingSource = relayInfo.BillingSource
 	task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
 	task.PrivateData.TokenId = relayInfo.TokenId

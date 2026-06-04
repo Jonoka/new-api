@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -142,4 +143,31 @@ func TestParseTaskResultImageQueuedTask(t *testing.T) {
 	require.NotNil(t, info)
 	assert.Equal(t, model.TaskStatusQueued, info.Status)
 	assert.Equal(t, "0%", info.Progress)
+}
+
+func TestConvertToOpenAIVideoConvertsURLToB64WhenRequested(t *testing.T) {
+	imageServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("image-bytes"))
+	}))
+	defer imageServer.Close()
+
+	adaptor := &TaskAdaptor{}
+	body, err := adaptor.ConvertToOpenAIVideo(&model.Task{
+		TaskID: "public_task",
+		PrivateData: model.TaskPrivateData{
+			ResponseFormat: "b64_json",
+		},
+		Data: []byte(`{"created":1,"data":[{"url":"` + imageServer.URL + `/img.png"}],"task_id":"upstream_task"}`),
+	})
+
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, common.Unmarshal(body, &got))
+	data := got["data"].([]any)
+	item := data[0].(map[string]any)
+	assert.Equal(t, "aW1hZ2UtYnl0ZXM=", item["b64_json"])
+	_, hasURL := item["url"]
+	assert.False(t, hasURL)
+	assert.Equal(t, "public_task", got["task_id"])
 }

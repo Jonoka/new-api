@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/pkg/imageutil"
 	"github.com/QuantumNous/new-api/relay/channel/openrouter"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -560,6 +561,19 @@ func OpenaiHandlerWithUsage(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
 
+	// Honor OpenAI image response_format=b64_json even when an OpenAI-compatible
+	// upstream returns only transient image URLs. Keep this in-memory only and do
+	// not leak the upstream URL if conversion was requested.
+	if shouldConvertImageResponseURLToB64(info) {
+		convertedBody, converted, convertErr := imageutil.ConvertImageURLResponseToB64(c.Request.Context(), responseBody)
+		if convertErr != nil {
+			return nil, types.NewOpenAIError(convertErr, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+		}
+		if converted {
+			responseBody = convertedBody
+		}
+	}
+
 	var usageResp dto.SimpleResponse
 	err = common.Unmarshal(responseBody, &usageResp)
 	if err != nil {
@@ -585,6 +599,17 @@ func OpenaiHandlerWithUsage(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	}
 	applyUsagePostProcessing(info, &usageResp.Usage, responseBody)
 	return &usageResp.Usage, nil
+}
+
+func shouldConvertImageResponseURLToB64(info *relaycommon.RelayInfo) bool {
+	if info == nil {
+		return false
+	}
+	imageReq, ok := info.Request.(*dto.ImageRequest)
+	if !ok || !strings.EqualFold(strings.TrimSpace(imageReq.ResponseFormat), "b64_json") {
+		return false
+	}
+	return true
 }
 
 func applyUsagePostProcessing(info *relaycommon.RelayInfo, usage *dto.Usage, responseBody []byte) {

@@ -2,7 +2,10 @@ package openai
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/constant"
@@ -77,4 +80,37 @@ func TestConvertImageRequestDoesNotAddAsyncForOtherModels(t *testing.T) {
 	require.NoError(t, json.Unmarshal(body, &got))
 	_, exists := got["async"]
 	assert.False(t, exists)
+}
+
+func TestOpenaiHandlerWithUsageConvertsURLToB64WhenRequested(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	imageServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("image-bytes"))
+	}))
+	defer imageServer.Close()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(`{"created":1,"data":[{"url":"` + imageServer.URL + `/img.png","width":720,"height":1280}],"usage":{"total_tokens":1}}`)),
+	}
+
+	usage, apiErr := OpenaiHandlerWithUsage(c, &relaycommon.RelayInfo{
+		Request:     &dto.ImageRequest{ResponseFormat: "b64_json"},
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI},
+	}, resp)
+
+	require.Nil(t, apiErr)
+	require.NotNil(t, usage)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	data := got["data"].([]any)
+	item := data[0].(map[string]any)
+	assert.Equal(t, "aW1hZ2UtYnl0ZXM=", item["b64_json"])
+	_, hasURL := item["url"]
+	assert.False(t, hasURL)
 }
