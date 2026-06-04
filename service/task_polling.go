@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/imageutil"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 
@@ -386,6 +387,11 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	}
 
 	logger.LogDebug(ctx, "updateVideoSingleTask response: %s", responseBody)
+	responseBody, err = convertImageTaskResponseToB64IfRequested(ctx, task, responseBody)
+	if err != nil {
+		logger.LogError(ctx, fmt.Sprintf("convert image task response url to b64 failed for task %s: %s", taskId, err.Error()))
+		return fmt.Errorf("convert image task response url to b64 failed for task %s: %w", taskId, err)
+	}
 
 	snap := task.Snapshot()
 
@@ -549,7 +555,21 @@ func truncateBase64(s string) string {
 	return s[:maxKeep] + "..."
 }
 
-// settleTaskBillingOnComplete 任务完成时的统一计费调整。
+func convertImageTaskResponseToB64IfRequested(ctx context.Context, task *model.Task, responseBody []byte) ([]byte, error) {
+	if task == nil || !strings.EqualFold(strings.TrimSpace(task.PrivateData.ResponseFormat), "b64_json") || !strings.HasPrefix(strings.TrimSpace(task.PrivateData.RequestPath), "/v1/images/generations") {
+		return responseBody, nil
+	}
+	convertedBody, changed, err := imageutil.ConvertImageURLResponseToB64(ctx, responseBody)
+	if err != nil {
+		return nil, err
+	}
+	if changed {
+		return convertedBody, nil
+	}
+	return responseBody, nil
+}
+
+// settleTaskBillingOnComplete 结算任务完成后的费用差额。
 // 优先级：1. adaptor.AdjustBillingOnComplete 返回正数 → 使用 adaptor 计算的额度
 //
 //  2. taskResult.TotalTokens > 0 → 按 token 重算
