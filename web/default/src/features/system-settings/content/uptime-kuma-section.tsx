@@ -65,12 +65,17 @@ import { SettingsSwitchField } from '../components/settings-form-layout'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
 
+const DEFAULT_TIME_WINDOW_HOURS = 24
+const MIN_TIME_WINDOW_HOURS = 1
+const MAX_TIME_WINDOW_HOURS = 720
+
 type UptimeKumaGroup = {
   id: number
   categoryName: string
   url: string
   slug: string
   embedUrl?: string
+  timeWindowHours: number
 }
 
 type UptimeKumaSectionProps = {
@@ -85,6 +90,24 @@ const isValidUrl = (value: string) => {
   } catch {
     return false
   }
+}
+
+const normalizeTimeWindowHours = (value: unknown) => {
+  const parsed =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string'
+        ? Number(value)
+        : DEFAULT_TIME_WINDOW_HOURS
+
+  if (!Number.isInteger(parsed)) {
+    return DEFAULT_TIME_WINDOW_HOURS
+  }
+
+  return Math.min(
+    MAX_TIME_WINDOW_HOURS,
+    Math.max(MIN_TIME_WINDOW_HOURS, parsed)
+  )
 }
 
 const createUptimeKumaSchema = (t: (key: string) => string) =>
@@ -108,6 +131,19 @@ const createUptimeKumaSchema = (t: (key: string) => string) =>
     embedUrl: z.string().trim().max(1000, {
       error: t('Embed URL must be less than 1000 characters'),
     }),
+    timeWindowHours: z.coerce
+      .number({
+        error: t('Availability window must be between 1 and 720 hours'),
+      })
+      .int({
+        error: t('Availability window must be between 1 and 720 hours'),
+      })
+      .min(1, {
+        error: t('Availability window must be between 1 and 720 hours'),
+      })
+      .max(720, {
+        error: t('Availability window must be between 1 and 720 hours'),
+      }),
   }).superRefine((values, ctx) => {
     if (values.embedUrl) {
       if (!isValidUrl(values.embedUrl)) {
@@ -172,6 +208,7 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
       url: '',
       slug: '',
       embedUrl: '',
+      timeWindowHours: DEFAULT_TIME_WINDOW_HOURS,
     },
   })
 
@@ -186,6 +223,7 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
             url: item.url || '',
             slug: item.slug || '',
             embedUrl: item.embedUrl || '',
+            timeWindowHours: normalizeTimeWindowHours(item.timeWindowHours),
           }))
         )
       }
@@ -218,6 +256,7 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
       url: '',
       slug: '',
       embedUrl: '',
+      timeWindowHours: DEFAULT_TIME_WINDOW_HOURS,
     })
     setShowDialog(true)
   }
@@ -229,6 +268,7 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
       url: group.url,
       slug: group.slug,
       embedUrl: group.embedUrl || '',
+      timeWindowHours: group.timeWindowHours || DEFAULT_TIME_WINDOW_HOURS,
     })
     setShowDialog(true)
   }
@@ -268,16 +308,21 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
   }
 
   const handleSubmitForm = (values: UptimeKumaFormValues) => {
+    const nextValues = {
+      ...values,
+      timeWindowHours: Number(values.timeWindowHours),
+    }
+
     if (editingGroup) {
       setGroups((prev) =>
         prev.map((item) =>
-          item.id === editingGroup.id ? { ...item, ...values } : item
+          item.id === editingGroup.id ? { ...item, ...nextValues } : item
         )
       )
       toast.success(t('Group updated. Click "Save Settings" to apply.'))
     } else {
       const newId = Math.max(...groups.map((item) => item.id), 0) + 1
-      setGroups((prev) => [...prev, { id: newId, ...values }])
+      setGroups((prev) => [...prev, { id: newId, ...nextValues }])
       toast.success(t('Group added. Click "Save Settings" to apply.'))
     }
     setHasChanges(true)
@@ -359,6 +404,7 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
                 <TableHead>{t('Category Name')}</TableHead>
                 <TableHead>{t('Uptime Kuma URL')}</TableHead>
                 <TableHead>{t('Status Page Slug')}</TableHead>
+                <TableHead>{t('Window')}</TableHead>
                 <TableHead>{t('Embed URL')}</TableHead>
                 <TableHead className='w-32'>{t('Actions')}</TableHead>
               </TableRow>
@@ -366,7 +412,7 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
             <TableBody>
               {groups.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className='h-24 text-center'>
+                  <TableCell colSpan={7} className='h-24 text-center'>
                     {t(
                       'No Uptime Kuma groups yet. Click "Add Group" to create one.'
                     )}
@@ -394,6 +440,9 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
                     </TableCell>
                     <TableCell className='text-muted-foreground font-mono text-sm'>
                       {group.slug}
+                    </TableCell>
+                    <TableCell className='text-muted-foreground font-mono text-sm tabular-nums'>
+                      {group.timeWindowHours || DEFAULT_TIME_WINDOW_HOURS}H
                     </TableCell>
                     <TableCell
                       className='text-primary max-w-xs truncate font-mono text-sm'
@@ -517,6 +566,38 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
                     <FormDescription>
                       {t(
                         'Optional ApiPanelWatch compact page. When set, the dashboard renders it directly instead of fetching Uptime Kuma.'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name='timeWindowHours'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Availability window (hours)')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        min={MIN_TIME_WINDOW_HOURS}
+                        max={MAX_TIME_WINDOW_HOURS}
+                        step={1}
+                        placeholder='24'
+                        {...field}
+                        onChange={(event) =>
+                          field.onChange(
+                            event.target.value === ''
+                              ? ''
+                              : event.target.valueAsNumber
+                          )
+                        }
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'Used to select the Uptime Kuma uptimeList window, for example 1H or 24H.'
                       )}
                     </FormDescription>
                     <FormMessage />

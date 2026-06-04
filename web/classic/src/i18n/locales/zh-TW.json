@@ -3884,6 +3884,11 @@
     "Well-Known URL 必须以 http:// 或 https:// 开头": "Well-Known URL 必須以 http:// 或 https:// 開頭",
     "whsec_xxx 的 Webhook 签名密钥，敏感信息不显示": "whsec_xxx 的 Webhook 簽名密鑰，敏感資訊不顯示",
     "Worker地址": "Worker位址",
-    "Worker密钥": "Worker密鑰"
+    "Worker密钥": "Worker密鑰",
+    "最近{{window}}": "最近{{window}}",
+    "统计窗口": "統計視窗",
+    "统计窗口(小时)": "統計視窗（小時）",
+    "统计窗口必须在1到720小时之间": "統計視窗必須介於 1 到 720 小時之間",
+    "用于选择Uptime Kuma可用率统计窗口，例如1H或24H": "用於選擇 Uptime Kuma 可用率統計視窗，例如 1H 或 24H"
   }
 }

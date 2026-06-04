@@ -48,6 +48,8 @@ export interface UptimeGroupResult {
   categoryName: string
   monitors: UptimeMonitor[]
   embedUrl?: string
+  timeWindowHours?: number
+  timeWindowLabel?: string
 }
 
 // ============================================================================

@@ -8,3 +8,10 @@ func TestValidateUptimeKumaGroupsAllowsEmbedUrlWithoutKumaUrlAndSlug(t *testing.
 		t.Fatalf("validateUptimeKumaGroups returned error: %v", err)
 	}
 }
+
+func TestValidateUptimeKumaGroupsRejectsInvalidTimeWindowHours(t *testing.T) {
+	err := validateUptimeKumaGroups(`[{"id":1,"categoryName":"API","url":"https://status.example.com","slug":"api","timeWindowHours":721}]`)
+	if err == nil {
+		t.Fatalf("validateUptimeKumaGroups returned nil, want error")
+	}
+}

@@ -39,6 +39,28 @@ import { useTranslation } from 'react-i18next';
 
 const { Text } = Typography;
 
+const DEFAULT_TIME_WINDOW_HOURS = 24;
+const MIN_TIME_WINDOW_HOURS = 1;
+const MAX_TIME_WINDOW_HOURS = 720;
+
+const parseTimeWindowHours = (value) => {
+  const hours =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string'
+        ? Number(value)
+        : NaN;
+
+  return Number.isInteger(hours) &&
+    hours >= MIN_TIME_WINDOW_HOURS &&
+    hours <= MAX_TIME_WINDOW_HOURS
+    ? hours
+    : null;
+};
+
+const normalizeTimeWindowHours = (value) =>
+  parseTimeWindowHours(value) ?? DEFAULT_TIME_WINDOW_HOURS;
+
 const SettingsUptimeKuma = ({ options, refresh }) => {
   const { t } = useTranslation();
 
@@ -54,6 +76,7 @@ const SettingsUptimeKuma = ({ options, refresh }) => {
     categoryName: '',
     url: '',
     slug: '',
+    timeWindowHours: DEFAULT_TIME_WINDOW_HOURS,
   });
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -105,6 +128,21 @@ const SettingsUptimeKuma = ({ options, refresh }) => {
           }}
         >
           {text}
+        </div>
+      ),
+    },
+    {
+      title: t('统计窗口'),
+      dataIndex: 'timeWindowHours',
+      key: 'timeWindowHours',
+      render: (value) => (
+        <div
+          style={{
+            fontFamily: 'monospace',
+            color: 'var(--semi-color-text-1)',
+          }}
+        >
+          {normalizeTimeWindowHours(value)}H
         </div>
       ),
     },
@@ -172,6 +210,7 @@ const SettingsUptimeKuma = ({ options, refresh }) => {
       categoryName: '',
       url: '',
       slug: '',
+      timeWindowHours: DEFAULT_TIME_WINDOW_HOURS,
     });
     setShowUptimeModal(true);
   };
@@ -182,6 +221,7 @@ const SettingsUptimeKuma = ({ options, refresh }) => {
       categoryName: group.categoryName,
       url: group.url,
       slug: group.slug,
+      timeWindowHours: normalizeTimeWindowHours(group.timeWindowHours),
     });
     setShowUptimeModal(true);
   };
@@ -222,20 +262,30 @@ const SettingsUptimeKuma = ({ options, refresh }) => {
       return;
     }
 
+    const timeWindowHours = parseTimeWindowHours(uptimeForm.timeWindowHours);
+    if (timeWindowHours === null) {
+      showError(t('统计窗口必须在1到720小时之间'));
+      return;
+    }
+
     try {
       setModalLoading(true);
+      const nextForm = {
+        ...uptimeForm,
+        timeWindowHours,
+      };
 
       let newList;
       if (editingGroup) {
         newList = uptimeGroupsList.map((item) =>
-          item.id === editingGroup.id ? { ...item, ...uptimeForm } : item,
+          item.id === editingGroup.id ? { ...item, ...nextForm } : item,
         );
       } else {
         const newId =
           Math.max(...uptimeGroupsList.map((item) => item.id), 0) + 1;
         const newGroup = {
           id: newId,
-          ...uptimeForm,
+          ...nextForm,
         };
         newList = [...uptimeGroupsList, newGroup];
       }
@@ -267,6 +317,7 @@ const SettingsUptimeKuma = ({ options, refresh }) => {
       const listWithIds = list.map((item, index) => ({
         ...item,
         id: item.id || index + 1,
+        timeWindowHours: normalizeTimeWindowHours(item.timeWindowHours),
       }));
       setUptimeGroupsList(listWithIds);
     } catch (error) {
@@ -493,6 +544,30 @@ const SettingsUptimeKuma = ({ options, refresh }) => {
             maxLength={100}
             rules={[{ required: true, message: t('请输入状态页面Slug') }]}
             onChange={(value) => setUptimeForm({ ...uptimeForm, slug: value })}
+          />
+          <Form.InputNumber
+            field='timeWindowHours'
+            label={t('统计窗口(小时)')}
+            min={MIN_TIME_WINDOW_HOURS}
+            max={MAX_TIME_WINDOW_HOURS}
+            step={1}
+            placeholder='24'
+            rules={[
+              {
+                required: true,
+                message: t('统计窗口必须在1到720小时之间'),
+              },
+            ]}
+            onChange={(value) =>
+              setUptimeForm({
+                ...uptimeForm,
+                timeWindowHours:
+                  typeof value === 'number'
+                    ? value
+                    : DEFAULT_TIME_WINDOW_HOURS,
+              })
+            }
+            extraText={t('用于选择Uptime Kuma可用率统计窗口，例如1H或24H')}
           />
         </Form>
       </Modal>

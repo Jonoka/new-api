@@ -4021,6 +4021,11 @@
     "Well-Known URL 必须以 http:// 或 https:// 开头": "Well-Known URL 必须以 http:// 或 https:// 开头",
     "whsec_xxx 的 Webhook 签名密钥，敏感信息不显示": "whsec_xxx 的 Webhook 签名密钥，敏感信息不显示",
     "Worker地址": "Worker地址",
-    "Worker密钥": "Worker密钥"
+    "Worker密钥": "Worker密钥",
+    "最近{{window}}": "最近{{window}}",
+    "统计窗口": "统计窗口",
+    "统计窗口(小时)": "统计窗口(小时)",
+    "统计窗口必须在1到720小时之间": "统计窗口必须在1到720小时之间",
+    "用于选择Uptime Kuma可用率统计窗口，例如1H或24H": "用于选择Uptime Kuma可用率统计窗口，例如1H或24H"
   }
 }

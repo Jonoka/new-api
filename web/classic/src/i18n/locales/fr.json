@@ -3891,6 +3891,11 @@
     "Well-Known URL 必须以 http:// 或 https:// 开头": "L'URL bien connue doit commencer par http:// ou https://",
     "whsec_xxx 的 Webhook 签名密钥，敏感信息不显示": "Clé de signature Webhook whsec_xxx, les informations sensibles ne sont pas affichées",
     "Worker地址": "Adresse du Worker",
-    "Worker密钥": "Clé du Worker"
+    "Worker密钥": "Clé du Worker",
+    "最近{{window}}": "{{window}} dernieres",
+    "统计窗口": "Fenetre",
+    "统计窗口(小时)": "Fenetre de disponibilite (heures)",
+    "统计窗口必须在1到720小时之间": "La fenetre de disponibilite doit etre comprise entre 1 et 720 heures",
+    "用于选择Uptime Kuma可用率统计窗口，例如1H或24H": "Utilise pour selectionner la fenetre de disponibilite Uptime Kuma, par exemple 1H ou 24H"
   }
 }

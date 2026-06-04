@@ -20,6 +20,7 @@ import { memo, useEffect, useState } from 'react'
 import { Activity, RotateCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { getUptimeStatus } from '@/features/dashboard/api'
@@ -41,6 +42,10 @@ const StatusDot = memo(function StatusDot(props: { status: number }) {
   const color = STATUS_COLOR_MAP[props.status] ?? DEFAULT_STATUS_COLOR
   return <span className={cn('inline-block size-2 rounded-full', color)} />
 })
+
+function getTimeWindowLabel(group: UptimeGroupResult) {
+  return group.timeWindowLabel || `${group.timeWindowHours || 24}H`
+}
 
 export function UptimePanel() {
   const { t } = useTranslation()
@@ -132,6 +137,14 @@ export function UptimePanel() {
                   <span className='text-muted-foreground/40 font-mono text-xs tabular-nums'>
                     {group.embedUrl ? t('Widget') : group.monitors?.length || 0}
                   </span>
+                  <Badge
+                    variant='outline'
+                    className='h-5 rounded px-1.5 font-mono text-[11px] font-medium'
+                  >
+                    {t('Last {{window}}', {
+                      window: getTimeWindowLabel(group),
+                    })}
+                  </Badge>
                 </div>
               </div>
 

@@ -4037,6 +4037,11 @@
     "Well-Known URL 必须以 http:// 或 https:// 开头": "Well-Known URL must start with http:// or https://",
     "whsec_xxx 的 Webhook 签名密钥，敏感信息不显示": "Webhook signature key for whsec_xxx, sensitive information not displayed",
     "Worker地址": "Worker Address",
-    "Worker密钥": "Worker Key"
+    "Worker密钥": "Worker Key",
+    "最近{{window}}": "Last {{window}}",
+    "统计窗口": "Window",
+    "统计窗口(小时)": "Availability window (hours)",
+    "统计窗口必须在1到720小时之间": "Availability window must be between 1 and 720 hours",
+    "用于选择Uptime Kuma可用率统计窗口，例如1H或24H": "Used to select the Uptime Kuma uptime window, for example 1H or 24H"
   }
 }
