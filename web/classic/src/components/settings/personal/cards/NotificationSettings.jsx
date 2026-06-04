@@ -67,6 +67,7 @@ const NotificationSettings = ({
     chat: {
       enabled: true,
       playground: true,
+      canvas: true,
       chat: true,
     },
     console: {
@@ -158,7 +159,7 @@ const NotificationSettings = ({
 
   const resetSidebarModules = () => {
     const defaultConfig = {
-      chat: { enabled: true, playground: true, chat: true },
+      chat: { enabled: true, playground: true, canvas: true, chat: true },
       console: {
         enabled: true,
         detail: true,
@@ -261,6 +262,11 @@ const NotificationSettings = ({
           key: 'playground',
           title: t('操练场'),
           description: t('AI模型测试环境'),
+        },
+        {
+          key: 'canvas',
+          title: t('无限画布'),
+          description: t('选择分组后打开无限画布'),
         },
         { key: 'chat', title: t('聊天'), description: t('聊天会话管理') },
       ],

@@ -5,9 +5,12 @@
 upload
 *.exe
 *.db
+*.db-shm
+*.db-wal
 build
 *.db-journal
 logs
+tmp-local-logs/
 web/default/dist
 web/classic/dist
 web/node_modules

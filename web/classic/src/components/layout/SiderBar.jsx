@@ -52,6 +52,7 @@ const routerMap = {
   deployment: '/console/deployment',
   game_management: '/console/game-management',
   playground: '/console/playground',
+  canvas: '/console/canvas',
   personal: '/console/personal',
 };
 
@@ -232,6 +233,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('操练场'),
         itemKey: 'playground',
         to: '/playground',
+      },
+      {
+        text: t('无限画布'),
+        itemKey: 'canvas',
+        to: '/canvas',
       },
       {
         text: t('聊天'),

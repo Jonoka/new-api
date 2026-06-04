@@ -66,6 +66,7 @@ import {
 import {
   LayoutDashboard,
   TerminalSquare,
+  Brush,
   MessageSquare,
   Key,
   BarChart3,
@@ -127,6 +128,8 @@ export function getLucideIcon(key, selected = false) {
       return <LayoutDashboard {...commonProps} color={iconColor} />;
     case 'playground':
       return <TerminalSquare {...commonProps} color={iconColor} />;
+    case 'canvas':
+      return <Brush {...commonProps} color={iconColor} />;
     case 'chat':
       return <MessageSquare {...commonProps} color={iconColor} />;
     case 'token':

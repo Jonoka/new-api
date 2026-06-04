@@ -181,6 +181,7 @@ function Start-Backend {
     $backendExe = Get-BackendExecutable
     $env:PORT = [string]$BackendPort
     $env:SQLITE_PATH = "$DbPath`?_busy_timeout=30000"
+    $env:SESSION_COOKIE_SECURE = 'false'
 
     Write-Info "启动后端：端口=$BackendPort，数据库=tmp-local-v10101.db"
     $process = Start-Process `

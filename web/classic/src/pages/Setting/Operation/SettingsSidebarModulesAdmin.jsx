@@ -44,6 +44,7 @@ export default function SettingsSidebarModulesAdmin(props) {
     chat: {
       enabled: true,
       playground: true,
+      canvas: true,
       chat: true,
     },
     console: {
@@ -109,6 +110,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       chat: {
         enabled: true,
         playground: true,
+        canvas: true,
         chat: true,
       },
       console: {
@@ -187,7 +189,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       } catch (error) {
         // 使用默认配置
         const defaultModules = {
-          chat: { enabled: true, playground: true, chat: true },
+          chat: { enabled: true, playground: true, canvas: true, chat: true },
           console: {
             enabled: true,
             detail: true,
@@ -232,6 +234,11 @@ export default function SettingsSidebarModulesAdmin(props) {
           key: 'playground',
           title: t('操练场'),
           description: t('AI模型测试环境'),
+        },
+        {
+          key: 'canvas',
+          title: t('无限画布'),
+          description: t('选择分组后打开无限画布'),
         },
         { key: 'chat', title: t('聊天'), description: t('聊天会话管理') },
       ],

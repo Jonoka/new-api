@@ -46,6 +46,7 @@ import Task from './pages/Task';
 import ModelPage from './pages/Model';
 import ModelDeploymentPage from './pages/ModelDeployment';
 import Playground from './pages/Playground';
+import Canvas from './pages/Canvas';
 import Subscription from './pages/Subscription';
 import GameCenter from './pages/GameCenter';
 import GameManagement from './pages/GameManagement';
@@ -172,6 +173,14 @@ function App() {
           element={
             <PrivateRoute>
               <Playground />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/canvas'
+          element={
+            <PrivateRoute>
+              <Canvas />
             </PrivateRoute>
           }
         />
