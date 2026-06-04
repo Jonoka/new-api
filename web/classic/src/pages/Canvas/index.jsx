@@ -12,12 +12,40 @@ import {
 import { UserContext } from '../../context/User';
 import { API_ENDPOINTS } from '../../constants/playground.constants';
 
+const capabilityGroups = [
+  { key: 'textGroup', label: '文本分组' },
+  { key: 'imageGroup', label: '生图分组' },
+  { key: 'audioGroup', label: '音频分组' },
+  { key: 'videoGroup', label: '视频分组' },
+];
+
+const groupStateAccessors = {
+  textGroup: ['textGroup', 'setTextGroup'],
+  imageGroup: ['imageGroup', 'setImageGroup'],
+  audioGroup: ['audioGroup', 'setAudioGroup'],
+  videoGroup: ['videoGroup', 'setVideoGroup'],
+};
+
 const Canvas = () => {
   const { t } = useTranslation();
   const [userState] = useContext(UserContext);
   const [groups, setGroups] = useState([]);
-  const [selectedGroup, setSelectedGroup] = useState('');
+  const [defaultGroup, setDefaultGroup] = useState('');
+  const [textGroup, setTextGroup] = useState('');
+  const [imageGroup, setImageGroup] = useState('');
+  const [audioGroup, setAudioGroup] = useState('');
+  const [videoGroup, setVideoGroup] = useState('');
   const [loading, setLoading] = useState(false);
+  const capabilityGroupState = {
+    textGroup,
+    setTextGroup,
+    imageGroup,
+    setImageGroup,
+    audioGroup,
+    setAudioGroup,
+    videoGroup,
+    setVideoGroup,
+  };
 
   useEffect(() => {
     const loadGroups = async () => {
@@ -40,7 +68,7 @@ const Canvas = () => {
           groupOptions.find((group) => group.value === 'default')?.value ||
           groupOptions[0]?.value ||
           '';
-        setSelectedGroup((current) => current || fallback);
+        setDefaultGroup((current) => current || fallback);
       } catch (error) {
         showError(t('加载分组失败'));
       } finally {
@@ -52,14 +80,18 @@ const Canvas = () => {
   }, [t, userState?.user?.group]);
 
   const launchUrl = useMemo(() => {
-    if (!selectedGroup || typeof window === 'undefined') return '';
+    if (!defaultGroup || typeof window === 'undefined') return '';
 
     return buildCanvasLaunchUrl({
       canvasOrigin: CANVAS_APP_ORIGIN,
       newApiOrigin: window.location.origin,
-      group: selectedGroup,
+      group: defaultGroup,
+      textGroup,
+      imageGroup,
+      audioGroup,
+      videoGroup,
     });
-  }, [selectedGroup]);
+  }, [audioGroup, defaultGroup, imageGroup, textGroup, videoGroup]);
 
   const openCanvas = () => {
     if (!launchUrl) return;
@@ -82,17 +114,43 @@ const Canvas = () => {
 
         <div className='mb-5'>
           <div className='mb-2 text-sm font-medium text-gray-900'>
-            {t('模型分组')}
+            {t('默认分组')}
           </div>
           <Select
-            value={selectedGroup}
-            onChange={setSelectedGroup}
+            value={defaultGroup}
+            onChange={setDefaultGroup}
             optionList={groups}
             loading={loading}
             disabled={loading || groups.length === 0}
             filter
             style={{ width: '100%' }}
           />
+        </div>
+
+        <div className='mb-5 grid grid-cols-1 gap-3 md:grid-cols-2'>
+          {capabilityGroups.map((item) => (
+            <div key={item.key}>
+              <div className='mb-2 text-sm font-medium text-gray-900'>
+                {t(item.label)}
+              </div>
+              <Select
+                value={capabilityGroupState[groupStateAccessors[item.key][0]]}
+                onChange={
+                  capabilityGroupState[groupStateAccessors[item.key][1]]
+                }
+                optionList={groups}
+                loading={loading}
+                disabled={loading || groups.length === 0}
+                filter
+                showClear
+                onClear={() =>
+                  capabilityGroupState[groupStateAccessors[item.key][1]]('')
+                }
+                placeholder={t('默认分组')}
+                style={{ width: '100%' }}
+              />
+            </div>
+          ))}
         </div>
 
         <Button

@@ -27,19 +27,19 @@ test('classic sidebar configuration defaults include canvas', () => {
   assert.match(readSource('hooks/common/useSidebar.js'), /canvas:\s*true/);
   assert.match(
     readSource('pages/Setting/Operation/SettingsSidebarModulesAdmin.jsx'),
-    /canvas:\s*true/
+    /canvas:\s*true/,
   );
   assert.match(
     readSource('components/settings/personal/cards/NotificationSettings.jsx'),
-    /canvas:\s*true/
+    /canvas:\s*true/,
   );
 
   const userSettingsSource = readSource(
-    'pages/Setting/Personal/SettingsSidebarModulesUser.jsx'
+    'pages/Setting/Personal/SettingsSidebarModulesUser.jsx',
   );
   assert.match(
     userSettingsSource,
-    /canvas:\s*isSidebarModuleAllowed\('chat', 'canvas'\)/
+    /canvas:\s*isSidebarModuleAllowed\('chat', 'canvas'\)/,
   );
   assert.match(userSettingsSource, /key:\s*'canvas'/);
 });
@@ -50,6 +50,26 @@ test('classic canvas launcher builds session based New API URL', () => {
   assert.match(source, /mode['"]?,\s*['"]newapi/);
   assert.match(source, /baseUrl['"]?,\s*`\$\{normalizedOrigin\}\/canvas`/);
   assert.match(source, /group['"]?,\s*group/);
+  assert.match(source, /textGroup/);
+  assert.match(source, /imageGroup/);
+  assert.match(source, /audioGroup/);
+  assert.match(source, /videoGroup/);
+  assert.match(source, /searchParams\.set\('textGroup'/);
+});
+
+test('classic canvas launcher exposes optional capability groups', () => {
+  const source = readSource('pages/Canvas/index.jsx');
+
+  assert.match(source, /defaultGroup/);
+  assert.match(source, /textGroup/);
+  assert.match(source, /imageGroup/);
+  assert.match(source, /audioGroup/);
+  assert.match(source, /videoGroup/);
+  assert.match(source, /文本分组/);
+  assert.match(source, /生图分组/);
+  assert.match(source, /音频分组/);
+  assert.match(source, /视频分组/);
+  assert.match(source, /showClear/);
 });
 
 test('classic group selector displays group names instead of descriptions', () => {
