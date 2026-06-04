@@ -8,13 +8,13 @@ import (
 	"testing"
 )
 
-func TestFetchGroupDataUsesConfiguredTimeWindowHours(t *testing.T) {
+func TestFetchGroupDataUsesConfiguredTimeWindowLabelOnly(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/status-page/api":
 			fmt.Fprint(w, `{"publicGroupList":[{"id":1,"name":"Claude","monitorList":[{"id":7,"name":"Claude API"}]}]}`)
 		case "/api/status-page/heartbeat/api":
-			fmt.Fprint(w, `{"heartbeatList":{"7":[{"status":1}]},"uptimeList":{"7_1":0.91,"7_24":0.99}}`)
+			fmt.Fprint(w, `{"heartbeatList":{"7":[{"status":1}]},"uptimeList":{"7_24":0.99}}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -25,20 +25,20 @@ func TestFetchGroupDataUsesConfiguredTimeWindowHours(t *testing.T) {
 		"categoryName":    "Claude",
 		"url":             server.URL,
 		"slug":            "api",
-		"timeWindowHours": float64(1),
+		"timeWindowHours": float64(5),
 	})
 
 	if len(result.Monitors) != 1 {
 		t.Fatalf("Monitors length = %d", len(result.Monitors))
 	}
-	if result.Monitors[0].Uptime != 0.91 {
-		t.Fatalf("Uptime = %v, want 0.91", result.Monitors[0].Uptime)
+	if result.Monitors[0].Uptime != 0.99 {
+		t.Fatalf("Uptime = %v, want 0.99", result.Monitors[0].Uptime)
 	}
-	if result.TimeWindowHours != 1 {
-		t.Fatalf("TimeWindowHours = %d, want 1", result.TimeWindowHours)
+	if result.TimeWindowHours != 5 {
+		t.Fatalf("TimeWindowHours = %d, want 5", result.TimeWindowHours)
 	}
-	if result.TimeWindowLabel != "1H" {
-		t.Fatalf("TimeWindowLabel = %q, want 1H", result.TimeWindowLabel)
+	if result.TimeWindowLabel != "5H" {
+		t.Fatalf("TimeWindowLabel = %q, want 5H", result.TimeWindowLabel)
 	}
 }
 

@@ -20,7 +20,6 @@ import { memo, useEffect, useState } from 'react'
 import { Activity, RotateCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { getUptimeStatus } from '@/features/dashboard/api'
@@ -47,11 +46,16 @@ function getTimeWindowLabel(group: UptimeGroupResult) {
   return group.timeWindowLabel || `${group.timeWindowHours || 24}H`
 }
 
+function getActiveTimeWindowLabel(groups: UptimeGroupResult[]) {
+  return groups[0] ? getTimeWindowLabel(groups[0]) : ''
+}
+
 export function UptimePanel() {
   const { t } = useTranslation()
   const [groups, setGroups] = useState<UptimeGroupResult[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const activeTimeWindowLabel = getActiveTimeWindowLabel(groups)
 
   useEffect(() => {
     const abortController = new AbortController()
@@ -102,6 +106,11 @@ export function UptimePanel() {
         <span className='flex items-center gap-2'>
           <Activity className='text-muted-foreground/60 size-4' />
           {t('Uptime')}
+          {activeTimeWindowLabel && (
+            <span className='bg-primary/10 text-primary rounded-full px-2 py-0.5 text-xs font-medium'>
+              {t('Last {{window}}', { window: activeTimeWindowLabel })}
+            </span>
+          )}
         </span>
       }
       description={t('Grouped monitor status from Uptime Kuma')}
@@ -137,14 +146,6 @@ export function UptimePanel() {
                   <span className='text-muted-foreground/40 font-mono text-xs tabular-nums'>
                     {group.embedUrl ? t('Widget') : group.monitors?.length || 0}
                   </span>
-                  <Badge
-                    variant='outline'
-                    className='h-5 rounded px-1.5 font-mono text-[11px] font-medium'
-                  >
-                    {t('Last {{window}}', {
-                      window: getTimeWindowLabel(group),
-                    })}
-                  </Badge>
                 </div>
               </div>
 

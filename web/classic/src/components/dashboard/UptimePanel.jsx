@@ -37,6 +37,14 @@ import ScrollableContainer from '../common/ui/ScrollableContainer';
 const getTimeWindowLabel = (group) =>
   group.timeWindowLabel || `${group.timeWindowHours || 24}H`;
 
+const getActiveTimeWindowLabel = (uptimeData, activeUptimeTab) => {
+  const activeGroup =
+    uptimeData.find((group) => group.categoryName === activeUptimeTab) ||
+    uptimeData[0];
+
+  return activeGroup ? getTimeWindowLabel(activeGroup) : '';
+};
+
 const UptimePanel = ({
   uptimeData,
   uptimeLoading,
@@ -49,18 +57,9 @@ const UptimePanel = ({
   ILLUSTRATION_SIZE,
   t,
 }) => {
-  const renderGroupHeader = (group) => (
-    <div className='px-3 py-2 bg-gray-50 border-b border-gray-100 flex items-center gap-2'>
-      <span className='text-sm font-semibold text-gray-700'>
-        {group.categoryName}
-      </span>
-      <Tag color='grey' size='small' shape='circle'>
-        {group.monitors ? group.monitors.length : 0}
-      </Tag>
-      <Tag color='blue' size='small' shape='circle'>
-        {t('最近{{window}}', { window: getTimeWindowLabel(group) })}
-      </Tag>
-    </div>
+  const activeTimeWindowLabel = getActiveTimeWindowLabel(
+    uptimeData,
+    activeUptimeTab,
   );
 
   return (
@@ -72,6 +71,11 @@ const UptimePanel = ({
           <div className='flex items-center gap-2'>
             <Gauge size={16} />
             {t('服务可用性')}
+            {activeTimeWindowLabel && (
+              <Tag color='blue' size='small' shape='circle'>
+                {t('最近{{window}}', { window: activeTimeWindowLabel })}
+              </Tag>
+            )}
           </div>
           <Button
             icon={<RefreshCw size={14} />}
@@ -91,12 +95,9 @@ const UptimePanel = ({
         <Spin spinning={uptimeLoading}>
           {uptimeData.length > 0 ? (
             uptimeData.length === 1 ? (
-              <>
-                {renderGroupHeader(uptimeData[0])}
-                <ScrollableContainer maxHeight='21.5rem'>
-                  {renderMonitorList(uptimeData[0].monitors)}
-                </ScrollableContainer>
-              </>
+              <ScrollableContainer maxHeight='24rem'>
+                {renderMonitorList(uptimeData[0].monitors)}
+              </ScrollableContainer>
             ) : (
               <Tabs
                 type='card'
@@ -121,11 +122,6 @@ const UptimePanel = ({
                           shape='circle'
                         >
                           {group.monitors ? group.monitors.length : 0}
-                        </Tag>
-                        <Tag color='blue' size='small' shape='circle'>
-                          {t('最近{{window}}', {
-                            window: getTimeWindowLabel(group),
-                          })}
                         </Tag>
                       </span>
                     }

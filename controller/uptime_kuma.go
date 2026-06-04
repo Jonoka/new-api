@@ -22,6 +22,7 @@ const (
 	defaultUptimeTimeWindowHour = 24
 	minUptimeTimeWindowHour     = 1
 	maxUptimeTimeWindowHour     = 720
+	uptimeKeySuffix             = "_24"
 	apiStatusPath               = "/api/status-page/"
 	apiHeartbeatPath            = "/api/status-page/heartbeat/"
 )
@@ -125,7 +126,6 @@ func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[st
 	embedUrl, _ := groupConfig["embedUrl"].(string)
 	categoryName, _ := groupConfig["categoryName"].(string)
 	timeWindowHours := getUptimeTimeWindowHours(groupConfig)
-	uptimeKeySuffix := "_" + strconv.Itoa(timeWindowHours)
 
 	result := UptimeGroupResult{
 		CategoryName:    categoryName,

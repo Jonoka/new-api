@@ -26,9 +26,8 @@ type Adaptor struct {
 const (
 	claudeCodeSystemText           = "You are Claude Code, Anthropic's official CLI for Claude."
 	claudeCodeUserDeviceID         = "0000000000000000000000000000000000000000000000000000000000000000"
-	claudeCodeUserAccountID        = "00000000-0000-0000-0000-000000000000"
 	claudeCodeUserSessionID        = "00000000-0000-0000-0000-000000000000"
-	claudeCodeUserID               = "user_" + claudeCodeUserDeviceID + "_account_" + claudeCodeUserAccountID + "_session_" + claudeCodeUserSessionID
+	claudeCodeUserID               = "user_" + claudeCodeUserDeviceID + "_account__session_" + claudeCodeUserSessionID
 	claudeCodeAnthropicBeta        = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05,effort-2025-11-24,context-management-2025-06-27,extended-cache-ttl-2025-04-11"
 	claudeCodeUserAgent            = "claude-cli/2.1.92 (external, cli)"
 	claudeCodeStainlessVersion     = "0.70.0"
@@ -40,7 +39,8 @@ const (
 	claudeCodeStainlessTimeoutSecs = "600"
 )
 
-var claudeCodeLegacyUserIDPattern = regexp.MustCompile(`^user_[a-fA-F0-9]{64}_account_[a-fA-F0-9-]*_session_[a-fA-F0-9-]{36}$`)
+// 旧版 sub2api 的 Claude Code 限制只识别空 account 的 legacy user_id。
+var claudeCodeLegacySub2APIUserIDPattern = regexp.MustCompile(`^user_[a-fA-F0-9]{64}_account__session_[\w-]+$`)
 
 func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dto.GeminiChatRequest) (any, error) {
 	//TODO implement me
@@ -243,7 +243,7 @@ func ensureClaudeCodeMetadata(request *dto.ClaudeRequest) error {
 		}
 	}
 	userID := strings.TrimSpace(common.Interface2String(metadata["user_id"]))
-	if userID == "" || !isClaudeCodeMetadataUserID(userID) {
+	if userID == "" || !isClaudeCodeLegacySub2APIUserID(userID) {
 		metadata["user_id"] = claudeCodeUserID
 	}
 	metadataBytes, err := common.Marshal(metadata)
@@ -294,22 +294,10 @@ func containsClaudeCodeMarker(value any) bool {
 	return false
 }
 
-func isClaudeCodeMetadataUserID(userID string) bool {
+func isClaudeCodeLegacySub2APIUserID(userID string) bool {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return false
 	}
-	if claudeCodeLegacyUserIDPattern.MatchString(userID) {
-		return true
-	}
-
-	var parsed struct {
-		DeviceID    string `json:"device_id"`
-		AccountUUID string `json:"account_uuid"`
-		SessionID   string `json:"session_id"`
-	}
-	if err := common.Unmarshal([]byte(userID), &parsed); err != nil {
-		return false
-	}
-	return strings.TrimSpace(parsed.DeviceID) != "" && strings.TrimSpace(parsed.SessionID) != ""
+	return claudeCodeLegacySub2APIUserIDPattern.MatchString(userID)
 }

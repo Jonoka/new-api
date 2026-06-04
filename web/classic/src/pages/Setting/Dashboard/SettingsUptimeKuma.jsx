@@ -132,7 +132,7 @@ const SettingsUptimeKuma = ({ options, refresh }) => {
       ),
     },
     {
-      title: t('统计窗口'),
+      title: t('展示窗口'),
       dataIndex: 'timeWindowHours',
       key: 'timeWindowHours',
       render: (value) => (
@@ -264,7 +264,7 @@ const SettingsUptimeKuma = ({ options, refresh }) => {
 
     const timeWindowHours = parseTimeWindowHours(uptimeForm.timeWindowHours);
     if (timeWindowHours === null) {
-      showError(t('统计窗口必须在1到720小时之间'));
+      showError(t('展示窗口必须在1到720小时之间'));
       return;
     }
 
@@ -547,7 +547,7 @@ const SettingsUptimeKuma = ({ options, refresh }) => {
           />
           <Form.InputNumber
             field='timeWindowHours'
-            label={t('统计窗口(小时)')}
+            label={t('展示窗口(小时)')}
             min={MIN_TIME_WINDOW_HOURS}
             max={MAX_TIME_WINDOW_HOURS}
             step={1}
@@ -555,7 +555,7 @@ const SettingsUptimeKuma = ({ options, refresh }) => {
             rules={[
               {
                 required: true,
-                message: t('统计窗口必须在1到720小时之间'),
+                message: t('展示窗口必须在1到720小时之间'),
               },
             ]}
             onChange={(value) =>
@@ -567,7 +567,9 @@ const SettingsUptimeKuma = ({ options, refresh }) => {
                     : DEFAULT_TIME_WINDOW_HOURS,
               })
             }
-            extraText={t('用于选择Uptime Kuma可用率统计窗口，例如1H或24H')}
+            extraText={t(
+              '仅用于仪表盘展示标签，例如1H或24H；实际数据仍由状态页面Slug决定',
+            )}
           />
         </Form>
       </Modal>

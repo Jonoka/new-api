@@ -133,16 +133,16 @@ const createUptimeKumaSchema = (t: (key: string) => string) =>
     }),
     timeWindowHours: z.coerce
       .number({
-        error: t('Availability window must be between 1 and 720 hours'),
+        error: t('Display window must be between 1 and 720 hours'),
       })
       .int({
-        error: t('Availability window must be between 1 and 720 hours'),
+        error: t('Display window must be between 1 and 720 hours'),
       })
       .min(1, {
-        error: t('Availability window must be between 1 and 720 hours'),
+        error: t('Display window must be between 1 and 720 hours'),
       })
       .max(720, {
-        error: t('Availability window must be between 1 and 720 hours'),
+        error: t('Display window must be between 1 and 720 hours'),
       }),
   }).superRefine((values, ctx) => {
     if (values.embedUrl) {
@@ -581,7 +581,7 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
                 name='timeWindowHours'
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>{t('Availability window (hours)')}</FormLabel>
+                    <FormLabel>{t('Display window (hours)')}</FormLabel>
                     <FormControl>
                       <Input
                         type='number'
@@ -601,7 +601,7 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
                     </FormControl>
                     <FormDescription>
                       {t(
-                        'Used to select the Uptime Kuma uptimeList window, for example 1H or 24H.'
+                        'Only used as the dashboard display label, for example 1H or 24H. The actual data source is still the configured status page slug.'
                       )}
                     </FormDescription>
                     <FormMessage />
