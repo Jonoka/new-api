@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -321,9 +322,10 @@ func updateVideoTasks(ctx context.Context, platform constant.TaskPlatform, chann
 		}
 		return fmt.Errorf("CacheGetChannel failed: %w", err)
 	}
+	platform = taskPollingPlatform(platform, cacheGetChannel)
 	adaptor := GetTaskAdaptorFunc(platform)
 	if adaptor == nil {
-		return fmt.Errorf("video adaptor not found")
+		return fmt.Errorf("video adaptor not found for platform %s channel_type %d", platform, cacheGetChannel.Type)
 	}
 	info := &relaycommon.RelayInfo{}
 	info.ChannelMeta = &relaycommon.ChannelMeta{
@@ -339,6 +341,16 @@ func updateVideoTasks(ctx context.Context, platform constant.TaskPlatform, chann
 		time.Sleep(1 * time.Second)
 	}
 	return nil
+}
+
+func taskPollingPlatform(platform constant.TaskPlatform, ch *model.Channel) constant.TaskPlatform {
+	if strings.TrimSpace(string(platform)) != "" {
+		return platform
+	}
+	if ch != nil && ch.Type > 0 {
+		return constant.TaskPlatform(strconv.Itoa(ch.Type))
+	}
+	return platform
 }
 
 func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *model.Channel, taskId string, taskM map[string]*model.Task) error {

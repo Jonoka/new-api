@@ -395,7 +395,7 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 
 	// OpenAI Video/Image task API 格式: 走各 adaptor 的 OpenAI 兼容转换器
 	if isOpenAIVideoAPI || isOpenAIImageTaskAPI {
-		adaptor := GetTaskAdaptor(originTask.Platform)
+		adaptor := taskAdaptorForStoredTask(originTask)
 		if adaptor == nil {
 			taskResp = service.TaskErrorWrapperLocal(fmt.Errorf("invalid channel id: %d", originTask.ChannelId), "invalid_channel_id", http.StatusBadRequest)
 			return
@@ -422,6 +422,23 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		taskResp = service.TaskErrorWrapper(err, "marshal_response_failed", http.StatusInternalServerError)
 	}
 	return
+}
+
+func taskAdaptorForStoredTask(task *model.Task) channel.TaskAdaptor {
+	if task == nil {
+		return nil
+	}
+	if adaptor := GetTaskAdaptor(task.Platform); adaptor != nil {
+		return adaptor
+	}
+	if task.ChannelId <= 0 {
+		return nil
+	}
+	channelModel, err := model.GetChannelById(task.ChannelId, true)
+	if err != nil || channelModel == nil || channelModel.Type <= 0 {
+		return nil
+	}
+	return GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(channelModel.Type)))
 }
 
 // tryRealtimeFetch 尝试从上游实时拉取 Gemini/Vertex 任务状态。

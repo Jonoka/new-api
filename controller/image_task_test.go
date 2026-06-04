@@ -3,6 +3,7 @@ package controller
 import (
 	"testing"
 
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -112,6 +113,24 @@ func TestImageTaskPersistedQuotaFallsBackToBillingSession(t *testing.T) {
 	}
 
 	assert.Equal(t, 90000, imageTaskPersistedQuota(relayInfo))
+}
+
+func TestImageTaskSubmitPlatformPrefersChannelMetaType(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Set("platform", "")
+	relayInfo := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI},
+	}
+
+	assert.Equal(t, constant.TaskPlatform("1"), imageTaskSubmitPlatform(ctx, relayInfo))
+}
+
+func TestImageTaskSubmitPlatformFallsBackToGinChannelType(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Set("channel_type", constant.ChannelTypeOpenAI)
+	ctx.Set("platform", "")
+
+	assert.Equal(t, constant.TaskPlatform("1"), imageTaskSubmitPlatform(ctx, nil))
 }
 
 func TestNormalizeOpenAIImageGenerationQuality(t *testing.T) {

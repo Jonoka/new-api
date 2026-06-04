@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -100,7 +101,7 @@ func RelayImageTaskSubmit(c *gin.Context) {
 		upstreamTaskID = taskID
 	}
 
-	task := model.InitTask(constant.TaskPlatform(c.GetString("platform")), relayInfo)
+	task := model.InitTask(imageTaskSubmitPlatform(c, relayInfo), relayInfo)
 	task.TaskID = taskID
 	task.PrivateData.UpstreamTaskID = upstreamTaskID
 	task.PrivateData.RequestPath = c.Request.URL.Path
@@ -137,6 +138,21 @@ func RelayImageTaskSubmit(c *gin.Context) {
 		return
 	}
 	common.SysLog(fmt.Sprintf("insert image task success: task_id=%s upstream_task_id=%s channel_id=%d status=%s", task.TaskID, task.PrivateData.UpstreamTaskID, task.ChannelId, task.Status))
+}
+
+func imageTaskSubmitPlatform(c *gin.Context, relayInfo *relaycommon.RelayInfo) constant.TaskPlatform {
+	if relayInfo != nil && relayInfo.ChannelMeta != nil && relayInfo.ChannelMeta.ChannelType > 0 {
+		return constant.TaskPlatform(strconv.Itoa(relayInfo.ChannelMeta.ChannelType))
+	}
+	if c != nil {
+		if channelType := c.GetInt("channel_type"); channelType > 0 {
+			return constant.TaskPlatform(strconv.Itoa(channelType))
+		}
+		if platform := strings.TrimSpace(c.GetString("platform")); platform != "" {
+			return constant.TaskPlatform(platform)
+		}
+	}
+	return ""
 }
 
 func imageTaskPersistedQuota(relayInfo *relaycommon.RelayInfo) int {
