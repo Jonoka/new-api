@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -25,23 +26,16 @@ type Adaptor struct {
 }
 
 const (
-	claudeCodeSystemText           = "You are Claude Code, Anthropic's official CLI for Claude."
-	claudeCodeUserDeviceID         = "0000000000000000000000000000000000000000000000000000000000000000"
-	claudeCodeUserSessionID        = "00000000-0000-0000-0000-000000000000"
-	claudeCodeUserID               = "user_" + claudeCodeUserDeviceID + "_account__session_" + claudeCodeUserSessionID
-	claudeCodeAnthropicBeta        = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05,effort-2025-11-24,context-management-2025-06-27,extended-cache-ttl-2025-04-11"
-	claudeCodeUserAgent            = "claude-cli/2.1.92 (external, cli)"
-	claudeCodeStainlessVersion     = "0.70.0"
-	claudeCodeStainlessRuntime     = "node"
-	claudeCodeStainlessRuntimeVer  = "v24.13.0"
-	claudeCodeStainlessOS          = "Linux"
-	claudeCodeStainlessArch        = "arm64"
-	claudeCodeStainlessRetryCount  = "0"
-	claudeCodeStainlessTimeoutSecs = "600"
+	claudeCodeSystemText               = "You are Claude Code, Anthropic's official CLI for Claude."
+	claudeCodeAnthropicBeta            = "interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14,claude-code-20250219,oauth-2025-04-20,extended-cache-ttl-2025-04-11"
+	claudeCodeUserAgentFallbackVersion = "2.1.156"
+	claudeCodeStainlessVersion         = "0.72.0"
+	claudeCodeStainlessRuntime         = "node"
+	claudeCodeStainlessRuntimeVer      = "v24.13.0"
+	claudeCodeStainlessRetryCount      = "0"
+	claudeCodeStainlessTimeoutSecs     = "600"
 )
 
-// 旧版 sub2api 的 Claude Code 限制只识别空 account 的 legacy user_id。
-var claudeCodeLegacySub2APIUserIDPattern = regexp.MustCompile(`^user_[a-fA-F0-9]{64}_account__session_[\w-]+$`)
 var claudeCodeUserAgentPattern = regexp.MustCompile(`(?i)^claude-cli/\d+\.\d+\.\d+`)
 
 var realClaudeCodeHeaderPassthroughNames = []string{
@@ -52,6 +46,39 @@ var realClaudeCodeHeaderPassthroughNames = []string{
 	"anthropic-dangerous-direct-browser-access",
 	"X-Client-Request-Id",
 	"X-Claude-Code-Session-Id",
+}
+
+func getClaudeCodeVersion(info *relaycommon.RelayInfo) string {
+	if info != nil && strings.TrimSpace(info.ChannelOtherSettings.ClaudeCodeVersion) != "" {
+		return strings.TrimSpace(info.ChannelOtherSettings.ClaudeCodeVersion)
+	}
+	return claudeCodeUserAgentFallbackVersion
+}
+
+func mapStainlessOS(goos string) string {
+	switch goos {
+	case "linux":
+		return "Linux"
+	case "darwin":
+		return "MacOS"
+	case "windows":
+		return "Windows"
+	default:
+		return "Linux"
+	}
+}
+
+func mapStainlessArch(goarch string) string {
+	switch goarch {
+	case "amd64":
+		return "x64"
+	case "arm64":
+		return "arm64"
+	case "386":
+		return "x86"
+	default:
+		return "x64"
+	}
 }
 
 func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dto.GeminiChatRequest) (any, error) {
@@ -127,11 +154,11 @@ func applyClaudeCodeHeaderFingerprint(req *http.Header, info *relaycommon.RelayI
 	if req == nil || !shouldUseClaudeCodeFingerprint(info) {
 		return
 	}
-	req.Set("User-Agent", claudeCodeUserAgent)
+	req.Set("User-Agent", fmt.Sprintf("claude-cli/%s (external, cli)", getClaudeCodeVersion(info)))
 	req.Set("X-Stainless-Lang", "js")
 	req.Set("X-Stainless-Package-Version", claudeCodeStainlessVersion)
-	req.Set("X-Stainless-OS", claudeCodeStainlessOS)
-	req.Set("X-Stainless-Arch", claudeCodeStainlessArch)
+	req.Set("X-Stainless-OS", mapStainlessOS(runtime.GOOS))
+	req.Set("X-Stainless-Arch", mapStainlessArch(runtime.GOARCH))
 	req.Set("X-Stainless-Runtime", claudeCodeStainlessRuntime)
 	req.Set("X-Stainless-Runtime-Version", claudeCodeStainlessRuntimeVer)
 	req.Set("X-Stainless-Retry-Count", claudeCodeStainlessRetryCount)
@@ -246,7 +273,7 @@ func applyClaudeCodeRequestFingerprint(info *relaycommon.RelayInfo, request *dto
 		return nil
 	}
 	ensureClaudeCodeSystem(request)
-	return ensureClaudeCodeMetadata(request)
+	return nil
 }
 
 func ensureClaudeCodeSystem(request *dto.ClaudeRequest) {
@@ -279,25 +306,6 @@ func ensureClaudeCodeSystem(request *dto.ClaudeRequest) {
 		return
 	}
 	request.System = append([]dto.ClaudeMediaMessage{newClaudeCodeSystemBlock()}, systemContents...)
-}
-
-func ensureClaudeCodeMetadata(request *dto.ClaudeRequest) error {
-	metadata := make(map[string]interface{})
-	if len(request.Metadata) > 0 {
-		if err := common.Unmarshal(request.Metadata, &metadata); err != nil {
-			return err
-		}
-	}
-	userID := strings.TrimSpace(common.Interface2String(metadata["user_id"]))
-	if userID == "" || !isClaudeCodeLegacySub2APIUserID(userID) {
-		metadata["user_id"] = claudeCodeUserID
-	}
-	metadataBytes, err := common.Marshal(metadata)
-	if err != nil {
-		return err
-	}
-	request.Metadata = metadataBytes
-	return nil
 }
 
 func newClaudeCodeSystemBlock() dto.ClaudeMediaMessage {
@@ -421,12 +429,4 @@ func containsClaudeCodeMarker(value any) bool {
 		}
 	}
 	return false
-}
-
-func isClaudeCodeLegacySub2APIUserID(userID string) bool {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return false
-	}
-	return claudeCodeLegacySub2APIUserIDPattern.MatchString(userID)
 }

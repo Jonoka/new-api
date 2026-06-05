@@ -4575,6 +4575,8 @@
     "Use backup code": "Use backup code",
     "Use Claude Code fingerprint access": "Use Claude Code fingerprint access",
     "Use Claude Code transport fingerprint": "Use Claude Code transport fingerprint",
+    "Claude Code Version": "Claude Code Version",
+    "Custom Claude Code version for User-Agent header, leave empty to use default": "Custom Claude Code version for User-Agent header, leave empty to use default",
     "Use disk cache when request body exceeds this size": "Use disk cache when request body exceeds this size",
     "Use external tools to extend capabilities": "Use external tools to extend capabilities",
     "Use our unified OpenAI-compatible endpoint in your applications": "Use our unified OpenAI-compatible endpoint in your applications",

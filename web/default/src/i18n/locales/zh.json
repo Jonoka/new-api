@@ -4575,6 +4575,8 @@
     "Use backup code": "使用备用代码",
     "Use Claude Code fingerprint access": "使用 Claude Code 指纹访问",
     "Use Claude Code transport fingerprint": "使用 Claude Code Transport 指纹",
+    "Claude Code Version": "Claude Code 版本号",
+    "Custom Claude Code version for User-Agent header, leave empty to use default": "自定义 User-Agent 中的 Claude Code 版本号，留空使用默认值",
     "Use disk cache when request body exceeds this size": "请求体超过此大小时使用磁盘缓存",
     "Use external tools to extend capabilities": "通过外部工具扩展能力",
     "Use our unified OpenAI-compatible endpoint in your applications": "在应用中使用我们兼容 OpenAI 的统一接口",

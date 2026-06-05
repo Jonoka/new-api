@@ -51,7 +51,7 @@ func TestConvertClaudeRequestKeepsBodyUnchangedByDefault(t *testing.T) {
 	require.JSONEq(t, `{"user_id":"origin-user"}`, string(claudeReq.Metadata))
 }
 
-func TestConvertClaudeRequestAddsClaudeCodeSystemAndMetadata(t *testing.T) {
+func TestConvertClaudeRequestAddsClaudeCodeSystem(t *testing.T) {
 	t.Parallel()
 
 	adaptor := &Adaptor{}
@@ -74,7 +74,7 @@ func TestConvertClaudeRequestAddsClaudeCodeSystemAndMetadata(t *testing.T) {
 	require.Len(t, system, 1)
 	require.Equal(t, "text", system[0].Type)
 	require.Contains(t, system[0].GetText(), "Claude Code")
-	requireClaudeCodeLegacyMetadata(t, claudeReq.Metadata)
+	require.Empty(t, claudeReq.Metadata)
 }
 
 func TestConvertClaudeRequestNormalizesExistingClaudeCodeStringSystem(t *testing.T) {
@@ -199,7 +199,7 @@ func TestConvertClaudeRequestPrependsClaudeCodeSystemWhenMarkerIsNotTextBlock(t 
 	requireClaudeCodeSystemInJSON(t, converted)
 }
 
-func TestConvertClaudeRequestRewritesInvalidMetadataUserID(t *testing.T) {
+func TestConvertClaudeRequestPreservesExistingMetadataWhenFingerprintEnabled(t *testing.T) {
 	t.Parallel()
 
 	adaptor := &Adaptor{}
@@ -221,13 +221,11 @@ func TestConvertClaudeRequestRewritesInvalidMetadataUserID(t *testing.T) {
 	claudeReq := converted.(*dto.ClaudeRequest)
 	var metadata map[string]interface{}
 	require.NoError(t, common.Unmarshal(claudeReq.Metadata, &metadata))
-	userID, ok := metadata["user_id"].(string)
-	require.True(t, ok)
-	require.Equal(t, "user_0000000000000000000000000000000000000000000000000000000000000000_account__session_00000000-0000-0000-0000-000000000000", userID)
+	require.Equal(t, "hermes-user", metadata["user_id"])
 	require.Equal(t, "keep", metadata["trace"])
 }
 
-func TestConvertClaudeRequestRewritesAccountMetadataForLegacySub2APICompatibility(t *testing.T) {
+func TestConvertClaudeRequestPreservesLegacyMetadataWhenFingerprintEnabled(t *testing.T) {
 	t.Parallel()
 
 	adaptor := &Adaptor{}
@@ -247,9 +245,9 @@ func TestConvertClaudeRequestRewritesAccountMetadataForLegacySub2APICompatibilit
 	require.NoError(t, err)
 
 	claudeReq := converted.(*dto.ClaudeRequest)
-	requireClaudeCodeLegacyMetadata(t, claudeReq.Metadata)
 	var metadata map[string]interface{}
 	require.NoError(t, common.Unmarshal(claudeReq.Metadata, &metadata))
+	require.Equal(t, "user_0000000000000000000000000000000000000000000000000000000000000000_account_00000000-0000-0000-0000-000000000000_session_00000000-0000-0000-0000-000000000000", metadata["user_id"])
 	require.Equal(t, "keep", metadata["trace"])
 }
 
@@ -275,7 +273,7 @@ func TestConvertClaudeRequestAddsClaudeCodeFingerprintWhenTransportFingerprintEn
 	system := claudeReq.ParseSystem()
 	require.Len(t, system, 1)
 	require.Contains(t, system[0].GetText(), "Claude Code")
-	requireClaudeCodeLegacyMetadata(t, claudeReq.Metadata)
+	require.Empty(t, claudeReq.Metadata)
 }
 
 func TestConvertOpenAIRequestAddsClaudeCodeFingerprint(t *testing.T) {
@@ -303,7 +301,7 @@ func TestConvertOpenAIRequestAddsClaudeCodeFingerprint(t *testing.T) {
 	system := claudeReq.ParseSystem()
 	require.Len(t, system, 1)
 	require.Contains(t, system[0].GetText(), "Claude Code")
-	requireClaudeCodeLegacyMetadata(t, claudeReq.Metadata)
+	require.Empty(t, claudeReq.Metadata)
 }
 
 func TestClaudeCodeFingerprintMatchesSub2APIMessagesClientRestriction(t *testing.T) {
@@ -349,12 +347,8 @@ func TestClaudeCodeFingerprintMatchesSub2APIMessagesClientRestriction(t *testing
 	require.True(t, ok)
 	require.Contains(t, firstSystem["text"], "Claude Code")
 
-	metadata, ok := body["metadata"].(map[string]interface{})
-	require.True(t, ok)
-	userID, ok := metadata["user_id"].(string)
-	require.True(t, ok)
-	require.True(t, legacySub2APIClaudeCodeUserIDPattern.MatchString(userID))
-	require.NotNil(t, parseCurrentSub2APIClaudeCodeUserID(userID))
+	_, hasMetadata := body["metadata"]
+	require.False(t, hasMetadata, "fingerprint mode should not inject metadata")
 }
 
 func TestClaudeCodeFingerprintFinalOutboundRequestMatchesSub2APIRestrictions(t *testing.T) {
@@ -427,12 +421,8 @@ func TestClaudeCodeFingerprintFinalOutboundRequestMatchesSub2APIRestrictions(t *
 	require.True(t, ok)
 	require.Contains(t, firstSystem["text"], "Claude Code")
 
-	metadata, ok := body["metadata"].(map[string]interface{})
-	require.True(t, ok)
-	userID, ok := metadata["user_id"].(string)
-	require.True(t, ok)
-	require.True(t, legacySub2APIClaudeCodeUserIDPattern.MatchString(userID))
-	require.NotNil(t, parseCurrentSub2APIClaudeCodeUserID(userID))
+	_, hasMetadata := body["metadata"]
+	require.False(t, hasMetadata, "fingerprint mode should not inject metadata")
 }
 
 func TestRealClaudeCodeHeadersPassThroughWhenChannelFingerprintDisabled(t *testing.T) {
@@ -640,14 +630,14 @@ func TestSetupRequestHeaderAddsClaudeCodeFingerprintHeaders(t *testing.T) {
 
 	require.Equal(t, "sk-test", headers.Get("x-api-key"))
 	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
-	require.Equal(t, "claude-cli/2.1.92 (external, cli)", headers.Get("User-Agent"))
+	require.Regexp(t, regexp.MustCompile(`(?i)^claude-cli/\d+\.\d+\.\d+ \(external, cli\)$`), headers.Get("User-Agent"))
 	require.Equal(t, "cli", headers.Get("X-App"))
 	require.Equal(t, "2023-06-01", headers.Get("anthropic-version"))
 	require.Equal(t, "true", headers.Get("anthropic-dangerous-direct-browser-access"))
 	require.Equal(t, "js", headers.Get("X-Stainless-Lang"))
-	require.Equal(t, "0.70.0", headers.Get("X-Stainless-Package-Version"))
-	require.Equal(t, "Linux", headers.Get("X-Stainless-OS"))
-	require.Equal(t, "arm64", headers.Get("X-Stainless-Arch"))
+	require.Equal(t, "0.72.0", headers.Get("X-Stainless-Package-Version"))
+	require.NotEmpty(t, headers.Get("X-Stainless-OS"))
+	require.NotEmpty(t, headers.Get("X-Stainless-Arch"))
 	require.Equal(t, "node", headers.Get("X-Stainless-Runtime"))
 	require.Equal(t, "v24.13.0", headers.Get("X-Stainless-Runtime-Version"))
 	require.Equal(t, "0", headers.Get("X-Stainless-Retry-Count"))
@@ -656,6 +646,10 @@ func TestSetupRequestHeaderAddsClaudeCodeFingerprintHeaders(t *testing.T) {
 	require.Contains(t, headers.Get("anthropic-beta"), "claude-code-20250219")
 	require.Contains(t, headers.Get("anthropic-beta"), "oauth-2025-04-20")
 	require.Contains(t, headers.Get("anthropic-beta"), "extended-cache-ttl-2025-04-11")
+	require.Contains(t, headers.Get("anthropic-beta"), "fine-grained-tool-streaming-2025-05-14")
+	require.NotContains(t, headers.Get("anthropic-beta"), "prompt-caching-scope-2026-01-05")
+	require.NotContains(t, headers.Get("anthropic-beta"), "effort-2025-11-24")
+	require.NotContains(t, headers.Get("anthropic-beta"), "context-management-2025-06-27")
 }
 
 func TestSetupRequestHeaderAddsClaudeCodeFingerprintHeadersWhenTransportFingerprintEnabled(t *testing.T) {
@@ -678,13 +672,14 @@ func TestSetupRequestHeaderAddsClaudeCodeFingerprintHeadersWhenTransportFingerpr
 
 	require.Equal(t, "sk-test", headers.Get("x-api-key"))
 	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
-	require.Equal(t, "claude-cli/2.1.92 (external, cli)", headers.Get("User-Agent"))
+	require.Regexp(t, regexp.MustCompile(`(?i)^claude-cli/\d+\.\d+\.\d+ \(external, cli\)$`), headers.Get("User-Agent"))
 	require.Equal(t, "cli", headers.Get("X-App"))
 	require.Equal(t, "2023-06-01", headers.Get("anthropic-version"))
 	require.Equal(t, "true", headers.Get("anthropic-dangerous-direct-browser-access"))
 	require.Contains(t, headers.Get("anthropic-beta"), "claude-code-20250219")
 	require.Contains(t, headers.Get("anthropic-beta"), "oauth-2025-04-20")
 	require.Contains(t, headers.Get("anthropic-beta"), "extended-cache-ttl-2025-04-11")
+	require.Contains(t, headers.Get("anthropic-beta"), "fine-grained-tool-streaming-2025-05-14")
 }
 
 func TestSetupRequestHeaderDoesNotPassThroughNonClaudeCodeClientHeaders(t *testing.T) {
@@ -754,16 +749,6 @@ func stringPointer(value string) *string {
 	return &value
 }
 
-func requireClaudeCodeLegacyMetadata(t *testing.T, raw []byte) {
-	t.Helper()
-
-	var metadata map[string]interface{}
-	require.NoError(t, common.Unmarshal(raw, &metadata))
-	userID, ok := metadata["user_id"].(string)
-	require.True(t, ok)
-	require.Equal(t, "user_0000000000000000000000000000000000000000000000000000000000000000_account__session_00000000-0000-0000-0000-000000000000", userID)
-}
-
 func requireClaudeCodeSystemInJSON(t *testing.T, request any) {
 	t.Helper()
 
@@ -781,37 +766,4 @@ func requireClaudeCodeSystemInJSON(t *testing.T, request any) {
 	require.True(t, ok)
 	require.Equal(t, "text", firstSystem["type"])
 	require.Contains(t, firstSystem["text"], "Claude Code")
-}
-
-var legacySub2APIClaudeCodeUserIDPattern = regexp.MustCompile(`^user_[a-fA-F0-9]{64}_account__session_[\w-]+$`)
-
-func parseCurrentSub2APIClaudeCodeUserID(userID string) map[string]string {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return nil
-	}
-	legacy := regexp.MustCompile(`^user_([a-fA-F0-9]{64})_account_([a-fA-F0-9-]*)_session_([a-fA-F0-9-]{36})$`)
-	if matches := legacy.FindStringSubmatch(userID); matches != nil {
-		return map[string]string{
-			"device_id":    matches[1],
-			"account_uuid": matches[2],
-			"session_id":   matches[3],
-		}
-	}
-	var parsed struct {
-		DeviceID    string `json:"device_id"`
-		AccountUUID string `json:"account_uuid"`
-		SessionID   string `json:"session_id"`
-	}
-	if err := common.Unmarshal([]byte(userID), &parsed); err != nil {
-		return nil
-	}
-	if strings.TrimSpace(parsed.DeviceID) == "" || strings.TrimSpace(parsed.SessionID) == "" {
-		return nil
-	}
-	return map[string]string{
-		"device_id":    parsed.DeviceID,
-		"account_uuid": parsed.AccountUUID,
-		"session_id":   parsed.SessionID,
-	}
 }

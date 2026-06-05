@@ -215,6 +215,7 @@ export const channelFormSchema = z
     claude_beta_query: z.boolean().optional(), // Anthropic: beta query passthrough
     claude_code_fingerprint_enabled: z.boolean().optional(), // Anthropic: Claude Code fingerprint
     claude_code_transport_fingerprint_enabled: z.boolean().optional(), // Anthropic：Claude Code Transport 指纹
+    claude_code_version: z.string().optional(), // Anthropic: Custom Claude Code version for User-Agent
     // Upstream model update settings (stored in settings JSON)
     upstream_model_update_check_enabled: z.boolean().optional(),
     upstream_model_update_auto_sync_enabled: z.boolean().optional(),
@@ -359,6 +360,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   claude_beta_query: false,
   claude_code_fingerprint_enabled: false,
   claude_code_transport_fingerprint_enabled: false,
+  claude_code_version: '',
   upstream_model_update_check_enabled: false,
   upstream_model_update_auto_sync_enabled: false,
   upstream_model_update_ignored_models: '',
@@ -422,6 +424,7 @@ export function transformChannelToFormDefaults(
   let claudeBetaQuery = false
   let claudeCodeFingerprintEnabled = false
   let claudeCodeTransportFingerprintEnabled = false
+  let claudeCodeVersion = ''
   let upstreamModelUpdateCheckEnabled = false
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
@@ -451,6 +454,10 @@ export function transformChannelToFormDefaults(
         parsed.claude_code_fingerprint_enabled === true
       claudeCodeTransportFingerprintEnabled =
         parsed.claude_code_transport_fingerprint_enabled === true
+      claudeCodeVersion =
+        typeof parsed.claude_code_version === 'string'
+          ? parsed.claude_code_version
+          : ''
       upstreamModelUpdateCheckEnabled =
         parsed.upstream_model_update_check_enabled === true
       upstreamModelUpdateAutoSyncEnabled =
@@ -543,6 +550,7 @@ export function transformChannelToFormDefaults(
     claude_code_fingerprint_enabled: claudeCodeFingerprintEnabled,
     claude_code_transport_fingerprint_enabled:
       claudeCodeTransportFingerprintEnabled,
+    claude_code_version: claudeCodeVersion,
     allow_safety_identifier: allowSafetyIdentifier,
     upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
@@ -651,6 +659,11 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
       formData.claude_code_fingerprint_enabled === true
     settingsObj.claude_code_transport_fingerprint_enabled =
       formData.claude_code_transport_fingerprint_enabled === true
+    if (formData.claude_code_version?.trim()) {
+      settingsObj.claude_code_version = formData.claude_code_version.trim()
+    } else {
+      delete settingsObj.claude_code_version
+    }
   } else {
     if ('allow_speed' in settingsObj) delete settingsObj.allow_speed
     if ('claude_beta_query' in settingsObj) delete settingsObj.claude_beta_query
@@ -658,6 +671,8 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
       delete settingsObj.claude_code_fingerprint_enabled
     if ('claude_code_transport_fingerprint_enabled' in settingsObj)
       delete settingsObj.claude_code_transport_fingerprint_enabled
+    if ('claude_code_version' in settingsObj)
+      delete settingsObj.claude_code_version
   }
 
   // Upstream model update settings (for model-fetchable channel types)

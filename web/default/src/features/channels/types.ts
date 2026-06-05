@@ -103,6 +103,7 @@ export interface ChannelOtherSettings {
   claude_beta_query?: boolean
   claude_code_fingerprint_enabled?: boolean
   claude_code_transport_fingerprint_enabled?: boolean
+  claude_code_version?: string
   upstream_model_update_check_enabled?: boolean
   upstream_model_update_auto_sync_enabled?: boolean
   upstream_model_update_ignored_models?: string[]

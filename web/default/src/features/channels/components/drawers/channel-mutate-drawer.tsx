@@ -3434,6 +3434,29 @@ export function ChannelMutateDrawer({
                                     </FormItem>
                                   )}
                                 />
+
+                                <FormField
+                                  control={form.control}
+                                  name='claude_code_version'
+                                  render={({ field }) => (
+                                    <FormItem className='px-4 py-3'>
+                                      <FormLabel className='text-sm'>
+                                        {t('Claude Code Version')}
+                                      </FormLabel>
+                                      <FormDescription>
+                                        {t(
+                                          'Custom Claude Code version for User-Agent header, leave empty to use default'
+                                        )}
+                                      </FormDescription>
+                                      <FormControl>
+                                        <Input
+                                          placeholder='2.1.156'
+                                          {...field}
+                                        />
+                                      </FormControl>
+                                    </FormItem>
+                                  )}
+                                />
                               </>
                             )}
                           </div>
