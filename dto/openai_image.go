@@ -2,7 +2,10 @@ package dto
 
 import (
 	"encoding/json"
+	"fmt"
+	"math"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -75,6 +78,109 @@ func (i *ImageRequest) MapOpenAIImageQualityToGPT2APITier() {
 		return
 	}
 	i.Quality = MapOpenAIImageQualityToGPT2APITier(i.Quality)
+}
+
+func MapGPT2APIImageSize(model string, quality string, size string) string {
+	table := gpt2apiImageSizeTableForModel(model)
+	if table == nil {
+		return size
+	}
+	tier := strings.ToLower(strings.TrimSpace(MapOpenAIImageQualityToGPT2APITier(quality)))
+	if tier == "" || tier == "auto" {
+		return size
+	}
+	tierTable := table[tier]
+	if tierTable == nil {
+		return size
+	}
+	ratio, ok := parseImageAspectRatio(size)
+	if !ok {
+		return size
+	}
+	bestKey := ""
+	bestDelta := math.MaxFloat64
+	for key := range tierTable {
+		keyRatio, ok := parseAspectRatioKey(key)
+		if !ok {
+			continue
+		}
+		delta := math.Abs(math.Log(ratio / keyRatio))
+		if delta < bestDelta {
+			bestDelta = delta
+			bestKey = key
+		}
+	}
+	if bestKey == "" {
+		return size
+	}
+	return tierTable[bestKey]
+}
+
+func (i *ImageRequest) MapGPT2APIImageSize(model string) {
+	if i == nil {
+		return
+	}
+	i.Size = MapGPT2APIImageSize(model, i.Quality, i.Size)
+}
+
+func gpt2apiImageSizeTableForModel(model string) map[string]map[string]string {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "nano-banana-pro", "nano-banana-v2", "nano-banana":
+		return map[string]map[string]string{
+			"1k": {"1:1": "1024x1024", "3:2": "1264x848", "2:3": "848x1264", "4:3": "1152x864", "3:4": "864x1152", "5:4": "1152x928", "4:5": "928x1152", "16:9": "1376x768", "9:16": "768x1376", "21:9": "1584x672"},
+			"2k": {"1:1": "2048x2048", "3:2": "2528x1696", "2:3": "1696x2528", "4:3": "2048x1536", "3:4": "1536x2048", "5:4": "2304x1856", "4:5": "1856x2304", "16:9": "2752x1536", "9:16": "1536x2752", "21:9": "3168x1344"},
+			"4k": {"1:1": "4096x4096", "3:2": "5056x3392", "2:3": "3392x5056", "4:3": "4784x3584", "3:4": "3584x4784", "5:4": "4608x3712", "4:5": "3712x4608", "16:9": "5504x3072", "9:16": "3072x5504", "21:9": "6336x2688"},
+		}
+	case "gpt-image-2":
+		return map[string]map[string]string{
+			"1k": {"1:1": "1024x1024", "3:2": "1536x1024", "2:3": "1024x1536", "4:3": "1152x864", "3:4": "864x1152", "5:4": "1120x896", "4:5": "896x1120", "16:9": "1280x720", "9:16": "720x1280", "21:9": "1456x624"},
+			"2k": {"1:1": "2048x2048", "3:2": "2496x1664", "2:3": "1664x2496", "4:3": "2304x1728", "3:4": "1728x2304", "5:4": "2240x1792", "4:5": "1792x2240", "16:9": "2560x1440", "9:16": "1440x2560", "21:9": "3024x1296"},
+			"4k": {"1:1": "2480x2480", "3:2": "3056x2032", "2:3": "2032x3056", "4:3": "2880x2160", "3:4": "2160x2880", "5:4": "2784x2224", "4:5": "2224x2784", "16:9": "3328x1872", "9:16": "1872x3328", "21:9": "3808x1632"},
+		}
+	default:
+		return nil
+	}
+}
+
+func parseImageAspectRatio(size string) (float64, bool) {
+	value := strings.ToLower(strings.TrimSpace(size))
+	if value == "" {
+		return 0, false
+	}
+	if strings.Contains(value, "x") {
+		parts := strings.Split(value, "x")
+		if len(parts) != 2 {
+			return 0, false
+		}
+		w, errW := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+		h, errH := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+		if errW != nil || errH != nil || w <= 0 || h <= 0 {
+			return 0, false
+		}
+		return w / h, true
+	}
+	return parseAspectRatioKey(value)
+}
+
+func parseAspectRatioKey(key string) (float64, bool) {
+	parts := strings.Split(strings.TrimSpace(key), ":")
+	if len(parts) != 2 {
+		return 0, false
+	}
+	w, errW := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	h, errH := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	if errW != nil || errH != nil || w <= 0 || h <= 0 {
+		return 0, false
+	}
+	return w / h, true
+}
+
+func GPT2APIImageSizeMismatchError(model string, size string) string {
+	model = strings.TrimSpace(model)
+	if gpt2apiImageSizeTableForModel(model) == nil {
+		return ""
+	}
+	return fmt.Sprintf("size %s is not a documented GPT2API size for %s", size, model)
 }
 
 func (i *ImageRequest) UnmarshalJSON(data []byte) error {

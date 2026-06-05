@@ -152,7 +152,7 @@ func TestConvertImageEditMultipartMapsChannel23HighTo4K(t *testing.T) {
 	require.NoError(t, writer.WriteField("model", "nano-banana-pro"))
 	require.NoError(t, writer.WriteField("prompt", "test"))
 	require.NoError(t, writer.WriteField("quality", "high"))
-	require.NoError(t, writer.WriteField("size", "3840x2160"))
+	require.NoError(t, writer.WriteField("size", "5504x3072"))
 	part, err := writer.CreateFormFile("image", "input.png")
 	require.NoError(t, err)
 	_, _ = part.Write([]byte("png"))
@@ -172,14 +172,14 @@ func TestConvertImageEditMultipartMapsChannel23HighTo4K(t *testing.T) {
 			ApiType:           constant.APITypeOpenAI,
 			UpstreamModelName: "nano-banana-pro",
 		},
-	}, dto.ImageRequest{Model: "nano-banana-pro", Prompt: "test", Size: "3840x2160", Quality: "high"})
+	}, dto.ImageRequest{Model: "nano-banana-pro", Prompt: "test", Size: "5504x3072", Quality: "high"})
 
 	require.NoError(t, err)
 	body, ok := converted.(*bytes.Buffer)
 	require.True(t, ok)
 	multipartBody := body.String()
 	assert.Contains(t, multipartBody, "4K")
-	assert.Contains(t, multipartBody, "3840x2160")
+	assert.Contains(t, multipartBody, "5504x3072")
 	assert.NotContains(t, multipartBody, "high")
 }
 

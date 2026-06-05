@@ -429,7 +429,9 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		request.Async = &async
 	}
 	if shouldMapOpenAIImageQualityToGPT2APITier(info, request) {
+		modelName := firstNonEmpty(info.UpstreamModelName, info.OriginModelName, request.Model)
 		request.MapOpenAIImageQualityToGPT2APITier()
+		request.MapGPT2APIImageSize(modelName)
 	}
 	logChannel23ImageUpstreamParams(c, info, request)
 	switch info.RelayMode {
