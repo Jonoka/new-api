@@ -107,7 +107,11 @@ func VideoProxy(c *gin.Context) {
 			return
 		}
 	case constant.ChannelTypeOpenAI, constant.ChannelTypeSora:
-		videoURL = fmt.Sprintf("%s/v1/videos/%s/content", baseURL, task.GetUpstreamTaskID())
+		if storedURL := firstUsableStoredVideoURL(task); storedURL != "" {
+			videoURL = storedURL
+		} else {
+			videoURL = fmt.Sprintf("%s/v1/videos/%s/content", baseURL, task.GetUpstreamTaskID())
+		}
 		req.Header.Set("Authorization", "Bearer "+channel.Key)
 	default:
 		// Video URL is stored in PrivateData.ResultURL (fallback to FailReason for old data)
@@ -169,6 +173,40 @@ func VideoProxy(c *gin.Context) {
 	if _, err = io.Copy(c.Writer, resp.Body); err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to stream video content: %s", err.Error()))
 	}
+}
+
+func firstUsableStoredVideoURL(task *model.Task) string {
+	if task == nil {
+		return ""
+	}
+	if url := strings.TrimSpace(task.PrivateData.ResultURL); url != "" && !strings.Contains(url, "/v1/videos/") {
+		return url
+	}
+	var payload struct {
+		Data []struct {
+			URL string `json:"url"`
+		} `json:"data"`
+		Result struct {
+			Data []struct {
+				URL string `json:"url"`
+			} `json:"data"`
+		} `json:"result"`
+	}
+	if len(task.Data) > 0 {
+		if err := common.Unmarshal(task.Data, &payload); err == nil {
+			for _, item := range payload.Data {
+				if url := strings.TrimSpace(item.URL); url != "" {
+					return url
+				}
+			}
+			for _, item := range payload.Result.Data {
+				if url := strings.TrimSpace(item.URL); url != "" {
+					return url
+				}
+			}
+		}
+	}
+	return strings.TrimSpace(task.PrivateData.ResultURL)
 }
 
 func writeVideoDataURL(c *gin.Context, dataURL string) error {

@@ -100,6 +100,76 @@ func TestFetchTaskUsesSingularVideoGenerationsPath(t *testing.T) {
 	assert.Equal(t, "/v1/video/generations/upstream_video_task", gotPath)
 }
 
+func TestFetchTaskUsesGPT2APIVideoGenerationsForCanvasVideosPath(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = io.WriteString(w, `{"id":"upstream_video_task","status":"succeeded","progress":100}`)
+	}))
+	defer server.Close()
+
+	adaptor := &TaskAdaptor{}
+	resp, err := adaptor.FetchTask(server.URL+"/gpt2api.com", "test-key", map[string]any{
+		"task_id":             "upstream_video_task",
+		"request_path":        "/v1/videos",
+		"upstream_model_name": "grok-imagine-video",
+	}, "")
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	_ = resp.Body.Close()
+	assert.Equal(t, "/gpt2api.com/v1/video/generations/upstream_video_task", gotPath)
+}
+
+func TestGPT2APIVideoMappingHelpers(t *testing.T) {
+	body := map[string]any{
+		"model":           "grok-imagine-video",
+		"prompt":          "test prompt",
+		"seconds":         "6",
+		"size":            "1280x720",
+		"resolution_name": "720p",
+		"preset":          "normal",
+	}
+	mapGPT2APIVideoJSONBody(body)
+
+	assert.Equal(t, 6, body["duration"])
+	assert.Equal(t, "16:9", body["ratio"])
+	assert.Equal(t, "hd", body["quality"])
+	assert.Equal(t, true, body["async"])
+	_, hasSeconds := body["seconds"]
+	assert.False(t, hasSeconds)
+	_, hasSize := body["size"]
+	assert.False(t, hasSize)
+}
+
+func TestConvertToOpenAIVideoNormalizesVideoStatusAndStripsUsage(t *testing.T) {
+	adaptor := &TaskAdaptor{}
+	body, err := adaptor.ConvertToOpenAIVideo(&model.Task{
+		TaskID: "public_video_task",
+		PrivateData: model.TaskPrivateData{
+			RequestPath: "/v1/videos",
+		},
+		Data: []byte(`{
+			"id":"upstream_video_task",
+			"status":"succeeded",
+			"usage":{"total_cost":50,"total_points":0.5},
+			"result":{"data":[{"url":"https://example.com/video.mp4"}],"usage":{"total_cost":50,"total_points":0.5}}
+		}`),
+	})
+
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, common.Unmarshal(body, &got))
+	assert.Equal(t, "completed", got["status"])
+	assert.Equal(t, "public_video_task", got["id"])
+	assert.Equal(t, "public_video_task", got["task_id"])
+	_, hasTopUsage := got["usage"]
+	assert.False(t, hasTopUsage)
+	result := got["result"].(map[string]any)
+	_, hasResultUsage := result["usage"]
+	assert.False(t, hasResultUsage)
+}
+
 func TestParseTaskResultImageResponseWithArtifact(t *testing.T) {
 	adaptor := &TaskAdaptor{}
 	info, err := adaptor.ParseTaskResult([]byte(`{"created":1780226859,"data":[{"url":"https://example.com/generated.png"}],"task_id":"upstream_img_task"}`))

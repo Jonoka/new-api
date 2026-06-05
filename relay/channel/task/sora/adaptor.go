@@ -143,7 +143,7 @@ func (a *TaskAdaptor) BuildRequestURL(info *relaycommon.RelayInfo) (string, erro
 	if info.Action == constant.TaskActionRemix {
 		return fmt.Sprintf("%s/v1/videos/%s/remix", base, info.OriginTaskID), nil
 	}
-	if strings.HasPrefix(requestPath, "/v1/video/generations") {
+	if shouldUseGPT2APIVideoGenerations(info) || strings.HasPrefix(requestPath, "/v1/video/generations") {
 		return base + "/v1/video/generations", nil
 	}
 	return fmt.Sprintf("%s/v1/videos", base), nil
@@ -152,6 +152,10 @@ func (a *TaskAdaptor) BuildRequestURL(info *relaycommon.RelayInfo) (string, erro
 // BuildRequestHeader sets required headers.
 func (a *TaskAdaptor) BuildRequestHeader(c *gin.Context, req *http.Request, info *relaycommon.RelayInfo) error {
 	req.Header.Set("Authorization", "Bearer "+a.apiKey)
+	if shouldUseGPT2APIVideoGenerations(info) {
+		req.Header.Set("Content-Type", c.Request.Header.Get("Content-Type"))
+		return nil
+	}
 	req.Header.Set("Content-Type", c.Request.Header.Get("Content-Type"))
 	return nil
 }
@@ -171,6 +175,9 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 		var bodyMap map[string]interface{}
 		if err := common.Unmarshal(cachedBody, &bodyMap); err == nil {
 			bodyMap["model"] = info.UpstreamModelName
+			if shouldUseGPT2APIVideoGenerations(info) {
+				mapGPT2APIVideoJSONBody(bodyMap)
+			}
 			if newBody, err := common.Marshal(bodyMap); err == nil {
 				return bytes.NewReader(newBody), nil
 			}
@@ -186,15 +193,24 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 		var buf bytes.Buffer
 		writer := multipart.NewWriter(&buf)
 		writer.WriteField("model", info.UpstreamModelName)
-		for key, values := range formData.Value {
-			if key == "model" {
-				continue
-			}
-			for _, v := range values {
-				writer.WriteField(key, v)
+		gpt2apiVideo := shouldUseGPT2APIVideoGenerations(info)
+		if gpt2apiVideo {
+			writeGPT2APIVideoMappedFields(writer, formData.Value)
+		} else {
+			for key, values := range formData.Value {
+				if key == "model" {
+					continue
+				}
+				for _, v := range values {
+					writer.WriteField(key, v)
+				}
 			}
 		}
 		for fieldName, fileHeaders := range formData.File {
+			upstreamFieldName := fieldName
+			if gpt2apiVideo && fieldName == "input_reference[]" {
+				upstreamFieldName = "image"
+			}
 			for _, fh := range fileHeaders {
 				f, err := fh.Open()
 				if err != nil {
@@ -213,7 +229,7 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 					}
 				}
 				h := make(textproto.MIMEHeader)
-				h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, fieldName, fh.Filename))
+				h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, upstreamFieldName, fh.Filename))
 				h.Set("Content-Type", ct)
 				part, err := writer.CreatePart(h)
 				if err != nil {
@@ -230,6 +246,163 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	}
 
 	return common.ReaderOnly(storage), nil
+}
+
+func shouldUseGPT2APIVideoGenerations(info *relaycommon.RelayInfo) bool {
+	if info == nil || info.Action == constant.TaskActionRemix {
+		return false
+	}
+	base := strings.ToLower(strings.TrimSpace(info.ChannelBaseUrl))
+	modelName := strings.ToLower(strings.TrimSpace(info.UpstreamModelName))
+	requestPath := strings.Split(strings.TrimSpace(info.RequestURLPath), "?")[0]
+	if !strings.HasPrefix(requestPath, "/v1/videos") {
+		return false
+	}
+	if info.ChannelId == 23 || strings.Contains(base, "gpt2api.com") {
+		return isGPT2APIVideoGenerationsModel(modelName)
+	}
+	return false
+}
+
+func isGPT2APIVideoGenerationsModel(modelName string) bool {
+	switch modelName {
+	case "grok-imagine-video", "sora", "veo3.1", "veo3.1-flash", "veo3.1-lite":
+		return true
+	default:
+		return false
+	}
+}
+
+func mapGPT2APIVideoJSONBody(bodyMap map[string]interface{}) {
+	if bodyMap == nil {
+		return
+	}
+	if _, ok := bodyMap["duration"]; !ok {
+		if seconds, ok := firstStringLike(bodyMap["seconds"]); ok && seconds != "" {
+			if secondsInt, err := strconv.Atoi(seconds); err == nil {
+				bodyMap["duration"] = secondsInt
+			} else {
+				bodyMap["duration"] = seconds
+			}
+		}
+	}
+	if _, ok := bodyMap["ratio"]; !ok {
+		if size, ok := firstStringLike(bodyMap["size"]); ok {
+			if ratio := videoRatioFromSize(size); ratio != "" {
+				bodyMap["ratio"] = ratio
+			}
+		}
+	}
+	if _, ok := bodyMap["quality"]; !ok {
+		if resolution, ok := firstStringLike(bodyMap["resolution_name"]); ok {
+			if quality := videoQualityFromResolutionName(resolution); quality != "" {
+				bodyMap["quality"] = quality
+			}
+		}
+	}
+	if _, ok := bodyMap["image"]; !ok {
+		if inputReference, ok := firstStringLike(bodyMap["input_reference"]); ok && inputReference != "" {
+			bodyMap["image"] = inputReference
+		}
+	}
+	bodyMap["async"] = true
+	delete(bodyMap, "seconds")
+	delete(bodyMap, "size")
+	delete(bodyMap, "resolution_name")
+	delete(bodyMap, "preset")
+	delete(bodyMap, "input_reference")
+}
+
+func writeGPT2APIVideoMappedFields(writer *multipart.Writer, values map[string][]string) {
+	written := map[string]bool{"model": true}
+	for key, vals := range values {
+		if key == "model" || key == "seconds" || key == "size" || key == "resolution_name" || key == "preset" {
+			continue
+		}
+		for _, v := range vals {
+			writer.WriteField(key, v)
+			written[key] = true
+		}
+	}
+	if !written["duration"] {
+		if seconds := firstFormValue(values, "seconds"); seconds != "" {
+			writer.WriteField("duration", seconds)
+		}
+	}
+	if !written["ratio"] {
+		if ratio := videoRatioFromSize(firstFormValue(values, "size")); ratio != "" {
+			writer.WriteField("ratio", ratio)
+		}
+	}
+	if !written["quality"] {
+		if quality := videoQualityFromResolutionName(firstFormValue(values, "resolution_name")); quality != "" {
+			writer.WriteField("quality", quality)
+		}
+	}
+	writer.WriteField("async", "true")
+}
+
+func firstFormValue(values map[string][]string, key string) string {
+	if values == nil || len(values[key]) == 0 {
+		return ""
+	}
+	return values[key][0]
+}
+
+func firstStringLike(v interface{}) (string, bool) {
+	switch value := v.(type) {
+	case string:
+		return value, true
+	case float64:
+		return strconv.Itoa(int(value)), true
+	case int:
+		return strconv.Itoa(value), true
+	case int64:
+		return strconv.FormatInt(value, 10), true
+	default:
+		return "", false
+	}
+}
+
+func videoRatioFromSize(size string) string {
+	size = strings.TrimSpace(strings.ToLower(size))
+	if size == "" || size == "auto" {
+		return ""
+	}
+	parts := strings.Split(size, "x")
+	if len(parts) != 2 {
+		return ""
+	}
+	w, errW := strconv.Atoi(strings.TrimSpace(parts[0]))
+	h, errH := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if errW != nil || errH != nil || w <= 0 || h <= 0 {
+		return ""
+	}
+	g := gcd(w, h)
+	return fmt.Sprintf("%d:%d", w/g, h/g)
+}
+
+func gcd(a, b int) int {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	if a < 0 {
+		return -a
+	}
+	return a
+}
+
+func videoQualityFromResolutionName(resolution string) string {
+	switch strings.ToLower(strings.TrimSpace(resolution)) {
+	case "1080p", "fullhd", "full_hd", "fhd":
+		return "fullhd"
+	case "720p", "hd":
+		return "hd"
+	case "480p", "sd":
+		return "sd"
+	default:
+		return ""
+	}
 }
 
 // DoRequest delegates to common helper.
@@ -280,7 +453,7 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	uriPath := fmt.Sprintf("/v1/videos/%s", taskID)
 	if rawPath, _ := body["request_path"].(string); strings.HasPrefix(rawPath, "/v1/images/generations") || strings.HasPrefix(rawPath, "/v1/images/edits") || strings.HasPrefix(rawPath, "/v1/images/edit") {
 		uriPath = path.Join("/v1/images/generations", taskID)
-	} else if strings.HasPrefix(rawPath, "/v1/video/generations") {
+	} else if strings.HasPrefix(rawPath, "/v1/video/generations") || shouldUseGPT2APIVideoGenerationsFetch(baseUrl, body, rawPath) {
 		uriPath = path.Join("/v1/video/generations", taskID)
 	}
 	uri := baseUrl + uriPath
@@ -300,6 +473,22 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 		client = http.DefaultClient
 	}
 	return client.Do(req)
+}
+
+func shouldUseGPT2APIVideoGenerationsFetch(baseURL string, body map[string]any, rawPath string) bool {
+	if !strings.HasPrefix(rawPath, "/v1/videos") {
+		return false
+	}
+	base := strings.ToLower(strings.TrimSpace(baseURL))
+	modelName := ""
+	if body != nil {
+		if v, ok := body["model"].(string); ok {
+			modelName = strings.ToLower(strings.TrimSpace(v))
+		} else if v, ok := body["upstream_model_name"].(string); ok {
+			modelName = strings.ToLower(strings.TrimSpace(v))
+		}
+	}
+	return strings.Contains(base, "gpt2api.com") && isGPT2APIVideoGenerationsModel(modelName)
 }
 
 func (a *TaskAdaptor) GetModelList() []string {
@@ -409,6 +598,12 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 			return nil, errors.Wrap(err, "convert image task response failed")
 		}
 		data = converted
+	} else if isOpenAIVideoTaskRequestPath(task.PrivateData.RequestPath) {
+		converted, err := convertVideoTaskResponseForOpenAIClient(data)
+		if err != nil {
+			return nil, errors.Wrap(err, "convert video task response failed")
+		}
+		data = converted
 	}
 	if strings.EqualFold(strings.TrimSpace(task.PrivateData.ResponseFormat), "b64_json") {
 		converted, _, err := imageutil.ConvertImageURLResponseToB64(context.Background(), data)
@@ -430,6 +625,43 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 func isOpenAIImageTaskRequestPath(requestPath string) bool {
 	path := strings.TrimSpace(requestPath)
 	return strings.HasPrefix(path, "/v1/images/generations") || strings.HasPrefix(path, "/v1/images/edits") || strings.HasPrefix(path, "/v1/images/edit")
+}
+
+func isOpenAIVideoTaskRequestPath(requestPath string) bool {
+	path := strings.TrimSpace(requestPath)
+	return strings.HasPrefix(path, "/v1/videos") || strings.HasPrefix(path, "/v1/video/generations")
+}
+
+func convertVideoTaskResponseForOpenAIClient(data []byte) ([]byte, error) {
+	var payload map[string]any
+	if err := common.Unmarshal(data, &payload); err != nil {
+		return nil, err
+	}
+	delete(payload, "usage")
+	if result, ok := payload["result"].(map[string]any); ok {
+		delete(result, "usage")
+	}
+	if status, ok := payload["status"].(string); ok {
+		payload["status"] = mapVideoTaskStatusForOpenAIClient(status)
+	}
+	return common.Marshal(payload)
+}
+
+func mapVideoTaskStatusForOpenAIClient(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "succeeded", "success", "completed":
+		return "completed"
+	case "processing", "in_progress", "running":
+		return "running"
+	case "queued", "pending", "submitted":
+		return "queued"
+	case "failed", "failure":
+		return "failed"
+	case "cancelled", "canceled":
+		return "cancelled"
+	default:
+		return status
+	}
 }
 
 func convertImageGenerationTaskResponse(data []byte) ([]byte, error) {
