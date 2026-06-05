@@ -437,6 +437,10 @@ func convertImageGenerationTaskResponse(data []byte) ([]byte, error) {
 	if err := common.Unmarshal(data, &payload); err != nil {
 		return nil, err
 	}
+	delete(payload, "usage")
+	if result, ok := payload["result"].(map[string]any); ok {
+		delete(result, "usage")
+	}
 	if _, hasData := payload["data"]; !hasData {
 		if result, ok := payload["result"].(map[string]any); ok {
 			if resultData, ok := result["data"]; ok {

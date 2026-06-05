@@ -219,7 +219,7 @@ func TestOpenaiHandlerWithUsageConvertsURLToB64WhenRequested(t *testing.T) {
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     make(http.Header),
-		Body:       io.NopCloser(strings.NewReader(`{"created":1,"data":[{"url":"` + imageServer.URL + `/img.png","width":720,"height":1280}],"usage":{"total_tokens":1}}`)),
+		Body:       io.NopCloser(strings.NewReader(`{"created":1,"data":[{"url":"` + imageServer.URL + `/img.png","width":720,"height":1280}],"usage":{"total_tokens":1,"total_cost":15,"total_points":0.15}}`)),
 	}
 
 	usage, apiErr := OpenaiHandlerWithUsage(c, &relaycommon.RelayInfo{
@@ -236,4 +236,6 @@ func TestOpenaiHandlerWithUsageConvertsURLToB64WhenRequested(t *testing.T) {
 	assert.Equal(t, "aW1hZ2UtYnl0ZXM=", item["b64_json"])
 	_, hasURL := item["url"]
 	assert.False(t, hasURL)
+	_, hasUsage := got["usage"]
+	assert.False(t, hasUsage)
 }

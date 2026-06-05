@@ -582,8 +582,13 @@ func OpenaiHandlerWithUsage(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 
+	clientResponseBody, err := stripImageUsageFromClientResponse(responseBody)
+	if err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
+
 	// 写入新的 response body
-	service.IOCopyBytesGracefully(c, resp, responseBody)
+	service.IOCopyBytesGracefully(c, resp, clientResponseBody)
 
 	if usageResp.InputTokens > 0 {
 		usageResp.PromptTokens += usageResp.InputTokens
@@ -597,6 +602,15 @@ func OpenaiHandlerWithUsage(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	}
 	applyUsagePostProcessing(info, &usageResp.Usage, responseBody)
 	return &usageResp.Usage, nil
+}
+
+func stripImageUsageFromClientResponse(responseBody []byte) ([]byte, error) {
+	var payload map[string]any
+	if err := common.Unmarshal(responseBody, &payload); err != nil {
+		return nil, err
+	}
+	delete(payload, "usage")
+	return common.Marshal(payload)
 }
 
 func shouldConvertImageResponseURLToB64(info *relaycommon.RelayInfo) bool {

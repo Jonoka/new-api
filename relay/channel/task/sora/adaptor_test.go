@@ -214,7 +214,8 @@ func TestConvertToOpenAIVideoAddsTopLevelDataFromNestedImageResult(t *testing.T)
 			"id":"upstream_task",
 			"object":"image.generation.task",
 			"status":"succeeded",
-			"result":{"data":[{"height":2560,"url":"https://example.com/nested.png","width":1440}]},
+			"usage":{"total_cost":15,"total_points":0.15},
+			"result":{"data":[{"height":2560,"url":"https://example.com/nested.png","width":1440}],"usage":{"total_cost":15,"total_points":0.15}},
 			"task_id":"upstream_task"
 		}`),
 	})
@@ -230,6 +231,10 @@ func TestConvertToOpenAIVideoAddsTopLevelDataFromNestedImageResult(t *testing.T)
 	resultData := result["data"].([]any)
 	resultItem := resultData[0].(map[string]any)
 	assert.Equal(t, "https://example.com/nested.png", resultItem["url"])
+	_, hasTopUsage := got["usage"]
+	assert.False(t, hasTopUsage)
+	_, hasResultUsage := result["usage"]
+	assert.False(t, hasResultUsage)
 	assert.Equal(t, "public_task", got["task_id"])
 }
 
