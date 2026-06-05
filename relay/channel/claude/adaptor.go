@@ -304,35 +304,26 @@ func ensureClaudeCodeMetadata(request *dto.ClaudeRequest) error {
 }
 
 func ensureClaudeCodeSystem(request *dto.ClaudeRequest) {
+	ccBlock := newClaudeCodeSystemBlock()
 	if request.System == nil {
-		request.System = []dto.ClaudeMediaMessage{newClaudeCodeSystemBlock()}
+		request.System = []dto.ClaudeMediaMessage{ccBlock}
 		return
 	}
 	if request.IsStringSystem() {
-		if strings.TrimSpace(request.GetStringSystem()) == "" {
-			request.System = []dto.ClaudeMediaMessage{newClaudeCodeSystemBlock()}
+		s := strings.TrimSpace(request.GetStringSystem())
+		if s == "" {
+			request.System = []dto.ClaudeMediaMessage{ccBlock}
 			return
 		}
-		if containsClaudeCodeMarker(request.GetStringSystem()) {
-			request.System = []dto.ClaudeMediaMessage{newTextSystemBlock(request.GetStringSystem())}
-			return
-		}
-		request.System = []dto.ClaudeMediaMessage{
-			newClaudeCodeSystemBlock(),
-			newTextSystemBlock(request.GetStringSystem()),
-		}
+		request.System = []dto.ClaudeMediaMessage{ccBlock, newTextSystemBlock(s)}
 		return
 	}
 	systemContents := normalizeClaudeSystemBlocks(request.System)
-	if containsClaudeCodeTextBlock(systemContents) {
-		request.System = systemContents
-		return
-	}
 	if len(systemContents) == 0 {
-		request.System = []dto.ClaudeMediaMessage{newClaudeCodeSystemBlock()}
+		request.System = []dto.ClaudeMediaMessage{ccBlock}
 		return
 	}
-	request.System = append([]dto.ClaudeMediaMessage{newClaudeCodeSystemBlock()}, systemContents...)
+	request.System = append([]dto.ClaudeMediaMessage{ccBlock}, systemContents...)
 }
 
 func newClaudeCodeSystemBlock() dto.ClaudeMediaMessage {
