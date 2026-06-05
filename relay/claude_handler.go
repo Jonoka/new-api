@@ -163,6 +163,14 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
 
+		// [CC-DEBUG] 临时：记录发出的 body 中 system 和 metadata 是否存在
+		if shouldUseClaudeCodeRequestFingerprint(info) {
+			hasSystem := strings.Contains(string(jsonData), `"system"`)
+			hasMetadata := strings.Contains(string(jsonData), `"metadata"`)
+			hasUserID := strings.Contains(string(jsonData), `"user_id"`)
+			common.SysLog(fmt.Sprintf("[CC-DEBUG-BODY] hasSystem=%v hasMetadata=%v hasUserID=%v bodyLen=%d", hasSystem, hasMetadata, hasUserID, len(jsonData)))
+		}
+
 		// remove disabled fields for Claude API
 		jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled)
 		if err != nil {
