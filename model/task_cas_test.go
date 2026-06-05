@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -249,4 +250,28 @@ func TestUpdateWithStatus_ConcurrentWinner(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 1, winCount, "exactly one goroutine should win the CAS")
+}
+
+func TestGetAllUnFinishSyncTasksSkipsCanvasImageWrapperTasks(t *testing.T) {
+	truncateTables(t)
+
+	insertTask(t, &Task{
+		TaskID:    "task_canvas_wrapper",
+		Platform:  constant.TaskPlatformCanvasImage,
+		Status:    TaskStatusInProgress,
+		Progress:  "10%",
+		ChannelId: 0,
+	})
+	insertTask(t, &Task{
+		TaskID:    "task_upstream",
+		Platform:  constant.TaskPlatform("1"),
+		Status:    TaskStatusInProgress,
+		Progress:  "10%",
+		ChannelId: 12,
+	})
+
+	tasks := GetAllUnFinishSyncTasks(100)
+
+	require.Len(t, tasks, 1)
+	assert.Equal(t, "task_upstream", tasks[0].TaskID)
 }
