@@ -2,14 +2,20 @@ package controller
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"mime/multipart"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestInjectCanvasGroupIntoJSONBody(t *testing.T) {
@@ -53,4 +59,81 @@ func TestInjectCanvasGroupIntoMultipartBody(t *testing.T) {
 	require.NotEmpty(t, ctx.Request.Header.Get("Content-Type"))
 	require.NotEqual(t, writer.FormDataContentType(), ctx.Request.Header.Get("Content-Type"))
 	require.Greater(t, ctx.Request.ContentLength, int64(0))
+}
+
+func TestBuildCanvasImageTaskResponseReturnsStoredResult(t *testing.T) {
+	task := &model.Task{
+		TaskID:   "task_canvas",
+		Status:   model.TaskStatusSuccess,
+		Progress: "100%",
+		Data:     json.RawMessage(`{"data":[{"b64_json":"abc"}]}`),
+	}
+
+	response := buildCanvasImageTaskResponse(task)
+
+	require.Equal(t, "task_canvas", response["task_id"])
+	require.Equal(t, "succeeded", response["status"])
+	require.JSONEq(t, `{"data":[{"b64_json":"abc"}]}`, string(response["result"].(json.RawMessage)))
+}
+
+func TestCanvasImageTaskFetchRejectsOtherUsersTask(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupCanvasImageTaskTestDB(t)
+
+	require.NoError(t, (&model.Task{
+		TaskID: "task_other",
+		UserId: 2,
+		Status: model.TaskStatusSuccess,
+		Data:   json.RawMessage(`{"data":[]}`),
+	}).Insert())
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("id", 1)
+	ctx.Params = gin.Params{{Key: "task_id", Value: "task_other"}}
+	ctx.Request = httptest.NewRequest("GET", "/canvas/v1/images/tasks/task_other?group=vip", nil)
+
+	CanvasImageTaskFetch(ctx)
+
+	require.Equal(t, http.StatusNotFound, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "task not found")
+}
+
+func TestFinishCanvasImageTaskStoresSuccessfulRelayResponse(t *testing.T) {
+	setupCanvasImageTaskTestDB(t)
+	recorder := httptest.NewRecorder()
+	recorder.WriteHeader(http.StatusOK)
+	_, err := recorder.WriteString(`{"data":[{"url":"https://example.com/image.png"}]}`)
+	require.NoError(t, err)
+
+	task := &model.Task{TaskID: "task_ok", UserId: 1, Status: model.TaskStatusInProgress}
+	require.NoError(t, task.Insert())
+
+	finishCanvasImageTask(task, 12, recorder)
+
+	reloaded, exists, err := model.GetByTaskId(1, "task_ok")
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.EqualValues(t, model.TaskStatusSuccess, reloaded.Status)
+	require.Equal(t, "100%", reloaded.Progress)
+	require.Equal(t, 12, reloaded.ChannelId)
+	require.JSONEq(t, `{"data":[{"url":"https://example.com/image.png"}]}`, string(reloaded.Data))
+	require.Empty(t, reloaded.FailReason)
+}
+
+func setupCanvasImageTaskTestDB(t *testing.T) {
+	t.Helper()
+
+	oldDB := model.DB
+	oldUsingSQLite := common.UsingSQLite
+	t.Cleanup(func() {
+		model.DB = oldDB
+		common.UsingSQLite = oldUsingSQLite
+	})
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	common.UsingSQLite = true
+	model.DB = db
+	require.NoError(t, db.AutoMigrate(&model.Task{}))
 }

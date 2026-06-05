@@ -72,6 +72,8 @@ func SetRelayRouter(router *gin.Engine) {
 	canvasRouter.Use(middleware.UserSessionAuth(), controller.CanvasPrepareRequest)
 	{
 		canvasRouter.GET("/models", controller.CanvasListModels)
+		canvasRouter.GET("/images/tasks/:task_id", controller.CanvasImageTaskFetch)
+		canvasRouter.POST("/images/tasks", controller.CanvasImageTaskSubmit)
 
 		canvasRelayRouter := canvasRouter.Group("")
 		canvasRelayRouter.Use(middleware.Distribute(), middleware.ModelRequestRateLimit())
