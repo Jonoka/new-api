@@ -127,6 +127,7 @@ func TestConvertImageEditMultipartMapsChannel23QualityAndAsync(t *testing.T) {
 	adaptor := &Adaptor{}
 	converted, err := adaptor.ConvertImageRequest(c, &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeImagesEdits,
+		RequestURLPath:  "/v1/images/edits",
 		OriginModelName: "nano-banana-v2",
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelId:         23,
@@ -142,6 +143,44 @@ func TestConvertImageEditMultipartMapsChannel23QualityAndAsync(t *testing.T) {
 	assert.Contains(t, multipartBody, "2K")
 	assert.Contains(t, multipartBody, "true")
 	assert.NotContains(t, multipartBody, "medium")
+}
+
+func TestConvertImageEditMultipartMapsChannel23HighTo4K(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	require.NoError(t, writer.WriteField("model", "nano-banana-pro"))
+	require.NoError(t, writer.WriteField("prompt", "test"))
+	require.NoError(t, writer.WriteField("quality", "high"))
+	require.NoError(t, writer.WriteField("size", "3840x2160"))
+	part, err := writer.CreateFormFile("image", "input.png")
+	require.NoError(t, err)
+	_, _ = part.Write([]byte("png"))
+	require.NoError(t, writer.Close())
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", &buf)
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+	require.NoError(t, c.Request.ParseMultipartForm(32<<20))
+	adaptor := &Adaptor{}
+	converted, err := adaptor.ConvertImageRequest(c, &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeImagesEdits,
+		RequestURLPath:  "/v1/images/edits",
+		OriginModelName: "nano-banana-pro",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:         23,
+			ApiType:           constant.APITypeOpenAI,
+			UpstreamModelName: "nano-banana-pro",
+		},
+	}, dto.ImageRequest{Model: "nano-banana-pro", Prompt: "test", Size: "3840x2160", Quality: "high"})
+
+	require.NoError(t, err)
+	body, ok := converted.(*bytes.Buffer)
+	require.True(t, ok)
+	multipartBody := body.String()
+	assert.Contains(t, multipartBody, "4K")
+	assert.Contains(t, multipartBody, "3840x2160")
+	assert.NotContains(t, multipartBody, "high")
 }
 
 func TestConvertImageRequestDoesNotAddAsyncForOtherModels(t *testing.T) {

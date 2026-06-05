@@ -293,14 +293,14 @@ func taskNeedsUpdate(oldTask *model.Task, newTask dto.SunoDataResponse) bool {
 func UpdateVideoTasks(ctx context.Context, platform constant.TaskPlatform, taskChannelM map[int][]string, taskM map[string]*model.Task) error {
 	for channelId, taskIds := range taskChannelM {
 		if err := updateVideoTasks(ctx, platform, channelId, taskIds, taskM); err != nil {
-			logger.LogError(ctx, fmt.Sprintf("Channel #%d failed to update video async tasks: %s", channelId, err.Error()))
+			logger.LogError(ctx, fmt.Sprintf("Channel #%d failed to update async tasks: %s", channelId, err.Error()))
 		}
 	}
 	return nil
 }
 
 func updateVideoTasks(ctx context.Context, platform constant.TaskPlatform, channelId int, taskIds []string, taskM map[string]*model.Task) error {
-	logger.LogInfo(ctx, fmt.Sprintf("Channel #%d pending video tasks: %d", channelId, len(taskIds)))
+	logger.LogInfo(ctx, fmt.Sprintf("Channel #%d pending async tasks: %d", channelId, len(taskIds)))
 	if len(taskIds) == 0 {
 		return nil
 	}
@@ -336,7 +336,7 @@ func updateVideoTasks(ctx context.Context, platform constant.TaskPlatform, chann
 	adaptor.Init(info)
 	for _, taskId := range taskIds {
 		if err := updateVideoSingleTask(ctx, adaptor, cacheGetChannel, taskId, taskM); err != nil {
-			logger.LogError(ctx, fmt.Sprintf("Failed to update video task %s: %s", taskId, err.Error()))
+			logger.LogError(ctx, fmt.Sprintf("Failed to update async task %s: %s", taskId, err.Error()))
 		}
 		// sleep 1 second between each task to avoid hitting rate limits of upstream platforms
 		time.Sleep(1 * time.Second)

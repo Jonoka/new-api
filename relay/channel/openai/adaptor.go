@@ -431,6 +431,7 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 	if shouldMapOpenAIImageQualityToGPT2APITier(info, request) {
 		request.MapOpenAIImageQualityToGPT2APITier()
 	}
+	logChannel23ImageUpstreamParams(c, info, request)
 	switch info.RelayMode {
 	case relayconstant.RelayModeImagesEdits:
 		if isJSONRequest(c) {
@@ -586,6 +587,27 @@ func shouldMapOpenAIImageQualityToGPT2APITier(info *relaycommon.RelayInfo, reque
 		return false
 	}
 	return strings.TrimSpace(request.Quality) != ""
+}
+
+func logChannel23ImageUpstreamParams(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) {
+	if info == nil || info.ChannelMeta == nil || info.ChannelMeta.ChannelId != 23 {
+		return
+	}
+	if info.RelayMode != relayconstant.RelayModeImagesGenerations && info.RelayMode != relayconstant.RelayModeImagesEdits {
+		return
+	}
+	async := ""
+	if request.Async != nil {
+		async = fmt.Sprintf("%t", *request.Async)
+	}
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf(
+		"channel=23 upstream image params: path=%s model=%s quality=%s size=%s async=%s",
+		info.RequestURLPath,
+		request.Model,
+		request.Quality,
+		request.Size,
+		async,
+	))
 }
 
 func firstNonEmpty(values ...string) string {

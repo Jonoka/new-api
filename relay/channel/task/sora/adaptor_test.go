@@ -58,7 +58,7 @@ func TestFetchTaskUsesImageGenerationsPath(t *testing.T) {
 	assert.Equal(t, "/v1/images/generations/upstream_img_task", gotPath)
 }
 
-func TestFetchTaskUsesImageEditsPath(t *testing.T) {
+func TestFetchTaskPollsImageEditsViaGenerationsPath(t *testing.T) {
 	var gotPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
@@ -77,7 +77,7 @@ func TestFetchTaskUsesImageEditsPath(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	_ = resp.Body.Close()
-	assert.Equal(t, "/v1/images/edits/upstream_img_edit_task", gotPath)
+	assert.Equal(t, "/v1/images/generations/upstream_img_edit_task", gotPath)
 }
 
 func TestFetchTaskUsesSingularVideoGenerationsPath(t *testing.T) {

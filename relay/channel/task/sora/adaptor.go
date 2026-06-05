@@ -278,10 +278,8 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	}
 
 	uriPath := fmt.Sprintf("/v1/videos/%s", taskID)
-	if rawPath, _ := body["request_path"].(string); strings.HasPrefix(rawPath, "/v1/images/generations") {
+	if rawPath, _ := body["request_path"].(string); strings.HasPrefix(rawPath, "/v1/images/generations") || strings.HasPrefix(rawPath, "/v1/images/edits") || strings.HasPrefix(rawPath, "/v1/images/edit") {
 		uriPath = path.Join("/v1/images/generations", taskID)
-	} else if strings.HasPrefix(rawPath, "/v1/images/edits") || strings.HasPrefix(rawPath, "/v1/images/edit") {
-		uriPath = path.Join(openAIImageEditPollPath(rawPath), taskID)
 	} else if strings.HasPrefix(rawPath, "/v1/video/generations") {
 		uriPath = path.Join("/v1/video/generations", taskID)
 	}
@@ -302,13 +300,6 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 		client = http.DefaultClient
 	}
 	return client.Do(req)
-}
-
-func openAIImageEditPollPath(requestPath string) string {
-	if strings.HasPrefix(strings.TrimSpace(requestPath), "/v1/images/edit") && !strings.HasPrefix(strings.TrimSpace(requestPath), "/v1/images/edits") {
-		return "/v1/images/edit"
-	}
-	return "/v1/images/edits"
 }
 
 func (a *TaskAdaptor) GetModelList() []string {
