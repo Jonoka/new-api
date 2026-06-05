@@ -183,6 +183,12 @@ func TestExecuteCanvasImageRelayRoutesEditTasks(t *testing.T) {
 	require.JSONEq(t, `{"ok":true,"path":"/canvas/v1/images/edits","imageCount":1}`, recorder.Body.String())
 }
 
+func TestNormalizeCanvasImageTaskActionAcceptsShortEditAction(t *testing.T) {
+	require.Equal(t, canvasImageTaskActionEdits, normalizeCanvasImageTaskAction("edits"))
+	require.Equal(t, canvasImageTaskActionEdits, normalizeCanvasImageTaskAction("images/edits"))
+	require.Equal(t, canvasImageTaskActionGenerations, normalizeCanvasImageTaskAction(""))
+}
+
 func setupCanvasImageTaskTestDB(t *testing.T) {
 	t.Helper()
 

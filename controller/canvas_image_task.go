@@ -208,7 +208,7 @@ func executeCanvasImageRelayWithHandler(relayReq canvasImageTaskRelayRequest, ha
 
 func normalizeCanvasImageTaskAction(action string) string {
 	switch strings.Trim(strings.TrimSpace(action), "/") {
-	case canvasImageTaskActionEdits:
+	case "edits", canvasImageTaskActionEdits:
 		return canvasImageTaskActionEdits
 	default:
 		return canvasImageTaskActionGenerations
