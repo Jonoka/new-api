@@ -3843,6 +3843,8 @@
     "Claude 强制 beta=true": "Claude Force beta=true",
     "Claude Code 指纹访问": "Claude Code fingerprint access",
     "Claude Code Transport 指纹": "Claude Code transport fingerprint",
+    "Claude Code 版本号": "Claude Code Version",
+    "自定义 User-Agent 中的 Claude Code 版本号，留空使用默认值": "Custom Claude Code version for User-Agent header, leave empty to use default",
     "Claude会在原有请求头基础上追加这些值，不会覆盖已有同名请求头；重复值会自动忽略。": "Claude appends these values on top of existing request headers. Existing headers are not overwritten, and duplicate values are ignored automatically.",
     "Claude请求头覆盖": "Claude request header override",
     "Claude请求头追加": "Claude request header append",
