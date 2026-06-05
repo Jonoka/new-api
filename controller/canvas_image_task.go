@@ -18,10 +18,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const canvasImageTaskAction = "images/generations"
+const (
+	canvasImageTaskActionGenerations = "images/generations"
+	canvasImageTaskActionEdits       = "images/edits"
+)
 
 type canvasImageTaskRelayRequest struct {
 	TaskID   string
+	Action   string
 	Body     []byte
 	Header   http.Header
 	RawQuery string
@@ -34,6 +38,7 @@ func CanvasImageTaskSubmit(c *gin.Context) {
 		abortCanvasRequest(c, http.StatusBadRequest, err.Error())
 		return
 	}
+	action := normalizeCanvasImageTaskAction(c.Query("action"))
 
 	now := time.Now().Unix()
 	task := &model.Task{
@@ -41,7 +46,7 @@ func CanvasImageTaskSubmit(c *gin.Context) {
 		Platform:   constant.TaskPlatformCanvasImage,
 		UserId:     c.GetInt("id"),
 		Group:      strings.TrimSpace(c.Query("group")),
-		Action:     canvasImageTaskAction,
+		Action:     action,
 		Status:     model.TaskStatusQueued,
 		Progress:   "0%",
 		SubmitTime: now,
@@ -53,6 +58,7 @@ func CanvasImageTaskSubmit(c *gin.Context) {
 
 	relayReq := canvasImageTaskRelayRequest{
 		TaskID:   task.TaskID,
+		Action:   action,
 		Body:     append([]byte(nil), body...),
 		Header:   c.Request.Header.Clone(),
 		RawQuery: c.Request.URL.RawQuery,
@@ -119,14 +125,20 @@ func runCanvasImageTaskRelay(relayReq canvasImageTaskRelayRequest) {
 	task.Progress = "10%"
 	_ = task.Update()
 
-	recorder, channelID := executeCanvasImageGenerationRelay(relayReq)
+	recorder, channelID := executeCanvasImageRelay(relayReq)
 	finishCanvasImageTask(task, channelID, recorder)
 }
 
-func executeCanvasImageGenerationRelay(relayReq canvasImageTaskRelayRequest) (*httptest.ResponseRecorder, int) {
+func executeCanvasImageRelay(relayReq canvasImageTaskRelayRequest) (*httptest.ResponseRecorder, int) {
+	return executeCanvasImageRelayWithHandler(relayReq, nil)
+}
+
+func executeCanvasImageRelayWithHandler(relayReq canvasImageTaskRelayRequest, handler gin.HandlerFunc) (*httptest.ResponseRecorder, int) {
 	recorder := httptest.NewRecorder()
 	engine := gin.New()
 	channelID := 0
+	action := normalizeCanvasImageTaskAction(relayReq.Action)
+	targetPath := "/canvas/v1/" + action
 
 	engine.Use(func(c *gin.Context) {
 		for key, value := range relayReq.Keys {
@@ -136,15 +148,18 @@ func executeCanvasImageGenerationRelay(relayReq canvasImageTaskRelayRequest) (*h
 		channelID = common.GetContextKeyInt(c, constant.ContextKeyChannelId)
 	})
 	engine.Use(middleware.BodyStorageCleanup())
-	engine.POST("/canvas/v1/images/generations",
-		middleware.Distribute(),
-		middleware.ModelRequestRateLimit(),
-		func(c *gin.Context) {
-			Relay(c, types.RelayFormatOpenAIImage)
-		},
-	)
-
-	targetURL := "/canvas/v1/images/generations"
+	if handler != nil {
+		engine.POST(targetPath, handler)
+	} else {
+		engine.POST(targetPath,
+			middleware.Distribute(),
+			middleware.ModelRequestRateLimit(),
+			func(c *gin.Context) {
+				Relay(c, types.RelayFormatOpenAIImage)
+			},
+		)
+	}
+	targetURL := targetPath
 	if relayReq.RawQuery != "" {
 		targetURL += "?" + relayReq.RawQuery
 	}
@@ -154,6 +169,15 @@ func executeCanvasImageGenerationRelay(relayReq canvasImageTaskRelayRequest) (*h
 	engine.ServeHTTP(recorder, request)
 
 	return recorder, channelID
+}
+
+func normalizeCanvasImageTaskAction(action string) string {
+	switch strings.Trim(strings.TrimSpace(action), "/") {
+	case canvasImageTaskActionEdits:
+		return canvasImageTaskActionEdits
+	default:
+		return canvasImageTaskActionGenerations
+	}
 }
 
 func finishCanvasImageTask(task *model.Task, channelID int, recorder *httptest.ResponseRecorder) {

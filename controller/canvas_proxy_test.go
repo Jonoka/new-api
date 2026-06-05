@@ -121,6 +121,36 @@ func TestFinishCanvasImageTaskStoresSuccessfulRelayResponse(t *testing.T) {
 	require.Empty(t, reloaded.FailReason)
 }
 
+func TestExecuteCanvasImageRelayRoutesEditTasks(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("model", "gpt-image-1"))
+	require.NoError(t, writer.WriteField("prompt", "edit"))
+	part, err := writer.CreateFormFile("image", "source.png")
+	require.NoError(t, err)
+	_, err = part.Write([]byte("fake image"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	relayReq := canvasImageTaskRelayRequest{
+		Action: canvasImageTaskActionEdits,
+		Body:   body.Bytes(),
+		Header: http.Header{"Content-Type": []string{writer.FormDataContentType()}},
+	}
+
+	recorder, _ := executeCanvasImageRelayWithHandler(relayReq, func(c *gin.Context) {
+		imageCount := 0
+		if form, err := c.MultipartForm(); err == nil && form != nil {
+			imageCount = len(form.File["image"])
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "path": c.Request.URL.Path, "imageCount": imageCount})
+	})
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.JSONEq(t, `{"ok":true,"path":"/canvas/v1/images/edits","imageCount":1}`, recorder.Body.String())
+}
+
 func setupCanvasImageTaskTestDB(t *testing.T) {
 	t.Helper()
 
