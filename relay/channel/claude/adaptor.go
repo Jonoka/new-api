@@ -268,11 +268,38 @@ func (a *Adaptor) GetChannelName() string {
 	return ChannelName
 }
 
+const (
+	claudeCodeUserDeviceID  = "0000000000000000000000000000000000000000000000000000000000000000"
+	claudeCodeUserSessionID = "00000000-0000-0000-0000-000000000000"
+	claudeCodeUserID        = "user_" + claudeCodeUserDeviceID + "_account__session_" + claudeCodeUserSessionID
+)
+
+var claudeCodeLegacySub2APIUserIDPattern = regexp.MustCompile(`^user_[a-fA-F0-9]{64}_account__session_[\w-]+$`)
+
 func applyClaudeCodeRequestFingerprint(info *relaycommon.RelayInfo, request *dto.ClaudeRequest) error {
 	if request == nil || !shouldUseClaudeCodeFingerprint(info) {
 		return nil
 	}
 	ensureClaudeCodeSystem(request)
+	return ensureClaudeCodeMetadata(request)
+}
+
+func ensureClaudeCodeMetadata(request *dto.ClaudeRequest) error {
+	metadata := make(map[string]interface{})
+	if len(request.Metadata) > 0 {
+		if err := common.Unmarshal(request.Metadata, &metadata); err != nil {
+			return err
+		}
+	}
+	userID := strings.TrimSpace(common.Interface2String(metadata["user_id"]))
+	if userID == "" || !claudeCodeLegacySub2APIUserIDPattern.MatchString(userID) {
+		metadata["user_id"] = claudeCodeUserID
+	}
+	metadataBytes, err := common.Marshal(metadata)
+	if err != nil {
+		return err
+	}
+	request.Metadata = metadataBytes
 	return nil
 }
 

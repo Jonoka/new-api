@@ -74,7 +74,7 @@ func TestConvertClaudeRequestAddsClaudeCodeSystem(t *testing.T) {
 	require.Len(t, system, 1)
 	require.Equal(t, "text", system[0].Type)
 	require.Contains(t, system[0].GetText(), "Claude Code")
-	require.Empty(t, claudeReq.Metadata)
+	requireClaudeCodeLegacyMetadata(t, claudeReq.Metadata)
 }
 
 func TestConvertClaudeRequestNormalizesExistingClaudeCodeStringSystem(t *testing.T) {
@@ -199,7 +199,7 @@ func TestConvertClaudeRequestPrependsClaudeCodeSystemWhenMarkerIsNotTextBlock(t 
 	requireClaudeCodeSystemInJSON(t, converted)
 }
 
-func TestConvertClaudeRequestPreservesExistingMetadataWhenFingerprintEnabled(t *testing.T) {
+func TestConvertClaudeRequestRewritesInvalidMetadataUserID(t *testing.T) {
 	t.Parallel()
 
 	adaptor := &Adaptor{}
@@ -221,11 +221,11 @@ func TestConvertClaudeRequestPreservesExistingMetadataWhenFingerprintEnabled(t *
 	claudeReq := converted.(*dto.ClaudeRequest)
 	var metadata map[string]interface{}
 	require.NoError(t, common.Unmarshal(claudeReq.Metadata, &metadata))
-	require.Equal(t, "hermes-user", metadata["user_id"])
+	require.Equal(t, "user_0000000000000000000000000000000000000000000000000000000000000000_account__session_00000000-0000-0000-0000-000000000000", metadata["user_id"])
 	require.Equal(t, "keep", metadata["trace"])
 }
 
-func TestConvertClaudeRequestPreservesLegacyMetadataWhenFingerprintEnabled(t *testing.T) {
+func TestConvertClaudeRequestRewritesAccountMetadataForLegacySub2APICompatibility(t *testing.T) {
 	t.Parallel()
 
 	adaptor := &Adaptor{}
@@ -245,9 +245,9 @@ func TestConvertClaudeRequestPreservesLegacyMetadataWhenFingerprintEnabled(t *te
 	require.NoError(t, err)
 
 	claudeReq := converted.(*dto.ClaudeRequest)
+	requireClaudeCodeLegacyMetadata(t, claudeReq.Metadata)
 	var metadata map[string]interface{}
 	require.NoError(t, common.Unmarshal(claudeReq.Metadata, &metadata))
-	require.Equal(t, "user_0000000000000000000000000000000000000000000000000000000000000000_account_00000000-0000-0000-0000-000000000000_session_00000000-0000-0000-0000-000000000000", metadata["user_id"])
 	require.Equal(t, "keep", metadata["trace"])
 }
 
@@ -273,7 +273,7 @@ func TestConvertClaudeRequestAddsClaudeCodeFingerprintWhenTransportFingerprintEn
 	system := claudeReq.ParseSystem()
 	require.Len(t, system, 1)
 	require.Contains(t, system[0].GetText(), "Claude Code")
-	require.Empty(t, claudeReq.Metadata)
+	requireClaudeCodeLegacyMetadata(t, claudeReq.Metadata)
 }
 
 func TestConvertOpenAIRequestAddsClaudeCodeFingerprint(t *testing.T) {
@@ -301,7 +301,7 @@ func TestConvertOpenAIRequestAddsClaudeCodeFingerprint(t *testing.T) {
 	system := claudeReq.ParseSystem()
 	require.Len(t, system, 1)
 	require.Contains(t, system[0].GetText(), "Claude Code")
-	require.Empty(t, claudeReq.Metadata)
+	requireClaudeCodeLegacyMetadata(t, claudeReq.Metadata)
 }
 
 func TestClaudeCodeFingerprintMatchesSub2APIMessagesClientRestriction(t *testing.T) {
@@ -347,8 +347,11 @@ func TestClaudeCodeFingerprintMatchesSub2APIMessagesClientRestriction(t *testing
 	require.True(t, ok)
 	require.Contains(t, firstSystem["text"], "Claude Code")
 
-	_, hasMetadata := body["metadata"]
-	require.False(t, hasMetadata, "fingerprint mode should not inject metadata")
+	metadata, ok := body["metadata"].(map[string]interface{})
+	require.True(t, ok)
+	userID, ok := metadata["user_id"].(string)
+	require.True(t, ok)
+	require.Regexp(t, regexp.MustCompile(`^user_[a-fA-F0-9]{64}_account__session_[\w-]+$`), userID)
 }
 
 func TestClaudeCodeFingerprintFinalOutboundRequestMatchesSub2APIRestrictions(t *testing.T) {
@@ -421,8 +424,11 @@ func TestClaudeCodeFingerprintFinalOutboundRequestMatchesSub2APIRestrictions(t *
 	require.True(t, ok)
 	require.Contains(t, firstSystem["text"], "Claude Code")
 
-	_, hasMetadata := body["metadata"]
-	require.False(t, hasMetadata, "fingerprint mode should not inject metadata")
+	metadata, ok := body["metadata"].(map[string]interface{})
+	require.True(t, ok)
+	userID, ok := metadata["user_id"].(string)
+	require.True(t, ok)
+	require.Regexp(t, regexp.MustCompile(`^user_[a-fA-F0-9]{64}_account__session_[\w-]+$`), userID)
 }
 
 func TestRealClaudeCodeHeadersPassThroughWhenChannelFingerprintDisabled(t *testing.T) {
@@ -747,6 +753,16 @@ func TestRealClaudeCodeHeaderPassthroughKeepsModelHeaderSettings(t *testing.T) {
 
 func stringPointer(value string) *string {
 	return &value
+}
+
+func requireClaudeCodeLegacyMetadata(t *testing.T, raw []byte) {
+	t.Helper()
+
+	var metadata map[string]interface{}
+	require.NoError(t, common.Unmarshal(raw, &metadata))
+	userID, ok := metadata["user_id"].(string)
+	require.True(t, ok)
+	require.Equal(t, "user_0000000000000000000000000000000000000000000000000000000000000000_account__session_00000000-0000-0000-0000-000000000000", userID)
 }
 
 func requireClaudeCodeSystemInJSON(t *testing.T, request any) {
