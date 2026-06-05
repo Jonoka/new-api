@@ -63,11 +63,11 @@ func (i *ImageRequest) NormalizeOpenAIImageGenerationQuality() {
 func MapOpenAIImageQualityToGPT2APITier(quality string) string {
 	switch strings.ToLower(strings.TrimSpace(quality)) {
 	case "low", "1k":
-		return "1K"
+		return "1k"
 	case "medium", "2k", "hd":
-		return "2K"
+		return "2k"
 	case "high", "4k", "ultra":
-		return "4K"
+		return "4k"
 	default:
 		return quality
 	}

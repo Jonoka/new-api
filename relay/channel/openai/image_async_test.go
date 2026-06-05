@@ -104,7 +104,7 @@ func TestConvertImageRequestMapsChannel23OpenAIQualityToGPT2APITier(t *testing.T
 	require.NoError(t, err)
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(body, &got))
-	assert.Equal(t, "4K", got["quality"])
+	assert.Equal(t, "4k", got["quality"])
 }
 
 func TestConvertImageEditMultipartMapsChannel23QualityAndAsync(t *testing.T) {
@@ -140,7 +140,7 @@ func TestConvertImageEditMultipartMapsChannel23QualityAndAsync(t *testing.T) {
 	body, ok := converted.(*bytes.Buffer)
 	require.True(t, ok)
 	multipartBody := body.String()
-	assert.Contains(t, multipartBody, "2K")
+	assert.Contains(t, multipartBody, "2k")
 	assert.Contains(t, multipartBody, "true")
 	assert.NotContains(t, multipartBody, "medium")
 }
@@ -178,7 +178,7 @@ func TestConvertImageEditMultipartMapsChannel23HighTo4K(t *testing.T) {
 	body, ok := converted.(*bytes.Buffer)
 	require.True(t, ok)
 	multipartBody := body.String()
-	assert.Contains(t, multipartBody, "4K")
+	assert.Contains(t, multipartBody, "4k")
 	assert.Contains(t, multipartBody, "5504x3072")
 	assert.NotContains(t, multipartBody, "high")
 }
