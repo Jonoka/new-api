@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"bytes"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -51,4 +53,23 @@ func TestDistributeSkipsChannelSetupWhenRouteDoesNotSelectChannel(t *testing.T) 
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusNoContent, recorder.Code)
+}
+
+func TestGetModelRequestReadsCanvasMultipartImageEditModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("model", "gpt-image-2"))
+	require.NoError(t, writer.WriteField("prompt", "edit image"))
+	require.NoError(t, writer.Close())
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/canvas/v1/images/edits?group=Image2", bytes.NewReader(body.Bytes()))
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+
+	req, shouldSelectChannel, err := getModelRequest(c)
+
+	require.NoError(t, err)
+	require.True(t, shouldSelectChannel)
+	require.Equal(t, "gpt-image-2", req.Model)
 }

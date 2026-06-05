@@ -392,9 +392,9 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 			modelRequest.Model = c.Param("model")
 		}
 	}
-	if strings.HasPrefix(c.Request.URL.Path, "/v1/images/generations") {
+	if isImageGenerationPath(c.Request.URL.Path) {
 		modelRequest.Model = common.GetStringIfEmpty(modelRequest.Model, "dall-e")
-	} else if strings.HasPrefix(c.Request.URL.Path, "/v1/images/edits") {
+	} else if isImageEditPath(c.Request.URL.Path) {
 		//modelRequest.Model = common.GetStringIfEmpty(c.PostForm("model"), "gpt-image-1")
 		contentType := c.ContentType()
 		if slices.Contains([]string{gin.MIMEPOSTForm, gin.MIMEMultipartPOSTForm}, contentType) {
@@ -441,6 +441,14 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		modelRequest.Model = ratio_setting.WithCompactModelSuffix(modelRequest.Model)
 	}
 	return &modelRequest, shouldSelectChannel, nil
+}
+
+func isImageGenerationPath(path string) bool {
+	return strings.HasPrefix(path, "/v1/images/generations") || strings.HasPrefix(path, "/canvas/v1/images/generations")
+}
+
+func isImageEditPath(path string) bool {
+	return strings.HasPrefix(path, "/v1/images/edits") || strings.HasPrefix(path, "/canvas/v1/images/edits")
 }
 
 func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, modelName string) (newAPIError *types.NewAPIError) {
