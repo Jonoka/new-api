@@ -331,6 +331,13 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		return nil, err
 	}
 	applyHeaderOverrideToRequest(req, headerOverride)
+	// [CC-DEBUG] 临时调试：记录发往上游的关键指纹 headers
+	if info != nil && info.ChannelMeta != nil &&
+		(info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled || info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled) {
+		logger.LogDebug(c, "[CC-DEBUG] outbound UA=%s X-App=%s anthropic-beta=%s anthropic-version=%s",
+			req.Header.Get("User-Agent"), req.Header.Get("X-App"),
+			req.Header.Get("anthropic-beta"), req.Header.Get("anthropic-version"))
+	}
 	resp, err := doRequest(c, req, info)
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)
