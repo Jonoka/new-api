@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -61,7 +62,7 @@ func TestInjectCanvasGroupIntoMultipartBody(t *testing.T) {
 	require.Greater(t, ctx.Request.ContentLength, int64(0))
 }
 
-func TestBuildCanvasImageTaskResponseReturnsStoredResult(t *testing.T) {
+func TestBuildCanvasImageTaskResponseReturnsLightweightContentURLs(t *testing.T) {
 	task := &model.Task{
 		TaskID:   "task_canvas",
 		Status:   model.TaskStatusSuccess,
@@ -73,7 +74,38 @@ func TestBuildCanvasImageTaskResponseReturnsStoredResult(t *testing.T) {
 
 	require.Equal(t, "task_canvas", response["task_id"])
 	require.Equal(t, "succeeded", response["status"])
-	require.JSONEq(t, `{"data":[{"b64_json":"abc"}]}`, string(response["result"].(json.RawMessage)))
+	result, ok := response["result"].(gin.H)
+	require.True(t, ok)
+	encoded, err := json.Marshal(result)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"data":[{"url":"/canvas/v1/images/tasks/task_canvas/content/0"}]}`, string(encoded))
+	require.NotContains(t, string(encoded), "b64_json")
+	require.NotContains(t, string(encoded), "abc")
+}
+
+func TestCanvasImageTaskContentReturnsStoredBase64Image(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupCanvasImageTaskTestDB(t)
+	imageBytes := []byte("fake image bytes")
+
+	require.NoError(t, (&model.Task{
+		TaskID: "task_image",
+		UserId: 1,
+		Status: model.TaskStatusSuccess,
+		Data:   json.RawMessage(`{"data":[{"b64_json":"` + base64.StdEncoding.EncodeToString(imageBytes) + `"}]}`),
+	}).Insert())
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("id", 1)
+	ctx.Params = gin.Params{{Key: "task_id", Value: "task_image"}, {Key: "index", Value: "0"}}
+	ctx.Request = httptest.NewRequest("GET", "/canvas/v1/images/tasks/task_image/content/0?group=vip", nil)
+
+	CanvasImageTaskContent(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, "image/png", recorder.Header().Get("Content-Type"))
+	require.Equal(t, imageBytes, recorder.Body.Bytes())
 }
 
 func TestCanvasImageTaskFetchRejectsOtherUsersTask(t *testing.T) {

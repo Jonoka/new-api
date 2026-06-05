@@ -2,10 +2,13 @@ package controller
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -85,6 +88,38 @@ func CanvasImageTaskFetch(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, buildCanvasImageTaskResponse(task))
+}
+
+func CanvasImageTaskContent(c *gin.Context) {
+	taskID := strings.TrimSpace(c.Param("task_id"))
+	index, err := strconv.Atoi(strings.TrimSpace(c.Param("index")))
+	if taskID == "" || err != nil || index < 0 {
+		abortCanvasRequest(c, http.StatusBadRequest, "invalid image content request")
+		return
+	}
+
+	task, exists, err := model.GetByTaskId(c.GetInt("id"), taskID)
+	if err != nil {
+		abortCanvasRequest(c, http.StatusInternalServerError, "failed to load image task")
+		return
+	}
+	if !exists {
+		abortCanvasRequest(c, http.StatusNotFound, "task not found")
+		return
+	}
+	if task.Status != model.TaskStatusSuccess {
+		abortCanvasRequest(c, http.StatusBadRequest, "image task is not completed")
+		return
+	}
+
+	image, mimeType, err := readCanvasImageTaskContent(task, index)
+	if err != nil {
+		abortCanvasRequest(c, http.StatusNotFound, "image content not found")
+		return
+	}
+
+	c.Header("Cache-Control", "private, max-age=86400")
+	c.Data(http.StatusOK, mimeType, image)
 }
 
 func readCanvasImageTaskBody(c *gin.Context) ([]byte, error) {
@@ -239,12 +274,99 @@ func buildCanvasImageTaskResponse(task *model.Task) gin.H {
 		"progress": task.Progress,
 	}
 	if task.Status == model.TaskStatusSuccess && len(bytes.TrimSpace(task.Data)) > 0 {
-		response["result"] = task.Data
+		response["result"] = buildCanvasImageTaskResult(task)
 	}
 	if task.Status == model.TaskStatusFailure {
 		response["error"] = task.FailReason
 	}
 	return response
+}
+
+func buildCanvasImageTaskResult(task *model.Task) gin.H {
+	var payload struct {
+		Created any `json:"created,omitempty"`
+		Data    []struct {
+			URL           string `json:"url,omitempty"`
+			B64JSON       string `json:"b64_json,omitempty"`
+			RevisedPrompt string `json:"revised_prompt,omitempty"`
+		} `json:"data"`
+	}
+	if err := common.Unmarshal(task.Data, &payload); err != nil {
+		return gin.H{"data": []gin.H{}}
+	}
+
+	items := make([]gin.H, 0, len(payload.Data))
+	for index, item := range payload.Data {
+		next := gin.H{}
+		switch {
+		case strings.TrimSpace(item.URL) != "":
+			next["url"] = item.URL
+		case strings.TrimSpace(item.B64JSON) != "":
+			next["url"] = canvasImageTaskContentPath(task.TaskID, index)
+		default:
+			continue
+		}
+		if strings.TrimSpace(item.RevisedPrompt) != "" {
+			next["revised_prompt"] = item.RevisedPrompt
+		}
+		items = append(items, next)
+	}
+
+	result := gin.H{"data": items}
+	if payload.Created != nil {
+		result["created"] = payload.Created
+	}
+	return result
+}
+
+func canvasImageTaskContentPath(taskID string, index int) string {
+	return fmt.Sprintf("/canvas/v1/images/tasks/%s/content/%d", url.PathEscape(taskID), index)
+}
+
+func readCanvasImageTaskContent(task *model.Task, index int) ([]byte, string, error) {
+	var payload struct {
+		Data []struct {
+			B64JSON string `json:"b64_json,omitempty"`
+		} `json:"data"`
+	}
+	if err := common.Unmarshal(task.Data, &payload); err != nil {
+		return nil, "", err
+	}
+	if index < 0 || index >= len(payload.Data) {
+		return nil, "", fmt.Errorf("image index out of range")
+	}
+	return decodeCanvasImageData(payload.Data[index].B64JSON)
+}
+
+func decodeCanvasImageData(value string) ([]byte, string, error) {
+	value = strings.TrimSpace(value)
+	mimeType := "image/png"
+	if strings.HasPrefix(value, "data:") {
+		parts := strings.SplitN(value, ",", 2)
+		if len(parts) != 2 {
+			return nil, "", fmt.Errorf("invalid image data url")
+		}
+		header := strings.TrimPrefix(parts[0], "data:")
+		if !strings.Contains(header, ";base64") {
+			return nil, "", fmt.Errorf("unsupported image data url")
+		}
+		mimeType = strings.TrimSuffix(header, ";base64")
+		if mimeType == "" {
+			mimeType = "image/png"
+		}
+		value = parts[1]
+	}
+	if value == "" {
+		return nil, "", fmt.Errorf("empty image data")
+	}
+	image, err := base64.StdEncoding.DecodeString(value)
+	if err != nil {
+		image, err = base64.RawStdEncoding.DecodeString(value)
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	return image, mimeType, nil
 }
 
 func mapCanvasImageTaskStatus(status model.TaskStatus) string {

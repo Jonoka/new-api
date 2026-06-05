@@ -73,6 +73,7 @@ func SetRelayRouter(router *gin.Engine) {
 	{
 		canvasRouter.GET("/models", controller.CanvasListModels)
 		canvasRouter.GET("/images/tasks/:task_id", controller.CanvasImageTaskFetch)
+		canvasRouter.GET("/images/tasks/:task_id/content/:index", controller.CanvasImageTaskContent)
 		canvasRouter.POST("/images/tasks", controller.CanvasImageTaskSubmit)
 
 		canvasRelayRouter := canvasRouter.Group("")
