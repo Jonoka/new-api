@@ -185,6 +185,11 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			}
 		}
 
+		// Sign billing header CCH placeholder after all body modifications
+		if shouldUseClaudeCodeRequestFingerprint(info) {
+			jsonData = claude.SignBillingHeaderCCH(jsonData)
+		}
+
 		logger.LogDebug(c, "requestBody: %s", jsonData)
 		body, size, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 		if err != nil {

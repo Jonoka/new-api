@@ -1,6 +1,10 @@
 package claude
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +22,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/types"
 
+	"github.com/cespare/xxhash/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -34,6 +39,8 @@ const (
 	claudeCodeStainlessRuntimeVer      = "v24.13.0"
 	claudeCodeStainlessRetryCount      = "0"
 	claudeCodeStainlessTimeoutSecs     = "600"
+	billingFingerprintSalt             = "59cf53e54c78"
+	cchSeed                            = uint64(0x6E52736AC806831E)
 )
 
 var claudeCodeUserAgentPattern = regexp.MustCompile(`(?i)^claude-cli/\d+\.\d+\.\d+`)
@@ -280,7 +287,7 @@ func applyClaudeCodeRequestFingerprint(info *relaycommon.RelayInfo, request *dto
 	if request == nil || !shouldUseClaudeCodeFingerprint(info) {
 		return nil
 	}
-	ensureClaudeCodeSystem(request)
+	ensureClaudeCodeSystem(request, info)
 	return ensureClaudeCodeMetadata(request)
 }
 
@@ -303,27 +310,21 @@ func ensureClaudeCodeMetadata(request *dto.ClaudeRequest) error {
 	return nil
 }
 
-func ensureClaudeCodeSystem(request *dto.ClaudeRequest) {
-	ccBlock := newClaudeCodeSystemBlock()
-	if request.System == nil {
-		request.System = []dto.ClaudeMediaMessage{ccBlock}
-		return
-	}
-	if request.IsStringSystem() {
-		s := strings.TrimSpace(request.GetStringSystem())
-		if s == "" {
-			request.System = []dto.ClaudeMediaMessage{ccBlock}
-			return
-		}
-		request.System = []dto.ClaudeMediaMessage{ccBlock, newTextSystemBlock(s)}
-		return
-	}
-	systemContents := normalizeClaudeSystemBlocks(request.System)
-	if len(systemContents) == 0 {
-		request.System = []dto.ClaudeMediaMessage{ccBlock}
-		return
-	}
-	request.System = append([]dto.ClaudeMediaMessage{ccBlock}, systemContents...)
+func ensureClaudeCodeSystem(request *dto.ClaudeRequest, info *relaycommon.RelayInfo) {
+	version := getClaudeCodeVersion(info)
+
+	// Build billing attribution block (no cache_control)
+	billingText := buildBillingBlockText(request, version)
+	billingBlock := dto.ClaudeMediaMessage{Type: "text"}
+	billingBlock.SetText(billingText)
+
+	// Build Claude Code prompt block (with cache_control: ephemeral)
+	ccBlock := dto.ClaudeMediaMessage{Type: "text", CacheControl: json.RawMessage(`{"type":"ephemeral"}`)}
+	ccBlock.SetText(claudeCodeSystemText)
+
+	// Always set system to [billing, cc_prompt] — original system is discarded
+	// from system field (sub2api's mimicry moves it to messages if needed)
+	request.System = []dto.ClaudeMediaMessage{billingBlock, ccBlock}
 }
 
 func newClaudeCodeSystemBlock() dto.ClaudeMediaMessage {
@@ -334,6 +335,79 @@ func newTextSystemBlock(text string) dto.ClaudeMediaMessage {
 	block := dto.ClaudeMediaMessage{Type: "text"}
 	block.SetText(text)
 	return block
+}
+
+// buildBillingBlockText constructs the billing attribution header text
+// matching real Claude Code CLI format.
+func buildBillingBlockText(request *dto.ClaudeRequest, version string) string {
+	fp := computeBillingFingerprint(request, version)
+	return fmt.Sprintf("x-anthropic-billing-header: cc_version=%s.%s; cc_entrypoint=cli; cch=00000;", version, fp)
+}
+
+// computeBillingFingerprint replicates the real Claude Code CLI fingerprint algorithm:
+// 1. Take the first user message's text content
+// 2. Extract characters at positions 4, 7, 20 (pad with '0' if shorter)
+// 3. SHA256(salt + chars + version), take first 3 hex chars
+func computeBillingFingerprint(request *dto.ClaudeRequest, version string) string {
+	firstText := extractFirstUserText(request)
+	indices := []int{4, 7, 20}
+	chars := make([]byte, 0, 3)
+	for _, i := range indices {
+		if i < len(firstText) {
+			chars = append(chars, firstText[i])
+		} else {
+			chars = append(chars, '0')
+		}
+	}
+	sum := sha256.Sum256([]byte(billingFingerprintSalt + string(chars) + version))
+	return hex.EncodeToString(sum[:])[:3]
+}
+
+// extractFirstUserText extracts the text content from the first user message.
+func extractFirstUserText(request *dto.ClaudeRequest) string {
+	if request == nil {
+		return ""
+	}
+	for _, msg := range request.Messages {
+		if msg.Role != "user" {
+			continue
+		}
+		switch content := msg.Content.(type) {
+		case string:
+			return content
+		case []interface{}:
+			for _, block := range content {
+				blockMap, ok := block.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				if blockMap["type"] == "text" {
+					if text, ok := blockMap["text"].(string); ok {
+						return text
+					}
+				}
+			}
+		}
+		break
+	}
+	return ""
+}
+
+// SignBillingHeaderCCH replaces the cch=00000 placeholder in the serialized body
+// with an xxHash64-based signature. Must be called after Marshal.
+func SignBillingHeaderCCH(body []byte) []byte {
+	placeholder := []byte("cch=00000;")
+	idx := bytes.Index(body, placeholder)
+	if idx < 0 {
+		return body
+	}
+	h := xxhash.NewWithSeed(cchSeed)
+	_, _ = h.Write(body)
+	cch := fmt.Sprintf("cch=%05x;", h.Sum64()&0xFFFFF)
+	result := make([]byte, len(body))
+	copy(result, body)
+	copy(result[idx:], []byte(cch))
+	return result
 }
 
 func normalizeClaudeSystemBlocks(value any) []dto.ClaudeMediaMessage {

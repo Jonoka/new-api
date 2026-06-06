@@ -71,9 +71,11 @@ func TestConvertClaudeRequestAddsClaudeCodeSystem(t *testing.T) {
 
 	claudeReq := converted.(*dto.ClaudeRequest)
 	system := claudeReq.ParseSystem()
-	require.Len(t, system, 1)
+	require.Len(t, system, 2)
 	require.Equal(t, "text", system[0].Type)
-	require.Contains(t, system[0].GetText(), "Claude Code")
+	require.Contains(t, system[0].GetText(), "x-anthropic-billing-header")
+	require.GreaterOrEqual(t, len(system), 2)
+	require.Contains(t, system[1].GetText(), "Claude Code")
 	requireClaudeCodeLegacyMetadata(t, claudeReq.Metadata)
 }
 
@@ -100,7 +102,9 @@ func TestConvertClaudeRequestNormalizesExistingClaudeCodeStringSystem(t *testing
 	system := claudeReq.ParseSystem()
 	require.GreaterOrEqual(t, len(system), 1)
 	require.Equal(t, "text", system[0].Type)
-	require.Contains(t, system[0].GetText(), "Claude Code")
+	require.Contains(t, system[0].GetText(), "x-anthropic-billing-header")
+	require.GreaterOrEqual(t, len(system), 2)
+	require.Contains(t, system[1].GetText(), "Claude Code")
 }
 
 func TestConvertClaudeRequestNormalizesObjectSystemWithClaudeCodeMarker(t *testing.T) {
@@ -129,7 +133,9 @@ func TestConvertClaudeRequestNormalizesObjectSystemWithClaudeCodeMarker(t *testi
 	system := claudeReq.ParseSystem()
 	require.GreaterOrEqual(t, len(system), 1)
 	require.Equal(t, "text", system[0].Type)
-	require.Contains(t, system[0].GetText(), "Claude Code")
+	require.Contains(t, system[0].GetText(), "x-anthropic-billing-header")
+	require.GreaterOrEqual(t, len(system), 2)
+	require.Contains(t, system[1].GetText(), "Claude Code")
 	requireClaudeCodeSystemInJSON(t, converted)
 }
 
@@ -161,7 +167,9 @@ func TestConvertClaudeRequestNormalizesContentStringSystemWithClaudeCodeMarker(t
 	system := claudeReq.ParseSystem()
 	require.GreaterOrEqual(t, len(system), 1)
 	require.Equal(t, "text", system[0].Type)
-	require.Contains(t, system[0].GetText(), "Claude Code")
+	require.Contains(t, system[0].GetText(), "x-anthropic-billing-header")
+	require.GreaterOrEqual(t, len(system), 2)
+	require.Contains(t, system[1].GetText(), "Claude Code")
 	requireClaudeCodeSystemInJSON(t, converted)
 }
 
@@ -193,9 +201,9 @@ func TestConvertClaudeRequestPrependsClaudeCodeSystemWhenMarkerIsNotTextBlock(t 
 	system := claudeReq.ParseSystem()
 	require.Len(t, system, 2)
 	require.Equal(t, "text", system[0].Type)
-	require.Contains(t, system[0].GetText(), "Claude Code")
-	require.Equal(t, "tool_result", system[1].Type)
-	require.Empty(t, system[1].GetText())
+	require.Contains(t, system[0].GetText(), "x-anthropic-billing-header")
+	require.Equal(t, "text", system[1].Type)
+	require.Contains(t, system[1].GetText(), "Claude Code")
 	requireClaudeCodeSystemInJSON(t, converted)
 }
 
@@ -271,8 +279,10 @@ func TestConvertClaudeRequestAddsClaudeCodeFingerprintWhenTransportFingerprintEn
 
 	claudeReq := converted.(*dto.ClaudeRequest)
 	system := claudeReq.ParseSystem()
-	require.Len(t, system, 1)
-	require.Contains(t, system[0].GetText(), "Claude Code")
+	require.Len(t, system, 2)
+	require.Contains(t, system[0].GetText(), "x-anthropic-billing-header")
+	require.GreaterOrEqual(t, len(system), 2)
+	require.Contains(t, system[1].GetText(), "Claude Code")
 	requireClaudeCodeLegacyMetadata(t, claudeReq.Metadata)
 }
 
@@ -299,8 +309,10 @@ func TestConvertOpenAIRequestAddsClaudeCodeFingerprint(t *testing.T) {
 
 	claudeReq := converted.(*dto.ClaudeRequest)
 	system := claudeReq.ParseSystem()
-	require.Len(t, system, 1)
-	require.Contains(t, system[0].GetText(), "Claude Code")
+	require.Len(t, system, 2)
+	require.Contains(t, system[0].GetText(), "x-anthropic-billing-header")
+	require.GreaterOrEqual(t, len(system), 2)
+	require.Contains(t, system[1].GetText(), "Claude Code")
 	requireClaudeCodeLegacyMetadata(t, claudeReq.Metadata)
 }
 
@@ -345,7 +357,7 @@ func TestClaudeCodeFingerprintMatchesSub2APIMessagesClientRestriction(t *testing
 	require.NotEmpty(t, systemEntries)
 	firstSystem, ok := systemEntries[0].(map[string]interface{})
 	require.True(t, ok)
-	require.Contains(t, firstSystem["text"], "Claude Code")
+	require.Contains(t, firstSystem["text"], "x-anthropic-billing-header")
 
 	metadata, ok := body["metadata"].(map[string]interface{})
 	require.True(t, ok)
@@ -422,7 +434,7 @@ func TestClaudeCodeFingerprintFinalOutboundRequestMatchesSub2APIRestrictions(t *
 	require.NotEmpty(t, systemEntries)
 	firstSystem, ok := systemEntries[0].(map[string]interface{})
 	require.True(t, ok)
-	require.Contains(t, firstSystem["text"], "Claude Code")
+	require.Contains(t, firstSystem["text"], "x-anthropic-billing-header")
 
 	metadata, ok := body["metadata"].(map[string]interface{})
 	require.True(t, ok)
@@ -555,8 +567,10 @@ func TestConvertClaudeRequestReplacesEmptyStringSystemWithClaudeCodeSystem(t *te
 
 	claudeReq := converted.(*dto.ClaudeRequest)
 	system := claudeReq.ParseSystem()
-	require.Len(t, system, 1)
-	require.Contains(t, system[0].GetText(), "Claude Code")
+	require.Len(t, system, 2)
+	require.Contains(t, system[0].GetText(), "x-anthropic-billing-header")
+	require.GreaterOrEqual(t, len(system), 2)
+	require.Contains(t, system[1].GetText(), "Claude Code")
 }
 
 func TestConvertClaudeRequestPrependsClaudeCodeSystemToStringSystem(t *testing.T) {
@@ -581,8 +595,8 @@ func TestConvertClaudeRequestPrependsClaudeCodeSystemToStringSystem(t *testing.T
 	claudeReq := converted.(*dto.ClaudeRequest)
 	system := claudeReq.ParseSystem()
 	require.Len(t, system, 2)
-	require.Contains(t, system[0].GetText(), "Claude Code")
-	require.Equal(t, "existing string system", system[1].GetText())
+	require.Contains(t, system[0].GetText(), "x-anthropic-billing-header")
+	require.Contains(t, system[1].GetText(), "Claude Code")
 }
 
 func TestConvertClaudeRequestPrependsClaudeCodeSystemWithoutOverwritingMetadataUserId(t *testing.T) {
@@ -611,8 +625,8 @@ func TestConvertClaudeRequestPrependsClaudeCodeSystemWithoutOverwritingMetadataU
 	claudeReq := converted.(*dto.ClaudeRequest)
 	system := claudeReq.ParseSystem()
 	require.Len(t, system, 2)
-	require.Contains(t, system[0].GetText(), "Claude Code")
-	require.Equal(t, "existing system", system[1].GetText())
+	require.Contains(t, system[0].GetText(), "x-anthropic-billing-header")
+	require.Contains(t, system[1].GetText(), "Claude Code")
 	require.JSONEq(t, `{"user_id":"`+existingClaudeCodeUserID+`","trace":"keep"}`, string(claudeReq.Metadata))
 }
 
@@ -776,10 +790,13 @@ func requireClaudeCodeSystemInJSON(t *testing.T, request any) {
 
 	systemEntries, ok := body["system"].([]interface{})
 	require.True(t, ok)
-	require.NotEmpty(t, systemEntries)
+	require.GreaterOrEqual(t, len(systemEntries), 2, "system should have at least billing + cc prompt blocks")
 
-	firstSystem, ok := systemEntries[0].(map[string]interface{})
+	billingBlock, ok := systemEntries[0].(map[string]interface{})
 	require.True(t, ok)
-	require.Equal(t, "text", firstSystem["type"])
-	require.Contains(t, firstSystem["text"], "Claude Code")
+	require.Contains(t, billingBlock["text"], "x-anthropic-billing-header")
+
+	ccBlock, ok := systemEntries[1].(map[string]interface{})
+	require.True(t, ok)
+	require.Contains(t, ccBlock["text"], "Claude Code")
 }
