@@ -142,6 +142,40 @@ func TestGPT2APIVideoMappingHelpers(t *testing.T) {
 	assert.False(t, hasSize)
 }
 
+func TestGPT2APIVideoFormValuesPreferJSONPayload(t *testing.T) {
+	body := formValuesToMap(map[string][]string{
+		"model":           {"grok-imagine-video"},
+		"prompt":          {"一个韩国女偶像在沙滩"},
+		"seconds":         {"6"},
+		"size":            {"720x1280"},
+		"resolution_name": {"720p"},
+		"preset":          {"normal"},
+	})
+	mapGPT2APIVideoJSONBody(body)
+
+	assert.Equal(t, "grok-imagine-video", body["model"])
+	assert.Equal(t, "一个韩国女偶像在沙滩", body["prompt"])
+	assert.Equal(t, 6, body["duration"])
+	assert.Equal(t, "9:16", body["ratio"])
+	assert.Equal(t, "hd", body["quality"])
+	assert.Equal(t, true, body["async"])
+	_, hasPreset := body["preset"]
+	assert.False(t, hasPreset)
+}
+
+func TestParseURLEncodedGPT2APIVideoForm(t *testing.T) {
+	values, err := parseURLEncodedForm([]byte("model=grok-imagine-video&prompt=test&seconds=6&size=720x1280&resolution_name=720p&preset=normal"))
+	require.NoError(t, err)
+	body := formValuesToMap(values)
+	mapGPT2APIVideoJSONBody(body)
+
+	assert.Equal(t, 6, body["duration"])
+	assert.Equal(t, "9:16", body["ratio"])
+	assert.Equal(t, "hd", body["quality"])
+	_, hasSize := body["size"]
+	assert.False(t, hasSize)
+}
+
 func TestConvertToOpenAIVideoNormalizesVideoStatusAndStripsUsage(t *testing.T) {
 	adaptor := &TaskAdaptor{}
 	body, err := adaptor.ConvertToOpenAIVideo(&model.Task{

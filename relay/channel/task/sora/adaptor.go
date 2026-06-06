@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"path"
 	"strconv"
 	"strings"
@@ -185,15 +186,36 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 		return bytes.NewReader(cachedBody), nil
 	}
 
+	if strings.HasPrefix(contentType, "application/x-www-form-urlencoded") && shouldUseGPT2APIVideoGenerations(info) {
+		if values, err := parseURLEncodedForm(cachedBody); err == nil {
+			bodyMap := formValuesToMap(values)
+			bodyMap["model"] = info.UpstreamModelName
+			mapGPT2APIVideoJSONBody(bodyMap)
+			if newBody, err := common.Marshal(bodyMap); err == nil {
+				c.Request.Header.Set("Content-Type", "application/json")
+				return bytes.NewReader(newBody), nil
+			}
+		}
+	}
+
 	if strings.Contains(contentType, "multipart/form-data") {
 		formData, err := common.ParseMultipartFormReusable(c)
 		if err != nil {
 			return bytes.NewReader(cachedBody), nil
 		}
+		gpt2apiVideo := shouldUseGPT2APIVideoGenerations(info)
+		if gpt2apiVideo && !multipartFormHasFiles(formData.File) {
+			bodyMap := formValuesToMap(formData.Value)
+			bodyMap["model"] = info.UpstreamModelName
+			mapGPT2APIVideoJSONBody(bodyMap)
+			if newBody, err := common.Marshal(bodyMap); err == nil {
+				c.Request.Header.Set("Content-Type", "application/json")
+				return bytes.NewReader(newBody), nil
+			}
+		}
 		var buf bytes.Buffer
 		writer := multipart.NewWriter(&buf)
 		writer.WriteField("model", info.UpstreamModelName)
-		gpt2apiVideo := shouldUseGPT2APIVideoGenerations(info)
 		if gpt2apiVideo {
 			writeGPT2APIVideoMappedFields(writer, formData.Value)
 		} else {
@@ -340,6 +362,42 @@ func writeGPT2APIVideoMappedFields(writer *multipart.Writer, values map[string][
 		}
 	}
 	writer.WriteField("async", "true")
+}
+
+func formValuesToMap(values map[string][]string) map[string]interface{} {
+	bodyMap := make(map[string]interface{}, len(values))
+	for key, vals := range values {
+		if len(vals) == 0 {
+			continue
+		}
+		if len(vals) == 1 {
+			bodyMap[key] = vals[0]
+			continue
+		}
+		items := make([]string, 0, len(vals))
+		for _, v := range vals {
+			items = append(items, v)
+		}
+		bodyMap[key] = items
+	}
+	return bodyMap
+}
+
+func parseURLEncodedForm(body []byte) (map[string][]string, error) {
+	values, err := url.ParseQuery(string(body))
+	if err != nil {
+		return nil, err
+	}
+	return map[string][]string(values), nil
+}
+
+func multipartFormHasFiles(files map[string][]*multipart.FileHeader) bool {
+	for _, headers := range files {
+		if len(headers) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func firstFormValue(values map[string][]string, key string) string {
