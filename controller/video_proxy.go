@@ -107,7 +107,9 @@ func VideoProxy(c *gin.Context) {
 			return
 		}
 	case constant.ChannelTypeOpenAI, constant.ChannelTypeSora:
-		if storedURL := firstUsableStoredVideoURL(task); storedURL != "" {
+		if assetURL := gpt2APIAssetProxyVideoURL(task, baseURL); assetURL != "" {
+			videoURL = assetURL
+		} else if storedURL := firstUsableStoredVideoURL(task); storedURL != "" {
 			videoURL = storedURL
 		} else {
 			videoURL = fmt.Sprintf("%s/v1/videos/%s/content", baseURL, task.GetUpstreamTaskID())
@@ -173,6 +175,57 @@ func VideoProxy(c *gin.Context) {
 	if _, err = io.Copy(c.Writer, resp.Body); err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to stream video content: %s", err.Error()))
 	}
+}
+
+type gpt2APIVideoPayload struct {
+	ID     string `json:"id"`
+	TaskID string `json:"task_id"`
+	Result struct {
+		ID   string `json:"id"`
+		Data []struct {
+			URL string `json:"url"`
+		} `json:"data"`
+	} `json:"result"`
+}
+
+func gpt2APIAssetProxyVideoURL(task *model.Task, baseURL string) string {
+	if task == nil || len(task.Data) == 0 || !isGPT2APIBaseURL(baseURL) {
+		return ""
+	}
+	var payload gpt2APIVideoPayload
+	if err := common.Unmarshal(task.Data, &payload); err != nil {
+		return ""
+	}
+	assetID := strings.TrimSpace(payload.Result.ID)
+	if assetID == "" {
+		assetID = strings.TrimSpace(payload.ID)
+	}
+	if assetID == "" {
+		assetID = strings.TrimSpace(payload.TaskID)
+	}
+	if assetID == "" {
+		return ""
+	}
+	assetIndex := -1
+	for i, item := range payload.Result.Data {
+		if strings.TrimSpace(item.URL) != "" {
+			assetIndex = i
+			break
+		}
+	}
+	if assetIndex < 0 {
+		assetIndex = 0
+	}
+	return fmt.Sprintf("%s/api/v1/gen/assets/%s/%d", strings.TrimRight(baseURL, "/"), url.PathEscape(assetID), assetIndex)
+}
+
+func isGPT2APIBaseURL(baseURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	return host == "gpt2api.com" || host == "www.gpt2api.com"
 }
 
 func firstUsableStoredVideoURL(task *model.Task) string {
