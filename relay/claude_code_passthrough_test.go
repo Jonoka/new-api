@@ -37,7 +37,7 @@ func TestShouldPassThroughRequestBodyRespectsPassThroughSettings(t *testing.T) {
 	}))
 }
 
-func TestShouldPassThroughRequestBodyDisabledForClaudeCodeFingerprint(t *testing.T) {
+func TestShouldPassThroughRequestBodyAllowedWithClaudeCodeFingerprint(t *testing.T) {
 	originalGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
 	defer func() {
 		model_setting.GetGlobalSettings().PassThroughRequestEnabled = originalGlobal
@@ -56,10 +56,10 @@ func TestShouldPassThroughRequestBodyDisabledForClaudeCodeFingerprint(t *testing
 		},
 	}
 
-	require.False(t, shouldPassThroughRequestBody(info))
+	require.True(t, shouldPassThroughRequestBody(info))
 }
 
-func TestShouldPassThroughRequestBodyDisabledForClaudeCodeTransportFingerprint(t *testing.T) {
+func TestShouldPassThroughRequestBodyAllowedWithClaudeCodeTransportFingerprint(t *testing.T) {
 	originalGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
 	defer func() {
 		model_setting.GetGlobalSettings().PassThroughRequestEnabled = originalGlobal
@@ -78,5 +78,5 @@ func TestShouldPassThroughRequestBodyDisabledForClaudeCodeTransportFingerprint(t
 		},
 	}
 
-	require.False(t, shouldPassThroughRequestBody(info))
+	require.True(t, shouldPassThroughRequestBody(info))
 }

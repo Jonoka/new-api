@@ -15,9 +15,6 @@ func shouldUseClaudeCodeRequestFingerprint(info *relaycommon.RelayInfo) bool {
 }
 
 func shouldPassThroughRequestBody(info *relaycommon.RelayInfo) bool {
-	if shouldUseClaudeCodeRequestFingerprint(info) {
-		return false
-	}
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled {
 		return true
 	}
