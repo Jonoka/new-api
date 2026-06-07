@@ -3,6 +3,7 @@ package sora
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -204,9 +205,12 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 			return bytes.NewReader(cachedBody), nil
 		}
 		gpt2apiVideo := shouldUseGPT2APIVideoGenerations(info)
-		if gpt2apiVideo && !multipartFormHasFiles(formData.File) {
+		if gpt2apiVideo {
 			bodyMap := formValuesToMap(formData.Value)
 			bodyMap["model"] = info.UpstreamModelName
+			if err := addGPT2APIVideoInputReferenceFiles(bodyMap, formData.File); err != nil {
+				return nil, err
+			}
 			mapGPT2APIVideoJSONBody(bodyMap)
 			if newBody, err := common.Marshal(bodyMap); err == nil {
 				c.Request.Header.Set("Content-Type", "application/json")
@@ -381,6 +385,58 @@ func formValuesToMap(values map[string][]string) map[string]interface{} {
 		bodyMap[key] = items
 	}
 	return bodyMap
+}
+
+func addGPT2APIVideoInputReferenceFiles(bodyMap map[string]interface{}, files map[string][]*multipart.FileHeader) error {
+	if bodyMap == nil || len(files) == 0 {
+		return nil
+	}
+	var images []string
+	for _, fieldName := range []string{"input_reference[]", "input_reference", "image"} {
+		for _, fh := range files[fieldName] {
+			dataURL, err := multipartFileHeaderToDataURL(fh)
+			if err != nil {
+				return err
+			}
+			if dataURL != "" {
+				images = append(images, dataURL)
+			}
+		}
+	}
+	if len(images) == 0 {
+		return nil
+	}
+	bodyMap["image"] = images[0]
+	if len(images) > 1 {
+		bodyMap["images"] = images
+	}
+	return nil
+}
+
+func multipartFileHeaderToDataURL(fh *multipart.FileHeader) (string, error) {
+	if fh == nil {
+		return "", nil
+	}
+	f, err := fh.Open()
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return "", err
+	}
+	if len(data) == 0 {
+		return "", nil
+	}
+	ct := strings.TrimSpace(fh.Header.Get("Content-Type"))
+	if ct == "" || ct == "application/octet-stream" {
+		ct = http.DetectContentType(data)
+	}
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+	return "data:" + ct + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
 
 func parseURLEncodedForm(body []byte) (map[string][]string, error) {

@@ -1,13 +1,18 @@
 package sora
 
 import (
+	"bytes"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -174,6 +179,55 @@ func TestParseURLEncodedGPT2APIVideoForm(t *testing.T) {
 	assert.Equal(t, "hd", body["quality"])
 	_, hasSize := body["size"]
 	assert.False(t, hasSize)
+}
+
+func TestGPT2APIVideoMultipartInputReferenceBecomesJSONImage(t *testing.T) {
+	var formBody bytes.Buffer
+	writer := multipart.NewWriter(&formBody)
+	require.NoError(t, writer.WriteField("model", "veo3.1"))
+	require.NoError(t, writer.WriteField("prompt", "女人看着镜头微笑"))
+	require.NoError(t, writer.WriteField("seconds", "6"))
+	require.NoError(t, writer.WriteField("size", "720x1280"))
+	require.NoError(t, writer.WriteField("resolution_name", "720p"))
+	require.NoError(t, writer.WriteField("preset", "normal"))
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Disposition", `form-data; name="input_reference[]"; filename="reference.png"`)
+	header.Set("Content-Type", "image/png")
+	part, err := writer.CreatePart(header)
+	require.NoError(t, err)
+	_, err = part.Write([]byte("fake-image-bytes"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewReader(formBody.Bytes()))
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	ctx, _ := common.NewTestContext(req)
+	ctx.Set(common.KeyRequestBody, formBody.Bytes())
+
+	adaptor := &TaskAdaptor{}
+	bodyReader, err := adaptor.BuildRequestBody(ctx, &relaycommon.RelayInfo{
+		ChannelId:         23,
+		ChannelBaseUrl:    "https://gpt2api.com",
+		RequestURLPath:    "/v1/videos",
+		UpstreamModelName: "veo3.1",
+	})
+	require.NoError(t, err)
+	payload, err := io.ReadAll(bodyReader)
+	require.NoError(t, err)
+
+	assert.Equal(t, "application/json", ctx.Request.Header.Get("Content-Type"))
+	var got map[string]any
+	require.NoError(t, common.Unmarshal(payload, &got))
+	assert.Equal(t, "veo3.1", got["model"])
+	assert.Equal(t, "女人看着镜头微笑", got["prompt"])
+	assert.Equal(t, 6, got["duration"])
+	assert.Equal(t, "9:16", got["ratio"])
+	assert.Equal(t, "hd", got["quality"])
+	assert.Equal(t, true, got["async"])
+	image, _ := got["image"].(string)
+	assert.True(t, strings.HasPrefix(image, "data:image/png;base64,"))
+	_, hasInputReference := got["input_reference"]
+	assert.False(t, hasInputReference)
 }
 
 func TestConvertToOpenAIVideoNormalizesVideoStatusAndStripsUsage(t *testing.T) {
