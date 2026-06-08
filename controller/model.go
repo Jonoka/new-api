@@ -209,6 +209,18 @@ func getModelOwnerGroups(userGroup string, tokenGroup string) []string {
 		return service.GetUserAutoGroup(userGroup)
 	}
 	if tokenGroup != "" {
+		// 多分组令牌：逗号分隔的分组列表
+		if strings.Contains(tokenGroup, ",") {
+			groups := strings.Split(tokenGroup, ",")
+			result := make([]string, 0, len(groups))
+			for _, g := range groups {
+				g = strings.TrimSpace(g)
+				if g != "" {
+					result = append(result, g)
+				}
+			}
+			return result
+		}
 		return []string{tokenGroup}
 	}
 	if userGroup != "" {
