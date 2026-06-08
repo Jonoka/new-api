@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useState, useContext, useRef } from 'react';
+import React, { useEffect, useState, useContext, useRef, useCallback } from 'react';
 import {
   API,
   showError,
@@ -41,11 +41,15 @@ import {
   Typography,
   Card,
   Tag,
+  TagGroup,
   Avatar,
   Form,
   Col,
   Row,
   InputNumber,
+  Popover,
+  Input,
+  Empty,
 } from '@douyinfe/semi-ui';
 import {
   IconCreditCard,
@@ -53,11 +57,221 @@ import {
   IconSave,
   IconClose,
   IconKey,
+  IconPlus,
+  IconDelete,
+  IconChevronUp,
+  IconChevronDown,
+  IconSearch,
 } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 import { StatusContext } from '../../../../context/Status';
 
 const { Text, Title } = Typography;
+
+// ============================================================================
+// GroupMultiPicker — 多分组选择 + 排序组件（Semi Design 风格）
+// ============================================================================
+
+const GroupMultiPicker = ({ groups, selectedGroups, onChange, t }) => {
+  const [popVisible, setPopVisible] = useState(false);
+  const [searchText, setSearchText] = useState('');
+
+  const isAutoSelected = selectedGroups.includes('auto');
+
+  const availableGroups = groups.filter((g) => {
+    if (selectedGroups.includes(g.value)) return false;
+    if (isAutoSelected && g.value !== 'auto') return false;
+    if (g.value === 'auto' && selectedGroups.length > 0 && !isAutoSelected) return false;
+    if (searchText) {
+      const q = searchText.toLowerCase();
+      return (
+        g.value.toLowerCase().includes(q) ||
+        (typeof g.label === 'string' && g.label.toLowerCase().includes(q))
+      );
+    }
+    return true;
+  });
+
+  const handleAdd = (value) => {
+    if (value === 'auto') {
+      onChange(['auto']);
+    } else {
+      onChange([...selectedGroups.filter((v) => v !== 'auto'), value]);
+    }
+    setSearchText('');
+  };
+
+  const handleRemove = (value) => {
+    onChange(selectedGroups.filter((v) => v !== value));
+  };
+
+  const handleMove = (index, direction) => {
+    const newGroups = [...selectedGroups];
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= newGroups.length) return;
+    [newGroups[index], newGroups[targetIndex]] = [newGroups[targetIndex], newGroups[index]];
+    onChange(newGroups);
+  };
+
+  const groupMap = {};
+  groups.forEach((g) => { groupMap[g.value] = g; });
+
+  const renderRatioBadge = (ratio) => {
+    if (ratio === undefined || ratio === null || ratio === '') return null;
+    return (
+      <Tag size='small' color='green' shape='circle' style={{ marginLeft: 4 }}>
+        {ratio}x
+      </Tag>
+    );
+  };
+
+  return (
+    <div>
+      {/* Selected groups list */}
+      {selectedGroups.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+          {selectedGroups.map((value, index) => {
+            const info = groupMap[value];
+            return (
+              <div
+                key={value}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '6px 10px',
+                  borderRadius: 8,
+                  border: '1px solid var(--semi-color-border)',
+                  backgroundColor: 'var(--semi-color-bg-2)',
+                }}
+              >
+                {/* Order controls */}
+                {selectedGroups.length > 1 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                    <Button
+                      icon={<IconChevronUp size='extra-small' />}
+                      size='small'
+                      theme='borderless'
+                      type='tertiary'
+                      disabled={index === 0}
+                      onClick={() => handleMove(index, -1)}
+                      style={{ padding: 0, height: 16 }}
+                    />
+                    <Button
+                      icon={<IconChevronDown size='extra-small' />}
+                      size='small'
+                      theme='borderless'
+                      type='tertiary'
+                      disabled={index === selectedGroups.length - 1}
+                      onClick={() => handleMove(index, 1)}
+                      style={{ padding: 0, height: 16 }}
+                    />
+                  </div>
+                )}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Text strong size='small' ellipsis={{ showTooltip: true }} style={{ maxWidth: 200 }}>
+                      {value}
+                    </Text>
+                    {info && renderRatioBadge(info.ratio)}
+                  </div>
+                  {info && info.label && (
+                    <Text type='tertiary' size='small' ellipsis={{ showTooltip: true }} style={{ maxWidth: 300 }}>
+                      {info.label}
+                    </Text>
+                  )}
+                </div>
+                <Button
+                  icon={<IconDelete size='small' />}
+                  size='small'
+                  theme='borderless'
+                  type='danger'
+                  onClick={() => handleRemove(value)}
+                  style={{ flexShrink: 0 }}
+                />
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Add button with popover */}
+      <Popover
+        visible={popVisible}
+        onVisibleChange={setPopVisible}
+        trigger='click'
+        position='bottomLeft'
+        showArrow
+        content={
+          <div style={{ width: 320, maxHeight: 360, overflow: 'auto', padding: 8 }}>
+            <Input
+              prefix={<IconSearch />}
+              placeholder={t('搜索分组...')}
+              value={searchText}
+              onChange={setSearchText}
+              showClear
+              size='small'
+              style={{ marginBottom: 8 }}
+            />
+            {availableGroups.length === 0 ? (
+              <Empty description={t('没有可选分组')} style={{ padding: 16 }} />
+            ) : (
+              availableGroups.map((g) => (
+                <div
+                  key={g.value}
+                  onClick={() => { handleAdd(g.value); setPopVisible(false); }}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '8px 12px',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--semi-color-fill-0)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                >
+                  <div>
+                    <Text strong size='small'>{g.value}</Text>
+                    {g.label && (
+                      <div>
+                        <Text type='tertiary' size='small'>{g.label}</Text>
+                      </div>
+                    )}
+                  </div>
+                  {renderRatioBadge(g.ratio)}
+                </div>
+              ))
+            )}
+          </div>
+        }
+      >
+        <Button
+          icon={<IconPlus />}
+          theme='light'
+          type='tertiary'
+          size='small'
+        >
+          {selectedGroups.length === 0 ? t('选择分组') : t('添加分组')}
+        </Button>
+      </Popover>
+
+      {/* Hint */}
+      {selectedGroups.length > 1 && !isAutoSelected && (
+        <div style={{ marginTop: 6 }}>
+          <Text type='tertiary' size='small'>
+            {t('多个分组包含相同模型时，将按排列顺序依次尝试')}
+          </Text>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ============================================================================
+// Main Component
+// ============================================================================
 
 const EditTokenModal = (props) => {
   const { t } = useTranslation();
@@ -67,6 +281,9 @@ const EditTokenModal = (props) => {
   const formApiRef = useRef(null);
   const [models, setModels] = useState([]);
   const [groups, setGroups] = useState([]);
+  const [selectedGroups, setSelectedGroups] = useState(() =>
+    defaultUseAutoGroup ? ['auto'] : []
+  );
   const [showQuotaInput, setShowQuotaInput] = useState(false);
   const isEdit = props.editingToken.id !== undefined;
   const defaultUseAutoGroup = statusState?.status?.default_use_auto_group === true;
@@ -80,7 +297,6 @@ const EditTokenModal = (props) => {
     model_limits_enabled: false,
     model_limits: [],
     allow_ips: '',
-    group: defaultUseAutoGroup ? 'auto' : '',
     cross_group_retry: defaultUseAutoGroup,
     tokenCount: 1,
   });
@@ -170,8 +386,15 @@ const EditTokenModal = (props) => {
       data.remain_amount = Number(
         quotaToDisplayAmount(data.remain_quota || 0).toFixed(6),
       );
+      // Parse group string into selectedGroups array
+      const groupStr = data.group || '';
+      setSelectedGroups(
+        groupStr ? groupStr.split(',').map((g) => g.trim()).filter(Boolean) : []
+      );
+      // Remove group from form data since we manage it separately
+      const { group: _g, ...formData } = data;
       if (formApiRef.current) {
-        formApiRef.current.setValues({ ...getInitValues(), ...data });
+        formApiRef.current.setValues({ ...getInitValues(), ...formData });
       }
     } else {
       showError(message);
@@ -183,6 +406,7 @@ const EditTokenModal = (props) => {
     if (formApiRef.current) {
       if (!isEdit) {
         formApiRef.current.setValues(getInitValues());
+        setSelectedGroups(defaultUseAutoGroup ? ['auto'] : []);
       }
     }
     loadModels();
@@ -195,9 +419,11 @@ const EditTokenModal = (props) => {
         loadToken();
       } else {
         formApiRef.current?.setValues(getInitValues());
+        setSelectedGroups(defaultUseAutoGroup ? ['auto'] : []);
       }
     } else {
       formApiRef.current?.reset();
+      setSelectedGroups(defaultUseAutoGroup ? ['auto'] : []);
     }
   }, [props.visiable, props.editingToken.id, defaultUseAutoGroup]);
 
@@ -215,8 +441,15 @@ const EditTokenModal = (props) => {
 
   const submit = async (values) => {
     setLoading(true);
+    // Inject group from selectedGroups state
+    const groupStr = selectedGroups.join(',');
+    const isMultiGroup = selectedGroups.length > 1;
+    const isAuto = selectedGroups.length === 1 && selectedGroups[0] === 'auto';
+
     if (isEdit) {
       let { tokenCount: _tc, ...localInputs } = values;
+      localInputs.group = groupStr;
+      localInputs.cross_group_retry = isMultiGroup ? true : isAuto ? !!localInputs.cross_group_retry : false;
       localInputs.remain_quota = localInputs.unlimited_quota
         ? 0
         : displayAmountToQuota(localInputs.remain_amount);
@@ -253,6 +486,8 @@ const EditTokenModal = (props) => {
       let successCount = 0;
       for (let i = 0; i < count; i++) {
         let { tokenCount: _tc, ...localInputs } = values;
+        localInputs.group = groupStr;
+        localInputs.cross_group_retry = isMultiGroup ? true : isAuto ? !!localInputs.cross_group_retry : false;
         const baseName =
           values.name.trim() === '' ? 'default' : values.name.trim();
         if (i !== 0 || values.name.trim() === '') {
@@ -297,6 +532,7 @@ const EditTokenModal = (props) => {
     }
     setLoading(false);
     formApiRef.current?.setValues(getInitValues());
+    setSelectedGroups(defaultUseAutoGroup ? ['auto'] : []);
   };
 
   return (
@@ -381,37 +617,19 @@ const EditTokenModal = (props) => {
                     />
                   </Col>
                   <Col span={24}>
-                    {groups.length > 0 ? (
-                      <Form.Select
-                        field='group'
-                        label={t('令牌分组')}
-                        placeholder={t('令牌分组，默认为用户的分组')}
-                        optionList={groups}
-                        renderOptionItem={renderGroupOption}
-                        filter={(input, option) => {
-                          const q = input.toLowerCase();
-                          return (
-                            option.value?.toLowerCase().includes(q) ||
-                            (typeof option.label === 'string' &&
-                              option.label.toLowerCase().includes(q))
-                          );
-                        }}
-                        showClear
-                        style={{ width: '100%' }}
+                    <Form.Slot label={t('令牌分组')}>
+                      <GroupMultiPicker
+                        groups={groups}
+                        selectedGroups={selectedGroups}
+                        onChange={setSelectedGroups}
+                        t={t}
                       />
-                    ) : (
-                      <Form.Select
-                        placeholder={t('管理员未设置用户可选分组')}
-                        disabled
-                        label={t('令牌分组')}
-                        style={{ width: '100%' }}
-                      />
-                    )}
+                    </Form.Slot>
                   </Col>
                   <Col
                     span={24}
                     style={{
-                      display: values.group === 'auto' ? 'block' : 'none',
+                      display: selectedGroups.length === 1 && selectedGroups[0] === 'auto' ? 'block' : 'none',
                     }}
                   >
                     <Form.Switch

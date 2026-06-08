@@ -104,6 +104,37 @@ const renderGroupColumn = (text, record, t, groupRatios = {}) => {
       </Tooltip>
     );
   }
+  // Multi-group: show first group + count badge with tooltip
+  if (text && text.includes(',')) {
+    const groupList = text.split(',').map((g) => g.trim()).filter(Boolean);
+    const firstRatio = groupRatios[groupList[0]];
+    return (
+      <Tooltip
+        content={
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {groupList.map((g, i) => (
+              <span key={g}>{i + 1}. {g}</span>
+            ))}
+          </div>
+        }
+        position='top'
+      >
+        <span className='flex items-center gap-1'>
+          {renderGroup(groupList[0])}
+          {firstRatio !== undefined && (
+            <Tag size='small' color='green' shape='circle'>
+              {firstRatio}x
+            </Tag>
+          )}
+          {groupList.length > 1 && (
+            <Tag size='small' color='blue' shape='circle'>
+              +{groupList.length - 1}
+            </Tag>
+          )}
+        </span>
+      </Tooltip>
+    );
+  }
   const ratio = groupRatios[text];
   return (
     <span className='flex items-center gap-1'>
