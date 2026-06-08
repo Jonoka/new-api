@@ -240,7 +240,7 @@ export function ApiKeysMutateDrawer({
   const quotaPlaceholder = tokensOnly
     ? t('Enter quota in tokens')
     : t('Enter quota in {{currency}}', { currency: currencyLabel })
-  const selectedGroups = form.watch('groups')
+  const selectedGroups = form.watch('groups') ?? []
   const unlimitedQuota = form.watch('unlimited_quota')
 
   return (
