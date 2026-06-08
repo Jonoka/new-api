@@ -230,6 +230,76 @@ func TestGPT2APIVideoMultipartInputReferenceBecomesJSONImage(t *testing.T) {
 	assert.False(t, hasInputReference)
 }
 
+func TestChannel25VideoFormMapsCanvasFields(t *testing.T) {
+	values, err := parseURLEncodedForm([]byte("model=veo3.1&prompt=test&seconds=6&size=720x1280&resolution_name=720p&preset=normal"))
+	require.NoError(t, err)
+	body := formValuesToMap(values)
+	body["model"] = channel25VideoModelForRequest(&relaycommon.RelayInfo{
+		ChannelId:         25,
+		ChannelBaseUrl:    "https://img-api.xn--1ys141f4ks.com",
+		RequestURLPath:    "/v1/videos",
+		UpstreamModelName: "veo3.1",
+	}, body)
+	mapChannel25VideoJSONBody(body)
+
+	assert.Equal(t, "veo3.1-720p", body["model"])
+	assert.Equal(t, "test", body["prompt"])
+	assert.Equal(t, "6", body["seconds"])
+	assert.Equal(t, "720x1280", body["size"])
+	assert.Equal(t, "9:16", body["aspect_ratio"])
+	assert.Equal(t, 1, body["type"])
+	_, hasPreset := body["preset"]
+	assert.False(t, hasPreset)
+}
+
+func TestChannel25VideoMultipartReferencesBecomeJSONImages(t *testing.T) {
+	var formBody bytes.Buffer
+	writer := multipart.NewWriter(&formBody)
+	require.NoError(t, writer.WriteField("model", "veo3.1-components"))
+	require.NoError(t, writer.WriteField("prompt", "reference test"))
+	require.NoError(t, writer.WriteField("seconds", "4"))
+	require.NoError(t, writer.WriteField("size", "1280x720"))
+	require.NoError(t, writer.WriteField("resolution_name", "720p"))
+	require.NoError(t, writer.WriteField("reference_mode", "components"))
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Disposition", `form-data; name="input_reference[]"; filename="reference.png"`)
+	header.Set("Content-Type", "image/png")
+	part, err := writer.CreatePart(header)
+	require.NoError(t, err)
+	_, err = part.Write([]byte("fake-image-bytes"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewReader(formBody.Bytes()))
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	ctx, _ := common.NewTestContext(req)
+	ctx.Set(common.KeyRequestBody, formBody.Bytes())
+
+	adaptor := &TaskAdaptor{}
+	bodyReader, err := adaptor.BuildRequestBody(ctx, &relaycommon.RelayInfo{
+		ChannelId:         25,
+		ChannelBaseUrl:    "https://img-api.xn--1ys141f4ks.com",
+		RequestURLPath:    "/v1/videos",
+		UpstreamModelName: "veo3.1-components",
+	})
+	require.NoError(t, err)
+	payload, err := io.ReadAll(bodyReader)
+	require.NoError(t, err)
+
+	assert.Equal(t, "application/json", ctx.Request.Header.Get("Content-Type"))
+	var got map[string]any
+	require.NoError(t, common.Unmarshal(payload, &got))
+	assert.Equal(t, "veo3.1-components-720p", got["model"])
+	assert.Equal(t, "16:9", got["aspect_ratio"])
+	assert.Equal(t, 3, got["type"])
+	image, _ := got["image"].(string)
+	assert.True(t, strings.HasPrefix(image, "data:image/png;base64,"))
+	images := got["images"].([]any)
+	assert.Len(t, images, 1)
+	_, hasInputReference := got["input_reference"]
+	assert.False(t, hasInputReference)
+}
+
 func TestConvertToOpenAIVideoNormalizesVideoStatusAndStripsUsage(t *testing.T) {
 	adaptor := &TaskAdaptor{}
 	body, err := adaptor.ConvertToOpenAIVideo(&model.Task{

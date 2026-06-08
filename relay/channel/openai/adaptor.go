@@ -2,6 +2,7 @@ package openai
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -167,6 +169,9 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 			info.RelayMode != relayconstant.RelayModeResponses &&
 			info.RelayMode != relayconstant.RelayModeResponsesCompact {
 			return fmt.Sprintf("%s/v1/chat/completions", info.ChannelBaseUrl), nil
+		}
+		if shouldRouteChannel25ImageEditToGenerations(info) {
+			return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, "/v1/images/generations", info.ChannelType), nil
 		}
 		return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, info.RequestURLPath, info.ChannelType), nil
 	}
@@ -433,6 +438,9 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		request.MapOpenAIImageQualityToGPT2APITier()
 		request.MapGPT2APIImageSize(modelName)
 	}
+	if shouldUseChannel25ImageMapping(info) {
+		return convertChannel25ImageRequest(c, info, request)
+	}
 	logChannel23ImageUpstreamParams(c, info, request)
 	switch info.RelayMode {
 	case relayconstant.RelayModeImagesEdits:
@@ -576,6 +584,183 @@ func shouldDefaultOpenAIImageRequestToSync(info *relaycommon.RelayInfo, request 
 	}
 	modelName := strings.ToLower(strings.TrimSpace(firstNonEmpty(info.UpstreamModelName, info.OriginModelName, request.Model)))
 	return modelName == "gpt-image-2"
+}
+
+func shouldUseChannel25ImageMapping(info *relaycommon.RelayInfo) bool {
+	if info == nil || (info.RelayMode != relayconstant.RelayModeImagesGenerations && info.RelayMode != relayconstant.RelayModeImagesEdits) {
+		return false
+	}
+	base := strings.ToLower(strings.TrimSpace(info.ChannelBaseUrl))
+	if info.ChannelMeta != nil && info.ChannelMeta.ChannelId == 25 {
+		return true
+	}
+	return strings.Contains(base, "xn--1ys141f4ks.com")
+}
+
+func shouldRouteChannel25ImageEditToGenerations(info *relaycommon.RelayInfo) bool {
+	return shouldUseChannel25ImageMapping(info) && info.RelayMode == relayconstant.RelayModeImagesEdits
+}
+
+func convertChannel25ImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
+	request.Model = firstNonEmpty(info.UpstreamModelName, info.OriginModelName, request.Model)
+	if request.Model == "" {
+		request.Model = info.UpstreamModelName
+	}
+	if request.ResponseFormat == "" {
+		request.ResponseFormat = "b64_json"
+	}
+	if info.RelayMode == relayconstant.RelayModeImagesEdits && !isJSONRequest(c) {
+		imageDataURL, err := firstImageFileDataURL(c)
+		if err != nil {
+			return nil, err
+		}
+		if imageDataURL != "" {
+			encoded, err := common.Marshal(imageDataURL)
+			if err != nil {
+				return nil, err
+			}
+			request.Image = encoded
+		}
+	}
+	bodyBytes, err := common.Marshal(request)
+	if err != nil {
+		return nil, err
+	}
+	var bodyMap map[string]any
+	if err := common.Unmarshal(bodyBytes, &bodyMap); err != nil {
+		return nil, err
+	}
+	applyChannel25GeminiImageConfig(bodyMap, request.Model, request.Size, request.Quality)
+	return bodyMap, nil
+}
+
+func applyChannel25GeminiImageConfig(bodyMap map[string]any, modelName string, size string, quality string) {
+	if bodyMap == nil || !isChannel25GeminiImageModel(modelName) {
+		return
+	}
+	ratio := imageAspectRatioString(size)
+	imageSize := channel25GeminiImageSizeTier(modelName, quality)
+	if ratio == "" && imageSize == "" && size == "" {
+		return
+	}
+	imageConfig := map[string]any{}
+	if ratio != "" {
+		imageConfig["aspect_ratio"] = ratio
+	}
+	if imageSize != "" {
+		imageConfig["image_size"] = imageSize
+	}
+	if size != "" {
+		imageConfig["size"] = size
+	}
+	bodyMap["extra_body"] = map[string]any{
+		"google": map[string]any{
+			"image_config": imageConfig,
+		},
+	}
+}
+
+func isChannel25GeminiImageModel(modelName string) bool {
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	return strings.HasPrefix(modelName, "gemini_3.") && strings.Contains(modelName, "image_preview")
+}
+
+func channel25GeminiImageSizeTier(modelName string, quality string) string {
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	if strings.Contains(modelName, "4k") {
+		return "4K"
+	}
+	switch strings.ToLower(strings.TrimSpace(quality)) {
+	case "high", "4k", "ultra":
+		return "4K"
+	case "medium", "2k", "hd":
+		return "2K"
+	case "low", "1k":
+		return "1K"
+	default:
+		return ""
+	}
+}
+
+func imageAspectRatioString(size string) string {
+	size = strings.TrimSpace(strings.ToLower(size))
+	if size == "" || size == "auto" {
+		return ""
+	}
+	parts := strings.Split(size, "x")
+	if len(parts) != 2 {
+		return ""
+	}
+	w, errW := strconv.Atoi(strings.TrimSpace(parts[0]))
+	h, errH := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if errW != nil || errH != nil || w <= 0 || h <= 0 {
+		return ""
+	}
+	divisor := gcdInt(w, h)
+	return fmt.Sprintf("%d:%d", w/divisor, h/divisor)
+}
+
+func gcdInt(a, b int) int {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	if a < 0 {
+		return -a
+	}
+	if a == 0 {
+		return 1
+	}
+	return a
+}
+
+func firstImageFileDataURL(c *gin.Context) (string, error) {
+	mf := c.Request.MultipartForm
+	if mf == nil {
+		if _, err := c.MultipartForm(); err != nil {
+			return "", errors.New("failed to parse multipart form")
+		}
+		mf = c.Request.MultipartForm
+	}
+	if mf == nil || mf.File == nil {
+		return "", nil
+	}
+	for _, fieldName := range []string{"image", "image[]", "input_reference[]", "input_reference"} {
+		if files := mf.File[fieldName]; len(files) > 0 {
+			return imageFileHeaderToDataURL(files[0])
+		}
+	}
+	for fieldName, files := range mf.File {
+		if strings.HasPrefix(fieldName, "image[") && len(files) > 0 {
+			return imageFileHeaderToDataURL(files[0])
+		}
+	}
+	return "", nil
+}
+
+func imageFileHeaderToDataURL(fileHeader *multipart.FileHeader) (string, error) {
+	if fileHeader == nil {
+		return "", nil
+	}
+	file, err := fileHeader.Open()
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return "", err
+	}
+	if len(data) == 0 {
+		return "", nil
+	}
+	mimeType := fileHeader.Header.Get("Content-Type")
+	if mimeType == "" || mimeType == "application/octet-stream" {
+		mimeType = http.DetectContentType(data)
+	}
+	if mimeType == "" {
+		mimeType = detectImageMimeType(fileHeader.Filename)
+	}
+	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
 
 func shouldMapOpenAIImageQualityToGPT2APITier(info *relaycommon.RelayInfo, request dto.ImageRequest) bool {

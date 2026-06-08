@@ -205,6 +205,94 @@ func TestConvertImageRequestDoesNotAddAsyncForOtherModels(t *testing.T) {
 	assert.False(t, exists)
 }
 
+func TestChannel25ImageEditRoutesToGenerations(t *testing.T) {
+	adaptor := &Adaptor{}
+	url, err := adaptor.GetRequestURL(&relaycommon.RelayInfo{
+		RelayMode:      relayconstant.RelayModeImagesEdits,
+		RequestURLPath: "/v1/images/edits",
+		ChannelBaseUrl: "https://img-api.xn--1ys141f4ks.com",
+		ChannelType:    constant.ChannelTypeOpenAI,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId: 25,
+			ApiType:   constant.APITypeOpenAI,
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://img-api.xn--1ys141f4ks.com/v1/images/generations", url)
+}
+
+func TestConvertChannel25GeminiImageRequestAddsGoogleImageConfig(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"gemini_3.1_flash_image_preview_4K","prompt":"test"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	adaptor := &Adaptor{}
+	converted, err := adaptor.ConvertImageRequest(c, &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeImagesGenerations,
+		RequestURLPath:  "/v1/images/generations",
+		ChannelBaseUrl:  "https://img-api.xn--1ys141f4ks.com",
+		OriginModelName: "gemini_3.1_flash_image_preview_4K",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:         25,
+			ApiType:           constant.APITypeOpenAI,
+			UpstreamModelName: "gemini_3.1_flash_image_preview_4K",
+		},
+	}, dto.ImageRequest{Model: "gemini_3.1_flash_image_preview_4K", Prompt: "test", Size: "3840x2160", Quality: "high"})
+
+	require.NoError(t, err)
+	body, err := json.Marshal(converted)
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(body, &got))
+	assert.Equal(t, "gemini_3.1_flash_image_preview_4K", got["model"])
+	assert.Equal(t, "b64_json", got["response_format"])
+	extraBody := got["extra_body"].(map[string]any)
+	google := extraBody["google"].(map[string]any)
+	imageConfig := google["image_config"].(map[string]any)
+	assert.Equal(t, "16:9", imageConfig["aspect_ratio"])
+	assert.Equal(t, "4K", imageConfig["image_size"])
+	assert.Equal(t, "3840x2160", imageConfig["size"])
+}
+
+func TestConvertChannel25ImageEditMultipartUsesDataURLImage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	require.NoError(t, writer.WriteField("model", "gpt-image-2"))
+	require.NoError(t, writer.WriteField("prompt", "edit test"))
+	part, err := writer.CreateFormFile("image", "input.png")
+	require.NoError(t, err)
+	_, _ = part.Write([]byte("png"))
+	require.NoError(t, writer.Close())
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", &buf)
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+	require.NoError(t, c.Request.ParseMultipartForm(32<<20))
+	adaptor := &Adaptor{}
+	converted, err := adaptor.ConvertImageRequest(c, &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeImagesEdits,
+		RequestURLPath:  "/v1/images/edits",
+		ChannelBaseUrl:  "https://img-api.xn--1ys141f4ks.com",
+		OriginModelName: "gpt-image-2",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:         25,
+			ApiType:           constant.APITypeOpenAI,
+			UpstreamModelName: "gpt-image-2",
+		},
+	}, dto.ImageRequest{Model: "gpt-image-2", Prompt: "edit test"})
+
+	require.NoError(t, err)
+	body, err := json.Marshal(converted)
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(body, &got))
+	assert.Equal(t, "gpt-image-2", got["model"])
+	image, _ := got["image"].(string)
+	assert.True(t, strings.HasPrefix(image, "data:image/png;base64,"))
+}
+
 func TestOpenaiHandlerWithUsageConvertsURLToB64WhenRequested(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	imageServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

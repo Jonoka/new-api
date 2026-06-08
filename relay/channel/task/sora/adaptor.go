@@ -176,9 +176,12 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	if strings.HasPrefix(contentType, "application/json") {
 		var bodyMap map[string]interface{}
 		if err := common.Unmarshal(cachedBody, &bodyMap); err == nil {
-			bodyMap["model"] = info.UpstreamModelName
+			bodyMap["model"] = channel25VideoModelForRequest(info, bodyMap)
 			if shouldUseGPT2APIVideoGenerations(info) {
+				bodyMap["model"] = info.UpstreamModelName
 				mapGPT2APIVideoJSONBody(bodyMap)
+			} else if shouldUseChannel25VideoMapping(info) {
+				mapChannel25VideoJSONBody(bodyMap)
 			}
 			if newBody, err := common.Marshal(bodyMap); err == nil {
 				return bytes.NewReader(newBody), nil
@@ -199,12 +202,25 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 		}
 	}
 
+	if strings.HasPrefix(contentType, "application/x-www-form-urlencoded") && shouldUseChannel25VideoMapping(info) {
+		if values, err := parseURLEncodedForm(cachedBody); err == nil {
+			bodyMap := formValuesToMap(values)
+			bodyMap["model"] = channel25VideoModelForRequest(info, bodyMap)
+			mapChannel25VideoJSONBody(bodyMap)
+			if newBody, err := common.Marshal(bodyMap); err == nil {
+				c.Request.Header.Set("Content-Type", "application/json")
+				return bytes.NewReader(newBody), nil
+			}
+		}
+	}
+
 	if strings.Contains(contentType, "multipart/form-data") {
 		formData, err := common.ParseMultipartFormReusable(c)
 		if err != nil {
 			return bytes.NewReader(cachedBody), nil
 		}
 		gpt2apiVideo := shouldUseGPT2APIVideoGenerations(info)
+		channel25Video := shouldUseChannel25VideoMapping(info)
 		if gpt2apiVideo {
 			bodyMap := formValuesToMap(formData.Value)
 			bodyMap["model"] = info.UpstreamModelName
@@ -212,6 +228,18 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 				return nil, err
 			}
 			mapGPT2APIVideoJSONBody(bodyMap)
+			if newBody, err := common.Marshal(bodyMap); err == nil {
+				c.Request.Header.Set("Content-Type", "application/json")
+				return bytes.NewReader(newBody), nil
+			}
+		}
+		if channel25Video {
+			bodyMap := formValuesToMap(formData.Value)
+			bodyMap["model"] = channel25VideoModelForRequest(info, bodyMap)
+			if err := addChannel25VideoReferenceFiles(bodyMap, formData.File); err != nil {
+				return nil, err
+			}
+			mapChannel25VideoJSONBody(bodyMap)
 			if newBody, err := common.Marshal(bodyMap); err == nil {
 				c.Request.Header.Set("Content-Type", "application/json")
 				return bytes.NewReader(newBody), nil
@@ -297,6 +325,197 @@ func isGPT2APIVideoGenerationsModel(modelName string) bool {
 	default:
 		return false
 	}
+}
+
+func shouldUseChannel25VideoMapping(info *relaycommon.RelayInfo) bool {
+	if info == nil || info.Action == constant.TaskActionRemix {
+		return false
+	}
+	requestPath := strings.Split(strings.TrimSpace(info.RequestURLPath), "?")[0]
+	if !strings.HasPrefix(requestPath, "/v1/videos") {
+		return false
+	}
+	base := strings.ToLower(strings.TrimSpace(info.ChannelBaseUrl))
+	if info.ChannelId != 25 && !strings.Contains(base, "xn--1ys141f4ks.com") {
+		return false
+	}
+	return isChannel25VideoModel(strings.ToLower(strings.TrimSpace(info.UpstreamModelName)))
+}
+
+func isChannel25VideoModel(modelName string) bool {
+	if modelName == "sora-2" {
+		return true
+	}
+	return strings.HasPrefix(modelName, "veo3.1")
+}
+
+func channel25VideoModelForRequest(info *relaycommon.RelayInfo, bodyMap map[string]interface{}) string {
+	modelName := ""
+	if info != nil {
+		modelName = strings.TrimSpace(info.UpstreamModelName)
+	}
+	if modelName == "" && bodyMap != nil {
+		modelName, _ = firstStringLike(bodyMap["model"])
+	}
+	if bodyMap == nil {
+		return modelName
+	}
+	resolution, _ := firstStringLike(bodyMap["resolution_name"])
+	return channel25VideoModelForResolution(modelName, resolution)
+}
+
+func channel25VideoModelForResolution(modelName string, resolution string) string {
+	modelName = strings.TrimSpace(modelName)
+	if !strings.HasPrefix(strings.ToLower(modelName), "veo3.1") {
+		return modelName
+	}
+	resolution = strings.ToLower(strings.TrimSpace(resolution))
+	if resolution == "720p" || resolution == "hd" {
+		if !strings.HasSuffix(strings.ToLower(modelName), "-720p") {
+			return modelName + "-720p"
+		}
+		return modelName
+	}
+	if resolution == "1080p" || resolution == "fullhd" || resolution == "full_hd" || resolution == "fhd" {
+		return strings.TrimSuffix(modelName, "-720p")
+	}
+	return modelName
+}
+
+func mapChannel25VideoJSONBody(bodyMap map[string]interface{}) {
+	if bodyMap == nil {
+		return
+	}
+	if _, ok := bodyMap["aspect_ratio"]; !ok {
+		if ratio, ok := firstStringLike(bodyMap["ratio"]); ok && ratio != "" {
+			bodyMap["aspect_ratio"] = ratio
+		} else if size, ok := firstStringLike(bodyMap["size"]); ok {
+			if ratio := videoRatioFromSize(size); ratio != "" {
+				bodyMap["aspect_ratio"] = ratio
+			}
+		}
+	}
+	mergeChannel25FrameFields(bodyMap)
+	if _, ok := bodyMap["type"]; !ok {
+		if videoType, ok := firstStringLike(bodyMap["video_type"]); ok && videoType != "" {
+			bodyMap["type"] = videoType
+		} else {
+			bodyMap["type"] = channel25VideoType(bodyMap)
+		}
+	}
+	delete(bodyMap, "ratio")
+	delete(bodyMap, "resolution_name")
+	delete(bodyMap, "preset")
+	delete(bodyMap, "video_type")
+	delete(bodyMap, "reference_mode")
+}
+
+func channel25VideoType(bodyMap map[string]interface{}) int {
+	mode, _ := firstStringLike(bodyMap["reference_mode"])
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	modelName, _ := firstStringLike(bodyMap["model"])
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	if mode == "components" || mode == "reference" || strings.Contains(modelName, "components") {
+		return 3
+	}
+	if channel25HasReferenceImage(bodyMap) {
+		return 2
+	}
+	return 1
+}
+
+func channel25HasReferenceImage(bodyMap map[string]interface{}) bool {
+	for _, key := range []string{"image", "images", "input_reference", "input_reference[]", "first_frame", "last_frame", "reference_images", "reference_images[]"} {
+		if v, ok := bodyMap[key]; ok && hasNonEmptyValue(v) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasNonEmptyValue(v interface{}) bool {
+	switch value := v.(type) {
+	case string:
+		return strings.TrimSpace(value) != ""
+	case []string:
+		return len(value) > 0
+	case []interface{}:
+		return len(value) > 0
+	default:
+		return v != nil
+	}
+}
+
+func mergeChannel25FrameFields(bodyMap map[string]interface{}) {
+	if bodyMap == nil {
+		return
+	}
+	var images []string
+	for _, key := range []string{"first_frame", "last_frame", "reference_images", "reference_images[]", "input_reference", "input_reference[]"} {
+		if v, ok := bodyMap[key]; ok {
+			images = appendStringValues(images, v)
+		}
+	}
+	if len(images) > 0 {
+		if _, hasImage := bodyMap["image"]; !hasImage {
+			bodyMap["image"] = images[0]
+		}
+		if _, hasImages := bodyMap["images"]; !hasImages {
+			bodyMap["images"] = images
+		}
+	}
+	delete(bodyMap, "first_frame")
+	delete(bodyMap, "last_frame")
+	delete(bodyMap, "reference_images")
+	delete(bodyMap, "reference_images[]")
+	delete(bodyMap, "input_reference")
+	delete(bodyMap, "input_reference[]")
+}
+
+func appendStringValues(dst []string, v interface{}) []string {
+	switch value := v.(type) {
+	case string:
+		if strings.TrimSpace(value) != "" {
+			dst = append(dst, value)
+		}
+	case []string:
+		for _, item := range value {
+			if strings.TrimSpace(item) != "" {
+				dst = append(dst, item)
+			}
+		}
+	case []interface{}:
+		for _, item := range value {
+			if text, ok := firstStringLike(item); ok && strings.TrimSpace(text) != "" {
+				dst = append(dst, text)
+			}
+		}
+	}
+	return dst
+}
+
+func addChannel25VideoReferenceFiles(bodyMap map[string]interface{}, files map[string][]*multipart.FileHeader) error {
+	if bodyMap == nil || len(files) == 0 {
+		return nil
+	}
+	var images []string
+	for _, fieldName := range []string{"input_reference[]", "input_reference", "image", "images", "images[]", "first_frame", "last_frame", "reference_images[]", "reference_images"} {
+		for _, fh := range files[fieldName] {
+			dataURL, err := multipartFileHeaderToDataURL(fh)
+			if err != nil {
+				return err
+			}
+			if dataURL != "" {
+				images = append(images, dataURL)
+			}
+		}
+	}
+	if len(images) == 0 {
+		return nil
+	}
+	bodyMap["image"] = images[0]
+	bodyMap["images"] = images
+	return nil
 }
 
 func mapGPT2APIVideoJSONBody(bodyMap map[string]interface{}) {
