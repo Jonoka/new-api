@@ -550,7 +550,10 @@ func buildChannel25VideoMappedBodyForBilling(c *gin.Context, info *relaycommon.R
 	if err != nil {
 		return nil, false, err
 	}
-	cachedBody := storage.GetBody()
+	cachedBody, err := storage.Bytes()
+	if err != nil {
+		return nil, false, err
+	}
 	contentType := c.GetHeader("Content-Type")
 	if strings.HasPrefix(contentType, "application/json") {
 		var bodyMap map[string]interface{}
@@ -572,7 +575,7 @@ func buildChannel25VideoMappedBodyForBilling(c *gin.Context, info *relaycommon.R
 		return bodyMap, true, nil
 	}
 	if strings.HasPrefix(contentType, "multipart/form-data") {
-		formData, err := parseMultipartForm(c.Request, cachedBody)
+		formData, err := common.ParseMultipartFormReusable(c)
 		if err != nil {
 			return nil, false, err
 		}
