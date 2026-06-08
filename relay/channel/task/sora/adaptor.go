@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/pkg/imageutil"
 	"github.com/QuantumNous/new-api/relay/channel"
 	taskcommon "github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
@@ -77,6 +78,32 @@ func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 	a.ChannelType = info.ChannelType
 	a.baseURL = info.ChannelBaseUrl
 	a.apiKey = info.ApiKey
+}
+
+func (a *TaskAdaptor) PrepareBillingRequestInput(c *gin.Context, info *relaycommon.RelayInfo) error {
+	if !shouldUseChannel25VideoMapping(info) {
+		return nil
+	}
+	bodyMap, ok, err := buildChannel25VideoMappedBodyForBilling(c, info)
+	if err != nil || !ok {
+		return err
+	}
+	bodyBytes, err := common.Marshal(bodyMap)
+	if err != nil {
+		return err
+	}
+	headers := map[string]string{"Content-Type": "application/json"}
+	if info != nil {
+		for k, v := range info.RequestHeaders {
+			headers[k] = v
+		}
+	}
+	headers["Content-Type"] = "application/json"
+	info.BillingRequestInput = &billingexpr.RequestInput{
+		Headers: headers,
+		Body:    bodyBytes,
+	}
+	return nil
 }
 
 func validateRemixRequest(c *gin.Context) *dto.TaskError {
@@ -516,6 +543,48 @@ func addChannel25VideoReferenceFiles(bodyMap map[string]interface{}, files map[s
 	bodyMap["image"] = images[0]
 	bodyMap["images"] = images
 	return nil
+}
+
+func buildChannel25VideoMappedBodyForBilling(c *gin.Context, info *relaycommon.RelayInfo) (map[string]interface{}, bool, error) {
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return nil, false, err
+	}
+	cachedBody := storage.GetBody()
+	contentType := c.GetHeader("Content-Type")
+	if strings.HasPrefix(contentType, "application/json") {
+		var bodyMap map[string]interface{}
+		if err := common.Unmarshal(cachedBody, &bodyMap); err != nil {
+			return nil, false, err
+		}
+		bodyMap["model"] = channel25VideoModelForRequest(info, bodyMap)
+		mapChannel25VideoJSONBody(bodyMap)
+		return bodyMap, true, nil
+	}
+	if strings.HasPrefix(contentType, "application/x-www-form-urlencoded") {
+		values, err := parseURLEncodedForm(cachedBody)
+		if err != nil {
+			return nil, false, err
+		}
+		bodyMap := formValuesToMap(values)
+		bodyMap["model"] = channel25VideoModelForRequest(info, bodyMap)
+		mapChannel25VideoJSONBody(bodyMap)
+		return bodyMap, true, nil
+	}
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		formData, err := parseMultipartForm(c.Request, cachedBody)
+		if err != nil {
+			return nil, false, err
+		}
+		bodyMap := formValuesToMap(formData.Value)
+		bodyMap["model"] = channel25VideoModelForRequest(info, bodyMap)
+		if err := addChannel25VideoReferenceFiles(bodyMap, formData.File); err != nil {
+			return nil, false, err
+		}
+		mapChannel25VideoJSONBody(bodyMap)
+		return bodyMap, true, nil
+	}
+	return nil, false, nil
 }
 
 func mapGPT2APIVideoJSONBody(bodyMap map[string]interface{}) {

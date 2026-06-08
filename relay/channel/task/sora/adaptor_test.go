@@ -276,12 +276,13 @@ func TestChannel25VideoMultipartReferencesBecomeJSONImages(t *testing.T) {
 	ctx.Set(common.KeyRequestBody, formBody.Bytes())
 
 	adaptor := &TaskAdaptor{}
-	bodyReader, err := adaptor.BuildRequestBody(ctx, &relaycommon.RelayInfo{
+	info := &relaycommon.RelayInfo{
 		ChannelId:         25,
 		ChannelBaseUrl:    "https://img-api.xn--1ys141f4ks.com",
 		RequestURLPath:    "/v1/videos",
 		UpstreamModelName: "veo3.1-components",
-	})
+	}
+	bodyReader, err := adaptor.BuildRequestBody(ctx, info)
 	require.NoError(t, err)
 	payload, err := io.ReadAll(bodyReader)
 	require.NoError(t, err)
@@ -298,6 +299,40 @@ func TestChannel25VideoMultipartReferencesBecomeJSONImages(t *testing.T) {
 	assert.Len(t, images, 1)
 	_, hasInputReference := got["input_reference"]
 	assert.False(t, hasInputReference)
+}
+
+func TestChannel25VideoPrepareBillingRequestInputUsesMappedJSON(t *testing.T) {
+	var formBody bytes.Buffer
+	writer := multipart.NewWriter(&formBody)
+	require.NoError(t, writer.WriteField("model", "veo3.1-components"))
+	require.NoError(t, writer.WriteField("prompt", "billing test"))
+	require.NoError(t, writer.WriteField("seconds", "6"))
+	require.NoError(t, writer.WriteField("size", "1280x720"))
+	require.NoError(t, writer.WriteField("resolution_name", "720p"))
+	require.NoError(t, writer.WriteField("reference_mode", "components"))
+	require.NoError(t, writer.Close())
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewReader(formBody.Bytes()))
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	ctx, _ := common.NewTestContext(req)
+	ctx.Set(common.KeyRequestBody, formBody.Bytes())
+
+	adaptor := &TaskAdaptor{}
+	info := &relaycommon.RelayInfo{
+		ChannelId:         25,
+		ChannelBaseUrl:    "https://img-api.xn--1ys141f4ks.com",
+		RequestURLPath:    "/v1/videos",
+		UpstreamModelName: "veo3.1-components",
+	}
+	require.NoError(t, adaptor.PrepareBillingRequestInput(ctx, info))
+	require.NotNil(t, info.BillingRequestInput)
+	assert.Equal(t, "application/json", info.BillingRequestInput.Headers["Content-Type"])
+	var got map[string]any
+	require.NoError(t, common.Unmarshal(info.BillingRequestInput.Body, &got))
+	assert.Equal(t, "veo3.1-components-720p", got["model"])
+	assert.Equal(t, "6", got["seconds"])
+	assert.Equal(t, "16:9", got["aspect_ratio"])
+	assert.Equal(t, 3, got["type"])
 }
 
 func TestConvertToOpenAIVideoNormalizesVideoStatusAndStripsUsage(t *testing.T) {

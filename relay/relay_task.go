@@ -179,6 +179,11 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 
 	// 4. 价格计算：基础模型价格
 	info.OriginModelName = modelName
+	if billingPreparer, ok := adaptor.(channel.BillingRequestInputPreparer); ok {
+		if err := billingPreparer.PrepareBillingRequestInput(c, info); err != nil {
+			return nil, service.TaskErrorWrapper(err, "prepare_billing_request_failed", http.StatusBadRequest)
+		}
+	}
 	priceData, err := helper.ModelPriceHelperPerCall(c, info)
 	if err != nil {
 		return nil, service.TaskErrorWrapper(err, "model_price_error", http.StatusBadRequest)

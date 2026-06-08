@@ -81,3 +81,7 @@ type TaskAdaptor interface {
 type OpenAIVideoConverter interface {
 	ConvertToOpenAIVideo(originTask *model.Task) ([]byte, error)
 }
+
+type BillingRequestInputPreparer interface {
+	PrepareBillingRequestInput(c *gin.Context, info *relaycommon.RelayInfo) error
+}
