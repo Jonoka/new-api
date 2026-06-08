@@ -949,7 +949,7 @@ export default function RequestRateLimit(props) {
                   <div style={{ marginTop: 8 }}>
                     <Text type='tertiary' size='small'>
                       {t(
-                        '分组速率配置优先级高于全局速率限制。限制周期统一使用上方配置的”限制周期”值。',
+                        '分组速率配置优先级高于全局速率限制，限制周期统一使用上方配置的限制周期值。',
                       )}
                     </Text>
                   </div>

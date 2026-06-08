@@ -680,7 +680,7 @@
     "分组设置使用说明": "Group Settings Guide",
     "分组是用于控制计费倍率和模型访问权限的核心概念。每个用户属于一个分组，每个令牌也可以指定使用某个分组。": "Groups are a core concept for controlling billing ratios and model access. Each user belongs to a group, and each token can be assigned to a specific group.",
     "分组速率配置优先级高于全局速率限制。": "Group rate configuration priority is higher than global rate limit.",
-    "分组速率配置优先级高于全局速率限制。限制周期统一使用上方配置的"限制周期"值。": "Group rate limit takes priority over global rate limit. The rate limit period uses the configured value above.",
+    "分组速率配置优先级高于全局速率限制，限制周期统一使用上方配置的限制周期值。": "Group rate limit overrides the global limit. Rate period uses the configured value above.",
     "分组速率限制": "Group rate limit",
     "请输入分组名称": "Please enter a group name",
     "分组特殊倍率": "Group special ratio",
