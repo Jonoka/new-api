@@ -173,6 +173,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			// 单候选分组：直接路由，不需要分组间 failover
 			channel, err = model.GetRandomSatisfiedChannelWithExclusions(candidateGroups[0], param.ModelName, param.GetRetry(), param.ExcludedChannelIDs)
 			selectGroup = candidateGroups[0]
+			common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroup, candidateGroups[0])
 			if err != nil {
 				return nil, selectGroup, err
 			}

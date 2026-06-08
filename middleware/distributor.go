@@ -219,6 +219,10 @@ func Distribute() func(c *gin.Context) {
 		} else {
 			common.SetContextKey(c, constant.ContextKeySelectedChannelGroup, usingGroup)
 		}
+		// 多分组令牌：将 UsingGroup 更新为实际命中的分组，确保日志和计费使用正确的分组
+		if selectGroup != "" && strings.Contains(usingGroup, ",") {
+			common.SetContextKey(c, constant.ContextKeyUsingGroup, selectGroup)
+		}
 		common.SetContextKey(c, constant.ContextKeyOriginalModel, modelRequest.Model)
 		if channel != nil {
 			common.SetContextKey(c, constant.ContextKeySelectedChannel, channel)
