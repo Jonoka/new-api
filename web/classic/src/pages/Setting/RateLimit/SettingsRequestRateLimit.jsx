@@ -68,6 +68,203 @@ function normalizeLimitPair(value, fallback = [0, 1]) {
   ];
 }
 
+function normalizeGroupRateLimit(value) {
+  const raw = parseJSONSafe(value, {});
+  const result = {};
+  Object.entries(raw).forEach(([groupName, limits]) => {
+    if (!groupName) return;
+    result[groupName] = normalizeLimitPair(limits);
+  });
+  return result;
+}
+
+function serializeGroupRateLimit(config) {
+  const result = {};
+  Object.entries(config).forEach(([groupName, limits]) => {
+    if (!groupName) return;
+    result[groupName] = normalizeLimitPair(limits);
+  });
+  return Object.keys(result).length === 0
+    ? ''
+    : JSON.stringify(result, null, 2);
+}
+
+function GroupRateLimitRules({ value, onChange }) {
+  const { t } = useTranslation();
+  const [config, setConfig] = useState(() => normalizeGroupRateLimit(value));
+  const [newGroupName, setNewGroupName] = useState('');
+
+  useEffect(() => {
+    setConfig(normalizeGroupRateLimit(value));
+  }, [value]);
+
+  const emitChange = useCallback(
+    (nextConfig) => {
+      setConfig(nextConfig);
+      onChange?.(serializeGroupRateLimit(nextConfig));
+    },
+    [onChange],
+  );
+
+  const setLimit = useCallback(
+    (groupName, limits) => {
+      const nextConfig = { ...config };
+      nextConfig[groupName] = normalizeLimitPair(limits);
+      emitChange(nextConfig);
+    },
+    [config, emitChange],
+  );
+
+  const renameGroup = useCallback(
+    (oldName, newName) => {
+      const name = String(newName || '').trim();
+      if (!name || name === oldName) return;
+      if (config[name]) {
+        showWarning(t('该分组已存在'));
+        return;
+      }
+      const nextConfig = {};
+      Object.entries(config).forEach(([k, v]) => {
+        nextConfig[k === oldName ? name : k] = v;
+      });
+      emitChange(nextConfig);
+    },
+    [config, emitChange, t],
+  );
+
+  const removeGroup = useCallback(
+    (groupName) => {
+      const nextConfig = { ...config };
+      delete nextConfig[groupName];
+      emitChange(nextConfig);
+    },
+    [config, emitChange],
+  );
+
+  const addGroup = useCallback(() => {
+    const name = String(newGroupName || '').trim();
+    if (!name) {
+      showWarning(t('请输入分组名称'));
+      return;
+    }
+    if (config[name]) {
+      showWarning(t('该分组已存在'));
+      return;
+    }
+    const nextConfig = { ...config };
+    nextConfig[name] = [0, 1];
+    emitChange(nextConfig);
+    setNewGroupName('');
+  }, [config, emitChange, newGroupName, t]);
+
+  const groupOptions = useMemo(
+    () => Object.keys(config).map((name) => ({ value: name, label: name })),
+    [config],
+  );
+
+  const entries = Object.entries(config);
+
+  return (
+    <div className='space-y-3'>
+      {entries.length === 0 ? (
+        <Text type='tertiary' className='block py-4 text-center'>
+          {t('暂无分组规则，点击下方按钮添加')}
+        </Text>
+      ) : (
+        entries.map(([groupName, limits]) => (
+          <div
+            key={groupName}
+            className='flex flex-wrap items-center gap-2'
+            style={{
+              border: '1px solid var(--semi-color-border)',
+              borderRadius: 6,
+              padding: 8,
+            }}
+          >
+            <Select
+              size='small'
+              filter
+              allowCreate
+              placeholder={t('分组名称')}
+              value={groupName}
+              optionList={groupOptions}
+              style={{ minWidth: 180, flex: 1 }}
+              position='bottomLeft'
+              onChange={(nextName) => renameGroup(groupName, nextName)}
+            />
+            <InputNumber
+              size='small'
+              min={0}
+              max={2147483647}
+              value={limits[0]}
+              suffix={t('次')}
+              style={{ width: 150 }}
+              onChange={(v) =>
+                setLimit(groupName, [Number(v) || 0, limits[1]])
+              }
+            />
+            <InputNumber
+              size='small'
+              min={1}
+              max={2147483647}
+              value={limits[1]}
+              suffix={t('成功次')}
+              style={{ width: 150 }}
+              onChange={(v) =>
+                setLimit(groupName, [
+                  limits[0],
+                  Math.max(1, Number(v) || 1),
+                ])
+              }
+            />
+            <Popconfirm
+              title={t('确认删除该分组？')}
+              onConfirm={() => removeGroup(groupName)}
+              position='left'
+            >
+              <Button
+                icon={<IconDelete />}
+                type='danger'
+                theme='borderless'
+                size='small'
+              />
+            </Popconfirm>
+          </div>
+        ))
+      )}
+      <div className='mt-3 flex flex-wrap justify-center gap-2'>
+        <Select
+          size='small'
+          filter
+          allowCreate
+          placeholder={t('输入分组名称')}
+          value={newGroupName || undefined}
+          optionList={groupOptions}
+          onChange={setNewGroupName}
+          style={{ width: 220 }}
+          position='bottomLeft'
+        />
+        <Button icon={<IconPlus />} theme='outline' onClick={addGroup}>
+          {t('添加分组')}
+        </Button>
+      </div>
+      <div
+        style={{
+          border: '1px solid var(--semi-color-border)',
+          borderRadius: 6,
+          padding: 12,
+          background: 'var(--semi-color-fill-0)',
+        }}
+      >
+        <Text strong>{t('JSON 预览')}</Text>
+        <pre style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
+          {serializeGroupRateLimit(config) || '{}'}
+        </pre>
+      </div>
+    </div>
+  );
+}
+
 function normalizeUserGroupRateLimit(value) {
   const raw = parseJSONSafe(value, {});
   const result = {};
@@ -578,6 +775,14 @@ export default function RequestRateLimit(props) {
     );
   }, [inputs.ModelRequestRateLimitGroup, inputs.ModelRequestRateLimitUserGroup]);
 
+  const handleGroupRateLimitChange = useCallback((value) => {
+    setInputs((current) => ({
+      ...current,
+      ModelRequestRateLimitGroup: value,
+    }));
+    refForm.current?.setValue('ModelRequestRateLimitGroup', value);
+  }, []);
+
   const handleUserGroupRateLimitChange = useCallback((value) => {
     setInputs((current) => ({
       ...current,
@@ -722,55 +927,33 @@ export default function RequestRateLimit(props) {
             </Row>
             <Row>
               <Col xs={24} sm={16}>
-                <Form.TextArea
-                  label={t('分组速率限制')}
-                  placeholder={t(
-                    '{\n  "default": [200, 100],\n  "vip": [0, 1000]\n}',
-                  )}
-                  field={'ModelRequestRateLimitGroup'}
-                  autosize={{ minRows: 5, maxRows: 15 }}
-                  trigger='blur'
-                  stopValidateWithError
-                  rules={[
-                    {
-                      validator: (rule, value) =>
-                        !value || verifyJSON(value),
-                      message: t('不是合法的 JSON 字符串'),
-                    },
-                  ]}
-                  extraText={
-                    <div>
-                      <p>{t('说明：')}</p>
-                      <ul>
-                        <li>
-                          {t(
-                            '使用 JSON 对象格式，格式为：{"组名": [最多请求次数, 最多请求完成次数]}',
-                          )}
-                        </li>
-                        <li>
-                          {t(
-                            '示例：{"default": [200, 100], "vip": [0, 1000]}。',
-                          )}
-                        </li>
-                        <li>
-                          {t(
-                            '[最多请求次数]必须大于等于0，[最多请求完成次数]必须大于等于1。',
-                          )}
-                        </li>
-                        <li>
-                          {t(
-                            '[最多请求次数]和[最多请求完成次数]的最大值为2147483647。',
-                          )}
-                        </li>
-                        <li>{t('分组速率配置优先级高于全局速率限制。')}</li>
-                        <li>{t('限制周期统一使用上方配置的“限制周期”值。')}</li>
-                      </ul>
-                    </div>
-                  }
-                  onChange={(value) => {
-                    setInputs({ ...inputs, ModelRequestRateLimitGroup: value });
-                  }}
-                />
+                <Form.Slot label={t('分组速率限制')}>
+                  <GroupRateLimitRules
+                    value={inputs.ModelRequestRateLimitGroup}
+                    onChange={handleGroupRateLimitChange}
+                  />
+                  <Form.TextArea
+                    field={'ModelRequestRateLimitGroup'}
+                    noLabel
+                    style={{ display: 'none' }}
+                    trigger='blur'
+                    stopValidateWithError
+                    rules={[
+                      {
+                        validator: (rule, value) =>
+                          !value || verifyJSON(value),
+                        message: t('不是合法的 JSON 字符串'),
+                      },
+                    ]}
+                  />
+                  <div style={{ marginTop: 8 }}>
+                    <Text type='tertiary' size='small'>
+                      {t(
+                        '分组速率配置优先级高于全局速率限制。限制周期统一使用上方配置的”限制周期”值。',
+                      )}
+                    </Text>
+                  </div>
+                </Form.Slot>
               </Col>
             </Row>
             <Row>
