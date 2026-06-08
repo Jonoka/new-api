@@ -25,5 +25,6 @@ func isClaudeSamplingDeprecatedModel(model string) bool {
 
 	return strings.HasPrefix(normalized, "claude-sonnet-4-6") ||
 		strings.HasPrefix(normalized, "claude-opus-4-6") ||
-		strings.HasPrefix(normalized, "claude-opus-4-7")
+		strings.HasPrefix(normalized, "claude-opus-4-7") ||
+		strings.HasPrefix(normalized, "claude-opus-4-8")
 }
