@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -41,6 +42,33 @@ func resolveTokenGroupForCreate(requestGroup string, userGroup string) string {
 		return "auto"
 	}
 	return strings.TrimSpace(userGroup)
+}
+
+// validateTokenGroups 校验多分组令牌的分组字段。
+// 规则：auto 不能与其他分组混用；分组不能重复；分组名不能为空。
+func validateTokenGroups(group string) error {
+	if group == "" || group == "auto" {
+		return nil
+	}
+	if !strings.Contains(group, ",") {
+		return nil // 单分组不额外校验
+	}
+	groups := strings.Split(group, ",")
+	seen := make(map[string]bool)
+	for _, g := range groups {
+		g = strings.TrimSpace(g)
+		if g == "" {
+			return errors.New("分组名不能为空")
+		}
+		if g == "auto" {
+			return errors.New("auto 不能与其他分组混用")
+		}
+		if seen[g] {
+			return errors.New("分组不能重复: " + g)
+		}
+		seen[g] = true
+	}
+	return nil
 }
 
 func GetAllTokens(c *gin.Context) {
@@ -219,6 +247,11 @@ func AddToken(c *gin.Context) {
 		common.SysLog("failed to generate token key: " + err.Error())
 		return
 	}
+	resolvedGroup := resolveTokenGroupForCreate(token.Group, c.GetString("group"))
+	if err := validateTokenGroups(resolvedGroup); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	cleanToken := model.Token{
 		UserId:             c.GetInt("id"),
 		Name:               token.Name,
@@ -231,7 +264,7 @@ func AddToken(c *gin.Context) {
 		ModelLimitsEnabled: token.ModelLimitsEnabled,
 		ModelLimits:        token.ModelLimits,
 		AllowIps:           token.AllowIps,
-		Group:              resolveTokenGroupForCreate(token.Group, c.GetString("group")),
+		Group:              resolvedGroup,
 		CrossGroupRetry:    token.CrossGroupRetry,
 	}
 	err = cleanToken.Insert()
@@ -301,6 +334,10 @@ func UpdateToken(c *gin.Context) {
 	if statusOnly != "" {
 		cleanToken.Status = token.Status
 	} else {
+		if err := validateTokenGroups(token.Group); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 		// If you add more fields, please also update token.Update()
 		cleanToken.Name = token.Name
 		cleanToken.ExpiredTime = token.ExpiredTime

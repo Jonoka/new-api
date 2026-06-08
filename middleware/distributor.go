@@ -123,6 +123,19 @@ func Distribute() func(c *gin.Context) {
 									break
 								}
 							}
+						} else if strings.Contains(usingGroup, ",") {
+							// 多分组令牌亲和性检查
+							multiGroups := strings.Split(usingGroup, ",")
+							for _, g := range multiGroups {
+								g = strings.TrimSpace(g)
+								if g != "" && model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
+									selectGroup = g
+									common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
+									channel = preferred
+									service.MarkChannelAffinityUsed(c, g, preferred.Id)
+									break
+								}
+							}
 						} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) {
 							channel = preferred
 							selectGroup = usingGroup
@@ -142,6 +155,8 @@ func Distribute() func(c *gin.Context) {
 						showGroup := usingGroup
 						if usingGroup == "auto" {
 							showGroup = fmt.Sprintf("auto(%s)", selectGroup)
+						} else if strings.Contains(usingGroup, ",") {
+							showGroup = fmt.Sprintf("multi(%s)", selectGroup)
 						}
 						message := i18n.T(c, i18n.MsgDistributorGetChannelFailed, map[string]any{"Group": showGroup, "Model": modelRequest.Model, "Error": err.Error()})
 						// 如果错误，但是渠道不为空，说明是数据库一致性问题
@@ -178,6 +193,8 @@ func Distribute() func(c *gin.Context) {
 				showGroup := usingGroup
 				if usingGroup == "auto" {
 					showGroup = fmt.Sprintf("auto(%s)", selectGroup)
+				} else if strings.Contains(usingGroup, ",") {
+					showGroup = fmt.Sprintf("multi(%s)", selectGroup)
 				}
 				message := i18n.T(c, i18n.MsgDistributorGetChannelFailed, map[string]any{"Group": showGroup, "Model": modelRequest.Model, "Error": err.Error()})
 				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, message, types.ErrorCodeModelNotFound)

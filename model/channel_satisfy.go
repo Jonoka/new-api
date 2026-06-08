@@ -69,3 +69,46 @@ func isChannelIDInList(list []int, channelID int) bool {
 	}
 	return false
 }
+
+// GroupHasModelChannels 判断分组是否有给定模型的可用渠道。
+// 用于多分组令牌路由时过滤出有目标模型的候选分组。
+func GroupHasModelChannels(group string, modelName string) bool {
+	if group == "" || modelName == "" {
+		return false
+	}
+	if !common.MemoryCacheEnabled {
+		return groupHasModelChannelsDB(group, modelName)
+	}
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+	if group2model2channels == nil {
+		return false
+	}
+	if len(group2model2channels[group][modelName]) > 0 {
+		return true
+	}
+	normalized := ratio_setting.FormatMatchingModelName(modelName)
+	if normalized != "" && normalized != modelName {
+		return len(group2model2channels[group][normalized]) > 0
+	}
+	return false
+}
+
+func groupHasModelChannelsDB(group string, modelName string) bool {
+	var count int64
+	err := DB.Model(&Ability{}).
+		Where(commonGroupCol+" = ? AND model = ? AND enabled = ?", group, modelName, true).
+		Count(&count).Error
+	if err == nil && count > 0 {
+		return true
+	}
+	normalized := ratio_setting.FormatMatchingModelName(modelName)
+	if normalized == "" || normalized == modelName {
+		return false
+	}
+	count = 0
+	err = DB.Model(&Ability{}).
+		Where(commonGroupCol+" = ? AND model = ? AND enabled = ?", group, normalized, true).
+		Count(&count).Error
+	return err == nil && count > 0
+}

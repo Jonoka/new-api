@@ -340,6 +340,36 @@ func (token *Token) GetModelLimits() []string {
 	return strings.Split(token.ModelLimits, ",")
 }
 
+// GetGroups 解析逗号分隔的分组字段，返回有序分组列表。
+// 单分组返回 1 个元素的切片，空串返回 nil。
+func (token *Token) GetGroups() []string {
+	if token.Group == "" {
+		return nil
+	}
+	parts := strings.Split(token.Group, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// IsMultiGroup 判断令牌是否配置了多个分组（逗号分隔）。
+func (token *Token) IsMultiGroup() bool {
+	return strings.Contains(token.Group, ",")
+}
+
+// IsAutoGroup 判断令牌是否为自动分组。
+func (token *Token) IsAutoGroup() bool {
+	return token.Group == "auto"
+}
+
 func (token *Token) GetModelLimitsMap() map[string]bool {
 	limits := token.GetModelLimits()
 	limitsMap := make(map[string]bool)

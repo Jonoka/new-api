@@ -3783,6 +3783,8 @@
     "Select a color": "Select a color",
     "Select a group": "Select a group",
     "Select a group type": "Select a group type",
+    "Select groups": "Select groups",
+    "Drag to reorder. When multiple groups have the same model, they will be tried in order.": "Drag to reorder. When multiple groups have the same model, they will be tried in order.",
     "Select a model to edit pricing": "Select a model to edit pricing",
     "Select a prediction from Game Center": "Select a prediction from Game Center",
     "Select a preset...": "Select a preset...",

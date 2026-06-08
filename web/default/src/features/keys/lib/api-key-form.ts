@@ -19,7 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 import { z } from 'zod'
 import type { TFunction } from 'i18next'
 import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
-import { DEFAULT_GROUP } from '../constants'
 import { type ApiKeyFormData, type ApiKey } from '../types'
 
 // ============================================================================
@@ -35,7 +34,7 @@ export function getApiKeyFormSchema(t: TFunction) {
       unlimited_quota: z.boolean(),
       model_limits: z.array(z.string()),
       allow_ips: z.string().optional(),
-      group: z.string().optional(),
+      groups: z.array(z.string()),
       cross_group_retry: z.boolean().optional(),
       tokenCount: z.number().min(1).optional(),
     })
@@ -70,7 +69,7 @@ export const API_KEY_FORM_DEFAULT_VALUES: ApiKeyFormValues = {
   unlimited_quota: true,
   model_limits: [],
   allow_ips: '',
-  group: DEFAULT_GROUP,
+  groups: [],
   cross_group_retry: true,
   tokenCount: 1,
 }
@@ -80,7 +79,7 @@ export function getApiKeyFormDefaultValues(
 ): ApiKeyFormValues {
   return {
     ...API_KEY_FORM_DEFAULT_VALUES,
-    group: defaultUseAutoGroup ? 'auto' : DEFAULT_GROUP,
+    groups: defaultUseAutoGroup ? ['auto'] : [],
     cross_group_retry: defaultUseAutoGroup,
   }
 }
@@ -95,6 +94,9 @@ export function getApiKeyFormDefaultValues(
 export function transformFormDataToPayload(
   data: ApiKeyFormValues
 ): ApiKeyFormData {
+  const groupStr = data.groups.join(',')
+  const isAuto = data.groups.length === 1 && data.groups[0] === 'auto'
+  const isMultiGroup = data.groups.length > 1
   return {
     name: data.name,
     remain_quota: data.unlimited_quota
@@ -107,8 +109,9 @@ export function transformFormDataToPayload(
     model_limits_enabled: data.model_limits.length > 0,
     model_limits: data.model_limits.join(','),
     allow_ips: data.allow_ips || '',
-    group: data.group || '',
-    cross_group_retry: data.group === 'auto' ? !!data.cross_group_retry : false,
+    group: groupStr,
+    // Multi-group always enables cross-group retry; auto respects user toggle
+    cross_group_retry: isMultiGroup ? true : isAuto ? !!data.cross_group_retry : false,
   }
 }
 
@@ -132,7 +135,7 @@ export function transformApiKeyToFormDefaults(
       ? apiKey.model_limits.split(',').filter(Boolean)
       : [],
     allow_ips: apiKey.allow_ips || '',
-    group: apiKey.group || DEFAULT_GROUP,
+    groups: apiKey.group ? apiKey.group.split(',').map((g) => g.trim()).filter(Boolean) : [],
     cross_group_retry: !!apiKey.cross_group_retry,
     tokenCount: 1,
   }

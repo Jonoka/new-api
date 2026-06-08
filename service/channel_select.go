@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -152,6 +153,68 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 				common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex, i)
 			}
 			break
+		}
+	} else if strings.Contains(param.TokenGroup, ",") {
+		// 多分组令牌：按用户自定义顺序路由，仅尝试有目标模型的分组
+		allGroups := strings.Split(param.TokenGroup, ",")
+		// 过滤出有目标模型可用渠道的候选分组
+		candidateGroups := make([]string, 0, len(allGroups))
+		for _, g := range allGroups {
+			g = strings.TrimSpace(g)
+			if g != "" && model.GroupHasModelChannels(g, param.ModelName) {
+				candidateGroups = append(candidateGroups, g)
+			}
+		}
+
+		if len(candidateGroups) == 0 {
+			// 没有任何分组有该模型的渠道
+			return nil, selectGroup, nil
+		} else if len(candidateGroups) == 1 {
+			// 单候选分组：直接路由，不需要分组间 failover
+			channel, err = model.GetRandomSatisfiedChannelWithExclusions(candidateGroups[0], param.ModelName, param.GetRetry(), param.ExcludedChannelIDs)
+			selectGroup = candidateGroups[0]
+			if err != nil {
+				return nil, selectGroup, err
+			}
+		} else {
+			// 多候选分组：按用户排序依次尝试（复用 auto 的 group-advancement 模式）
+			startGroupIndex := 0
+			if lastGroupIndex, exists := common.GetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex); exists {
+				if idx, ok := lastGroupIndex.(int); ok {
+					startGroupIndex = idx
+				}
+			}
+
+			for i := startGroupIndex; i < len(candidateGroups); i++ {
+				g := candidateGroups[i]
+				priorityRetry := param.GetRetry()
+				if i > startGroupIndex {
+					priorityRetry = 0
+				}
+				logger.LogDebug(param.Ctx, "Multi-group selecting group: %s, priorityRetry: %d", g, priorityRetry)
+
+				channel, _ = model.GetRandomSatisfiedChannelWithExclusions(g, param.ModelName, priorityRetry, param.ExcludedChannelIDs)
+				if channel == nil {
+					logger.LogDebug(param.Ctx, "No available channel in group %s for model %s at priorityRetry %d, trying next group", g, param.ModelName, priorityRetry)
+					common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex, i+1)
+					param.SetRetry(0)
+					continue
+				}
+				common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroup, g)
+				selectGroup = g
+				logger.LogDebug(param.Ctx, "Multi-group selected group: %s", g)
+
+				// 多分组天然支持跨分组重试
+				if priorityRetry >= common.RetryTimes {
+					logger.LogDebug(param.Ctx, "Multi-group: group %s retries exhausted, preparing switch to next group", g)
+					common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex, i+1)
+					param.SetRetry(0)
+					param.ResetRetryNextTry()
+				} else {
+					common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex, i)
+				}
+				break
+			}
 		}
 	} else {
 		channel, err = model.GetRandomSatisfiedChannelWithExclusions(param.TokenGroup, param.ModelName, param.GetRetry(), param.ExcludedChannelIDs)

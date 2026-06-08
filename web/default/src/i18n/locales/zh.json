@@ -3783,6 +3783,8 @@
     "Select a color": "选择颜色",
     "Select a group": "选择一个分组",
     "Select a group type": "选择分组类型",
+    "Select groups": "选择分组",
+    "Drag to reorder. When multiple groups have the same model, they will be tried in order.": "拖拽排序。当多个分组包含相同模型时，将按排列顺序依次尝试。",
     "Select a model to edit pricing": "选择一个模型编辑定价",
     "Select a prediction from Game Center": "请从游戏中心选择一个预测",
     "Select a preset...": "选择一个预设...",

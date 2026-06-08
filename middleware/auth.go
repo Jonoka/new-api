@@ -435,19 +435,47 @@ func TokenAuth() func(c *gin.Context) {
 		userGroup := userCache.Group
 		tokenGroup := token.Group
 		if tokenGroup != "" {
-			// check common.UserUsableGroups[userGroup]
-			if _, ok := service.GetUserUsableGroups(userGroup)[tokenGroup]; !ok {
-				abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("无权访问 %s 分组", tokenGroup))
-				return
-			}
-			// check group in common.GroupRatio
-			if !ratio_setting.ContainsGroupRatio(tokenGroup) {
-				if tokenGroup != "auto" {
-					abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("分组 %s 已被弃用", tokenGroup))
+			if strings.Contains(tokenGroup, ",") {
+				// 多分组令牌：逐个校验每个分组的权限
+				usableGroups := service.GetUserUsableGroups(userGroup)
+				groups := strings.Split(tokenGroup, ",")
+				validGroups := make([]string, 0, len(groups))
+				for _, g := range groups {
+					g = strings.TrimSpace(g)
+					if g == "" {
+						continue
+					}
+					if _, ok := usableGroups[g]; !ok {
+						abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("无权访问 %s 分组", g))
+						return
+					}
+					if !ratio_setting.ContainsGroupRatio(g) {
+						abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("分组 %s 已被弃用", g))
+						return
+					}
+					validGroups = append(validGroups, g)
+				}
+				if len(validGroups) == 0 {
+					abortWithOpenAiMessage(c, http.StatusForbidden, "令牌未配置有效分组")
 					return
 				}
+				// 整个逗号串传递，由路由层解析
+				userGroup = tokenGroup
+			} else {
+				// 单分组或 auto：保持原有逻辑
+				if _, ok := service.GetUserUsableGroups(userGroup)[tokenGroup]; !ok {
+					abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("无权访问 %s 分组", tokenGroup))
+					return
+				}
+				// check group in common.GroupRatio
+				if !ratio_setting.ContainsGroupRatio(tokenGroup) {
+					if tokenGroup != "auto" {
+						abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("分组 %s 已被弃用", tokenGroup))
+						return
+					}
+				}
+				userGroup = tokenGroup
 			}
-			userGroup = tokenGroup
 		}
 		common.SetContextKey(c, constant.ContextKeyUsingGroup, userGroup)
 
