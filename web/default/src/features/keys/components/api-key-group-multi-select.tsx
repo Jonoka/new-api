@@ -17,24 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMemo, useState } from 'react'
-import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from '@dnd-kit/core'
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable'
-import { restrictToVerticalAxis } from '@dnd-kit/modifiers'
-import { CSS } from '@dnd-kit/utilities'
+import { Reorder, useDragControls } from 'motion/react'
 import { Check, GripVertical, Plus, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
@@ -60,10 +43,10 @@ import {
 } from './api-key-group-combobox'
 
 // ============================================================================
-// Sortable Group Card
+// Reorder Group Card
 // ============================================================================
 
-function SortableGroupCard({
+function ReorderGroupCard({
   option,
   onRemove,
   ratioLabel,
@@ -72,36 +55,21 @@ function SortableGroupCard({
   onRemove: () => void
   ratioLabel: string
 }) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: option.value })
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-  }
-
+  const controls = useDragControls()
   const ratioText = formatGroupRatio(option.ratio, ratioLabel)
 
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={cn(
-        'border-border/60 bg-background flex items-center gap-2 rounded-lg border px-2.5 py-2 shadow-xs transition-shadow sm:gap-3 sm:px-3 sm:py-2.5',
-        isDragging && 'ring-ring/25 z-50 shadow-md ring-2'
-      )}
+    <Reorder.Item
+      value={option.value}
+      dragListener={false}
+      dragControls={controls}
+      className='border-border/60 bg-background flex items-center gap-2 rounded-lg border px-2.5 py-2 shadow-xs sm:gap-3 sm:px-3 sm:py-2.5'
+      whileDrag={{ boxShadow: '0 4px 16px rgba(0,0,0,0.12)', zIndex: 50 }}
     >
       <button
         type='button'
         className='text-muted-foreground/60 hover:text-muted-foreground -ml-0.5 shrink-0 cursor-grab touch-none active:cursor-grabbing'
-        {...attributes}
-        {...listeners}
+        onPointerDown={(e) => controls.start(e)}
       >
         <GripVertical className='size-4' />
       </button>
@@ -134,7 +102,7 @@ function SortableGroupCard({
       >
         <X className='size-3.5' />
       </button>
-    </div>
+    </Reorder.Item>
   )
 }
 
@@ -168,14 +136,10 @@ export function ApiKeyGroupMultiSelect({
   const availableOptions = useMemo(() => {
     const search = searchValue.trim().toLowerCase()
     return options.filter((option) => {
-      // If auto is selected, no other groups can be added
       if (isAutoSelected && option.value !== 'auto') return false
-      // If non-auto groups are selected, auto is not available
       if (option.value === 'auto' && value.length > 0 && !isAutoSelected)
         return false
-      // Filter out already selected
       if (selectedSet.has(option.value)) return false
-      // Apply search filter
       if (!search) return true
       return (
         option.value.toLowerCase().includes(search) ||
@@ -194,30 +158,10 @@ export function ApiKeyGroupMultiSelect({
     return map
   }, [options])
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 5 },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
-  )
-
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event
-    if (over && active.id !== over.id) {
-      const oldIndex = value.indexOf(String(active.id))
-      const newIndex = value.indexOf(String(over.id))
-      onValueChange(arrayMove(value, oldIndex, newIndex))
-    }
-  }
-
   const handleSelect = (selectedValue: string) => {
     if (selectedValue === 'auto') {
-      // Auto is exclusive: clear all others
       onValueChange(['auto'])
     } else {
-      // Remove auto if present, then add
       const filtered = value.filter((v) => v !== 'auto')
       onValueChange([...filtered, selectedValue])
     }
@@ -228,48 +172,37 @@ export function ApiKeyGroupMultiSelect({
     onValueChange(value.filter((v) => v !== removeValue))
   }
 
-  // Check if there are any groups that can still be added
   const canAddMore =
     !disabled &&
     !isAutoSelected &&
-    options.some(
-      (o) => !selectedSet.has(o.value) && o.value !== 'auto'
-    )
-  const canSelectAuto =
-    !disabled && value.length === 0
-
+    options.some((o) => !selectedSet.has(o.value) && o.value !== 'auto')
+  const canSelectAuto = !disabled && value.length === 0
   const showAddButton = canAddMore || canSelectAuto || value.length === 0
 
   return (
     <div className='flex flex-col gap-2'>
       {/* Selected groups — draggable list */}
       {value.length > 0 && (
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          modifiers={[restrictToVerticalAxis]}
-          onDragEnd={handleDragEnd}
+        <Reorder.Group
+          axis='y'
+          values={value}
+          onReorder={onValueChange}
+          className='flex flex-col gap-1.5'
+          layoutScroll
         >
-          <SortableContext
-            items={value}
-            strategy={verticalListSortingStrategy}
-          >
-            <div className='flex flex-col gap-1.5'>
-              {value.map((v) => {
-                const opt = optionMap.get(v)
-                if (!opt) return null
-                return (
-                  <SortableGroupCard
-                    key={v}
-                    option={opt}
-                    onRemove={() => handleRemove(v)}
-                    ratioLabel={t('Ratio')}
-                  />
-                )
-              })}
-            </div>
-          </SortableContext>
-        </DndContext>
+          {value.map((v) => {
+            const opt = optionMap.get(v)
+            if (!opt) return null
+            return (
+              <ReorderGroupCard
+                key={v}
+                option={opt}
+                onRemove={() => handleRemove(v)}
+                ratioLabel={t('Ratio')}
+              />
+            )
+          })}
+        </Reorder.Group>
       )}
 
       {/* Add group button with popover */}

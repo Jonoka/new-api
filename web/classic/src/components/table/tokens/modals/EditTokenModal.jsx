@@ -281,12 +281,12 @@ const EditTokenModal = (props) => {
   const formApiRef = useRef(null);
   const [models, setModels] = useState([]);
   const [groups, setGroups] = useState([]);
-  const [selectedGroups, setSelectedGroups] = useState(() =>
-    defaultUseAutoGroup ? ['auto'] : []
-  );
   const [showQuotaInput, setShowQuotaInput] = useState(false);
   const isEdit = props.editingToken.id !== undefined;
   const defaultUseAutoGroup = statusState?.status?.default_use_auto_group === true;
+  const [selectedGroups, setSelectedGroups] = useState(() =>
+    defaultUseAutoGroup ? ['auto'] : []
+  );
 
   const getInitValues = () => ({
     name: '',
