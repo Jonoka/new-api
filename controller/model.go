@@ -275,16 +275,17 @@ func ListModels(c *gin.Context, modelType int) {
 		}
 		ownerGroups = groups.ownerGroups
 		var models []string
-		if groups.tokenGroup == "auto" {
-			for _, autoGroup := range ownerGroups {
-				groupModels := model.GetGroupEnabledModels(autoGroup)
+		if groups.tokenGroup == "auto" || len(ownerGroups) > 1 {
+			// auto 或多分组令牌：聚合所有分组的模型
+			for _, group := range ownerGroups {
+				groupModels := model.GetGroupEnabledModels(group)
 				for _, g := range groupModels {
 					if !common.StringsContains(models, g) {
 						models = append(models, g)
 					}
 				}
 			}
-		} else {
+		} else if len(ownerGroups) == 1 {
 			models = model.GetGroupEnabledModels(ownerGroups[0])
 		}
 		for _, modelName := range models {
