@@ -32,9 +32,9 @@ type Adaptor struct {
 
 const (
 	claudeCodeSystemText               = "You are Claude Code, Anthropic's official CLI for Claude."
-	claudeCodeAnthropicBeta            = "interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14,claude-code-20250219,oauth-2025-04-20,extended-cache-ttl-2025-04-11"
-	claudeCodeUserAgentFallbackVersion = "2.1.156"
-	claudeCodeStainlessVersion         = "0.72.0"
+	claudeCodeAnthropicBeta            = "interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14,claude-code-20250219,oauth-2025-04-20,context-management-2025-06-27,extended-cache-ttl-2025-04-11,prompt-caching-scope-2026-01-05"
+	claudeCodeUserAgentFallbackVersion = "2.1.169"
+	claudeCodeStainlessVersion         = "0.94.0"
 	claudeCodeStainlessRuntime         = "node"
 	claudeCodeStainlessRuntimeVer      = "v24.13.0"
 	claudeCodeStainlessRetryCount      = "0"
