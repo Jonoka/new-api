@@ -483,20 +483,58 @@ func mergeChannel25FrameFields(bodyMap map[string]interface{}) {
 			images = appendStringValues(images, v)
 		}
 	}
-	if len(images) > 0 {
-		if _, hasImage := bodyMap["image"]; !hasImage {
-			bodyMap["image"] = images[0]
-		}
-		if _, hasImages := bodyMap["images"]; !hasImages {
-			bodyMap["images"] = images
-		}
-	}
 	delete(bodyMap, "first_frame")
 	delete(bodyMap, "last_frame")
 	delete(bodyMap, "reference_images")
 	delete(bodyMap, "reference_images[]")
 	delete(bodyMap, "input_reference")
 	delete(bodyMap, "input_reference[]")
+	if len(images) == 0 {
+		return
+	}
+	videoType := channel25RequestedVideoType(bodyMap)
+	switch videoType {
+	case 3:
+		delete(bodyMap, "image")
+		if _, hasImages := bodyMap["images"]; !hasImages {
+			bodyMap["images"] = images
+		}
+	case 2:
+		if len(images) == 1 {
+			bodyMap["image"] = images[0]
+			delete(bodyMap, "images")
+			return
+		}
+		bodyMap["images"] = images[:minInt(len(images), 2)]
+		delete(bodyMap, "image")
+	default:
+		delete(bodyMap, "image")
+		delete(bodyMap, "images")
+	}
+}
+
+func channel25RequestedVideoType(bodyMap map[string]interface{}) int {
+	if bodyMap == nil {
+		return 1
+	}
+	if value, ok := firstStringLike(bodyMap["type"]); ok {
+		if parsed, err := strconv.Atoi(strings.TrimSpace(value)); err == nil {
+			return parsed
+		}
+	}
+	if value, ok := firstStringLike(bodyMap["video_type"]); ok {
+		if parsed, err := strconv.Atoi(strings.TrimSpace(value)); err == nil {
+			return parsed
+		}
+	}
+	return channel25VideoType(bodyMap)
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func appendStringValues(dst []string, v interface{}) []string {
@@ -540,8 +578,23 @@ func addChannel25VideoReferenceFiles(bodyMap map[string]interface{}, files map[s
 	if len(images) == 0 {
 		return nil
 	}
-	bodyMap["image"] = images[0]
-	bodyMap["images"] = images
+	videoType := channel25RequestedVideoType(bodyMap)
+	switch videoType {
+	case 3:
+		delete(bodyMap, "image")
+		bodyMap["images"] = images[:minInt(len(images), 3)]
+	case 2:
+		if len(images) == 1 {
+			bodyMap["image"] = images[0]
+			delete(bodyMap, "images")
+			return nil
+		}
+		bodyMap["images"] = images[:minInt(len(images), 2)]
+		delete(bodyMap, "image")
+	default:
+		delete(bodyMap, "image")
+		delete(bodyMap, "images")
+	}
 	return nil
 }
 

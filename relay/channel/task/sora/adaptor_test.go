@@ -293,12 +293,61 @@ func TestChannel25VideoMultipartReferencesBecomeJSONImages(t *testing.T) {
 	assert.Equal(t, "veo3.1-components-720p", got["model"])
 	assert.Equal(t, "16:9", got["aspect_ratio"])
 	assert.Equal(t, 3, got["type"])
-	image, _ := got["image"].(string)
-	assert.True(t, strings.HasPrefix(image, "data:image/png;base64,"))
+	_, hasImage := got["image"]
+	assert.False(t, hasImage)
 	images := got["images"].([]any)
 	assert.Len(t, images, 1)
 	_, hasInputReference := got["input_reference"]
 	assert.False(t, hasInputReference)
+}
+
+func TestChannel25VideoType2WithTwoReferencesUsesImagesOnly(t *testing.T) {
+	var formBody bytes.Buffer
+	writer := multipart.NewWriter(&formBody)
+	require.NoError(t, writer.WriteField("model", "veo3.1"))
+	require.NoError(t, writer.WriteField("prompt", "type 2 image test"))
+	require.NoError(t, writer.WriteField("seconds", "6"))
+	require.NoError(t, writer.WriteField("size", "720x1280"))
+	require.NoError(t, writer.WriteField("resolution_name", "720p"))
+	require.NoError(t, writer.WriteField("type", "2"))
+	require.NoError(t, writer.WriteField("reference_mode", "image"))
+	for _, filename := range []string{"a.png", "b.png"} {
+		header := make(textproto.MIMEHeader)
+		header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="input_reference[]"; filename="%s"`, filename))
+		header.Set("Content-Type", "image/png")
+		part, err := writer.CreatePart(header)
+		require.NoError(t, err)
+		_, err = part.Write([]byte("fake-image-bytes"))
+		require.NoError(t, err)
+	}
+	require.NoError(t, writer.Close())
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewReader(formBody.Bytes()))
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	ctx, _ := common.NewTestContext(req)
+	ctx.Set(common.KeyRequestBody, formBody.Bytes())
+
+	adaptor := &TaskAdaptor{}
+	info := &relaycommon.RelayInfo{
+		ChannelId:         25,
+		ChannelBaseUrl:    "https://img-api.xn--1ys141f4ks.com",
+		RequestURLPath:    "/v1/videos",
+		UpstreamModelName: "veo3.1",
+	}
+	bodyReader, err := adaptor.BuildRequestBody(ctx, info)
+	require.NoError(t, err)
+	payload, err := io.ReadAll(bodyReader)
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, common.Unmarshal(payload, &got))
+	assert.Equal(t, "veo3.1-720p", got["model"])
+	assert.Equal(t, "9:16", got["aspect_ratio"])
+	assert.Equal(t, "2", got["type"])
+	_, hasImage := got["image"]
+	assert.False(t, hasImage)
+	images := got["images"].([]any)
+	assert.Len(t, images, 2)
 }
 
 func TestChannel25VideoPrepareBillingRequestInputUsesMappedJSON(t *testing.T) {
