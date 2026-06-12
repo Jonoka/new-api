@@ -5,45 +5,121 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	utls "github.com/refraction-networking/utls"
 )
 
 // oauthHTTPClient is the shared HTTP client used by custom (generic) OAuth
 // providers.
 //
-// We use a dedicated client (instead of http.DefaultTransport) so we can
-// control timeouts and force HTTP/2 negotiation. Keep-alive is intentionally
-// LEFT ENABLED so the connection profile matches a real browser — some
-// upstream WAFs (e.g. WAFPRO on yaohuo.me) flag connections without
-// keep-alive as bot-like and silently drop them.
-var oauthHTTPClient = &http.Client{
-	Timeout: 20 * time.Second,
-	Transport: &http.Transport{
+// Two adaptations are layered here to survive aggressive upstream WAFs
+// (observed concretely with WAFPRO on yaohuo.me, which silently RSTs Go's
+// default net/http connections, surfacing as `Post ...: EOF` in logs):
+//
+//  1. TLS ClientHello is forged via uTLS to look like Chrome — Go's default
+//     crypto/tls fingerprint (JA3) is distinct from any real browser and
+//     gets flagged before any HTTP byte is sent.
+//  2. A full browser-style header preset is layered on top (applied by
+//     callers via applyBrowserHeaders) so the request also passes the
+//     HTTP-layer signature checks.
+var oauthHTTPClient = newOAuthHTTPClient()
+
+func newOAuthHTTPClient() *http.Client {
+	dialer := &net.Dialer{
+		Timeout:   10 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+
+	transport := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           dialer.DialContext,
+		MaxIdleConns:          16,
+		IdleConnTimeout:       30 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 15 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          16,
-		IdleConnTimeout:       30 * time.Second,
-	},
+		// DialTLSContext takes over TLS so we can drive uTLS instead of
+		// crypto/tls. ForceAttemptHTTP2 is intentionally LEFT OFF — when a
+		// custom DialTLS is set, Go won't auto-enable HTTP/2 even if the
+		// ALPN negotiates "h2", which keeps us on HTTP/1.1 and avoids
+		// HTTP/2-layer fingerprints differing from Chrome.
+		DialTLSContext: dialUTLSChrome(dialer),
+	}
+
+	return &http.Client{
+		Timeout:   20 * time.Second,
+		Transport: transport,
+	}
+}
+
+// dialUTLSChrome returns a DialTLSContext that performs the TLS handshake
+// with a Chrome-flavoured ClientHello via uTLS. The host:port and ServerName
+// are derived from `addr`. Errors from the underlying TCP dial or the uTLS
+// handshake are surfaced as-is so the transport can decide whether to retry
+// the request.
+func dialUTLSChrome(dialer *net.Dialer) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		rawConn, err := dialer.DialContext(ctx, network, addr)
+		if err != nil {
+			return nil, err
+		}
+
+		host, _, splitErr := net.SplitHostPort(addr)
+		if splitErr != nil {
+			host = addr
+		}
+
+		uconn := utls.UClient(rawConn, &utls.Config{
+			ServerName: host,
+		}, utls.HelloChrome_Auto)
+
+		// Build the Chrome ClientHello once so we can mutate it, then force
+		// ALPN to HTTP/1.1 only.
+		//
+		// Why: Chrome's real ClientHello advertises ALPN ["h2", "http/1.1"],
+		// and HelloChrome_Auto faithfully copies that. But our outer
+		// *http.Transport only speaks HTTP/1.x, so if the server picks h2
+		// (yaohuo does), the Transport sees a raw HTTP/2 SETTINGS frame and
+		// fails with "malformed HTTP response". The TLS-level JA3
+		// fingerprint is what the WAF actually keys on; ALPN doesn't change
+		// it. Setting utls.Config.NextProtos does NOT propagate into a
+		// pre-baked spec like HelloChrome_Auto, so we patch the extension
+		// list directly.
+		if err := uconn.BuildHandshakeState(); err != nil {
+			_ = rawConn.Close()
+			return nil, err
+		}
+		for _, ext := range uconn.Extensions {
+			if alpn, ok := ext.(*utls.ALPNExtension); ok {
+				alpn.AlpnProtocols = []string{"http/1.1"}
+			}
+		}
+		if err := uconn.BuildHandshakeState(); err != nil {
+			_ = rawConn.Close()
+			return nil, err
+		}
+		if err := uconn.HandshakeContext(ctx); err != nil {
+			_ = rawConn.Close()
+			return nil, err
+		}
+		return uconn, nil
+	}
 }
 
 // defaultBrowserUserAgent is a stable, recent Chrome-on-Windows UA used for
-// upstream OAuth requests so the call profile matches a real browser. WAFs
-// (e.g. WAFPRO) often flag Go's default `Go-http-client/1.1` UA as bot
-// traffic and silently RST the connection (surfaces in Go as "Post ...: EOF").
+// upstream OAuth requests so the call profile matches a real browser.
 const defaultBrowserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 
 // applyBrowserHeaders adds a full set of browser-like headers to h.
 //
 // Why: WAF policies frequently allow-list requests that look like browser
 // XHR/fetch calls (User-Agent + Accept-Language + Sec-Ch-Ua + Sec-Fetch-*).
-// Server-to-server OAuth calls don't naturally carry these, which is why the
-// raw Go client gets RST'd by some upstreams.
+// Server-to-server OAuth calls don't naturally carry these.
 //
 // refererURL — typically the OAuth endpoint URL itself. Its scheme+host is
 // used to derive Referer (root path) and Origin so they match the request's
@@ -60,8 +136,7 @@ func applyBrowserHeaders(h http.Header, refererURL string) {
 	h.Set("Accept", "application/json, text/javascript, */*; q=0.01")
 	h.Set("Accept-Language", "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7")
 	// Intentionally omit Accept-Encoding — Go's net/http auto-injects "gzip"
-	// and transparently decompresses; if we set "br" here, Go disables that
-	// auto-handling and we'd get raw brotli bytes back.
+	// and transparently decompresses; setting it manually disables that.
 	h.Set("Sec-Ch-Ua", `"Chromium";v="126", "Not(A:Brand";v="24", "Google Chrome";v="126"`)
 	h.Set("Sec-Ch-Ua-Mobile", "?0")
 	h.Set("Sec-Ch-Ua-Platform", `"Windows"`)
@@ -117,8 +192,6 @@ func doOAuthRequest(ctx context.Context, method, urlStr string, headers http.Hea
 		return nil, err
 	}
 
-	// brief backoff before the single retry; rebuild request because the
-	// body reader from the first attempt may have been consumed.
 	time.Sleep(200 * time.Millisecond)
 	req2, buildErr := buildReq()
 	if buildErr != nil {
@@ -128,9 +201,7 @@ func doOAuthRequest(ctx context.Context, method, urlStr string, headers http.Hea
 }
 
 // isRetryableConnError reports whether err looks like a transport-level
-// connection closure that is worth a single retry. We deliberately keep the
-// matcher tight — we don't retry on context deadlines, TLS validation
-// failures, or HTTP-level errors, since those won't recover on retry.
+// connection closure that is worth a single retry.
 func isRetryableConnError(err error) bool {
 	if err == nil {
 		return false
