@@ -74,9 +74,15 @@ func dialUTLSChrome(dialer *net.Dialer) func(ctx context.Context, network, addr 
 			host = addr
 		}
 
+		// HelloChrome_120: NOT HelloChrome_Auto. In uTLS v1.8 the _Auto
+		// alias resolves to HelloChrome_120_PQ (post-quantum / X25519MLKEM
+		// key share) which WAFPRO on yaohuo.me actively rejects (verified
+		// on-host: _Auto → EOF in ~1s, _120 → 400 business response in
+		// ~900 ms). Pinning to a stable, widely-deployed Chrome
+		// fingerprint avoids future Auto-alias drift breaking us again.
 		uconn := utls.UClient(rawConn, &utls.Config{
 			ServerName: host,
-		}, utls.HelloChrome_Auto)
+		}, utls.HelloChrome_120)
 
 		// Build the Chrome ClientHello once so we can mutate it, then force
 		// ALPN to HTTP/1.1 only.
