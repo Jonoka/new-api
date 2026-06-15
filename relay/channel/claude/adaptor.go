@@ -527,21 +527,19 @@ func containsClaudeCodeMarker(value any) bool {
 }
 
 func extractClaudeThinkingEffort(request *dto.ClaudeRequest) string {
-	if request.Thinking != nil {
-		switch request.Thinking.Type {
-		case "disabled":
-			return ""
-		case "enabled":
-			if budget := request.Thinking.GetBudgetTokens(); budget > 0 {
-				return fmt.Sprintf("thinking:%d", budget)
-			}
-			return "thinking"
-		case "adaptive":
-			return "adaptive"
-		}
-	}
 	if effort := request.GetEfforts(); effort != "" {
 		return effort
+	}
+	if request.Thinking != nil {
+		if request.Thinking.Type == "disabled" {
+			return ""
+		}
+		if budget := request.Thinking.GetBudgetTokens(); budget > 0 {
+			return fmt.Sprintf("thinking:%d", budget)
+		}
+		if request.Thinking.Type == "enabled" || request.Thinking.Type == "adaptive" {
+			return "thinking"
+		}
 	}
 	return ""
 }

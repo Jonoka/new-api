@@ -309,14 +309,12 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 			request.THINKING = nil
 
 			if info.ReasoningEffort == "" {
-				if thinking.Type == "enabled" {
+				if thinking.Type == "enabled" || thinking.Type == "adaptive" {
 					if budget := thinking.GetBudgetTokens(); budget > 0 {
 						info.ReasoningEffort = fmt.Sprintf("thinking:%d", budget)
 					} else {
 						info.ReasoningEffort = "thinking"
 					}
-				} else if thinking.Type == "adaptive" {
-					info.ReasoningEffort = "adaptive"
 				}
 			}
 		}
