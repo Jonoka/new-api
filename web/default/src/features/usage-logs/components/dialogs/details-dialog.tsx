@@ -801,9 +801,9 @@ export function DetailsDialog(props: DetailsDialogProps) {
                   <StatusBadge
                     label={other.reasoning_effort}
                     variant={
-                      other.reasoning_effort === 'high'
+                      other.reasoning_effort === 'high' || other.reasoning_effort?.startsWith('thinking:')
                         ? 'orange'
-                        : other.reasoning_effort === 'medium'
+                        : other.reasoning_effort === 'medium' || other.reasoning_effort === 'thinking' || other.reasoning_effort === 'adaptive'
                           ? 'yellow'
                           : 'green'
                     }

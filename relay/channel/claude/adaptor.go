@@ -97,6 +97,9 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 	if err := applyClaudeCodeRequestFingerprint(info, request); err != nil {
 		return nil, err
 	}
+	if info.ReasoningEffort == "" {
+		info.ReasoningEffort = extractClaudeThinkingEffort(request)
+	}
 	return request, nil
 }
 
@@ -521,4 +524,24 @@ func containsClaudeCodeMarker(value any) bool {
 		}
 	}
 	return false
+}
+
+func extractClaudeThinkingEffort(request *dto.ClaudeRequest) string {
+	if request.Thinking != nil {
+		switch request.Thinking.Type {
+		case "disabled":
+			return ""
+		case "enabled":
+			if budget := request.Thinking.GetBudgetTokens(); budget > 0 {
+				return fmt.Sprintf("thinking:%d", budget)
+			}
+			return "thinking"
+		case "adaptive":
+			return "adaptive"
+		}
+	}
+	if effort := request.GetEfforts(); effort != "" {
+		return effort
+	}
+	return ""
 }
