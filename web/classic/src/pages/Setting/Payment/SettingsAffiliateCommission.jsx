@@ -730,6 +730,7 @@ export default function SettingsAffiliateCommission(props) {
   const [bindLoading, setBindLoading] = useState(false);
   const [bindResult, setBindResult] = useState(null);
   const formApiRef = useRef(null);
+  const antifraudFormApiRef = useRef(null);
 
   const handleFieldChange = (fieldName) => (value) => {
     setInputs((current) => ({ ...current, [fieldName]: value }));
@@ -865,6 +866,7 @@ export default function SettingsAffiliateCommission(props) {
     setInputs(nextInputs);
     setOriginInputs(nextInputs);
     formApiRef.current?.setValues(nextInputs);
+    antifraudFormApiRef.current?.setValues(nextInputs);
   }, [props.options]);
 
   const saveSettings = async () => {
@@ -1723,7 +1725,7 @@ export default function SettingsAffiliateCommission(props) {
           <Card>
             <Form
               values={inputs}
-              getFormApi={(api) => (formApiRef.current = api)}
+              getFormApi={(api) => (antifraudFormApiRef.current = api)}
               style={{ marginBottom: 16 }}
             >
               <div className='space-y-4'>
