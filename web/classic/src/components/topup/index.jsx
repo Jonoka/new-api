@@ -1017,7 +1017,12 @@ const TopUp = () => {
 
       {/* Bepusdt 链选择模态框 */}
       <Modal
-        title={t('选择 USDT 网络')}
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <img src='/pay-usdt.svg' alt='USDT' style={{ width: 20, height: 20 }} />
+            {t('选择 USDT 网络')}
+          </div>
+        }
         visible={bepusdtChainModalVisible}
         onCancel={() => setBepusdtChainModalVisible(false)}
         footer={null}
@@ -1037,6 +1042,7 @@ const TopUp = () => {
               theme='light'
               size='large'
               style={{ minWidth: 100 }}
+              icon={<img src='/pay-usdt.svg' alt='' style={{ width: 16, height: 16 }} />}
               onClick={() => {
                 setBepusdtSelectedChain(chain.trade_type);
                 setBepusdtChainModalVisible(false);

@@ -51,7 +51,13 @@ const PaymentConfirmModal = ({
     <Modal
       title={
         <div className='flex items-center'>
-          <CreditCard className='mr-2' size={18} />
+          {payWay === 'bepusdt' ? (
+            <img src='/pay-usdt.svg' alt='USDT' className='mr-2' style={{ width: 18, height: 18 }} />
+          ) : payWay === 'okpay' ? (
+            <img src='/pay-okpay.svg' alt='OKPay' className='mr-2' style={{ width: 18, height: 18 }} />
+          ) : (
+            <CreditCard className='mr-2' size={18} />
+          )}
           {t('充值确认')}
         </div>
       }
@@ -163,6 +169,28 @@ const PaymentConfirmModal = ({
                             className='mr-2'
                             size={16}
                             color='#635BFF'
+                          />
+                        ) : payMethod.type === 'bepusdt' ? (
+                          <img
+                            src='/pay-usdt.svg'
+                            alt='USDT'
+                            className='mr-2'
+                            style={{
+                              width: 16,
+                              height: 16,
+                              objectFit: 'contain',
+                            }}
+                          />
+                        ) : payMethod.type === 'okpay' ? (
+                          <img
+                            src='/pay-okpay.svg'
+                            alt='OKPay'
+                            className='mr-2'
+                            style={{
+                              width: 16,
+                              height: 16,
+                              objectFit: 'contain',
+                            }}
                           />
                         ) : payMethod.icon ? (
                           <img
