@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -193,10 +194,18 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 
 	if resp != nil {
 		httpResp = resp.(*http.Response)
-		// Respect the client's original stream preference.
-		// Don't let upstream Content-Type override info.IsStream:
-		// if client sent stream=false, always return JSON even if upstream returns SSE
-		// (the non-streaming handler will convert SSE→JSON when needed).
+		// When upstream returns SSE (text/event-stream), force streaming mode
+		// regardless of the client's original stream preference. This handles
+		// upstreams like tokens-pro that always stream (chatgpt.com requirement)
+		// even when the client omitted the stream field. Without this, the
+		// non-streaming handler buffers the entire SSE response causing
+		// first-token = total-time.
+		if httpResp.StatusCode == http.StatusOK {
+			ct := httpResp.Header.Get("Content-Type")
+			if !info.IsStream && strings.Contains(ct, "text/event-stream") {
+				info.IsStream = true
+			}
+		}
 		if httpResp.StatusCode != http.StatusOK {
 			newApiErr := service.RelayErrorHandler(c.Request.Context(), httpResp, false)
 			// reset status code 重置状态码
