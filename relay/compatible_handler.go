@@ -194,15 +194,13 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 
 	if resp != nil {
 		httpResp = resp.(*http.Response)
-		// When upstream returns SSE (text/event-stream), force streaming mode
-		// regardless of the client's original stream preference. This handles
-		// upstreams like tokens-pro that always stream (chatgpt.com requirement)
-		// even when the client omitted the stream field. Without this, the
-		// non-streaming handler buffers the entire SSE response causing
-		// first-token = total-time.
-		if httpResp.StatusCode == http.StatusOK {
+		// When upstream returns SSE (text/event-stream or empty Content-Type
+		// with streaming body), force streaming mode. This handles upstreams
+		// like tokens-pro/sub2api that always stream for OpenAI OAuth even
+		// when the client omitted the stream field.
+		if httpResp.StatusCode == http.StatusOK && !info.IsStream {
 			ct := httpResp.Header.Get("Content-Type")
-			if !info.IsStream && strings.Contains(ct, "text/event-stream") {
+			if strings.Contains(ct, "text/event-stream") || strings.Contains(ct, "stream") {
 				info.IsStream = true
 			}
 		}

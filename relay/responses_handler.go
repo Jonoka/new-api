@@ -124,6 +124,14 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	if resp != nil {
 		httpResp = resp.(*http.Response)
 
+		// Force streaming when upstream returns SSE — same as TextHelper.
+		if httpResp.StatusCode == http.StatusOK && !info.IsStream {
+			ct := httpResp.Header.Get("Content-Type")
+			if strings.Contains(ct, "text/event-stream") || strings.Contains(ct, "stream") {
+				info.IsStream = true
+			}
+		}
+
 		if httpResp.StatusCode != http.StatusOK {
 			newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
 			// reset status code 重置状态码
