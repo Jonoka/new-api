@@ -44,7 +44,7 @@ export function RevenuePanel() {
 
   const granularity = selectedDays <= 1 ? 'hour' : 'day'
   const { start_timestamp, end_timestamp } = useMemo(
-    () => computeTimeRange(selectedDays),
+    () => computeTimeRange(selectedDays, undefined, undefined, true),
     [selectedDays]
   )
 

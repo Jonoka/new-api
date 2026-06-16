@@ -68,9 +68,10 @@ const RevenuePanel = ({ CARD_PROPS, CHART_CONFIG }) => {
   const loadRevenueData = useCallback(async () => {
     setLoading(true);
     try {
-      const now = Math.floor(Date.now() / 1000);
-      const start = now - selectedDays * 86400;
-      const end = now + 3600;
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const end = Math.floor(todayStart.getTime() / 1000) + 86400 - 1;
+      const start = Math.floor(todayStart.getTime() / 1000) - (selectedDays - 1) * 86400;
       const res = await API.get(
         `/api/data/revenue?start_timestamp=${start}&end_timestamp=${end}&granularity=${granularity}`
       );
