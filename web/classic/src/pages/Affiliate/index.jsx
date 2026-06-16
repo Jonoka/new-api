@@ -68,6 +68,115 @@ import { ITEMS_PER_PAGE } from '../../constants';
 
 const { Text, Title } = Typography;
 
+function AffiliateApplicationGate({
+  t,
+  reviewStatus,
+  agreementConfirm,
+  setAgreementConfirm,
+  applyLoading,
+  handleApply,
+}) {
+  const { status, eligibility, rejected_reason } = reviewStatus || {};
+
+  // Pending — waiting for admin review
+  if (status === 'pending') {
+    return (
+      <Card style={{ marginTop: 24 }}>
+        <Space vertical align='center' style={{ width: '100%', padding: 40 }}>
+          <Tag color='orange' size='large'>{t('审核中')}</Tag>
+          <Text type='secondary'>
+            {t('您的返佣参与申请正在审核中，请耐心等待管理员处理。')}
+          </Text>
+        </Space>
+      </Card>
+    );
+  }
+
+  // Rejected — show reason + allow re-apply
+  if (status === 'rejected') {
+    return (
+      <Card style={{ marginTop: 24 }}>
+        <Space vertical align='start' style={{ width: '100%', padding: 20 }}>
+          <Tag color='red' size='large'>{t('申请被驳回')}</Tag>
+          {rejected_reason && (
+            <Text type='secondary'>
+              {t('驳回原因')}：{rejected_reason}
+            </Text>
+          )}
+          <Text type='secondary'>
+            {t('您可以重新提交申请。')}
+          </Text>
+          <Button
+            type='primary'
+            loading={applyLoading}
+            onClick={handleApply}
+          >
+            {t('重新申请')}
+          </Button>
+        </Space>
+      </Card>
+    );
+  }
+
+  // Not eligible
+  if (eligibility && !eligibility.eligible) {
+    return (
+      <Card style={{ marginTop: 24 }}>
+        <Space vertical align='start' style={{ width: '100%', padding: 20 }}>
+          <Tag color='grey' size='large'>{t('暂不满足申请条件')}</Tag>
+          {eligibility.reason && (
+            <Text type='secondary'>{eligibility.reason}</Text>
+          )}
+        </Space>
+      </Card>
+    );
+  }
+
+  // Default: show agreement + apply form
+  const agreementEnabled = reviewStatus?.agreement_enabled;
+  const agreementText = reviewStatus?.agreement_text || '';
+  const canSubmit = !agreementEnabled || agreementConfirm === '我已同意';
+
+  return (
+    <Card style={{ marginTop: 24 }}>
+      <Space vertical align='start' style={{ width: '100%', padding: 20 }}>
+        <Title heading={5}>{t('申请参与返佣')}</Title>
+        <Text type='secondary'>
+          {t('您需要提交申请并通过审核后才能参与返佣分成。')}
+        </Text>
+        {agreementEnabled && agreementText && (
+          <>
+            <Card
+              style={{
+                width: '100%',
+                background: 'var(--semi-color-fill-0)',
+                maxHeight: 300,
+                overflow: 'auto',
+              }}
+            >
+              <Text style={{ whiteSpace: 'pre-wrap' }}>{agreementText}</Text>
+            </Card>
+            <Input
+              placeholder={t('请输入"我已同意"确认协议')}
+              value={agreementConfirm}
+              onChange={setAgreementConfirm}
+              style={{ width: 260 }}
+            />
+          </>
+        )}
+        <Button
+          type='primary'
+          loading={applyLoading}
+          disabled={!canSubmit}
+          onClick={handleApply}
+        >
+          {t('提交申请')}
+        </Button>
+      </Space>
+    </Card>
+  );
+}
+
 const EMPTY_ACCOUNT = {
   user_id: 0,
   usdt_address: '',
@@ -237,6 +346,65 @@ const Affiliate = () => {
   const [withdrawAmount, setWithdrawAmount] = useState(0);
   const [withdrawLoading, setWithdrawLoading] = useState(false);
   const [transferLoading, setTransferLoading] = useState(false);
+
+  // Anti-fraud application state
+  const [reviewStatus, setReviewStatus] = useState(null); // null = loading, object = loaded
+  const [reviewLoading, setReviewLoading] = useState(true);
+  const [applyLoading, setApplyLoading] = useState(false);
+  const [agreementConfirm, setAgreementConfirm] = useState('');
+
+  // Load application status on mount
+  useEffect(() => {
+    const checkApplicationStatus = async () => {
+      setReviewLoading(true);
+      try {
+        const [statusRes, agreementRes] = await Promise.all([
+          API.get('/api/affiliate/application-status'),
+          API.get('/api/affiliate/agreement'),
+        ]);
+        if (statusRes.data.success) {
+          const data = statusRes.data.data || {};
+          // Merge agreement info from the agreement endpoint
+          if (agreementRes.data.success) {
+            const agr = agreementRes.data.data || {};
+            data.agreement_enabled = agr.agreement_enabled;
+            data.agreement_text = agr.agreement_text;
+          }
+          setReviewStatus(data);
+        } else {
+          setReviewStatus({ review_enabled: false });
+        }
+      } catch (error) {
+        setReviewStatus({ review_enabled: false });
+      } finally {
+        setReviewLoading(false);
+      }
+    };
+    checkApplicationStatus();
+  }, []);
+
+  const handleApply = async () => {
+    setApplyLoading(true);
+    try {
+      const res = await API.post('/api/affiliate/apply', {
+        agreement_accepted: true,
+      });
+      if (res.data.success) {
+        showSuccess(t('申请已提交'));
+        // Reload status
+        const statusRes = await API.get('/api/affiliate/application-status');
+        if (statusRes.data.success) {
+          setReviewStatus(statusRes.data.data);
+        }
+      } else {
+        showError(res.data.message);
+      }
+    } catch (error) {
+      showError(t('提交失败'));
+    } finally {
+      setApplyLoading(false);
+    }
+  };
 
   const balance = summary?.balance || {};
   const availableAmount = useMemo(
@@ -614,6 +782,21 @@ const Affiliate = () => {
 
   return (
     <div className='w-full max-w-7xl mx-auto relative min-h-screen lg:min-h-0 mt-[60px] px-2'>
+      {reviewLoading ? (
+        <Spin spinning={true}>
+          <div style={{ minHeight: 200 }} />
+        </Spin>
+      ) : reviewStatus?.review_enabled && reviewStatus?.status !== 'approved' ? (
+        <AffiliateApplicationGate
+          t={t}
+          reviewStatus={reviewStatus}
+          agreementConfirm={agreementConfirm}
+          setAgreementConfirm={setAgreementConfirm}
+          applyLoading={applyLoading}
+          handleApply={handleApply}
+        />
+      ) : (
+      <>
       <Spin spinning={loading}>
         <div className='flex flex-col gap-4'>
           <div className='flex flex-col gap-1'>
@@ -1111,6 +1294,8 @@ const Affiliate = () => {
           </Text>
         </Space>
       </Modal>
+      </>
+      )}
     </div>
   );
 };

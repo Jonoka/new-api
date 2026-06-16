@@ -62,6 +62,14 @@ const DEFAULT_INPUTS = {
   'affiliate_setting.payout_methods': 'usdt,alipay,wechat',
   'affiliate_setting.usdt_chain': 'TRC20',
   'affiliate_setting.promotion_template': '邀请链接：{invite_link}',
+  'affiliate_setting.review_enabled': false,
+  'affiliate_setting.auto_approve_after_days': 0,
+  'affiliate_setting.agreement_enabled': false,
+  'affiliate_setting.agreement_text': '',
+  'affiliate_setting.inviter_min_account_age_days': 0,
+  'affiliate_setting.inviter_min_recharge_amount': 0,
+  'affiliate_setting.invitee_min_account_age_days': 0,
+  'affiliate_setting.invitee_min_recharge_amount': 0,
 };
 
 const SETTLEMENT_DELAY_KEY = 'affiliate_setting.settlement_delay_seconds';
@@ -195,6 +203,492 @@ function SwitchRow({ title, description, children }) {
       </div>
       {children}
     </div>
+  );
+}
+
+function ApplicationsPanel() {
+  const { t } = useTranslation();
+  const [applications, setApplications] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(ITEMS_PER_PAGE);
+  const [total, setTotal] = useState(0);
+  const [statusFilter, setStatusFilter] = useState('');
+
+  const loadApplications = async () => {
+    setLoading(true);
+    try {
+      const res = await API.get('/api/affiliate/admin/applications', {
+        params: {
+          p: page,
+          page_size: pageSize,
+          status: statusFilter || undefined,
+        },
+      });
+      if (res.data.success) {
+        const pageData = res.data.data || {};
+        setApplications(pageData.items || []);
+        setTotal(getPageTotal(pageData));
+      } else {
+        showError(res.data.message);
+      }
+    } catch (error) {
+      showError(t('获取申请列表失败'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadApplications();
+  }, [page, pageSize, statusFilter]);
+
+  const handleApprove = (id) => {
+    Modal.confirm({
+      title: t('确认通过'),
+      content: t('确认通过该用户的返佣申请？'),
+      onOk: async () => {
+        try {
+          const res = await API.post(
+            `/api/affiliate/admin/applications/${id}/approve`,
+            { remark: '' },
+          );
+          if (res.data.success) {
+            showSuccess(t('已通过'));
+            await loadApplications();
+          } else {
+            showError(res.data.message);
+          }
+        } catch (error) {
+          showError(t('操作失败'));
+        }
+      },
+    });
+  };
+
+  const handleReject = (id) => {
+    let reason = '';
+    Modal.confirm({
+      title: t('驳回申请'),
+      content: (
+        <Input
+          placeholder={t('驳回原因（可选）')}
+          onChange={(value) => { reason = value; }}
+        />
+      ),
+      onOk: async () => {
+        try {
+          const res = await API.post(
+            `/api/affiliate/admin/applications/${id}/reject`,
+            { reason },
+          );
+          if (res.data.success) {
+            showSuccess(t('已驳回'));
+            await loadApplications();
+          } else {
+            showError(res.data.message);
+          }
+        } catch (error) {
+          showError(t('操作失败'));
+        }
+      },
+    });
+  };
+
+  const applicationStatusText = (status) => {
+    const map = {
+      pending: t('待审核'),
+      approved: t('已通过'),
+      rejected: t('已驳回'),
+    };
+    return map[status] || status;
+  };
+
+  const applicationStatusColor = (status) => {
+    if (status === 'approved') return 'green';
+    if (status === 'rejected') return 'red';
+    return 'orange';
+  };
+
+  const applicationColumns = [
+    { title: 'ID', dataIndex: 'id', width: 80 },
+    { title: t('用户 ID'), dataIndex: 'user_id', width: 100 },
+    {
+      title: t('用户名'),
+      dataIndex: 'username',
+      width: 160,
+      render: (value) => value || '-',
+    },
+    {
+      title: t('状态'),
+      dataIndex: 'status',
+      width: 100,
+      render: (value) => (
+        <Tag color={applicationStatusColor(value)}>
+          {applicationStatusText(value)}
+        </Tag>
+      ),
+    },
+    {
+      title: t('申请时间'),
+      dataIndex: 'created_at',
+      width: 170,
+      render: (value) => (value ? timestamp2string(value) : '-'),
+    },
+    {
+      title: t('操作'),
+      key: 'action',
+      width: 180,
+      render: (_, record) => (
+        <Space>
+          {record.status === 'pending' && (
+            <>
+              <Button
+                size='small'
+                type='primary'
+                onClick={() => handleApprove(record.id)}
+              >
+                {t('通过')}
+              </Button>
+              <Button
+                size='small'
+                type='danger'
+                onClick={() => handleReject(record.id)}
+              >
+                {t('驳回')}
+              </Button>
+            </>
+          )}
+        </Space>
+      ),
+    },
+  ];
+
+  return (
+    <Card>
+      <Space vertical align='start' style={{ width: '100%' }}>
+        <SectionHeader
+          title={t('返佣申请审核')}
+          description={t('审核用户的返佣参与申请')}
+        />
+        <Space wrap>
+          <Select
+            value={statusFilter}
+            onChange={(value) => {
+              setPage(1);
+              setStatusFilter(value);
+            }}
+            style={{ width: 140 }}
+          >
+            <Select.Option value=''>{t('全部状态')}</Select.Option>
+            <Select.Option value='pending'>{t('待审核')}</Select.Option>
+            <Select.Option value='approved'>{t('已通过')}</Select.Option>
+            <Select.Option value='rejected'>{t('已驳回')}</Select.Option>
+          </Select>
+          <Button theme='outline' onClick={loadApplications}>
+            {t('刷新')}
+          </Button>
+        </Space>
+        <Table
+          rowKey='id'
+          loading={loading}
+          columns={applicationColumns}
+          dataSource={applications}
+          pagination={{
+            currentPage: page,
+            pageSize: pageSize,
+            total: total,
+            pageSizeOpts: [10, 20, 50, 100],
+            showSizeChanger: true,
+            onPageChange: setPage,
+            onPageSizeChange: (size) => {
+              setPageSize(size);
+              setPage(1);
+            },
+          }}
+          empty={<Empty description={t('暂无申请记录')} />}
+          size='small'
+          scroll={{ x: 790 }}
+          className='w-full'
+        />
+      </Space>
+    </Card>
+  );
+}
+
+function FraudAlertsPanel() {
+  const { t } = useTranslation();
+  const [alerts, setAlerts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(ITEMS_PER_PAGE);
+  const [total, setTotal] = useState(0);
+  const [statusFilter, setStatusFilter] = useState('');
+
+  const loadAlerts = async () => {
+    setLoading(true);
+    try {
+      const res = await API.get('/api/affiliate/admin/fraud-alerts', {
+        params: {
+          p: page,
+          page_size: pageSize,
+          status: statusFilter || undefined,
+        },
+      });
+      if (res.data.success) {
+        const pageData = res.data.data || {};
+        setAlerts(pageData.items || []);
+        setTotal(getPageTotal(pageData));
+      } else {
+        showError(res.data.message);
+      }
+    } catch (error) {
+      showError(t('获取异常检测列表失败'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAlerts();
+  }, [page, pageSize, statusFilter]);
+
+  const handleScan = async () => {
+    setScanning(true);
+    try {
+      const res = await API.post('/api/affiliate/admin/fraud-alerts/scan');
+      if (res.data.success) {
+        const newAlerts = res.data.data?.new_alerts || 0;
+        showSuccess(t('检测完成') + `，${t('新增')} ${newAlerts} ${t('条警报')}`);
+        await loadAlerts();
+      } else {
+        showError(res.data.message);
+      }
+    } catch (error) {
+      showError(t('检测失败'));
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const handleAction = (id, action) => {
+    const actionText = {
+      unbind: t('解绑邀请关系'),
+      clawback: t('追回返佣'),
+      dismiss: t('忽略'),
+    }[action];
+
+    if (action === 'dismiss') {
+      let remark = '';
+      Modal.confirm({
+        title: t('忽略警报'),
+        content: (
+          <Input
+            placeholder={t('备注（可选）')}
+            onChange={(value) => { remark = value; }}
+          />
+        ),
+        onOk: async () => {
+          try {
+            const res = await API.post(
+              `/api/affiliate/admin/fraud-alerts/${id}/dismiss`,
+              { remark },
+            );
+            if (res.data.success) {
+              showSuccess(t('已忽略'));
+              await loadAlerts();
+            } else {
+              showError(res.data.message);
+            }
+          } catch (error) {
+            showError(t('操作失败'));
+          }
+        },
+      });
+      return;
+    }
+
+    Modal.confirm({
+      title: t('确认操作'),
+      content: `${t('确认执行')}：${actionText}？`,
+      onOk: async () => {
+        try {
+          const res = await API.post(
+            `/api/affiliate/admin/fraud-alerts/${id}/${action}`,
+          );
+          if (res.data.success) {
+            showSuccess(t('操作成功'));
+            await loadAlerts();
+          } else {
+            showError(res.data.message);
+          }
+        } catch (error) {
+          showError(t('操作失败'));
+        }
+      },
+    });
+  };
+
+  const alertStatusText = (status) => {
+    const map = {
+      pending: t('待处理'),
+      dismissed: t('已忽略'),
+      unbound: t('已解绑'),
+      clawback: t('已追回'),
+    };
+    return map[status] || status;
+  };
+
+  const alertStatusColor = (status) => {
+    if (status === 'dismissed') return 'grey';
+    if (status === 'unbound' || status === 'clawback') return 'green';
+    return 'orange';
+  };
+
+  const alertColumns = [
+    { title: 'ID', dataIndex: 'id', width: 80 },
+    {
+      title: t('邀请人'),
+      dataIndex: 'inviter_id',
+      width: 160,
+      render: (_, record) =>
+        renderAdminUser(
+          record.inviter_id,
+          record.inviter_username,
+          record.inviter_name,
+          '',
+        ),
+    },
+    {
+      title: t('被邀请人'),
+      dataIndex: 'invitee_id',
+      width: 160,
+      render: (_, record) =>
+        renderAdminUser(
+          record.invitee_id,
+          record.invitee_username,
+          record.invitee_name,
+          '',
+        ),
+    },
+    {
+      title: t('共享 IP'),
+      dataIndex: 'shared_ips',
+      width: 200,
+      render: (value) => {
+        const ips = value || [];
+        return (
+          <Space wrap>
+            {ips.map((ip) => (
+              <Tag key={ip} size='small'>{ip}</Tag>
+            ))}
+            {ips.length === 0 && '-'}
+          </Space>
+        );
+      },
+    },
+    {
+      title: t('状态'),
+      dataIndex: 'status',
+      width: 100,
+      render: (value) => (
+        <Tag color={alertStatusColor(value)}>{alertStatusText(value)}</Tag>
+      ),
+    },
+    {
+      title: t('操作'),
+      key: 'action',
+      width: 240,
+      render: (_, record) => (
+        <Space>
+          {record.status === 'pending' && (
+            <>
+              <Button
+                size='small'
+                type='warning'
+                onClick={() => handleAction(record.id, 'unbind')}
+              >
+                {t('解绑')}
+              </Button>
+              <Button
+                size='small'
+                type='danger'
+                onClick={() => handleAction(record.id, 'clawback')}
+              >
+                {t('追回')}
+              </Button>
+              <Button
+                size='small'
+                theme='outline'
+                onClick={() => handleAction(record.id, 'dismiss')}
+              >
+                {t('忽略')}
+              </Button>
+            </>
+          )}
+        </Space>
+      ),
+    },
+  ];
+
+  return (
+    <Card>
+      <Space vertical align='start' style={{ width: '100%' }}>
+        <SectionHeader
+          title={t('异常检测')}
+          description={t('检测可疑的邀请关系（如共享 IP）')}
+        />
+        <Space wrap>
+          <Button
+            type='primary'
+            loading={scanning}
+            onClick={handleScan}
+          >
+            {t('一键检测')}
+          </Button>
+          <Select
+            value={statusFilter}
+            onChange={(value) => {
+              setPage(1);
+              setStatusFilter(value);
+            }}
+            style={{ width: 140 }}
+          >
+            <Select.Option value=''>{t('全部状态')}</Select.Option>
+            <Select.Option value='pending'>{t('待处理')}</Select.Option>
+            <Select.Option value='dismissed'>{t('已忽略')}</Select.Option>
+            <Select.Option value='unbound'>{t('已解绑')}</Select.Option>
+            <Select.Option value='clawback'>{t('已追回')}</Select.Option>
+          </Select>
+          <Button theme='outline' onClick={loadAlerts}>
+            {t('刷新')}
+          </Button>
+        </Space>
+        <Table
+          rowKey='id'
+          loading={loading}
+          columns={alertColumns}
+          dataSource={alerts}
+          pagination={{
+            currentPage: page,
+            pageSize: pageSize,
+            total: total,
+            pageSizeOpts: [10, 20, 50, 100],
+            showSizeChanger: true,
+            onPageChange: setPage,
+            onPageSizeChange: (size) => {
+              setPageSize(size);
+              setPage(1);
+            },
+          }}
+          empty={<Empty description={t('暂无异常警报')} />}
+          size='small'
+          scroll={{ x: 940 }}
+          className='w-full'
+        />
+      </Space>
+    </Card>
   );
 }
 
@@ -1219,6 +1713,112 @@ export default function SettingsAffiliateCommission(props) {
               scroll={{ x: 1170 }}
             />
           </Card>
+        </Tabs.TabPane>
+
+        <Tabs.TabPane tab={t('反欺诈设置')} itemKey='anti-fraud'>
+          <Card>
+            <Form
+              values={inputs}
+              getFormApi={(api) => (formApiRef.current = api)}
+              style={{ marginBottom: 16 }}
+            >
+              <div className='space-y-4'>
+                <SectionHeader
+                  title={t('申请审核')}
+                  description={t('开启后用户需申请才能参与返佣')}
+                />
+                <SwitchRow title={t('开启返佣申请审核')}>
+                  <Form.Switch
+                    field='affiliate_setting.review_enabled'
+                    noLabel
+                    checkedText='｜'
+                    uncheckedText='〇'
+                    onChange={handleFieldChange('affiliate_setting.review_enabled')}
+                  />
+                </SwitchRow>
+                <Form.InputNumber
+                  field='affiliate_setting.auto_approve_after_days'
+                  label={t('自动通过天数（0=仅手动）')}
+                  min={0}
+                  precision={0}
+                  style={COMPACT_INPUT_STYLE}
+                  onChange={handleFieldChange('affiliate_setting.auto_approve_after_days')}
+                />
+
+                <SectionHeader
+                  title={t('协议设置')}
+                  description={t('用户申请前需确认协议内容')}
+                />
+                <SwitchRow title={t('启用协议')}>
+                  <Form.Switch
+                    field='affiliate_setting.agreement_enabled'
+                    noLabel
+                    checkedText='｜'
+                    uncheckedText='〇'
+                    onChange={handleFieldChange('affiliate_setting.agreement_enabled')}
+                  />
+                </SwitchRow>
+                <Form.TextArea
+                  field='affiliate_setting.agreement_text'
+                  label={t('协议内容')}
+                  autosize={{ minRows: 4, maxRows: 10 }}
+                  style={WIDE_INPUT_STYLE}
+                  onChange={handleFieldChange('affiliate_setting.agreement_text')}
+                />
+
+                <SectionHeader
+                  title={t('资格门槛')}
+                  description={t('设置邀请人和被邀请人的最低要求')}
+                />
+                <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
+                  <Form.InputNumber
+                    field='affiliate_setting.inviter_min_account_age_days'
+                    label={t('邀请人最少注册天数')}
+                    min={0}
+                    precision={0}
+                    style={COMPACT_INPUT_STYLE}
+                    onChange={handleFieldChange('affiliate_setting.inviter_min_account_age_days')}
+                  />
+                  <Form.InputNumber
+                    field='affiliate_setting.inviter_min_recharge_amount'
+                    label={t('邀请人最少充值额度')}
+                    min={0}
+                    style={COMPACT_INPUT_STYLE}
+                    onChange={handleFieldChange('affiliate_setting.inviter_min_recharge_amount')}
+                  />
+                  <Form.InputNumber
+                    field='affiliate_setting.invitee_min_account_age_days'
+                    label={t('被邀请人最少注册天数')}
+                    min={0}
+                    precision={0}
+                    style={COMPACT_INPUT_STYLE}
+                    onChange={handleFieldChange('affiliate_setting.invitee_min_account_age_days')}
+                  />
+                  <Form.InputNumber
+                    field='affiliate_setting.invitee_min_recharge_amount'
+                    label={t('被邀请人最少充值额度')}
+                    min={0}
+                    style={COMPACT_INPUT_STYLE}
+                    onChange={handleFieldChange('affiliate_setting.invitee_min_recharge_amount')}
+                  />
+                </div>
+
+                <div className='flex justify-end'>
+                  <Button type='primary' loading={saving} onClick={saveSettings}>
+                    {t('保存设置')}
+                  </Button>
+                </div>
+              </div>
+            </Form>
+          </Card>
+        </Tabs.TabPane>
+
+        <Tabs.TabPane tab={t('申请审核')} itemKey='applications'>
+          <ApplicationsPanel />
+        </Tabs.TabPane>
+
+        <Tabs.TabPane tab={t('异常检测')} itemKey='fraud'>
+          <FraudAlertsPanel />
         </Tabs.TabPane>
       </Tabs>
     </Spin>
