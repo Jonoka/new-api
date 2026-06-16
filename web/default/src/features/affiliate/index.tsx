@@ -496,6 +496,20 @@ export function Affiliate() {
             </div>
           ) : (
           <div className='mx-auto flex w-full max-w-7xl flex-col gap-4 sm:gap-5'>
+            {/* Anti-fraud notice for approved/existing users */}
+            {agreementEnabled && agreementText && (
+              <Card className='border-yellow-500/50 py-0'>
+                <CardContent className='p-4'>
+                  <div className='flex items-start gap-3'>
+                    <Badge variant='outline' className='shrink-0 border-yellow-500 text-yellow-700'>{t('Notice')}</Badge>
+                    <div className='min-w-0'>
+                      <p className='text-sm font-medium'>{t('Affiliate Anti-Fraud Agreement')}</p>
+                      <p className='text-muted-foreground mt-1 whitespace-pre-wrap text-xs'>{agreementText}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
             <Card className='py-0'>
               <CardHeader className='pb-2'>
                 <div className='flex items-center justify-between gap-3'>

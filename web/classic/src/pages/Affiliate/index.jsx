@@ -797,6 +797,23 @@ const Affiliate = () => {
         />
       ) : (
       <>
+      {/* Anti-fraud agreement notice for approved/existing users */}
+      {reviewStatus?.agreement_enabled && reviewStatus?.agreement_text && (
+        <Card
+          style={{ marginBottom: 16, border: '1px solid var(--semi-color-warning)' }}
+          bodyStyle={{ padding: '12px 20px' }}
+        >
+          <Space vertical align='start' style={{ width: '100%' }}>
+            <Space>
+              <Tag color='orange' size='small'>{t('反欺诈公告')}</Tag>
+              <Text strong>{t('参与返佣须知')}</Text>
+            </Space>
+            <Text type='secondary' style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>
+              {reviewStatus.agreement_text}
+            </Text>
+          </Space>
+        </Card>
+      )}
       <Spin spinning={loading}>
         <div className='flex flex-col gap-4'>
           <div className='flex flex-col gap-1'>
