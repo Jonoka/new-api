@@ -1025,6 +1025,7 @@ const TopUp = () => {
         size='small'
         centered
         style={{ maxWidth: 400 }}
+        bodyStyle={{ paddingBottom: 24 }}
       >
         <p style={{ marginBottom: 16, color: 'var(--semi-color-text-2)', fontSize: 14 }}>
           {t('请选择支付使用的区块链网络')}
@@ -1033,8 +1034,7 @@ const TopUp = () => {
           {(bepusdtChains || []).map((chain) => (
             <Button
               key={chain.trade_type}
-              theme='solid'
-              type='primary'
+              theme='light'
               size='large'
               style={{ minWidth: 100 }}
               onClick={() => {
