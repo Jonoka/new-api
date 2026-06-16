@@ -324,6 +324,7 @@ func RequestBepusdtPay(c *gin.Context) {
 func createBepusdtTransaction(c *gin.Context, orderId string, amountCNY float64, tradeType string, notifyUrl string, redirectUrl string) (string, error) {
 	apiUrl := strings.TrimRight(setting.BepusdtApiUrl, "/") + "/api/v1/order/create-transaction"
 
+	// 签名用字符串 map
 	params := map[string]string{
 		"order_id":     orderId,
 		"amount":       strconv.FormatFloat(amountCNY, 'f', 2, 64),
@@ -336,7 +337,20 @@ func createBepusdtTransaction(c *gin.Context, orderId string, amountCNY float64,
 	}
 	params["signature"] = generateBepusdtSignature(params, setting.BepusdtAuthToken)
 
-	jsonData, err := common.Marshal(params)
+	// 构建 JSON body，amount 和 timeout 用数字类型
+	jsonBody := map[string]interface{}{
+		"order_id":     orderId,
+		"amount":       amountCNY,
+		"fiat":         "CNY",
+		"trade_type":   tradeType,
+		"notify_url":   notifyUrl,
+		"redirect_url": redirectUrl,
+		"name":         fmt.Sprintf("TopUp-%s", orderId),
+		"timeout":      setting.BepusdtTimeout,
+		"signature":    params["signature"],
+	}
+
+	jsonData, err := common.Marshal(jsonBody)
 	if err != nil {
 		return "", fmt.Errorf("序列化请求失败: %v", err)
 	}
