@@ -24,6 +24,7 @@ import { StatusContext } from '../../context/Status';
 
 import DashboardHeader from './DashboardHeader';
 import StatsCards from './StatsCards';
+import RevenuePanel from './RevenuePanel';
 import ChartsPanel from './ChartsPanel';
 import ApiInfoPanel from './ApiInfoPanel';
 import AnnouncementsPanel from './AnnouncementsPanel';
@@ -181,6 +182,12 @@ const Dashboard = () => {
         CARD_PROPS={CARD_PROPS}
         CHART_CONFIG={CHART_CONFIG}
       />
+
+      {dashboardData.isAdminUser && (
+        <div className='mb-4'>
+          <RevenuePanel CARD_PROPS={CARD_PROPS} CHART_CONFIG={CHART_CONFIG} />
+        </div>
+      )}
 
       {/* API信息和图表面板 */}
       <div className='mb-4'>

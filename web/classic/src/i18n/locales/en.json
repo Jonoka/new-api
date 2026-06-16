@@ -4058,6 +4058,16 @@
     "统计窗口": "Window",
     "统计窗口(小时)": "Availability window (hours)",
     "统计窗口必须在1到720小时之间": "Availability window must be between 1 and 720 hours",
-    "用于选择Uptime Kuma可用率统计窗口，例如1H或24H": "Used to select the Uptime Kuma uptime window, for example 1H or 24H"
+    "用于选择Uptime Kuma可用率统计窗口，例如1H或24H": "Used to select the Uptime Kuma uptime window, for example 1H or 24H",
+    "收入统计": "Revenue Statistics",
+    "总收入": "Total Revenue",
+    "在线充值": "Online Recharge",
+    "兑换码": "Redemption Code",
+    "笔": "transactions",
+    "1天": "1 Day",
+    "7天": "7 Days",
+    "14天": "14 Days",
+    "29天": "29 Days",
+    "该时间段内无收入数据": "No revenue data in this period"
   }
 }
