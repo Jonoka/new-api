@@ -324,16 +324,18 @@ func RequestBepusdtPay(c *gin.Context) {
 func createBepusdtTransaction(c *gin.Context, orderId string, amountCNY float64, tradeType string, notifyUrl string, redirectUrl string) (string, error) {
 	apiUrl := strings.TrimRight(setting.BepusdtApiUrl, "/") + "/api/v1/order/create-transaction"
 
-	// 签名用字符串 map
+	// 签名用字符串 map（amount 格式必须与 JSON body 中的数字表示一致）
+	amountStr := strconv.FormatFloat(amountCNY, 'f', -1, 64)
+	timeoutStr := strconv.Itoa(setting.BepusdtTimeout)
 	params := map[string]string{
 		"order_id":     orderId,
-		"amount":       strconv.FormatFloat(amountCNY, 'f', 2, 64),
+		"amount":       amountStr,
 		"fiat":         "CNY",
 		"trade_type":   tradeType,
 		"notify_url":   notifyUrl,
 		"redirect_url": redirectUrl,
 		"name":         fmt.Sprintf("TopUp-%s", orderId),
-		"timeout":      strconv.Itoa(setting.BepusdtTimeout),
+		"timeout":      timeoutStr,
 	}
 	params["signature"] = generateBepusdtSignature(params, setting.BepusdtAuthToken)
 

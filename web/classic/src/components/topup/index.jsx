@@ -1024,23 +1024,19 @@ const TopUp = () => {
         maskClosable={true}
         size='small'
         centered
+        style={{ maxWidth: 400 }}
       >
-        <p style={{ marginBottom: 12, color: 'var(--semi-color-text-2)' }}>
+        <p style={{ marginBottom: 16, color: 'var(--semi-color-text-2)', fontSize: 14 }}>
           {t('请选择支付使用的区块链网络')}
         </p>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'center' }}>
           {(bepusdtChains || []).map((chain) => (
-            <button
+            <Button
               key={chain.trade_type}
-              style={{
-                padding: '8px 16px',
-                border: '1px solid var(--semi-color-border)',
-                borderRadius: 6,
-                background: 'var(--semi-color-bg-2)',
-                cursor: 'pointer',
-                fontSize: 14,
-                fontWeight: 500,
-              }}
+              theme='solid'
+              type='primary'
+              size='large'
+              style={{ minWidth: 100 }}
               onClick={() => {
                 setBepusdtSelectedChain(chain.trade_type);
                 setBepusdtChainModalVisible(false);
@@ -1049,7 +1045,7 @@ const TopUp = () => {
               }}
             >
               {chain.name}
-            </button>
+            </Button>
           ))}
         </div>
       </Modal>
