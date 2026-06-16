@@ -254,7 +254,8 @@ export function Affiliate() {
   }, [])
 
   const handleApply = async () => {
-    if (agreementEnabled && confirmInput !== '我已同意') {
+    const confirmText = t('agreement_confirm_text')
+    if (agreementEnabled && confirmInput !== confirmText) {
       toast.error(t('Please type the exact confirmation text'))
       return
     }
@@ -469,11 +470,11 @@ export function Affiliate() {
                             {agreementText}
                           </div>
                           <div className='space-y-2'>
-                            <Label>{t('Type "我已同意" to confirm')}</Label>
+                            <Label>{t('Type the confirmation text to agree')}</Label>
                             <Input
                               value={confirmInput}
                               onChange={(e) => setConfirmInput(e.target.value)}
-                              placeholder='我已同意'
+                              placeholder={t('agreement_confirm_text')}
                             />
                           </div>
                         </div>
@@ -483,7 +484,7 @@ export function Affiliate() {
                         disabled={
                           applying ||
                           (eligibility !== null && !eligibility.eligible) ||
-                          (agreementEnabled && confirmInput !== '我已同意')
+                          (agreementEnabled && confirmInput !== t('agreement_confirm_text'))
                         }
                       >
                         {applying ? t('Submitting...') : t('Submit Application')}

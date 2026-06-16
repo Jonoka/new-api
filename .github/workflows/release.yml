@@ -46,6 +46,7 @@ jobs:
         run: |
           cd web/default
           bun install
+          bun run tsc --noEmit 2>&1 || true
           DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=$VERSION bun run build
           cd ../..
       - name: Build Frontend (classic)
