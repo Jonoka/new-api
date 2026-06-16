@@ -88,6 +88,9 @@ const TopUp = () => {
   const [waffoMinTopUp, setWaffoMinTopUp] = useState(1);
   const [enableWaffoPancakeTopUp, setEnableWaffoPancakeTopUp] = useState(false);
   const [waffoPancakeMinTopUp, setWaffoPancakeMinTopUp] = useState(1);
+  const [enableBepusdtTopUp, setEnableBepusdtTopUp] = useState(false);
+  const [bepusdtChains, setBepusdtChains] = useState([]);
+  const [enableOkpayTopUp, setEnableOkpayTopUp] = useState(false);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [open, setOpen] = useState(false);
@@ -156,6 +159,12 @@ const TopUp = () => {
     }
     if (typeof payment === 'string' && payment.startsWith('waffo:')) {
       return getWaffoAmount(value);
+    }
+    if (payment === 'bepusdt') {
+      return getBepusdtAmount(value);
+    }
+    if (payment === 'okpay') {
+      return getOkpayAmount(value);
     }
     return getAmount(value);
   };
@@ -247,6 +256,16 @@ const TopUp = () => {
         showError(t('管理员未开启 Waffo 充值！'));
         return;
       }
+    } else if (payment === 'bepusdt') {
+      if (!enableBepusdtTopUp) {
+        showError(t('管理员未开启 Bepusdt 充值！'));
+        return;
+      }
+    } else if (payment === 'okpay') {
+      if (!enableOkpayTopUp) {
+        showError(t('管理员未开启 OKPay 充值！'));
+        return;
+      }
     } else {
       if (!enableOnlineTopUp) {
         showError(t('管理员未开启在线充值！'));
@@ -322,6 +341,27 @@ const TopUp = () => {
           payment_method: 'stripe',
           ...buildPromoPayload(),
         });
+      } else if (payWay === 'bepusdt') {
+        // Bepusdt 需要选链 — 使用第一条链或弹窗选择
+        const chains = bepusdtChains || [];
+        if (chains.length === 0) {
+          showError(t('管理员未配置 USDT 链'));
+          setConfirmLoading(false);
+          return;
+        }
+        // 如果只有一条链直接用，否则用第一条（后续可扩展为弹窗选择）
+        const tradeType = chains.length === 1 ? chains[0].trade_type : chains[0].trade_type;
+        res = await API.post('/api/user/bepusdt/pay', {
+          amount: parseInt(topUpCount),
+          trade_type: tradeType,
+          ...buildPromoPayload(),
+        });
+      } else if (payWay === 'okpay') {
+        // OKPay 支付请求
+        res = await API.post('/api/user/okpay/pay', {
+          amount: parseInt(topUpCount),
+          ...buildPromoPayload(),
+        });
       } else {
         // 普通支付请求
         res = await API.post('/api/user/pay', {
@@ -341,6 +381,11 @@ const TopUp = () => {
           if (payWay === 'stripe') {
             // Stripe 支付回调处理
             window.open(data.pay_link, '_blank');
+          } else if (payWay === 'bepusdt' || payWay === 'okpay') {
+            // Bepusdt/OKPay 支付跳转
+            if (data.payment_url) {
+              window.open(data.payment_url, '_blank');
+            }
           } else {
             // 普通支付表单提交
             let params = data;
@@ -696,6 +741,9 @@ const TopUp = () => {
           setWaffoMinTopUp(data.waffo_min_topup || 1);
           setEnableWaffoPancakeTopUp(enableWaffoPancakeTopUp);
           setWaffoPancakeMinTopUp(data.waffo_pancake_min_topup || 1);
+          setEnableBepusdtTopUp(data.enable_bepusdt_topup || false);
+          setBepusdtChains(data.bepusdt_chains || []);
+          setEnableOkpayTopUp(data.enable_okpay_topup || false);
           setMinTopUp(minTopUpValue);
           setTopUpCount(minTopUpValue);
           setTopUpLink(data.topup_link || '');
@@ -803,6 +851,42 @@ const TopUp = () => {
     setAmountLoading(true);
     try {
       const res = await API.post('/api/user/stripe/amount', {
+        amount: parseFloat(value),
+        ...buildPromoPayload(),
+      });
+      updateAmountFromResponse(res, t('获取金额失败'));
+    } catch (err) {
+      // amount fetch failed silently
+    } finally {
+      setAmountLoading(false);
+    }
+  };
+
+  const getBepusdtAmount = async (value) => {
+    if (value === undefined) {
+      value = topUpCount;
+    }
+    setAmountLoading(true);
+    try {
+      const res = await API.post('/api/user/bepusdt/amount', {
+        amount: parseFloat(value),
+        ...buildPromoPayload(),
+      });
+      updateAmountFromResponse(res, t('获取金额失败'));
+    } catch (err) {
+      // amount fetch failed silently
+    } finally {
+      setAmountLoading(false);
+    }
+  };
+
+  const getOkpayAmount = async (value) => {
+    if (value === undefined) {
+      value = topUpCount;
+    }
+    setAmountLoading(true);
+    try {
+      const res = await API.post('/api/user/okpay/amount', {
         amount: parseFloat(value),
         ...buildPromoPayload(),
       });
