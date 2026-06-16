@@ -352,6 +352,9 @@ const Affiliate = () => {
   const [reviewLoading, setReviewLoading] = useState(true);
   const [applyLoading, setApplyLoading] = useState(false);
   const [agreementConfirm, setAgreementConfirm] = useState('');
+  // Anti-fraud notice modal + banner state
+  const [agreementModalVisible, setAgreementModalVisible] = useState(false);
+  const [agreementBannerOpen, setAgreementBannerOpen] = useState(false);
 
   // Load application status on mount
   useEffect(() => {
@@ -371,6 +374,13 @@ const Affiliate = () => {
             data.agreement_text = agr.agreement_text;
           }
           setReviewStatus(data);
+          // Show modal if agreement enabled and user hasn't confirmed yet
+          if (data.agreement_enabled && data.agreement_text) {
+            const confirmed = localStorage.getItem('affiliate_agreement_confirmed');
+            if (!confirmed) {
+              setAgreementModalVisible(true);
+            }
+          }
         } else {
           setReviewStatus({ review_enabled: false });
         }
@@ -797,22 +807,44 @@ const Affiliate = () => {
         />
       ) : (
       <>
-      {/* Anti-fraud agreement notice for approved/existing users */}
+      {/* Anti-fraud agreement modal (first time) + collapsible banner (after) */}
       {reviewStatus?.agreement_enabled && reviewStatus?.agreement_text && (
-        <Card
-          style={{ marginBottom: 16, border: '1px solid var(--semi-color-warning)' }}
-          bodyStyle={{ padding: '12px 20px' }}
-        >
-          <Space vertical align='start' style={{ width: '100%' }}>
-            <Space>
-              <Tag color='orange' size='small'>{t('反欺诈公告')}</Tag>
-              <Text strong>{t('参与返佣须知')}</Text>
-            </Space>
-            <Text type='secondary' style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>
-              {reviewStatus.agreement_text}
-            </Text>
-          </Space>
-        </Card>
+        <>
+          <Modal
+            title={t('参与返佣须知')}
+            visible={agreementModalVisible}
+            closable={false}
+            maskClosable={false}
+            footer={
+              <Button type='primary' onClick={() => {
+                localStorage.setItem('affiliate_agreement_confirmed', String(Date.now()));
+                setAgreementModalVisible(false);
+              }}>
+                {t('我已知悉')}
+              </Button>
+            }
+          >
+            <Text style={{ whiteSpace: 'pre-wrap' }}>{reviewStatus.agreement_text}</Text>
+          </Modal>
+          {!agreementModalVisible && (
+            <div
+              style={{ marginBottom: 12, padding: '8px 16px', borderRadius: 6, border: '1px solid var(--semi-color-warning)', cursor: 'pointer' }}
+              onClick={() => setAgreementBannerOpen(!agreementBannerOpen)}
+            >
+              <Space>
+                <Tag color='orange' size='small'>{t('反欺诈公告')}</Tag>
+                <Text type='secondary'>{agreementBannerOpen ? t('收起') : t('点击查看返佣须知')}</Text>
+              </Space>
+              {agreementBannerOpen && (
+                <div style={{ marginTop: 8 }}>
+                  <Text type='secondary' style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>
+                    {reviewStatus.agreement_text}
+                  </Text>
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
       <Spin spinning={loading}>
         <div className='flex flex-col gap-4'>
