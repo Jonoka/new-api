@@ -25,6 +25,7 @@ import { SectionPageLayout } from '@/components/layout'
 import { BillingHistoryDialog } from './components/dialogs/billing-history-dialog'
 import { CreemConfirmDialog } from './components/dialogs/creem-confirm-dialog'
 import { PaymentConfirmDialog } from './components/dialogs/payment-confirm-dialog'
+import { BepusdtChainDialog } from './components/dialogs/bepusdt-chain-dialog'
 import { RechargeFormCard } from './components/recharge-form-card'
 import { SubscriptionPlansCard } from './components/subscription-plans-card'
 import { WalletStatsCard } from './components/wallet-stats-card'
@@ -37,9 +38,13 @@ import {
   useWaffoPayment,
   useWaffoPancakePayment,
 } from './hooks'
+import { useBepusdtPayment } from './hooks/use-bepusdt-payment'
+import { useOkpayPayment } from './hooks/use-okpay-payment'
 import {
   getDefaultPaymentType,
   getMinTopupAmount,
+  isBepusdtPayment,
+  isOkpayPayment,
   isWaffoPancakePayment,
 } from './lib'
 import type {
@@ -70,6 +75,7 @@ export function Wallet(props: WalletProps) {
   const [selectedCreemProduct, setSelectedCreemProduct] =
     useState<CreemProduct | null>(null)
   const [showSubscriptionPanel, setShowSubscriptionPanel] = useState(true)
+  const [bepusdtChainDialogOpen, setBepusdtChainDialogOpen] = useState(false)
 
   const { status } = useStatus()
   const { currency } = useSystemConfig()
@@ -93,6 +99,10 @@ export function Wallet(props: WalletProps) {
   const { processWaffoPayment } = useWaffoPayment()
   const { processing: pancakeProcessing, processWaffoPancakePayment } =
     useWaffoPancakePayment()
+  const { processing: bepusdtProcessing, processBepusdtPayment } =
+    useBepusdtPayment()
+  const { processing: okpayProcessing, processOkpayPayment } =
+    useOkpayPayment()
 
   // Fetch and refresh user data
   const fetchUser = useCallback(async () => {
@@ -169,6 +179,12 @@ export function Wallet(props: WalletProps) {
         return
       }
 
+      // For bepusdt, open chain selection dialog instead of confirm dialog
+      if (isBepusdtPayment(method.type)) {
+        setBepusdtChainDialogOpen(true)
+        return
+      }
+
       // Calculate payment amount and show confirmation dialog
       await calculatePaymentAmount(topupAmount, method.type, promoCode)
       setConfirmDialogOpen(true)
@@ -182,9 +198,15 @@ export function Wallet(props: WalletProps) {
     if (!selectedPaymentMethod) return
 
     const isPancake = isWaffoPancakePayment(selectedPaymentMethod.type)
-    const success = isPancake
-      ? await processWaffoPancakePayment(topupAmount, promoCode)
-      : await processPayment(topupAmount, selectedPaymentMethod.type, promoCode)
+    const isOkpay_ = isOkpayPayment(selectedPaymentMethod.type)
+    let success: boolean
+    if (isPancake) {
+      success = await processWaffoPancakePayment(topupAmount, promoCode)
+    } else if (isOkpay_) {
+      success = await processOkpayPayment(topupAmount, promoCode)
+    } else {
+      success = await processPayment(topupAmount, selectedPaymentMethod.type, promoCode)
+    }
 
     if (success) {
       setConfirmDialogOpen(false)
@@ -229,6 +251,19 @@ export function Wallet(props: WalletProps) {
       await processWaffoPayment(topupAmount, index, promoCode)
     } finally {
       setPaymentLoading(null)
+    }
+  }
+
+  // Handle Bepusdt chain selection and payment
+  const handleBepusdtChainConfirm = async (tradeType: string) => {
+    const success = await processBepusdtPayment(
+      topupAmount,
+      tradeType,
+      promoCode
+    )
+    if (success) {
+      setBepusdtChainDialogOpen(false)
+      await fetchUser()
     }
   }
 
@@ -314,7 +349,7 @@ export function Wallet(props: WalletProps) {
         paymentAmount={paymentAmount}
         paymentMethod={selectedPaymentMethod}
         calculating={calculating}
-        processing={processing || pancakeProcessing}
+        processing={processing || pancakeProcessing || okpayProcessing}
         discountRate={getDiscountRate()}
         usdExchangeRate={effectiveUsdExchangeRate}
       />
@@ -330,6 +365,15 @@ export function Wallet(props: WalletProps) {
         onConfirm={handleCreemConfirm}
         product={selectedCreemProduct}
         processing={creemProcessing}
+      />
+
+      <BepusdtChainDialog
+        open={bepusdtChainDialogOpen}
+        onOpenChange={setBepusdtChainDialogOpen}
+        chains={topupInfo?.bepusdt_chains || []}
+        topupAmount={topupAmount}
+        onConfirm={handleBepusdtChainConfirm}
+        processing={bepusdtProcessing}
       />
     </>
   )

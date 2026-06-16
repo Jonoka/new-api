@@ -95,12 +95,56 @@ func GetTopUpInfo(c *gin.Context) {
 		}
 	}
 
+	// 如果启用了 Bepusdt (USDT) 支付，添加到支付方法列表
+	enableBepusdt := isBepusdtTopUpEnabled()
+	var bepusdtChains []setting.BepusdtChain
+	if enableBepusdt {
+		bepusdtChains = setting.GetBepusdtChains()
+		hasBepusdt := false
+		for _, method := range payMethods {
+			if method["type"] == model.PaymentMethodBepusdt {
+				hasBepusdt = true
+				break
+			}
+		}
+		if !hasBepusdt {
+			payMethods = append(payMethods, map[string]string{
+				"name":      "USDT",
+				"type":      model.PaymentMethodBepusdt,
+				"color":     "#26A17B",
+				"min_topup": strconv.Itoa(setting.BepusdtMinTopUp),
+			})
+		}
+	}
+
+	// 如果启用了 OKPay 支付，添加到支付方法列表
+	enableOkpay := isOkpayTopUpEnabled()
+	if enableOkpay {
+		hasOkpay := false
+		for _, method := range payMethods {
+			if method["type"] == model.PaymentMethodOkpay {
+				hasOkpay = true
+				break
+			}
+		}
+		if !hasOkpay {
+			payMethods = append(payMethods, map[string]string{
+				"name":      "OKPay",
+				"type":      model.PaymentMethodOkpay,
+				"color":     "#4F46E5",
+				"min_topup": strconv.Itoa(setting.OkpayMinTopUp),
+			})
+		}
+	}
+
 	data := gin.H{
 		"enable_online_topup":              isEpayTopUpEnabled(),
 		"enable_stripe_topup":              isStripeTopUpEnabled(),
 		"enable_creem_topup":               isCreemTopUpEnabled(),
 		"enable_waffo_topup":               enableWaffo,
 		"enable_waffo_pancake_topup":       enableWaffoPancake,
+		"enable_bepusdt_topup":             enableBepusdt,
+		"enable_okpay_topup":               enableOkpay,
 		"enable_redemption":                complianceConfirmed,
 		"payment_compliance_confirmed":     complianceConfirmed,
 		"payment_compliance_terms_version": operation_setting.CurrentComplianceTermsVersion,
@@ -111,6 +155,8 @@ func GetTopUpInfo(c *gin.Context) {
 			return nil
 		}(),
 		"creem_products":          setting.CreemProducts,
+		"bepusdt_chains":          bepusdtChains,
+		"bepusdt_min_topup":       setting.BepusdtMinTopUp,
 		"pay_methods":             payMethods,
 		"min_topup":               operation_setting.MinTopUp,
 		"stripe_min_topup":        setting.StripeMinTopUp,

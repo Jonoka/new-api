@@ -92,6 +92,18 @@ func InitOptionMap() {
 	common.OptionMap["CreemProducts"] = setting.CreemProducts
 	common.OptionMap["CreemTestMode"] = strconv.FormatBool(setting.CreemTestMode)
 	common.OptionMap["CreemWebhookSecret"] = setting.CreemWebhookSecret
+	common.OptionMap["BepusdtApiUrl"] = setting.BepusdtApiUrl
+	common.OptionMap["BepusdtAuthToken"] = setting.BepusdtAuthToken
+	common.OptionMap["BepusdtUnitPrice"] = strconv.FormatFloat(setting.BepusdtUnitPrice, 'f', -1, 64)
+	common.OptionMap["BepusdtMinTopUp"] = strconv.Itoa(setting.BepusdtMinTopUp)
+	common.OptionMap["BepusdtTimeout"] = strconv.Itoa(setting.BepusdtTimeout)
+	common.OptionMap["BepusdtChains"] = setting.BepusdtChains
+	common.OptionMap["OkpayGatewayUrl"] = setting.OkpayGatewayUrl
+	common.OptionMap["OkpayMerchantId"] = setting.OkpayMerchantId
+	common.OptionMap["OkpayMerchantToken"] = setting.OkpayMerchantToken
+	common.OptionMap["OkpayExchangeRate"] = strconv.FormatFloat(setting.OkpayExchangeRate, 'f', -1, 64)
+	common.OptionMap["OkpayMinTopUp"] = strconv.Itoa(setting.OkpayMinTopUp)
+	common.OptionMap["OkpayCoin"] = setting.OkpayCoin
 	common.OptionMap["WaffoEnabled"] = strconv.FormatBool(setting.WaffoEnabled)
 	common.OptionMap["WaffoApiKey"] = setting.WaffoApiKey
 	common.OptionMap["WaffoPrivateKey"] = setting.WaffoPrivateKey
@@ -434,6 +446,30 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.CreemTestMode = value == "true"
 	case "CreemWebhookSecret":
 		setting.CreemWebhookSecret = value
+	case "BepusdtApiUrl":
+		setting.BepusdtApiUrl = value
+	case "BepusdtAuthToken":
+		setting.BepusdtAuthToken = value
+	case "BepusdtUnitPrice":
+		setting.BepusdtUnitPrice, _ = strconv.ParseFloat(value, 64)
+	case "BepusdtMinTopUp":
+		setting.BepusdtMinTopUp, _ = strconv.Atoi(value)
+	case "BepusdtTimeout":
+		setting.BepusdtTimeout, _ = strconv.Atoi(value)
+	case "BepusdtChains":
+		setting.BepusdtChains = value
+	case "OkpayGatewayUrl":
+		setting.OkpayGatewayUrl = value
+	case "OkpayMerchantId":
+		setting.OkpayMerchantId = value
+	case "OkpayMerchantToken":
+		setting.OkpayMerchantToken = value
+	case "OkpayExchangeRate":
+		setting.OkpayExchangeRate, _ = strconv.ParseFloat(value, 64)
+	case "OkpayMinTopUp":
+		setting.OkpayMinTopUp, _ = strconv.Atoi(value)
+	case "OkpayCoin":
+		setting.OkpayCoin = value
 	case "WaffoEnabled":
 		setting.WaffoEnabled = value == "true"
 	case "WaffoApiKey":

@@ -87,6 +87,20 @@ export function isWaffoPancakePayment(paymentType: string): boolean {
 }
 
 /**
+ * Check if payment method is Bepusdt (USDT)
+ */
+export function isBepusdtPayment(paymentType: string): boolean {
+  return paymentType === PAYMENT_TYPES.BEPUSDT
+}
+
+/**
+ * Check if payment method is OKPay
+ */
+export function isOkpayPayment(paymentType: string): boolean {
+  return paymentType === PAYMENT_TYPES.OKPAY
+}
+
+/**
  * Get default payment type from topup info
  */
 export function getDefaultPaymentType(topupInfo: TopupInfo | null): string {

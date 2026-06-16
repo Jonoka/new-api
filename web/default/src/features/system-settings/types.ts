@@ -241,6 +241,18 @@ export type BillingSettings = {
   CreemWebhookSecret: string
   CreemTestMode: boolean
   CreemProducts: string
+  BepusdtApiUrl: string
+  BepusdtAuthToken: string
+  BepusdtUnitPrice: number
+  BepusdtMinTopUp: number
+  BepusdtTimeout: number
+  BepusdtChains: string
+  OkpayGatewayUrl: string
+  OkpayMerchantId: string
+  OkpayMerchantToken: string
+  OkpayExchangeRate: number
+  OkpayMinTopUp: number
+  OkpayCoin: string
   WaffoEnabled: boolean
   WaffoApiKey: string
   WaffoPrivateKey: string

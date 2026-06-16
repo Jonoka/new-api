@@ -159,6 +159,26 @@ const paymentSchema = z.object({
   WaffoPancakeMerchantID: z.string(),
   WaffoPancakePrivateKey: z.string(),
   WaffoPancakeReturnURL: z.string(),
+  BepusdtApiUrl: z.string(),
+  BepusdtAuthToken: z.string(),
+  BepusdtUnitPrice: z.coerce.number().min(0),
+  BepusdtMinTopUp: z.coerce.number().min(0),
+  BepusdtTimeout: z.coerce.number().min(120),
+  BepusdtChains: z.string().superRefine((value, ctx) => {
+    const error = getJsonError(value, (parsed) => Array.isArray(parsed))
+    if (error) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: error,
+      })
+    }
+  }),
+  OkpayGatewayUrl: z.string(),
+  OkpayMerchantId: z.string(),
+  OkpayMerchantToken: z.string(),
+  OkpayExchangeRate: z.coerce.number().min(0),
+  OkpayMinTopUp: z.coerce.number().min(0),
+  OkpayCoin: z.string(),
 })
 
 type PaymentFormValues = z.infer<typeof paymentSchema>
@@ -338,6 +358,13 @@ export function PaymentSettingsSection({
       AmountOptions: formatJsonForEditor(initialFormValues.AmountOptions),
       AmountDiscount: formatJsonForEditor(initialFormValues.AmountDiscount),
       CreemProducts: formatJsonForEditor(initialFormValues.CreemProducts),
+      BepusdtChains: formatJsonForEditor(initialFormValues.BepusdtChains),
+      OkpayGatewayUrl: initialFormValues.OkpayGatewayUrl,
+      OkpayMerchantId: initialFormValues.OkpayMerchantId,
+      OkpayMerchantToken: initialFormValues.OkpayMerchantToken,
+      OkpayExchangeRate: initialFormValues.OkpayExchangeRate,
+      OkpayMinTopUp: initialFormValues.OkpayMinTopUp,
+      OkpayCoin: initialFormValues.OkpayCoin,
     },
   })
 
@@ -395,6 +422,13 @@ export function PaymentSettingsSection({
       AmountOptions: formatJsonForEditor(parsedDefaults.AmountOptions),
       AmountDiscount: formatJsonForEditor(parsedDefaults.AmountDiscount),
       CreemProducts: formatJsonForEditor(parsedDefaults.CreemProducts),
+      BepusdtChains: formatJsonForEditor(parsedDefaults.BepusdtChains),
+      OkpayGatewayUrl: parsedDefaults.OkpayGatewayUrl,
+      OkpayMerchantId: parsedDefaults.OkpayMerchantId,
+      OkpayMerchantToken: parsedDefaults.OkpayMerchantToken,
+      OkpayExchangeRate: parsedDefaults.OkpayExchangeRate,
+      OkpayMinTopUp: parsedDefaults.OkpayMinTopUp,
+      OkpayCoin: parsedDefaults.OkpayCoin,
     })
   }, [defaultsSignature, form])
 
@@ -419,6 +453,18 @@ export function PaymentSettingsSection({
       CreemWebhookSecret: values.CreemWebhookSecret.trim(),
       CreemTestMode: values.CreemTestMode,
       CreemProducts: values.CreemProducts.trim(),
+      BepusdtApiUrl: removeTrailingSlash(values.BepusdtApiUrl.trim()),
+      BepusdtAuthToken: values.BepusdtAuthToken.trim(),
+      BepusdtUnitPrice: values.BepusdtUnitPrice,
+      BepusdtMinTopUp: values.BepusdtMinTopUp,
+      BepusdtTimeout: values.BepusdtTimeout,
+      BepusdtChains: values.BepusdtChains.trim(),
+      OkpayGatewayUrl: removeTrailingSlash(values.OkpayGatewayUrl),
+      OkpayMerchantId: values.OkpayMerchantId.trim(),
+      OkpayMerchantToken: values.OkpayMerchantToken.trim(),
+      OkpayExchangeRate: values.OkpayExchangeRate,
+      OkpayMinTopUp: values.OkpayMinTopUp,
+      OkpayCoin: values.OkpayCoin.trim(),
       WaffoEnabled: values.WaffoEnabled,
       WaffoSandbox: values.WaffoSandbox,
       WaffoMerchantId: values.WaffoMerchantId.trim(),
@@ -464,6 +510,18 @@ export function PaymentSettingsSection({
       CreemWebhookSecret: initialRef.current.CreemWebhookSecret.trim(),
       CreemTestMode: initialRef.current.CreemTestMode,
       CreemProducts: initialRef.current.CreemProducts.trim(),
+      BepusdtApiUrl: removeTrailingSlash(initialRef.current.BepusdtApiUrl.trim()),
+      BepusdtAuthToken: initialRef.current.BepusdtAuthToken.trim(),
+      BepusdtUnitPrice: initialRef.current.BepusdtUnitPrice,
+      BepusdtMinTopUp: initialRef.current.BepusdtMinTopUp,
+      BepusdtTimeout: initialRef.current.BepusdtTimeout,
+      BepusdtChains: initialRef.current.BepusdtChains.trim(),
+      OkpayGatewayUrl: removeTrailingSlash(initialRef.current.OkpayGatewayUrl),
+      OkpayMerchantId: initialRef.current.OkpayMerchantId.trim(),
+      OkpayMerchantToken: initialRef.current.OkpayMerchantToken.trim(),
+      OkpayExchangeRate: initialRef.current.OkpayExchangeRate,
+      OkpayMinTopUp: initialRef.current.OkpayMinTopUp,
+      OkpayCoin: initialRef.current.OkpayCoin.trim(),
       WaffoEnabled: initialRef.current.WaffoEnabled,
       WaffoSandbox: initialRef.current.WaffoSandbox,
       WaffoMerchantId: initialRef.current.WaffoMerchantId.trim(),
@@ -609,6 +667,78 @@ export function PaymentSettingsSection({
       normalizeJsonForComparison(initial.CreemProducts)
     ) {
       updates.push({ key: 'CreemProducts', value: sanitized.CreemProducts })
+    }
+
+    if (sanitized.BepusdtApiUrl !== initial.BepusdtApiUrl) {
+      updates.push({ key: 'BepusdtApiUrl', value: sanitized.BepusdtApiUrl })
+    }
+
+    if (
+      sanitized.BepusdtAuthToken &&
+      sanitized.BepusdtAuthToken !== initial.BepusdtAuthToken
+    ) {
+      updates.push({
+        key: 'BepusdtAuthToken',
+        value: sanitized.BepusdtAuthToken,
+      })
+    }
+
+    if (sanitized.BepusdtUnitPrice !== initial.BepusdtUnitPrice) {
+      updates.push({
+        key: 'BepusdtUnitPrice',
+        value: sanitized.BepusdtUnitPrice,
+      })
+    }
+
+    if (sanitized.BepusdtMinTopUp !== initial.BepusdtMinTopUp) {
+      updates.push({ key: 'BepusdtMinTopUp', value: sanitized.BepusdtMinTopUp })
+    }
+
+    if (sanitized.BepusdtTimeout !== initial.BepusdtTimeout) {
+      updates.push({ key: 'BepusdtTimeout', value: sanitized.BepusdtTimeout })
+    }
+
+    if (
+      normalizeJsonForComparison(sanitized.BepusdtChains) !==
+      normalizeJsonForComparison(initial.BepusdtChains)
+    ) {
+      updates.push({ key: 'BepusdtChains', value: sanitized.BepusdtChains })
+    }
+
+    if (sanitized.OkpayGatewayUrl !== initial.OkpayGatewayUrl) {
+      updates.push({ key: 'OkpayGatewayUrl', value: sanitized.OkpayGatewayUrl })
+    }
+
+    if (
+      sanitized.OkpayMerchantId &&
+      sanitized.OkpayMerchantId !== initial.OkpayMerchantId
+    ) {
+      updates.push({ key: 'OkpayMerchantId', value: sanitized.OkpayMerchantId })
+    }
+
+    if (
+      sanitized.OkpayMerchantToken &&
+      sanitized.OkpayMerchantToken !== initial.OkpayMerchantToken
+    ) {
+      updates.push({
+        key: 'OkpayMerchantToken',
+        value: sanitized.OkpayMerchantToken,
+      })
+    }
+
+    if (sanitized.OkpayExchangeRate !== initial.OkpayExchangeRate) {
+      updates.push({
+        key: 'OkpayExchangeRate',
+        value: sanitized.OkpayExchangeRate,
+      })
+    }
+
+    if (sanitized.OkpayMinTopUp !== initial.OkpayMinTopUp) {
+      updates.push({ key: 'OkpayMinTopUp', value: sanitized.OkpayMinTopUp })
+    }
+
+    if (sanitized.OkpayCoin !== initial.OkpayCoin) {
+      updates.push({ key: 'OkpayCoin', value: sanitized.OkpayCoin })
     }
 
     if (sanitized.WaffoEnabled !== initial.WaffoEnabled) {
@@ -1506,6 +1636,268 @@ export function PaymentSettingsSection({
                   <FormDescription>
                     {t('Configure Creem products. Provide a JSON array.')}
                   </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+
+          <Separator />
+
+          <div className='space-y-4'>
+            <div>
+              <h3 className='text-lg font-medium'>
+                {t('Bepusdt (USDT) Gateway')}
+              </h3>
+              <p className='text-muted-foreground text-sm'>
+                {t('Configuration for Bepusdt USDT payment integration')}
+              </p>
+            </div>
+
+            <div className='grid gap-6 md:grid-cols-2'>
+              <FormField
+                control={form.control}
+                name='BepusdtApiUrl'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('API URL')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder='https://usdt.example.com'
+                        {...field}
+                        onChange={(event) => field.onChange(event.target.value)}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t('Bepusdt server address')}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='BepusdtAuthToken'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Auth Token')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='password'
+                        placeholder={t('Enter auth token')}
+                        autoComplete='new-password'
+                        {...field}
+                        onChange={(event) => field.onChange(event.target.value)}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t('Auth token (leave blank unless updating)')}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            <div className='grid gap-6 md:grid-cols-3'>
+              <FormField
+                control={form.control}
+                name='BepusdtUnitPrice'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Unit Price (CNY/USD)')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        {...safeNumberFieldProps(field)}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t('CNY per 1 USD')}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='BepusdtMinTopUp'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Min Topup')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        {...safeNumberFieldProps(field)}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='BepusdtTimeout'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Timeout (seconds)')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        {...safeNumberFieldProps(field)}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            <FormField
+              control={form.control}
+              name='BepusdtChains'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Chains Config (JSON)')}</FormLabel>
+                  <FormControl>
+                    <Textarea
+                      rows={4}
+                      placeholder='[{"name":"TRC20","trade_type":"usdt.trc20"},{"name":"ERC20","trade_type":"usdt.erc20"}]'
+                      {...field}
+                      onChange={(event) => field.onChange(event.target.value)}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'Configure supported USDT chains. Provide a JSON array.'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+
+          <Separator />
+
+          <div className='space-y-4'>
+            <div>
+              <h3 className='text-lg font-medium'>
+                {t('OKPay Gateway')}
+              </h3>
+              <p className='text-muted-foreground text-sm'>
+                {t('Configuration for OKPay payment integration')}
+              </p>
+            </div>
+
+            <div className='grid gap-6 md:grid-cols-2'>
+              <FormField
+                control={form.control}
+                name='OkpayGatewayUrl'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Gateway URL')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder='https://api.okaypay.me/shop'
+                        {...field}
+                        onChange={(event) => field.onChange(event.target.value)}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='OkpayMerchantId'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Merchant ID')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        onChange={(event) => field.onChange(event.target.value)}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            <div className='grid gap-6 md:grid-cols-3'>
+              <FormField
+                control={form.control}
+                name='OkpayMerchantToken'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Merchant Token')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='password'
+                        autoComplete='new-password'
+                        {...field}
+                        onChange={(event) => field.onChange(event.target.value)}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='OkpayExchangeRate'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Exchange Rate (CNY/USD)')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        {...safeNumberFieldProps(field)}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='OkpayMinTopUp'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Min Topup')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        {...safeNumberFieldProps(field)}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            <FormField
+              control={form.control}
+              name='OkpayCoin'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Coin')}</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder='USDT'
+                      {...field}
+                      onChange={(event) => field.onChange(event.target.value)}
+                    />
+                  </FormControl>
                   <FormMessage />
                 </FormItem>
               )}

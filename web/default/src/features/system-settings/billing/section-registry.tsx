@@ -152,6 +152,18 @@ const BILLING_SECTIONS = [
           CreemWebhookSecret: settings.CreemWebhookSecret,
           CreemTestMode: settings.CreemTestMode,
           CreemProducts: settings.CreemProducts,
+          BepusdtApiUrl: settings.BepusdtApiUrl ?? '',
+          BepusdtAuthToken: settings.BepusdtAuthToken ?? '',
+          BepusdtUnitPrice: settings.BepusdtUnitPrice ?? 7.2,
+          BepusdtMinTopUp: settings.BepusdtMinTopUp ?? 1,
+          BepusdtTimeout: settings.BepusdtTimeout ?? 1200,
+          BepusdtChains: settings.BepusdtChains ?? '[]',
+          OkpayGatewayUrl: settings.OkpayGatewayUrl ?? 'https://api.okaypay.me/shop',
+          OkpayMerchantId: settings.OkpayMerchantId ?? '',
+          OkpayMerchantToken: settings.OkpayMerchantToken ?? '',
+          OkpayExchangeRate: settings.OkpayExchangeRate ?? 7.2,
+          OkpayMinTopUp: settings.OkpayMinTopUp ?? 1,
+          OkpayCoin: settings.OkpayCoin ?? 'USDT',
         }}
         waffoDefaultValues={{
           WaffoEnabled: settings.WaffoEnabled ?? false,

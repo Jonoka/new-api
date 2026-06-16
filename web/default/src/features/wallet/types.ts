@@ -59,6 +59,14 @@ export type WaffoPancakePaymentResponse = ApiResponse<
     }
   | string
 >
+export type BepusdtPaymentResponse = ApiResponse<{
+  payment_url: string
+  trade_no: string
+}>
+export type OkpayPaymentResponse = ApiResponse<{
+  payment_url: string
+  trade_no: string
+}>
 
 /**
  * Creem product configuration
@@ -118,6 +126,38 @@ export interface WaffoPayMethod {
 }
 
 /**
+ * Bepusdt (USDT) chain configuration
+ */
+export interface BepusdtChain {
+  /** Display name, e.g. "TRC20" */
+  name: string
+  /** bepusdt trade_type, e.g. "usdt.trc20" */
+  trade_type: string
+}
+
+/**
+ * Bepusdt payment request parameters
+ */
+export interface BepusdtPaymentRequest {
+  /** Topup amount */
+  amount: number
+  /** Chain trade type, e.g. "usdt.trc20" */
+  trade_type: string
+  /** Optional promo code */
+  promo_code?: string
+}
+
+/**
+ * OKPay payment request parameters
+ */
+export interface OkpayPaymentRequest {
+  /** Topup amount */
+  amount: number
+  /** Optional promo code */
+  promo_code?: string
+}
+
+/**
  * Topup configuration information
  */
 export interface TopupInfo {
@@ -151,6 +191,14 @@ export interface TopupInfo {
   enable_waffo_pancake_topup?: boolean
   /** Minimum topup amount for Waffo Pancake */
   waffo_pancake_min_topup?: number
+  /** Whether Bepusdt (USDT) topup is enabled */
+  enable_bepusdt_topup?: boolean
+  /** Available Bepusdt chains */
+  bepusdt_chains?: BepusdtChain[]
+  /** Minimum topup amount for Bepusdt */
+  bepusdt_min_topup?: number
+  /** Whether OKPay topup is enabled */
+  enable_okpay_topup?: boolean
   /** Whether redemption code usage is enabled */
   enable_redemption?: boolean
   /** Whether compliance confirmation has been completed */
