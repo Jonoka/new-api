@@ -305,7 +305,7 @@ func RequestBepusdtPay(c *gin.Context) {
 	if err != nil {
 		_ = model.UpdatePendingTopUpStatus(tradeNo, model.PaymentProviderBepusdt, common.TopUpStatusFailed)
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Bepusdt 拉起支付失败 user_id=%d trade_no=%s trade_type=%s amount=%d money=%.2f error=%q", id, tradeNo, req.TradeType, req.Amount, payMoney, err.Error()))
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "拉起支付失败"})
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": fmt.Sprintf("拉起支付失败: %s", err.Error())})
 		return
 	}
 

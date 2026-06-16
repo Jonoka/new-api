@@ -91,6 +91,8 @@ const TopUp = () => {
   const [enableBepusdtTopUp, setEnableBepusdtTopUp] = useState(false);
   const [bepusdtChains, setBepusdtChains] = useState([]);
   const [enableOkpayTopUp, setEnableOkpayTopUp] = useState(false);
+  const [bepusdtSelectedChain, setBepusdtSelectedChain] = useState(null);
+  const [bepusdtChainModalVisible, setBepusdtChainModalVisible] = useState(false);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [open, setOpen] = useState(false);
@@ -261,6 +263,18 @@ const TopUp = () => {
         showError(t('管理员未开启 Bepusdt 充值！'));
         return;
       }
+      const chains = bepusdtChains || [];
+      if (chains.length === 0) {
+        showError(t('管理员未配置 USDT 链'));
+        return;
+      }
+      // 多条链时弹出选择
+      if (chains.length > 1) {
+        setBepusdtChainModalVisible(true);
+        return;
+      }
+      // 只有一条链直接设置
+      setBepusdtSelectedChain(chains[0].trade_type);
     } else if (payment === 'okpay') {
       if (!enableOkpayTopUp) {
         showError(t('管理员未开启 OKPay 充值！'));
@@ -342,15 +356,13 @@ const TopUp = () => {
           ...buildPromoPayload(),
         });
       } else if (payWay === 'bepusdt') {
-        // Bepusdt 需要选链 — 使用第一条链或弹窗选择
-        const chains = bepusdtChains || [];
-        if (chains.length === 0) {
-          showError(t('管理员未配置 USDT 链'));
+        // Bepusdt 使用已选链
+        const tradeType = bepusdtSelectedChain || (bepusdtChains[0] && bepusdtChains[0].trade_type);
+        if (!tradeType) {
+          showError(t('请选择支付链'));
           setConfirmLoading(false);
           return;
         }
-        // 如果只有一条链直接用，否则用第一条（后续可扩展为弹窗选择）
-        const tradeType = chains.length === 1 ? chains[0].trade_type : chains[0].trade_type;
         res = await API.post('/api/user/bepusdt/pay', {
           amount: parseInt(topUpCount),
           trade_type: tradeType,
@@ -1001,6 +1013,45 @@ const TopUp = () => {
             <p>{t('是否确认充值？')}</p>
           </>
         )}
+      </Modal>
+
+      {/* Bepusdt 链选择模态框 */}
+      <Modal
+        title={t('选择 USDT 网络')}
+        visible={bepusdtChainModalVisible}
+        onCancel={() => setBepusdtChainModalVisible(false)}
+        footer={null}
+        maskClosable={true}
+        size='small'
+        centered
+      >
+        <p style={{ marginBottom: 12, color: 'var(--semi-color-text-2)' }}>
+          {t('请选择支付使用的区块链网络')}
+        </p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {(bepusdtChains || []).map((chain) => (
+            <button
+              key={chain.trade_type}
+              style={{
+                padding: '8px 16px',
+                border: '1px solid var(--semi-color-border)',
+                borderRadius: 6,
+                background: 'var(--semi-color-bg-2)',
+                cursor: 'pointer',
+                fontSize: 14,
+                fontWeight: 500,
+              }}
+              onClick={() => {
+                setBepusdtSelectedChain(chain.trade_type);
+                setBepusdtChainModalVisible(false);
+                setPayWay('bepusdt');
+                setOpen(true);
+              }}
+            >
+              {chain.name}
+            </button>
+          ))}
+        </div>
       </Modal>
 
       {/* 主布局区域 */}
