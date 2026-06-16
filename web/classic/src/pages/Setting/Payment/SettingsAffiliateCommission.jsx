@@ -577,12 +577,16 @@ function FraudAlertsPanel() {
       dataIndex: 'shared_ips',
       width: 200,
       render: (value) => {
-        const ips = value || [];
+        let ips = [];
+        try {
+          ips = typeof value === 'string' ? JSON.parse(value) : (value || []);
+        } catch { ips = []; }
         return (
           <Space wrap>
-            {ips.map((ip) => (
+            {ips.slice(0, 5).map((ip) => (
               <Tag key={ip} size='small'>{ip}</Tag>
             ))}
+            {ips.length > 5 && <Tag size='small'>+{ips.length - 5}</Tag>}
             {ips.length === 0 && '-'}
           </Space>
         );
