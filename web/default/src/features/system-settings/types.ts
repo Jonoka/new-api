@@ -287,6 +287,14 @@ export type BillingSettings = {
   'affiliate_setting.payout_methods': string
   'affiliate_setting.usdt_chain': string
   'affiliate_setting.promotion_template': string
+  'affiliate_setting.review_enabled': boolean
+  'affiliate_setting.auto_approve_after_days': number
+  'affiliate_setting.agreement_enabled': boolean
+  'affiliate_setting.agreement_text': string
+  'affiliate_setting.inviter_min_account_age_days': number
+  'affiliate_setting.inviter_min_recharge_amount': number
+  'affiliate_setting.invitee_min_account_age_days': number
+  'affiliate_setting.invitee_min_recharge_amount': number
   'checkin_setting.enabled': boolean
   'checkin_setting.min_quota': number
   'checkin_setting.max_quota': number

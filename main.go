@@ -119,6 +119,9 @@ func main() {
 	// Subscription quota reset task (daily/weekly/monthly/custom)
 	service.StartSubscriptionQuotaResetTask()
 
+	// Affiliate auto-approve mature applications task (hourly)
+	service.StartAffiliateAutoApproveTask()
+
 	// Game prediction auto judge task skeleton.
 	service.StartGamePredictionJudgeTask()
 

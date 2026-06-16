@@ -312,7 +312,7 @@ func createAffiliateRewardsForPaymentTx(tx *gorm.DB, inviteeId int, sourceType s
 	}
 
 	var invitee User
-	if err := tx.Select("id", "inviter_id").Where("id = ?", inviteeId).First(&invitee).Error; err != nil {
+	if err := tx.Select("id", "inviter_id", "created_at").Where("id = ?", inviteeId).First(&invitee).Error; err != nil {
 		return err
 	}
 	if invitee.InviterId <= 0 {
@@ -320,6 +320,15 @@ func createAffiliateRewardsForPaymentTx(tx *gorm.DB, inviteeId int, sourceType s
 	}
 
 	affiliateSetting := setting.GetAffiliateSetting()
+
+	if affiliateSetting.ReviewEnabled && !IsInviterApproved(invitee.InviterId) {
+		return nil
+	}
+
+	if !checkInviteeEligibility(inviteeId, invitee.CreatedAt, affiliateSetting) {
+		return nil
+	}
+
 	if affiliateSetting.FirstLevelEnabled && affiliateSetting.FirstLevelRatio > 0 {
 		if err := createAffiliateRewardRecordTx(tx, invitee.InviterId, inviteeId, 1, sourceType, sourceId, sourceQuota, affiliateSetting.FirstLevelRatio); err != nil {
 			return err
@@ -335,6 +344,9 @@ func createAffiliateRewardsForPaymentTx(tx *gorm.DB, inviteeId int, sourceType s
 		return err
 	}
 	if parent.InviterId <= 0 {
+		return nil
+	}
+	if affiliateSetting.ReviewEnabled && !IsInviterApproved(parent.InviterId) {
 		return nil
 	}
 	return createAffiliateRewardRecordTx(tx, parent.InviterId, inviteeId, 2, sourceType, sourceId, sourceQuota, affiliateSetting.SecondLevelRatio)
@@ -387,6 +399,32 @@ func createAffiliateRewardRecordTx(tx *gorm.DB, userId int, inviteeId int, level
 
 func rewardRatioInvalid(ratio int) bool {
 	return ratio <= 0 || ratio > 100
+}
+
+func checkInviteeEligibility(inviteeId int, inviteeCreatedAt int64, s *setting.AffiliateSetting) bool {
+	if s.InviteeMinAccountAgeDays <= 0 && s.InviteeMinRechargeAmount <= 0 {
+		return true
+	}
+
+	if s.InviteeMinAccountAgeDays > 0 {
+		requiredAge := int64(s.InviteeMinAccountAgeDays) * 86400
+		if common.GetTimestamp()-inviteeCreatedAt < requiredAge {
+			return false
+		}
+	}
+
+	if s.InviteeMinRechargeAmount > 0 {
+		var totalRecharge int64
+		DB.Model(&TopUp{}).
+			Where("user_id = ? AND status = ?", inviteeId, common.TopUpStatusSuccess).
+			Select("COALESCE(SUM(quota), 0)").
+			Scan(&totalRecharge)
+		if totalRecharge < int64(s.InviteeMinRechargeAmount) {
+			return false
+		}
+	}
+
+	return true
 }
 
 func SettleMatureAffiliateRecords(userId int) error {

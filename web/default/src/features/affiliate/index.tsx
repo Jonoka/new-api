@@ -78,6 +78,9 @@ import {
   transferAffiliateToBalance,
   updateAffiliatePayoutAccount,
   uploadAffiliateQr,
+  getAffiliateApplicationStatus,
+  getAffiliateAgreement,
+  applyAffiliate,
 } from './api'
 import type {
   AffiliatePayoutAccount,
@@ -213,6 +216,65 @@ export function Affiliate() {
   const [withdrawAmount, setWithdrawAmount] = useState('')
   const [submittingWithdraw, setSubmittingWithdraw] = useState(false)
   const [transferring, setTransferring] = useState(false)
+
+  // Anti-fraud: Application state
+  const [appStatus, setAppStatus] = useState<string>('loading')
+  const [appRejectedReason, setAppRejectedReason] = useState('')
+  const [agreementText, setAgreementText] = useState('')
+  const [agreementEnabled, setAgreementEnabled] = useState(false)
+  const [confirmInput, setConfirmInput] = useState('')
+  const [applying, setApplying] = useState(false)
+  const [eligibility, setEligibility] = useState<{eligible: boolean; reason?: string} | null>(null)
+
+  useEffect(() => {
+    async function checkAppStatus() {
+      try {
+        const [statusRes, agreementRes] = await Promise.all([
+          getAffiliateApplicationStatus(),
+          getAffiliateAgreement(),
+        ])
+        if (statusRes.success) {
+          if (!statusRes.data.review_enabled) {
+            setAppStatus('not_required')
+          } else {
+            setAppStatus(statusRes.data.status || 'none')
+            if (statusRes.data.rejected_reason) setAppRejectedReason(statusRes.data.rejected_reason)
+            if (statusRes.data.eligibility) setEligibility(statusRes.data.eligibility)
+          }
+        }
+        if (agreementRes.success) {
+          setAgreementEnabled(agreementRes.data.agreement_enabled)
+          setAgreementText(agreementRes.data.agreement_text || '')
+        }
+      } catch {
+        setAppStatus('not_required')
+      }
+    }
+    checkAppStatus()
+  }, [])
+
+  const handleApply = async () => {
+    if (agreementEnabled && confirmInput !== '我已同意') {
+      toast.error(t('Please type the exact confirmation text'))
+      return
+    }
+    try {
+      setApplying(true)
+      const res = await applyAffiliate(true)
+      if (res.success) {
+        toast.success(t('Application submitted successfully'))
+        setAppStatus('pending')
+      } else {
+        toast.error(res.message || t('Application failed'))
+      }
+    } catch {
+      toast.error(t('Application failed'))
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  const needsApplication = appStatus !== 'not_required' && appStatus !== 'approved' && appStatus !== 'loading'
 
   const refresh = useCallback(async () => {
     try {
@@ -364,6 +426,74 @@ export function Affiliate() {
           {t('Affiliate Commission')}
         </SectionPageLayout.Title>
         <SectionPageLayout.Content>
+          {needsApplication ? (
+            <div className='mx-auto flex w-full max-w-2xl flex-col gap-4 sm:gap-5'>
+              <Card className='py-0'>
+                <CardHeader>
+                  <CardTitle className='text-base'>
+                    {appStatus === 'pending'
+                      ? t('Application Pending Review')
+                      : appStatus === 'rejected'
+                        ? t('Application Rejected')
+                        : t('Apply for Affiliate Program')}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className='space-y-4 p-4 pt-0'>
+                  {appStatus === 'pending' && (
+                    <p className='text-muted-foreground text-sm'>
+                      {t('Your affiliate application is being reviewed. You will be notified once it is approved.')}
+                    </p>
+                  )}
+                  {appStatus === 'rejected' && (
+                    <div className='space-y-2'>
+                      <p className='text-destructive text-sm'>
+                        {t('Your application was rejected.')}
+                        {appRejectedReason && ` ${t('Reason')}: ${appRejectedReason}`}
+                      </p>
+                      <p className='text-muted-foreground text-sm'>
+                        {t('You can submit a new application below.')}
+                      </p>
+                    </div>
+                  )}
+                  {(appStatus === 'none' || appStatus === 'rejected') && (
+                    <>
+                      {eligibility && !eligibility.eligible && (
+                        <div className='bg-destructive/10 text-destructive rounded-md p-3 text-sm'>
+                          {t('You do not meet the eligibility requirements yet.')}
+                          {eligibility.reason && ` ${t(eligibility.reason)}`}
+                        </div>
+                      )}
+                      {agreementEnabled && agreementText && (
+                        <div className='space-y-3'>
+                          <div className='bg-muted rounded-md p-4 text-sm whitespace-pre-wrap'>
+                            {agreementText}
+                          </div>
+                          <div className='space-y-2'>
+                            <Label>{t('Type "我已同意" to confirm')}</Label>
+                            <Input
+                              value={confirmInput}
+                              onChange={(e) => setConfirmInput(e.target.value)}
+                              placeholder='我已同意'
+                            />
+                          </div>
+                        </div>
+                      )}
+                      <Button
+                        onClick={handleApply}
+                        disabled={
+                          applying ||
+                          (eligibility !== null && !eligibility.eligible) ||
+                          (agreementEnabled && confirmInput !== '我已同意')
+                        }
+                      >
+                        {applying ? t('Submitting...') : t('Submit Application')}
+                      </Button>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          ) : (
           <div className='mx-auto flex w-full max-w-7xl flex-col gap-4 sm:gap-5'>
             <Card className='py-0'>
               <CardHeader className='pb-2'>
@@ -847,6 +977,7 @@ export function Affiliate() {
               </CardContent>
             </Card>
           </div>
+          )}
         </SectionPageLayout.Content>
       </SectionPageLayout>
 

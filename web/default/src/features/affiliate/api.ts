@@ -177,3 +177,83 @@ export async function bindAdminAffiliateInviter(
   )
   return res.data
 }
+
+export async function getAffiliateAgreement() {
+  const res = await api.get<
+    ApiResponse<{
+      agreement_enabled: boolean
+      agreement_text: string
+      review_enabled: boolean
+    }>
+  >('/api/affiliate/agreement')
+  return res.data
+}
+
+export async function getAffiliateApplicationStatus() {
+  const res = await api.get<ApiResponse<any>>(
+    '/api/affiliate/application-status'
+  )
+  return res.data
+}
+
+export async function applyAffiliate(agreementAccepted: boolean) {
+  const res = await api.post<ApiResponse<null>>('/api/affiliate/apply', {
+    agreement_accepted: agreementAccepted,
+  })
+  return res.data
+}
+
+export async function getAdminAffiliateApplications(
+  status = '',
+  page = 1,
+  pageSize = 50
+) {
+  const res = await api.get<ApiResponse<PageResponse<any>>>(
+    '/api/affiliate/admin/applications',
+    { params: { status, p: page, page_size: pageSize } }
+  )
+  return res.data
+}
+
+export async function updateAdminAffiliateApplication(
+  id: number,
+  action: 'approve' | 'reject',
+  payload: { remark?: string; reason?: string } = {}
+) {
+  const res = await api.post<ApiResponse<null>>(
+    `/api/affiliate/admin/applications/${id}/${action}`,
+    payload
+  )
+  return res.data
+}
+
+export async function getAdminFraudAlerts(
+  status = '',
+  page = 1,
+  pageSize = 50
+) {
+  const res = await api.get<ApiResponse<PageResponse<any>>>(
+    '/api/affiliate/admin/fraud-alerts',
+    { params: { status, p: page, page_size: pageSize } }
+  )
+  return res.data
+}
+
+export async function adminScanFraud() {
+  const res = await api.post<ApiResponse<{ new_alerts: number }>>(
+    '/api/affiliate/admin/fraud-alerts/scan'
+  )
+  return res.data
+}
+
+export async function adminResolveFraudAlert(
+  id: number,
+  action: 'unbind' | 'clawback' | 'dismiss',
+  remark = ''
+) {
+  const res = await api.post<ApiResponse<null>>(
+    `/api/affiliate/admin/fraud-alerts/${id}/${action}`,
+    { remark }
+  )
+  return res.data
+}

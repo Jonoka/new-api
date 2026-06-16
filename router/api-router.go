@@ -204,6 +204,9 @@ func SetApiRouter(router *gin.Engine) {
 			affiliateRoute.POST("/transfer-to-balance", controller.TransferAffiliateToBalance)
 			affiliateRoute.POST("/upload-qr", middleware.UploadRateLimit(), controller.UploadAffiliateQr)
 			affiliateRoute.DELETE("/qr", controller.DeleteAffiliateQr)
+			affiliateRoute.GET("/agreement", controller.GetAffiliateAgreement)
+			affiliateRoute.GET("/application-status", controller.GetAffiliateApplicationStatus)
+			affiliateRoute.POST("/apply", controller.ApplyAffiliate)
 		}
 		affiliateAdminRoute := apiRouter.Group("/affiliate/admin")
 		affiliateAdminRoute.Use(middleware.AdminAuth())
@@ -215,6 +218,14 @@ func SetApiRouter(router *gin.Engine) {
 			affiliateAdminRoute.POST("/withdrawals/:id/approve", controller.AdminApproveAffiliateWithdrawal)
 			affiliateAdminRoute.POST("/withdrawals/:id/reject", controller.AdminRejectAffiliateWithdrawal)
 			affiliateAdminRoute.POST("/withdrawals/:id/paid", controller.AdminMarkAffiliateWithdrawalPaid)
+			affiliateAdminRoute.GET("/applications", controller.AdminListAffiliateApplications)
+			affiliateAdminRoute.POST("/applications/:id/approve", controller.AdminApproveAffiliateApplication)
+			affiliateAdminRoute.POST("/applications/:id/reject", controller.AdminRejectAffiliateApplication)
+			affiliateAdminRoute.GET("/fraud-alerts", controller.AdminListFraudAlerts)
+			affiliateAdminRoute.POST("/fraud-alerts/scan", controller.AdminScanAffiliateFraud)
+			affiliateAdminRoute.POST("/fraud-alerts/:id/unbind", controller.AdminUnbindFraudAlert)
+			affiliateAdminRoute.POST("/fraud-alerts/:id/clawback", controller.AdminClawbackFraudAlert)
+			affiliateAdminRoute.POST("/fraud-alerts/:id/dismiss", controller.AdminDismissFraudAlert)
 		}
 
 		gameRoute := apiRouter.Group("/game")

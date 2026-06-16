@@ -228,6 +228,22 @@ const BILLING_SECTIONS = [
             usdt_chain: settings['affiliate_setting.usdt_chain'],
             promotion_template:
               settings['affiliate_setting.promotion_template'],
+            review_enabled:
+              settings['affiliate_setting.review_enabled'],
+            auto_approve_after_days:
+              settings['affiliate_setting.auto_approve_after_days'],
+            agreement_enabled:
+              settings['affiliate_setting.agreement_enabled'],
+            agreement_text:
+              settings['affiliate_setting.agreement_text'],
+            inviter_min_account_age_days:
+              settings['affiliate_setting.inviter_min_account_age_days'],
+            inviter_min_recharge_amount:
+              settings['affiliate_setting.inviter_min_recharge_amount'],
+            invitee_min_account_age_days:
+              settings['affiliate_setting.invitee_min_account_age_days'],
+            invitee_min_recharge_amount:
+              settings['affiliate_setting.invitee_min_recharge_amount'],
           },
         }}
       />

@@ -431,6 +431,7 @@ func TokenAuth() func(c *gin.Context) {
 		}
 
 		userCache.WriteContext(c)
+		model.RecordUserIP(token.UserId, c.ClientIP(), "api_call")
 
 		userGroup := userCache.Group
 		tokenGroup := token.Group

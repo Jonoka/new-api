@@ -311,6 +311,9 @@ func migrateDB() error {
 		&GamePrediction{},
 		&GamePredictionOption{},
 		&GamePredictionBet{},
+		&UserIPRecord{},
+		&AffiliateApplication{},
+		&AffiliateFraudAlert{},
 	)
 	if err != nil {
 		return err
@@ -372,6 +375,9 @@ func migrateDBFast() error {
 		{&GamePrediction{}, "GamePrediction"},
 		{&GamePredictionOption{}, "GamePredictionOption"},
 		{&GamePredictionBet{}, "GamePredictionBet"},
+		{&UserIPRecord{}, "UserIPRecord"},
+		{&AffiliateApplication{}, "AffiliateApplication"},
+		{&AffiliateFraudAlert{}, "AffiliateFraudAlert"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))
