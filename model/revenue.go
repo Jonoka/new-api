@@ -50,12 +50,10 @@ func GetRevenueStats(startTime, endTime int64, granularity string) (*RevenueStat
 		return nil, err
 	}
 
-	// --- Query 2: SubscriptionOrder (subscription online recharge) ---
-	if err := querySubscriptionRevenue(dataMap, bucketSeconds, startTime, endTime); err != nil {
-		return nil, err
-	}
+	// Note: subscription orders are already recorded in top_ups when completed,
+	// so we do NOT query subscription_orders separately to avoid double-counting.
 
-	// --- Query 3: RedemptionUsage (redemption code) ---
+	// --- Query 2: RedemptionUsage (redemption code) ---
 	if err := queryRedemptionRevenue(dataMap, bucketSeconds, startTime, endTime); err != nil {
 		return nil, err
 	}
@@ -95,27 +93,6 @@ func queryTopUpRevenue(dataMap map[int64]*RevenueDataPoint, bucketSeconds, start
 	err := DB.Raw(
 		"SELECT (complete_time / ? * ?) AS bucket, SUM(actual_money) AS money, COUNT(*) AS cnt "+
 			"FROM top_ups "+
-			"WHERE status = 'success' AND payment_provider != 'balance' "+
-			"AND complete_time >= ? AND complete_time <= ? "+
-			"GROUP BY bucket ORDER BY bucket",
-		bucketSeconds, bucketSeconds, startTime, endTime,
-	).Scan(&rows).Error
-	if err != nil {
-		return err
-	}
-	for _, r := range rows {
-		dp := getOrCreateDataPoint(dataMap, r.Bucket)
-		dp.OnlineMoney += r.Money
-		dp.OnlineCount += r.Cnt
-	}
-	return nil
-}
-
-func querySubscriptionRevenue(dataMap map[int64]*RevenueDataPoint, bucketSeconds, startTime, endTime int64) error {
-	var rows []revenueRow
-	err := DB.Raw(
-		"SELECT (complete_time / ? * ?) AS bucket, SUM(actual_money) AS money, COUNT(*) AS cnt "+
-			"FROM subscription_orders "+
 			"WHERE status = 'success' AND payment_provider != 'balance' "+
 			"AND complete_time >= ? AND complete_time <= ? "+
 			"GROUP BY bucket ORDER BY bucket",
