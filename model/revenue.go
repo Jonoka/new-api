@@ -35,9 +35,11 @@ type revenueRow struct {
 	Cnt    int     `gorm:"column:cnt"`
 }
 
-// GetRevenueStats aggregates revenue data across TopUp, SubscriptionOrder,
+// GetRevenueStats aggregates revenue data across TopUp
 // and RedemptionUsage within the given time range.
-func GetRevenueStats(startTime, endTime int64, granularity string) (*RevenueStatsResponse, error) {
+// tzOffset is the client's UTC offset in seconds (e.g. +28800 for UTC+8),
+// used to align daily buckets with the client's local midnight.
+func GetRevenueStats(startTime, endTime int64, granularity string, tzOffset int64) (*RevenueStatsResponse, error) {
 	bucketSeconds := int64(86400) // default: day
 	if granularity == "hour" {
 		bucketSeconds = 3600
@@ -46,7 +48,7 @@ func GetRevenueStats(startTime, endTime int64, granularity string) (*RevenueStat
 	dataMap := make(map[int64]*RevenueDataPoint)
 
 	// --- Query 1: TopUp (online recharge) ---
-	if err := queryTopUpRevenue(dataMap, bucketSeconds, startTime, endTime); err != nil {
+	if err := queryTopUpRevenue(dataMap, bucketSeconds, startTime, endTime, tzOffset); err != nil {
 		return nil, err
 	}
 
@@ -54,7 +56,7 @@ func GetRevenueStats(startTime, endTime int64, granularity string) (*RevenueStat
 	// so we do NOT query subscription_orders separately to avoid double-counting.
 
 	// --- Query 2: RedemptionUsage (redemption code) ---
-	if err := queryRedemptionRevenue(dataMap, bucketSeconds, startTime, endTime); err != nil {
+	if err := queryRedemptionRevenue(dataMap, bucketSeconds, startTime, endTime, tzOffset); err != nil {
 		return nil, err
 	}
 
@@ -88,15 +90,16 @@ func getOrCreateDataPoint(dataMap map[int64]*RevenueDataPoint, bucket int64) *Re
 	return dp
 }
 
-func queryTopUpRevenue(dataMap map[int64]*RevenueDataPoint, bucketSeconds, startTime, endTime int64) error {
+func queryTopUpRevenue(dataMap map[int64]*RevenueDataPoint, bucketSeconds, startTime, endTime, tzOffset int64) error {
 	var rows []revenueRow
+	// Align buckets to client timezone: shift → floor → shift back
 	err := DB.Raw(
-		"SELECT (complete_time / ? * ?) AS bucket, SUM(actual_money) AS money, COUNT(*) AS cnt "+
+		"SELECT ((complete_time + ?) / ? * ? - ?) AS bucket, SUM(actual_money) AS money, COUNT(*) AS cnt "+
 			"FROM top_ups "+
 			"WHERE status = 'success' AND payment_provider != 'balance' "+
 			"AND complete_time >= ? AND complete_time <= ? "+
 			"GROUP BY bucket ORDER BY bucket",
-		bucketSeconds, bucketSeconds, startTime, endTime,
+		tzOffset, bucketSeconds, bucketSeconds, tzOffset, startTime, endTime,
 	).Scan(&rows).Error
 	if err != nil {
 		return err
@@ -109,15 +112,15 @@ func queryTopUpRevenue(dataMap map[int64]*RevenueDataPoint, bucketSeconds, start
 	return nil
 }
 
-func queryRedemptionRevenue(dataMap map[int64]*RevenueDataPoint, bucketSeconds, startTime, endTime int64) error {
+func queryRedemptionRevenue(dataMap map[int64]*RevenueDataPoint, bucketSeconds, startTime, endTime, tzOffset int64) error {
 	var rows []revenueRow
 	err := DB.Raw(
-		"SELECT (ru.created_time / ? * ?) AS bucket, SUM(r.quota) AS quota, COUNT(*) AS cnt "+
+		"SELECT ((ru.created_time + ?) / ? * ? - ?) AS bucket, SUM(r.quota) AS quota, COUNT(*) AS cnt "+
 			"FROM redemption_usages ru "+
 			"LEFT JOIN redemptions r ON r.id = ru.redemption_id "+
 			"WHERE ru.created_time >= ? AND ru.created_time <= ? "+
 			"GROUP BY bucket ORDER BY bucket",
-		bucketSeconds, bucketSeconds, startTime, endTime,
+		tzOffset, bucketSeconds, bucketSeconds, tzOffset, startTime, endTime,
 	).Scan(&rows).Error
 	if err != nil {
 		return err

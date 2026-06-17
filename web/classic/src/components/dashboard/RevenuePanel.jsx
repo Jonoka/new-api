@@ -72,8 +72,9 @@ const RevenuePanel = ({ CARD_PROPS, CHART_CONFIG }) => {
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const end = Math.floor(todayStart.getTime() / 1000) + 86400 - 1;
       const start = Math.floor(todayStart.getTime() / 1000) - (selectedDays - 1) * 86400;
+      const tzOffset = now.getTimezoneOffset() * -60;
       const res = await API.get(
-        `/api/data/revenue?start_timestamp=${start}&end_timestamp=${end}&granularity=${granularity}`
+        `/api/data/revenue?start_timestamp=${start}&end_timestamp=${end}&granularity=${granularity}&timezone_offset=${tzOffset}`
       );
       const { success, message, data } = res.data;
       if (success) {

@@ -48,6 +48,8 @@ export function RevenuePanel() {
     [selectedDays]
   )
 
+  const tzOffset = useMemo(() => new Date().getTimezoneOffset() * -60, [])
+
   const { data, isLoading } = useQuery({
     queryKey: ['revenue-stats', start_timestamp, end_timestamp, granularity],
     queryFn: () =>
@@ -55,6 +57,7 @@ export function RevenuePanel() {
         start_timestamp,
         end_timestamp,
         granularity,
+        timezone_offset: tzOffset,
       }),
     staleTime: 60 * 1000,
   })

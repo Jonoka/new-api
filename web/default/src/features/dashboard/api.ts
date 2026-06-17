@@ -97,6 +97,7 @@ export async function getRevenueStats(params: {
   start_timestamp: number
   end_timestamp: number
   granularity: string
+  timezone_offset: number
 }) {
   const res = await api.get<{ success: boolean; data: RevenueStatsResponse }>(
     '/api/data/revenue',

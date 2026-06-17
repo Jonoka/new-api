@@ -26,7 +26,13 @@ func GetRevenueStats(c *gin.Context) {
 		granularity = "day"
 	}
 
-	stats, err := model.GetRevenueStats(startTimestamp, endTimestamp, granularity)
+	// timezone_offset: client's UTC offset in seconds (e.g. +28800 for UTC+8)
+	tzOffset, _ := strconv.ParseInt(c.DefaultQuery("timezone_offset", "0"), 10, 64)
+	if tzOffset < -43200 || tzOffset > 50400 {
+		tzOffset = 0
+	}
+
+	stats, err := model.GetRevenueStats(startTimestamp, endTimestamp, granularity, tzOffset)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
