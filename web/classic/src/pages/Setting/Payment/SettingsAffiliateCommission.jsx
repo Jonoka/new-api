@@ -1080,6 +1080,39 @@ export default function SettingsAffiliateCommission(props) {
       width: 170,
       render: (value) => (value ? timestamp2string(value) : '-'),
     },
+    {
+      title: t('操作'),
+      dataIndex: 'action',
+      width: 100,
+      fixed: 'right',
+      render: (_, record) => (
+        <Button
+          size='small'
+          type='danger'
+          theme='borderless'
+          onClick={async () => {
+            if (!window.confirm(t('确认解除该邀请关系？解除后不可恢复。'))) return;
+            try {
+              const res = await API.post('/api/affiliate/admin/bind-inviter', {
+                user_id: record.invitee_id,
+                aff_code: '',
+                force: true,
+              });
+              if (res.data.success) {
+                showSuccess(t('已解除邀请关系'));
+                loadInvitations();
+              } else {
+                showError(res.data.message || t('解除失败'));
+              }
+            } catch {
+              showError(t('解除失败'));
+            }
+          }}
+        >
+          {t('解除绑定')}
+        </Button>
+      ),
+    },
   ];
 
   const recordColumns = [
@@ -1517,13 +1550,47 @@ export default function SettingsAffiliateCommission(props) {
                   '默认不会覆盖已有邀请人；强制覆盖会同步调整新旧邀请人的邀请人数。',
                 )}
               </Text>
-              <Button
-                type='primary'
-                loading={bindLoading}
-                onClick={bindInviter}
-              >
-                {t('绑定邀请人')}
-              </Button>
+              <Space>
+                <Button
+                  type='primary'
+                  loading={bindLoading}
+                  onClick={bindInviter}
+                >
+                  {t('绑定邀请人')}
+                </Button>
+                <Button
+                  type='danger'
+                  loading={bindLoading}
+                  disabled={!selectedBindUser}
+                  onClick={async () => {
+                    if (!selectedBindUser) {
+                      showError(t('请先搜索并选择要解除绑定的用户'));
+                      return;
+                    }
+                    if (!window.confirm(t('确认解除该用户的邀请关系？'))) return;
+                    try {
+                      setBindLoading(true);
+                      const res = await API.post('/api/affiliate/admin/bind-inviter', {
+                        user_id: selectedBindUser.id,
+                        aff_code: '',
+                        force: true,
+                      });
+                      if (res.data.success) {
+                        showSuccess(t('已解除邀请关系'));
+                        setBindResult(res.data.data);
+                      } else {
+                        showError(res.data.message || t('解除失败'));
+                      }
+                    } catch {
+                      showError(t('解除失败'));
+                    } finally {
+                      setBindLoading(false);
+                    }
+                  }}
+                >
+                  {t('解除绑定')}
+                </Button>
+              </Space>
               {bindResult && (
                 <div style={SOFT_PANEL_STYLE} className='w-full'>
                   <Space vertical align='start'>
