@@ -207,6 +207,17 @@ func AdminScanAffiliateFraud(c *gin.Context) {
 	})
 }
 
+func AdminScanAffiliateFraudDeep(c *gin.Context) {
+	newAlerts, err := model.DetectFraudDeep()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"new_alerts": newAlerts,
+	})
+}
+
 type adminFraudActionRequest struct {
 	Remark string `json:"remark"`
 }

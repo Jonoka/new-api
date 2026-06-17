@@ -223,6 +223,7 @@ func SetApiRouter(router *gin.Engine) {
 			affiliateAdminRoute.POST("/applications/:id/reject", controller.AdminRejectAffiliateApplication)
 			affiliateAdminRoute.GET("/fraud-alerts", controller.AdminListFraudAlerts)
 			affiliateAdminRoute.POST("/fraud-alerts/scan", controller.AdminScanAffiliateFraud)
+			affiliateAdminRoute.POST("/fraud-alerts/scan-deep", controller.AdminScanAffiliateFraudDeep)
 			affiliateAdminRoute.POST("/fraud-alerts/:id/unbind", controller.AdminUnbindFraudAlert)
 			affiliateAdminRoute.POST("/fraud-alerts/:id/clawback", controller.AdminClawbackFraudAlert)
 			affiliateAdminRoute.POST("/fraud-alerts/:id/dismiss", controller.AdminDismissFraudAlert)

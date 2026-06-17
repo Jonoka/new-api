@@ -472,6 +472,24 @@ function FraudAlertsPanel() {
     }
   };
 
+  const handleScanDeep = async () => {
+    setScanning(true);
+    try {
+      const res = await API.post('/api/affiliate/admin/fraud-alerts/scan-deep');
+      if (res.data.success) {
+        const newAlerts = res.data.data?.new_alerts || 0;
+        showSuccess(t('深度检测完成') + `，${t('新增')} ${newAlerts} ${t('条警报')}`);
+        await loadAlerts();
+      } else {
+        showError(res.data.message);
+      }
+    } catch (error) {
+      showError(t('深度检测失败'));
+    } finally {
+      setScanning(false);
+    }
+  };
+
   const handleAction = (id, action) => {
     const actionText = {
       unbind: t('解绑邀请关系'),
@@ -650,6 +668,13 @@ function FraudAlertsPanel() {
             onClick={handleScan}
           >
             {t('一键检测')}
+          </Button>
+          <Button
+            type='warning'
+            loading={scanning}
+            onClick={handleScanDeep}
+          >
+            {t('深度检测（含历史日志）')}
           </Button>
           <Select
             value={statusFilter}

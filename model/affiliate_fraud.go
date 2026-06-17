@@ -110,6 +110,108 @@ func DetectFraudBulk() (int, error) {
 	return totalNew, nil
 }
 
+// DetectFraudDeep scans the logs table (LOG_DB) for IP overlaps between
+// inviters and their invitees. This catches historical activity that happened
+// before the user_ip_records table was introduced.
+func DetectFraudDeep() (int, error) {
+	var inviterIds []int
+	if err := DB.Model(&User{}).
+		Where("aff_count > 0").
+		Pluck("id", &inviterIds).Error; err != nil {
+		return 0, err
+	}
+
+	totalNew := 0
+	for _, inviterId := range inviterIds {
+		n, err := detectFraudDeepForInviter(inviterId)
+		if err != nil {
+			continue
+		}
+		totalNew += n
+	}
+	return totalNew, nil
+}
+
+func detectFraudDeepForInviter(inviterId int) (int, error) {
+	var inviteeIds []int
+	if err := DB.Model(&User{}).Where("inviter_id = ?", inviterId).Pluck("id", &inviteeIds).Error; err != nil {
+		return 0, err
+	}
+	if len(inviteeIds) == 0 {
+		return 0, nil
+	}
+
+	// Get inviter's distinct IPs from logs
+	var inviterIPs []string
+	if err := LOG_DB.Model(&Log{}).
+		Where("user_id = ? AND ip != ''", inviterId).
+		Distinct("ip").
+		Pluck("ip", &inviterIPs).Error; err != nil {
+		return 0, err
+	}
+	if len(inviterIPs) == 0 {
+		return 0, nil
+	}
+
+	// For each invitee, check IP overlap from logs
+	newAlerts := 0
+	for _, inviteeId := range inviteeIds {
+		var sharedIPs []string
+		if err := LOG_DB.Model(&Log{}).
+			Where("user_id = ? AND ip IN ? AND ip != ''", inviteeId, inviterIPs).
+			Distinct("ip").
+			Pluck("ip", &sharedIPs).Error; err != nil {
+			continue
+		}
+		if len(sharedIPs) == 0 {
+			continue
+		}
+
+		// Also merge with user_ip_records overlaps
+		ipRecordOverlaps, _ := GetIPOverlap(inviterId, inviteeId)
+		allShared := mergeUniqueStrings(sharedIPs, ipRecordOverlaps)
+
+		// Skip if alert already exists
+		var existing int64
+		DB.Model(&AffiliateFraudAlert{}).
+			Where("inviter_id = ? AND invitee_id = ? AND status = ?", inviterId, inviteeId, FraudAlertStatusDetected).
+			Count(&existing)
+		if existing > 0 {
+			continue
+		}
+
+		ipsJSON, _ := common.Marshal(allShared)
+		alert := &AffiliateFraudAlert{
+			InviterId:     inviterId,
+			InviteeId:     inviteeId,
+			SharedIps:     string(ipsJSON),
+			SharedIpCount: len(allShared),
+			Status:        FraudAlertStatusDetected,
+			DetectedAt:    common.GetTimestamp(),
+		}
+		if err := DB.Create(alert).Error; err != nil {
+			continue
+		}
+		newAlerts++
+	}
+	return newAlerts, nil
+}
+
+func mergeUniqueStrings(a, b []string) []string {
+	seen := make(map[string]bool, len(a)+len(b))
+	for _, s := range a {
+		seen[s] = true
+	}
+	for _, s := range b {
+		seen[s] = true
+	}
+	result := make([]string, 0, len(seen))
+	for s := range seen {
+		result = append(result, s)
+	}
+	return result
+}
+
 func UnbindAffiliateRelationship(alertId, adminId int, doClawback bool) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
 		var alert AffiliateFraudAlert

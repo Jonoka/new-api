@@ -246,6 +246,13 @@ export async function adminScanFraud() {
   return res.data
 }
 
+export async function adminScanFraudDeep() {
+  const res = await api.post<ApiResponse<{ new_alerts: number }>>(
+    '/api/affiliate/admin/fraud-alerts/scan-deep'
+  )
+  return res.data
+}
+
 export async function adminResolveFraudAlert(
   id: number,
   action: 'unbind' | 'clawback' | 'dismiss',
