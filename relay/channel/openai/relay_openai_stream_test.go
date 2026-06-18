@@ -100,3 +100,47 @@ func TestOaiStreamHandlerSkipsUsageOnlyChunkWhenNotRequested(t *testing.T) {
 	assert.NotContains(t, output, `"usage":{"prompt_tokens":3`)
 	assert.Contains(t, output, "[DONE]")
 }
+
+func TestOaiStreamHandlerKeepsToolCallChunkWithUsageWhenNotRequested(t *testing.T) {
+	body := strings.Join([]string{
+		chatCompletionSSE(`{"id":"chatcmpl-test","object":"chat.completion.chunk","created":1,"model":"gpt-test","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]},"finish_reason":null}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`),
+		"data: [DONE]\n",
+	}, "")
+	c, recorder, info, resp := setupOaiStreamTest(strings.NewReader(body))
+	info.ShouldIncludeUsage = false
+
+	usage, err := OaiStreamHandler(c, info, resp)
+	require.Nil(t, err)
+	require.Equal(t, &dto.Usage{PromptTokens: 3, CompletionTokens: 2, TotalTokens: 5}, usage)
+
+	output := recorder.Body.String()
+	assert.Contains(t, output, `"tool_calls"`)
+	assert.Contains(t, output, `"name":"lookup"`)
+	assert.Contains(t, output, `[DONE]`)
+}
+
+func TestOaiStreamHandlerClaudeSingleContentChunkClosesStream(t *testing.T) {
+	body := strings.Join([]string{
+		chatCompletionSSE(`{"id":"chatcmpl-test","object":"chat.completion.chunk","created":1,"model":"gpt-test","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":null}]}`),
+		"data: [DONE]\n",
+	}, "")
+	c, recorder, info, resp := setupOaiStreamTest(strings.NewReader(body))
+	info.RelayFormat = types.RelayFormatClaude
+	info.ClaudeConvertInfo = &relaycommon.ClaudeConvertInfo{
+		LastMessagesType: relaycommon.LastMessageTypeNone,
+	}
+
+	usage, err := OaiStreamHandler(c, info, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+
+	output := recorder.Body.String()
+	assert.Contains(t, output, "event: message_start")
+	assert.Contains(t, output, "event: content_block_start")
+	assert.Contains(t, output, "event: content_block_delta")
+	assert.Contains(t, output, "event: content_block_stop")
+	assert.Contains(t, output, "event: message_delta")
+	assert.Contains(t, output, "event: message_stop")
+	assert.Contains(t, output, `"stop_reason":"end_turn"`)
+	assert.Equal(t, 1, strings.Count(output, `"text":"hello"`))
+}

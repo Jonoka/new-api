@@ -148,24 +148,26 @@ func shouldForwardOpenAIStreamData(data string, info *relaycommon.RelayInfo) boo
 	}
 
 	return lo.SomeBy(streamResponse.Choices, func(choice dto.ChatCompletionsStreamResponseChoice) bool {
-		return choice.Delta.GetContentString() != "" || choice.Delta.GetReasoningContent() != ""
+		return choice.Delta.GetContentString() != "" ||
+			choice.Delta.GetReasoningContent() != "" ||
+			len(choice.Delta.ToolCalls) > 0
 	})
 }
 
-func isTerminalOpenAIStreamData(data string) (bool, error) {
+func parseOpenAIStreamData(data string) (*dto.ChatCompletionsStreamResponse, bool, error) {
 	var streamResponse dto.ChatCompletionsStreamResponse
 	if err := common.Unmarshal(common.StringToByteSlice(data), &streamResponse); err != nil {
-		return false, err
+		return nil, false, err
 	}
 	if len(streamResponse.Choices) == 0 {
-		return service.ValidUsage(streamResponse.Usage), nil
+		return &streamResponse, service.ValidUsage(streamResponse.Usage), nil
 	}
 	for _, choice := range streamResponse.Choices {
 		if choice.FinishReason != nil && *choice.FinishReason != "" {
-			return true, nil
+			return &streamResponse, true, nil
 		}
 	}
-	return false, nil
+	return &streamResponse, false, nil
 }
 
 func HandleFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, lastStreamData string,
@@ -182,24 +184,21 @@ func HandleFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, lastStream
 		helper.Done(c)
 
 	case types.RelayFormatClaude:
-		terminal, err := isTerminalOpenAIStreamData(lastStreamData)
+		streamResponse, terminal, err := parseOpenAIStreamData(lastStreamData)
 		if err != nil {
 			common.SysLog("error unmarshalling stream response: " + err.Error())
 			return
 		}
 		if !terminal {
-			return
-		}
-
-		var streamResponse dto.ChatCompletionsStreamResponse
-		if err := common.Unmarshal(common.StringToByteSlice(lastStreamData), &streamResponse); err != nil {
-			common.SysLog("error unmarshalling stream response: " + err.Error())
-			return
+			if info.ClaudeConvertInfo == nil || info.ClaudeConvertInfo.Done {
+				return
+			}
+			streamResponse = helper.GenerateStopResponse(responseId, createAt, model, "stop")
 		}
 
 		info.ClaudeConvertInfo.Usage = usage
 
-		claudeResponses := service.StreamResponseOpenAI2Claude(&streamResponse, info)
+		claudeResponses := service.StreamResponseOpenAI2Claude(streamResponse, info)
 		for _, resp := range claudeResponses {
 			_ = helper.ClaudeData(c, *resp)
 		}
