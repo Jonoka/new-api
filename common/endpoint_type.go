@@ -34,7 +34,7 @@ func GetEndpointTypesByChannelType(channelType int, modelName string) []constant
 		if IsOpenAIResponseOnlyModel(modelName) {
 			endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAIResponse}
 		} else {
-			endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAI}
+			endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAI, constant.EndpointTypeOpenAIResponse}
 		}
 	}
 	if IsImageGenerationModel(modelName) {
