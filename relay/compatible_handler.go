@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -194,16 +193,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 
 	if resp != nil {
 		httpResp = resp.(*http.Response)
-		// When upstream returns SSE (text/event-stream or empty Content-Type
-		// with streaming body), force streaming mode. This handles upstreams
-		// like tokens-pro/sub2api that always stream for OpenAI OAuth even
-		// when the client omitted the stream field.
-		if httpResp.StatusCode == http.StatusOK && !info.IsStream {
-			ct := httpResp.Header.Get("Content-Type")
-			if strings.Contains(ct, "text/event-stream") || strings.Contains(ct, "stream") {
-				info.IsStream = true
-			}
-		}
+		markActualStreamFromResponse(c, info, httpResp)
 		if httpResp.StatusCode != http.StatusOK {
 			newApiErr := service.RelayErrorHandler(c.Request.Context(), httpResp, false)
 			// reset status code 重置状态码
