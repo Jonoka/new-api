@@ -30,3 +30,25 @@ func TestGetEndpointTypesByChannelTypeResponseOnlyModel(t *testing.T) {
 		t.Fatalf("endpoint type = %q, want %q", got[0], constant.EndpointTypeOpenAIResponse)
 	}
 }
+
+func TestGetEndpointTypesByChannelTypeCodexUsesResponses(t *testing.T) {
+	got := GetEndpointTypesByChannelType(constant.ChannelTypeCodex, "gpt-5.4")
+
+	if len(got) != 1 {
+		t.Fatalf("endpoint types len = %d, want 1: %v", len(got), got)
+	}
+	if got[0] != constant.EndpointTypeOpenAIResponse {
+		t.Fatalf("endpoint type = %q, want %q", got[0], constant.EndpointTypeOpenAIResponse)
+	}
+}
+
+func TestGetEndpointTypesByChannelTypeCodexCompactUsesResponsesCompact(t *testing.T) {
+	got := GetEndpointTypesByChannelType(constant.ChannelTypeCodex, "gpt-5.4-openai-compact")
+
+	if len(got) != 1 {
+		t.Fatalf("endpoint types len = %d, want 1: %v", len(got), got)
+	}
+	if got[0] != constant.EndpointTypeOpenAIResponseCompact {
+		t.Fatalf("endpoint type = %q, want %q", got[0], constant.EndpointTypeOpenAIResponseCompact)
+	}
+}
