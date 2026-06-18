@@ -114,8 +114,7 @@ func processCompletionsStreamResponse(streamResponse dto.CompletionsStreamRespon
 
 func handleLastResponse(lastStreamData string, responseId *string, createAt *int64,
 	systemFingerprint *string, model *string, usage **dto.Usage,
-	containStreamUsage *bool, info *relaycommon.RelayInfo,
-	shouldSendLastResp *bool) error {
+	containStreamUsage *bool) error {
 
 	var lastStreamResponse dto.ChatCompletionsStreamResponse
 	if err := common.Unmarshal(common.StringToByteSlice(lastStreamData), &lastStreamResponse); err != nil {
@@ -130,14 +129,43 @@ func handleLastResponse(lastStreamData string, responseId *string, createAt *int
 	if service.ValidUsage(lastStreamResponse.Usage) {
 		*containStreamUsage = true
 		*usage = lastStreamResponse.Usage
-		if !info.ShouldIncludeUsage {
-			*shouldSendLastResp = lo.SomeBy(lastStreamResponse.Choices, func(choice dto.ChatCompletionsStreamResponseChoice) bool {
-				return choice.Delta.GetContentString() != "" || choice.Delta.GetReasoningContent() != ""
-			})
-		}
 	}
 
 	return nil
+}
+
+func shouldForwardOpenAIStreamData(data string, info *relaycommon.RelayInfo) bool {
+	if info == nil || info.ShouldIncludeUsage {
+		return true
+	}
+
+	var streamResponse dto.ChatCompletionsStreamResponse
+	if err := common.Unmarshal(common.StringToByteSlice(data), &streamResponse); err != nil {
+		return true
+	}
+	if !service.ValidUsage(streamResponse.Usage) {
+		return true
+	}
+
+	return lo.SomeBy(streamResponse.Choices, func(choice dto.ChatCompletionsStreamResponseChoice) bool {
+		return choice.Delta.GetContentString() != "" || choice.Delta.GetReasoningContent() != ""
+	})
+}
+
+func isTerminalOpenAIStreamData(data string) (bool, error) {
+	var streamResponse dto.ChatCompletionsStreamResponse
+	if err := common.Unmarshal(common.StringToByteSlice(data), &streamResponse); err != nil {
+		return false, err
+	}
+	if len(streamResponse.Choices) == 0 {
+		return service.ValidUsage(streamResponse.Usage), nil
+	}
+	for _, choice := range streamResponse.Choices {
+		if choice.FinishReason != nil && *choice.FinishReason != "" {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func HandleFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, lastStreamData string,
@@ -154,6 +182,15 @@ func HandleFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, lastStream
 		helper.Done(c)
 
 	case types.RelayFormatClaude:
+		terminal, err := isTerminalOpenAIStreamData(lastStreamData)
+		if err != nil {
+			common.SysLog("error unmarshalling stream response: " + err.Error())
+			return
+		}
+		if !terminal {
+			return
+		}
+
 		var streamResponse dto.ChatCompletionsStreamResponse
 		if err := common.Unmarshal(common.StringToByteSlice(lastStreamData), &streamResponse); err != nil {
 			common.SysLog("error unmarshalling stream response: " + err.Error())
@@ -169,32 +206,7 @@ func HandleFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, lastStream
 		info.ClaudeConvertInfo.Done = true
 
 	case types.RelayFormatGemini:
-		var streamResponse dto.ChatCompletionsStreamResponse
-		if err := common.Unmarshal(common.StringToByteSlice(lastStreamData), &streamResponse); err != nil {
-			common.SysLog("error unmarshalling stream response: " + err.Error())
-			return
-		}
-
-		// 这里处理的是 openai 最后一个流响应，其 delta 为空，有 finish_reason 字段
-		// 因此相比较于 google 官方的流响应，由 openai 转换而来会多一个 parts 为空，finishReason 为 STOP 的响应
-		// 而包含最后一段文本输出的响应（倒数第二个）的 finishReason 为 null
-		// 暂不知是否有程序会不兼容。
-
-		geminiResponse := service.StreamResponseOpenAI2Gemini(&streamResponse, info)
-
-		// openai 流响应开头的空数据
-		if geminiResponse == nil {
-			return
-		}
-
-		geminiResponseStr, err := common.Marshal(geminiResponse)
-		if err != nil {
-			common.SysLog("error marshalling gemini response: " + err.Error())
-			return
-		}
-
-		// 发送最终的 Gemini 响应
-		_ = helper.StringData(c, string(geminiResponseStr))
+		return
 	}
 }
 
