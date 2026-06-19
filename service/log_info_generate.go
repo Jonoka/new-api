@@ -80,7 +80,17 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	appendBillingInfo(relayInfo, other)
 	appendParamOverrideInfo(relayInfo, other)
 	appendStreamStatus(relayInfo, other)
+	appendTimingDiagnostics(relayInfo, other)
 	return other
+}
+
+func appendTimingDiagnostics(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+	if !constant.UpstreamTimingDiagnosticsEnabled || relayInfo == nil || other == nil {
+		return
+	}
+	if diagnostics := relayInfo.TimingDiagnosticsMilliseconds(); len(diagnostics) > 0 {
+		other["timing_diagnostics"] = diagnostics
+	}
 }
 
 func appendParamOverrideInfo(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {

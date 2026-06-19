@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -60,6 +61,17 @@ type ResponsesUsageInfo struct {
 	BuiltInTools map[string]*BuildInToolInfo
 }
 
+type UpstreamTimingDiagnostics struct {
+	mu                   sync.Mutex
+	start                time.Time
+	gotConn              time.Time
+	wroteRequest         time.Time
+	gotFirstResponseByte time.Time
+	clientDoReturn       time.Time
+	firstSSEData         time.Time
+	firstDownstreamWrite time.Time
+}
+
 type ChannelMeta struct {
 	ChannelType          int
 	ChannelId            int
@@ -99,6 +111,7 @@ type RelayInfo struct {
 	FirstResponseStartTime time.Time
 	FirstResponseTime      time.Time
 	isFirstResponse        bool
+	TimingDiagnostics      *UpstreamTimingDiagnostics
 	//SendLastReasoningResponse bool
 	IsStream               bool
 	IsGeminiBatchEmbedding bool
@@ -680,6 +693,113 @@ func (info *RelayInfo) ResetFirstResponseTiming(start time.Time) {
 	info.FirstResponseStartTime = start
 	info.FirstResponseTime = start.Add(-time.Second)
 	info.isFirstResponse = true
+}
+
+func (info *RelayInfo) EnableTimingDiagnostics(start time.Time) {
+	if info == nil {
+		return
+	}
+	if start.IsZero() {
+		start = time.Now()
+	}
+	info.TimingDiagnostics = &UpstreamTimingDiagnostics{start: start}
+}
+
+func (info *RelayInfo) MarkTimingGotConn() {
+	info.markTimingPoint(func(d *UpstreamTimingDiagnostics, now time.Time) {
+		if d.gotConn.IsZero() {
+			d.gotConn = now
+		}
+	})
+}
+
+func (info *RelayInfo) MarkTimingWroteRequest() {
+	info.markTimingPoint(func(d *UpstreamTimingDiagnostics, now time.Time) {
+		if d.wroteRequest.IsZero() {
+			d.wroteRequest = now
+		}
+	})
+}
+
+func (info *RelayInfo) MarkTimingGotFirstResponseByte() {
+	info.markTimingPoint(func(d *UpstreamTimingDiagnostics, now time.Time) {
+		if d.gotFirstResponseByte.IsZero() {
+			d.gotFirstResponseByte = now
+		}
+	})
+}
+
+func (info *RelayInfo) MarkTimingClientDoReturn() {
+	info.markTimingPoint(func(d *UpstreamTimingDiagnostics, now time.Time) {
+		if d.clientDoReturn.IsZero() {
+			d.clientDoReturn = now
+		}
+	})
+}
+
+func (info *RelayInfo) MarkTimingFirstSSEData() {
+	info.markTimingPoint(func(d *UpstreamTimingDiagnostics, now time.Time) {
+		if d.firstSSEData.IsZero() {
+			d.firstSSEData = now
+		}
+	})
+}
+
+func (info *RelayInfo) MarkTimingFirstDownstreamWrite() {
+	info.markTimingPoint(func(d *UpstreamTimingDiagnostics, now time.Time) {
+		if d.firstDownstreamWrite.IsZero() {
+			d.firstDownstreamWrite = now
+		}
+	})
+}
+
+func (info *RelayInfo) markTimingPoint(mark func(*UpstreamTimingDiagnostics, time.Time)) {
+	if info == nil || info.TimingDiagnostics == nil || mark == nil {
+		return
+	}
+	info.TimingDiagnostics.mu.Lock()
+	defer info.TimingDiagnostics.mu.Unlock()
+	mark(info.TimingDiagnostics, time.Now())
+}
+
+func (info *RelayInfo) TimingDiagnosticsMilliseconds() map[string]interface{} {
+	if info == nil || info.TimingDiagnostics == nil {
+		return nil
+	}
+	info.TimingDiagnostics.mu.Lock()
+	defer info.TimingDiagnostics.mu.Unlock()
+
+	d := info.TimingDiagnostics
+	if d.start.IsZero() {
+		return nil
+	}
+
+	result := make(map[string]interface{})
+	var beforeDoRequestMs int64
+	if !info.StartTime.IsZero() {
+		beforeDoRequestMs = d.start.Sub(info.StartTime).Milliseconds()
+	}
+	result["before_do_request_ms"] = float64(beforeDoRequestMs)
+	if !d.gotConn.IsZero() {
+		result["got_conn_ms"] = float64(d.gotConn.Sub(d.start).Milliseconds())
+	}
+	if !d.wroteRequest.IsZero() {
+		result["wrote_request_ms"] = float64(d.wroteRequest.Sub(d.start).Milliseconds())
+	}
+	if !d.gotFirstResponseByte.IsZero() {
+		result["got_first_response_byte_ms"] = float64(d.gotFirstResponseByte.Sub(d.start).Milliseconds())
+	}
+	if !d.clientDoReturn.IsZero() {
+		result["client_do_return_ms"] = float64(d.clientDoReturn.Sub(d.start).Milliseconds())
+	}
+	if !d.firstSSEData.IsZero() {
+		result["first_sse_data_ms"] = float64(d.firstSSEData.Sub(d.start).Milliseconds())
+	}
+	if !d.firstDownstreamWrite.IsZero() {
+		result["first_downstream_write_ms"] = float64(d.firstDownstreamWrite.Sub(d.start).Milliseconds())
+	}
+	result["total_ms"] = float64(info.ElapsedMilliseconds())
+	return result
 }
 
 func (info *RelayInfo) FirstResponseLatencyMilliseconds() int64 {

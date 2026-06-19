@@ -8,12 +8,33 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
+
+const timingDiagnosticsRelayInfoKey = "timing_diagnostics_relay_info"
+
+func SetTimingDiagnosticsRelayInfo(c *gin.Context, info *relaycommon.RelayInfo) {
+	if c == nil || info == nil {
+		return
+	}
+	c.Set(timingDiagnosticsRelayInfoKey, info)
+}
+
+func markFirstDownstreamWrite(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	if info, ok := c.Get(timingDiagnosticsRelayInfoKey); ok {
+		if relayInfo, ok := info.(*relaycommon.RelayInfo); ok && relayInfo != nil {
+			relayInfo.MarkTimingFirstDownstreamWrite()
+		}
+	}
+}
 
 func FlushWriter(c *gin.Context) (err error) {
 	defer func() {
@@ -161,12 +182,14 @@ func writeFilteredEventData(c *gin.Context, eventLine string, data string) (bool
 
 func writeStreamDataItems(c *gin.Context, items []string) {
 	for _, item := range items {
+		markFirstDownstreamWrite(c)
 		c.Render(-1, common.CustomEvent{Data: "data: " + item})
 	}
 }
 
 func writeFilteredEventDataItems(c *gin.Context, eventLine string, items []string) {
 	for _, item := range items {
+		markFirstDownstreamWrite(c)
 		c.Render(-1, common.CustomEvent{Data: eventLine})
 		c.Render(-1, common.CustomEvent{Data: "data: " + item})
 	}

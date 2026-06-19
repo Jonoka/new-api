@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"regexp"
 	"strings"
 	"sync"
@@ -553,7 +554,23 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	}
 
 	if info != nil {
-		info.ResetFirstResponseTiming(time.Now())
+		requestStart := time.Now()
+		info.ResetFirstResponseTiming(requestStart)
+		if rootconstant.UpstreamTimingDiagnosticsEnabled {
+			info.EnableTimingDiagnostics(requestStart)
+			trace := &httptrace.ClientTrace{
+				GotConn: func(httptrace.GotConnInfo) {
+					info.MarkTimingGotConn()
+				},
+				WroteRequest: func(httptrace.WroteRequestInfo) {
+					info.MarkTimingWroteRequest()
+				},
+				GotFirstResponseByte: func() {
+					info.MarkTimingGotFirstResponseByte()
+				},
+			}
+			req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
+		}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -562,6 +579,9 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	}
 	if resp == nil {
 		return nil, errors.New("resp is nil")
+	}
+	if info != nil {
+		info.MarkTimingClientDoReturn()
 	}
 	if info != nil && !info.IsStream {
 		info.SetFirstResponseTime()
