@@ -259,12 +259,10 @@ func ApplySensitiveFilterToStreamDataForSend(c *gin.Context, data string) (*Sens
 	if result.Blocked {
 		return streamResult, nil
 	}
-	readyData, held, err := bufferSensitiveStreamDataForSend(c, filtered)
-	if err != nil {
-		return nil, err
-	}
-	streamResult.Data = readyData
-	streamResult.Held = held
+	// Do not delay safe chunks here. Holding chunks to protect every possible
+	// cross-chunk keyword match makes short streams look like non-streaming
+	// responses when a long block keyword or prefill group is configured.
+	streamResult.Data = []string{filtered}
 	return streamResult, nil
 }
 

@@ -102,12 +102,12 @@ func TestStringDataBlocksSensitiveKeywordAcrossStreamChunks(t *testing.T) {
 	assert.Contains(t, body, "event: error")
 	assert.Contains(t, body, "sensitive_words_detected")
 	assert.True(t, c.GetBool("sensitive_response_stream_blocked"))
-	assert.NotContains(t, body, `"content":"啦"`)
+	assert.Contains(t, body, `"content":"啦"`)
 	assert.NotContains(t, body, `"content":"队"`)
 	assert.False(t, strings.Contains(body, "[DONE]"))
 }
 
-func TestStringDataFlushesDelayedSafeStreamChunksOnDone(t *testing.T) {
+func TestStringDataDoesNotDelaySafeStreamChunks(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	oldEnabled := setting.CheckSensitiveEnabled
 	oldRules := setting.SensitiveRules
@@ -142,6 +142,10 @@ func TestStringDataFlushesDelayedSafeStreamChunksOnDone(t *testing.T) {
 	common.SetContextKey(c, constant.ContextKeyChannelId, 1)
 
 	require.NoError(t, StringData(c, `{"choices":[{"delta":{"content":"安全"}}]}`))
+	bodyAfterChunk := recorder.Body.String()
+	assert.Contains(t, bodyAfterChunk, `"content":"安全"`)
+	assert.False(t, strings.Contains(bodyAfterChunk, "[DONE]"))
+
 	Done(c)
 
 	body := recorder.Body.String()
