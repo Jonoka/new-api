@@ -95,6 +95,11 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 	if err != nil {
 		return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
+	// 兼容转换必须保持入口请求的流式语义。入口未显式 stream=true 时，
+	// 向 /v1/responses 显式传 false，避免部分上游默认返回 SSE。
+	if !info.IsStream {
+		responsesReq.Stream = common.GetPointer(false)
+	}
 	info.AppendRequestConversion(types.RelayFormatOpenAIResponses)
 
 	savedRelayMode := info.RelayMode
@@ -144,7 +149,9 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 	statusCodeMappingStr := c.GetString("status_code_mapping")
 
 	httpResp = resp.(*http.Response)
-	markActualStreamFromResponse(c, info, httpResp)
+	if info.IsStream {
+		markActualStreamFromResponse(c, info, httpResp)
+	}
 	if httpResp.StatusCode != http.StatusOK {
 		newApiErr := service.RelayErrorHandler(c.Request.Context(), httpResp, false)
 		service.ResetStatusCode(newApiErr, statusCodeMappingStr)

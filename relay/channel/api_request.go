@@ -542,6 +542,9 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		}
 	}
 
+	if info != nil {
+		info.ResetFirstResponseTiming(time.Now())
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		logger.LogError(c, "do request failed: "+err.Error())
@@ -549,6 +552,9 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	}
 	if resp == nil {
 		return nil, errors.New("resp is nil")
+	}
+	if info != nil && !info.IsStream {
+		info.SetFirstResponseTime()
 	}
 
 	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {

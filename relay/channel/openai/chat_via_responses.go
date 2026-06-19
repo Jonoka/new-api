@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,6 +39,104 @@ func stringDeltaFromPrefix(prev string, next string) string {
 	return next
 }
 
+func convertResponsesSSEToJSON(sseBody []byte) ([]byte, error) {
+	lines := bytes.Split(sseBody, []byte("\n"))
+
+	var (
+		completedResp *dto.OpenAIResponsesResponse
+		responseID    string
+		model         string
+		createdAt     int
+		outputText    strings.Builder
+		usage         *dto.Usage
+	)
+
+	for _, line := range lines {
+		line = bytes.TrimSpace(line)
+		if !bytes.HasPrefix(line, []byte("data:")) {
+			continue
+		}
+		data := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
+		if len(data) == 0 || bytes.Equal(data, []byte("[DONE]")) {
+			continue
+		}
+
+		var streamResp dto.ResponsesStreamResponse
+		if err := common.Unmarshal(data, &streamResp); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal responses SSE event: %w", err)
+		}
+
+		if streamResp.Response != nil {
+			if streamResp.Response.ID != "" {
+				responseID = streamResp.Response.ID
+			}
+			if streamResp.Response.Model != "" {
+				model = streamResp.Response.Model
+			}
+			if streamResp.Response.CreatedAt != 0 {
+				createdAt = streamResp.Response.CreatedAt
+			}
+			if streamResp.Response.Usage != nil {
+				usage = streamResp.Response.Usage
+			}
+		}
+
+		switch streamResp.Type {
+		case "response.output_text.delta":
+			outputText.WriteString(streamResp.Delta)
+		case "response.completed":
+			if streamResp.Response != nil {
+				completedResp = streamResp.Response
+			}
+		case "response.error", "response.failed":
+			if streamResp.Response != nil {
+				completedResp = streamResp.Response
+			}
+		}
+	}
+
+	if completedResp == nil {
+		completedResp = &dto.OpenAIResponsesResponse{
+			ID:        responseID,
+			Object:    "response",
+			CreatedAt: createdAt,
+			Model:     model,
+			Usage:     usage,
+		}
+	}
+	if completedResp.ID == "" {
+		completedResp.ID = responseID
+	}
+	if completedResp.Object == "" {
+		completedResp.Object = "response"
+	}
+	if completedResp.CreatedAt == 0 {
+		completedResp.CreatedAt = createdAt
+	}
+	if completedResp.Model == "" {
+		completedResp.Model = model
+	}
+	if completedResp.Usage == nil {
+		completedResp.Usage = usage
+	}
+	if len(completedResp.Output) == 0 && outputText.Len() > 0 {
+		completedResp.Output = []dto.ResponsesOutput{
+			{
+				Type: "message",
+				Role: "assistant",
+				Content: []dto.ResponsesOutputContent{
+					{
+						Type: "output_text",
+						Text: outputText.String(),
+					},
+				},
+			},
+		}
+	}
+
+	return common.Marshal(completedResp)
+}
+
 func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	if resp == nil || resp.Body == nil {
 		return nil, types.NewOpenAIError(fmt.Errorf("invalid response"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
@@ -49,6 +148,14 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
+	}
+
+	if bytes.HasPrefix(bytes.TrimSpace(body), []byte("data:")) {
+		converted, convErr := convertResponsesSSEToJSON(body)
+		if convErr != nil {
+			return nil, types.NewOpenAIError(convErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+		}
+		body = converted
 	}
 
 	if err := common.Unmarshal(body, &responsesResp); err != nil {
