@@ -839,6 +839,7 @@ type OpenAIResponsesRequest struct {
 	MaxOutputTokens    *uint           `json:"max_output_tokens,omitempty"`
 	TopLogProbs        *int            `json:"top_logprobs,omitempty"`
 	Metadata           json.RawMessage `json:"metadata,omitempty"`
+	ClientMetadata     json.RawMessage `json:"client_metadata,omitempty"`
 	ParallelToolCalls  json.RawMessage `json:"parallel_tool_calls,omitempty"`
 	PreviousResponseID string          `json:"previous_response_id,omitempty"`
 	Reasoning          *Reasoning      `json:"reasoning,omitempty"`

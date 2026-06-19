@@ -18,7 +18,20 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
+
+func syncResponsesStreamStateFromBody(c *gin.Context, info *relaycommon.RelayInfo, jsonData []byte) {
+	if info == nil || len(jsonData) == 0 {
+		return
+	}
+	streamValue := gjson.GetBytes(jsonData, "stream")
+	if streamValue.Type != gjson.True && streamValue.Type != gjson.False {
+		return
+	}
+	info.IsStream = streamValue.Bool()
+	common.SetContextKey(c, appconstant.ContextKeyIsStream, info.IsStream)
+}
 
 func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
@@ -101,6 +114,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 				return newAPIErrorFromParamOverride(err)
 			}
 		}
+		syncResponsesStreamStateFromBody(c, info, jsonData)
 
 		logger.LogDebug(c, "requestBody: %s", jsonData)
 		body, size, closer, err := relaycommon.NewOutboundJSONBody(jsonData)

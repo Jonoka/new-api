@@ -22,8 +22,7 @@ type Adaptor struct {
 }
 
 const (
-	defaultOpenAIBetaHeaderValue      = "x-responsesapi-include-timing-metrics"
-	defaultCodexBetaFeaturesValue     = "x-openai-internal-codex-responses-lite"
+	defaultOpenAIBetaHeaderValue      = "responses=experimental"
 	defaultCodexOriginatorHeaderValue = "codex_cli_rs"
 )
 
@@ -130,6 +129,9 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	if len(request.Instructions) == 0 {
 		request.Instructions = json.RawMessage(`""`)
 	}
+	if info != nil && info.IsStream {
+		request.Stream = common.GetPointer(true)
+	}
 
 	if isCompact {
 		return request, nil
@@ -213,9 +215,6 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 	}
 	if req.Get("originator") == "" {
 		req.Set("originator", defaultCodexOriginatorHeaderValue)
-	}
-	if req.Get("X-Codex-Beta-Features") == "" {
-		req.Set("X-Codex-Beta-Features", defaultCodexBetaFeaturesValue)
 	}
 
 	// chatgpt.com/backend-api/codex/responses is strict about Content-Type.

@@ -1,10 +1,13 @@
 package codex
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 
+	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -68,5 +71,31 @@ func TestCodexSetupRequestHeaderUsesCurrentCodexDefaults(t *testing.T) {
 	require.Equal(t, "text/event-stream", headers.Get("Accept"))
 	require.Equal(t, defaultOpenAIBetaHeaderValue, headers.Get("OpenAI-Beta"))
 	require.Equal(t, defaultCodexOriginatorHeaderValue, headers.Get("Originator"))
-	require.Equal(t, defaultCodexBetaFeaturesValue, headers.Get("X-Codex-Beta-Features"))
+	require.Empty(t, headers.Get("X-Codex-Beta-Features"))
+}
+
+func TestCodexConvertOpenAIResponsesRequestPreservesCodexClientFields(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		IsStream:  true,
+		RelayMode: relayconstant.RelayModeResponses,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelSetting: dto.ChannelSettings{},
+		},
+	}
+	req := dto.OpenAIResponsesRequest{
+		Model:          "gpt-5-codex",
+		Input:          json.RawMessage(`"hello"`),
+		ClientMetadata: json.RawMessage(`{"thread_id":"thread-123","turn_id":"turn-123"}`),
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(nil, info, req)
+	require.NoError(t, err)
+
+	out, ok := converted.(dto.OpenAIResponsesRequest)
+	require.True(t, ok)
+	require.NotNil(t, out.Stream)
+	require.True(t, *out.Stream)
+	require.JSONEq(t, `{"thread_id":"thread-123","turn_id":"turn-123"}`, string(out.ClientMetadata))
+	require.JSONEq(t, `""`, string(out.Instructions))
+	require.JSONEq(t, `false`, string(out.Store))
 }

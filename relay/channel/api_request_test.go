@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -351,6 +352,25 @@ func TestApplyHeaderOverrideKeepsUserHeadersHighestPriority(t *testing.T) {
 
 	require.Equal(t, "custom-beta", upstreamReq.Header.Get("anthropic-beta"))
 	require.Equal(t, "custom-agent", upstreamReq.Header.Get("User-Agent"))
+}
+
+func TestEnforceFinalStreamHeadersKeepsCodexResponsesAcceptSSE(t *testing.T) {
+	t.Parallel()
+
+	upstreamReq := httptest.NewRequest(http.MethodPost, "https://chatgpt.com/backend-api/codex/responses", nil)
+	upstreamReq.Header.Set("Accept", "application/json")
+
+	info := &relaycommon.RelayInfo{
+		IsStream:  true,
+		RelayMode: relayconstant.RelayModeResponses,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeCodex,
+		},
+	}
+
+	enforceFinalStreamHeaders(upstreamReq, info)
+
+	require.Equal(t, "text/event-stream", upstreamReq.Header.Get("Accept"))
 }
 
 func TestShouldUseClaudeCodeTransportFingerprint(t *testing.T) {

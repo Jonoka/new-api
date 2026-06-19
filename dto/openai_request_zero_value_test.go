@@ -56,7 +56,8 @@ func TestOpenAIResponsesRequestPreserveExplicitZeroValues(t *testing.T) {
 		"max_output_tokens":0,
 		"max_tool_calls":0,
 		"stream":false,
-		"top_p":0
+		"top_p":0,
+		"client_metadata":{"thread_id":"thread-123","turn_id":"turn-123"}
 	}`)
 
 	var req OpenAIResponsesRequest
@@ -70,4 +71,6 @@ func TestOpenAIResponsesRequestPreserveExplicitZeroValues(t *testing.T) {
 	require.True(t, gjson.GetBytes(encoded, "max_tool_calls").Exists())
 	require.True(t, gjson.GetBytes(encoded, "stream").Exists())
 	require.True(t, gjson.GetBytes(encoded, "top_p").Exists())
+	require.Equal(t, "thread-123", gjson.GetBytes(encoded, "client_metadata.thread_id").String())
+	require.Equal(t, "turn-123", gjson.GetBytes(encoded, "client_metadata.turn_id").String())
 }

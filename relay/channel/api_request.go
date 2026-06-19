@@ -308,6 +308,15 @@ func applyHeaderOverrideToRequest(req *http.Request, headerOverride map[string]s
 	}
 }
 
+func enforceFinalStreamHeaders(req *http.Request, info *common.RelayInfo) {
+	if req == nil || info == nil || !info.IsStream {
+		return
+	}
+	if info.ApiType == rootconstant.APITypeCodex && info.RelayMode == constant.RelayModeResponses {
+		req.Header.Set("Accept", "text/event-stream")
+	}
+}
+
 func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
 	fullRequestURL, err := a.GetRequestURL(info)
 	if err != nil {
@@ -331,6 +340,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		return nil, err
 	}
 	applyHeaderOverrideToRequest(req, headerOverride)
+	enforceFinalStreamHeaders(req, info)
 	// [CC-DEBUG] 临时调试：记录发往上游的关键指纹 headers（用 Warn 级别，不需要开 debug 模式）
 	if info != nil && info.ChannelMeta != nil &&
 		(info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled || info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled) {
