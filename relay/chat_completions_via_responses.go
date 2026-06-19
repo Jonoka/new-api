@@ -68,6 +68,13 @@ func applySystemPromptIfNeeded(c *gin.Context, info *relaycommon.RelayInfo, requ
 	}
 }
 
+func syncResponsesStreamFlag(info *relaycommon.RelayInfo, request *dto.OpenAIResponsesRequest) {
+	if info == nil || request == nil {
+		return
+	}
+	request.Stream = common.GetPointer(info.IsStream)
+}
+
 func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, adaptor channel.Adaptor, request *dto.GeneralOpenAIRequest) (*dto.Usage, *types.NewAPIError) {
 	chatJSON, err := common.Marshal(request)
 	if err != nil {
@@ -95,11 +102,10 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 	if err != nil {
 		return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
-	// 兼容转换必须保持入口请求的流式语义。入口未显式 stream=true 时，
-	// 向 /v1/responses 显式传 false，避免部分上游默认返回 SSE。
-	if !info.IsStream {
-		responsesReq.Stream = common.GetPointer(false)
-	}
+	// 兼容转换必须按入口语义显式设置 stream。
+	// 流式请求要向 /v1/responses 传 true，否则部分上游会按非流生成后一次返回。
+	// 非流请求也传 false，避免部分上游默认返回 SSE。
+	syncResponsesStreamFlag(info, responsesReq)
 	info.AppendRequestConversion(types.RelayFormatOpenAIResponses)
 
 	savedRelayMode := info.RelayMode
