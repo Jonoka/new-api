@@ -136,7 +136,31 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 		other["is_model_mapped"] = true
 		other["upstream_model_name"] = props.UpstreamModelName
 	}
+	if useTimeMs := taskUseTimeMilliseconds(task); useTimeMs > 0 {
+		other["use_time_ms"] = float64(useTimeMs)
+	}
 	return other
+}
+
+func taskUseTimeMilliseconds(task *model.Task) int64 {
+	if task == nil {
+		return 0
+	}
+	start := task.StartTime
+	if start <= 0 {
+		start = task.SubmitTime
+	}
+	if start <= 0 {
+		start = task.CreatedAt
+	}
+	end := task.FinishTime
+	if end <= 0 {
+		end = common.GetTimestamp()
+	}
+	if start <= 0 || end <= start {
+		return 0
+	}
+	return (end - start) * 1000
 }
 
 // taskModelName 从 BillingContext 或 Properties 中获取模型名称。

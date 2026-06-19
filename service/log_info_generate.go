@@ -44,6 +44,7 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	other["model_price"] = modelPrice
 	other["user_group_ratio"] = userGroupRatio
 	other["frt"] = float64(relayInfo.FirstResponseLatencyMilliseconds())
+	other["use_time_ms"] = float64(relayInfo.ElapsedMilliseconds())
 	if relayInfo.ReasoningEffort != "" {
 		other["reasoning_effort"] = relayInfo.ReasoningEffort
 	}
@@ -258,6 +259,7 @@ func GenerateMjOtherInfo(relayInfo *relaycommon.RelayInfo, priceData types.Price
 	other := make(map[string]interface{})
 	other["model_price"] = priceData.ModelPrice
 	other["group_ratio"] = priceData.GroupRatioInfo.GroupRatio
+	other["use_time_ms"] = float64(relayInfo.ElapsedMilliseconds())
 	if priceData.GroupRatioInfo.HasSpecialRatio {
 		other["user_group_ratio"] = priceData.GroupRatioInfo.GroupSpecialRatio
 	}

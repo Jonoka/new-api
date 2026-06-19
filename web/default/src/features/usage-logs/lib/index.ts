@@ -24,6 +24,8 @@ For commercial licensing, please contact support@quantumnous.com
 export {
   parseLogOther,
   getTimeColor,
+  getLogUseTimeSeconds,
+  formatLogUseTime,
   formatModelName,
   formatDuration,
   getParamOverrideActionLabel,

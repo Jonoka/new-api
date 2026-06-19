@@ -32,7 +32,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
-import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
+import { formatLogQuota, formatTokens } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { Button } from '@/components/ui/button'
@@ -56,6 +56,8 @@ import {
   getTieredBillingSummary,
   hasAnyCacheTokens,
   isViolationFeeLog,
+  formatLogUseTime,
+  getLogUseTimeSeconds,
   getFirstResponseTimeColor,
   getResponseTimeColor,
 } from '../../lib/format'
@@ -403,6 +405,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
   const details = props.log.content ?? ''
   const other = parseLogOther(props.log.other)
+  const displayUseTime = getLogUseTimeSeconds(props.log.use_time, other)
   const typeConfig = getLogTypeConfig(props.log.type)
 
   const isViolation = isViolationFeeLog(other)
@@ -418,8 +421,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
     !!other?.expr_b64
   const hasAudioTokens = other?.ws || other?.audio
   const showTiming = isTimingLogType(props.log.type)
-  const showAdminIp =
-    props.isAdmin && !!props.log.ip && (showTiming || isTopup)
+  const showAdminIp = props.isAdmin && !!props.log.ip && (showTiming || isTopup)
   const adminInfo = other?.admin_info
   const topupAuditFields =
     isTopup && props.isAdmin && adminInfo
@@ -581,7 +583,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 />
               )}
 
-              {showTiming && props.log.use_time > 0 && (
+              {showTiming && (
                 <DetailRow
                   label={t('Response Time')}
                   value={
@@ -590,13 +592,13 @@ export function DetailsDialog(props: DetailsDialogProps) {
                         'font-medium',
                         timingTextColorClass(
                           getResponseTimeColor(
-                            props.log.use_time,
+                            displayUseTime,
                             props.log.completion_tokens
                           )
                         )
                       )}
                     >
-                      {formatUseTime(props.log.use_time)}
+                      {formatLogUseTime(props.log.use_time, other)}
                       {props.log.is_stream &&
                         other?.frt != null &&
                         other.frt > 0 && (
@@ -609,7 +611,8 @@ export function DetailsDialog(props: DetailsDialogProps) {
                             )}
                           >
                             {' '}
-                            (FRT: {formatUseTime(other.frt / 1000)})
+                            (FRT:{' '}
+                            {formatLogUseTime(0, { use_time_ms: other.frt })})
                           </span>
                         )}
                     </span>
@@ -801,9 +804,11 @@ export function DetailsDialog(props: DetailsDialogProps) {
                   <StatusBadge
                     label={other.reasoning_effort}
                     variant={
-                      other.reasoning_effort === 'high' || other.reasoning_effort?.startsWith('thinking:')
+                      other.reasoning_effort === 'high' ||
+                      other.reasoning_effort?.startsWith('thinking:')
                         ? 'orange'
-                        : other.reasoning_effort === 'medium' || other.reasoning_effort === 'thinking'
+                        : other.reasoning_effort === 'medium' ||
+                            other.reasoning_effort === 'thinking'
                           ? 'yellow'
                           : 'green'
                     }
