@@ -107,7 +107,7 @@ func TestOaiResponsesToChatStreamHandlerReadsDoneUsage(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), `"content":"Hi"`)
 }
 
-func TestOaiResponsesStreamHandlerFallsBackToEstimatedPromptTokens(t *testing.T) {
+func TestOaiResponsesStreamHandlerDoesNotBillPromptOnlyWithoutUsageOrOutput(t *testing.T) {
 	body := strings.Join([]string{
 		`data: {"type":"response.done","response":{"id":"resp_1","model":"test-model","created_at":1800000000}}`,
 		`data: [DONE]`,
@@ -119,7 +119,25 @@ func TestOaiResponsesStreamHandlerFallsBackToEstimatedPromptTokens(t *testing.T)
 	usage, err := OaiResponsesStreamHandler(c, info, resp)
 	require.Nil(t, err)
 	require.NotNil(t, usage)
-	require.Equal(t, 9, usage.PromptTokens)
+	require.Equal(t, 0, usage.PromptTokens)
 	require.Equal(t, 0, usage.CompletionTokens)
-	require.Equal(t, 9, usage.TotalTokens)
+	require.Equal(t, 0, usage.TotalTokens)
+}
+
+func TestOaiResponsesStreamHandlerFallsBackToEstimatedPromptTokensWithOutput(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"type":"response.output_text.delta","delta":"Hi"}`,
+		`data: {"type":"response.done","response":{"id":"resp_1","model":"test-model","created_at":1800000000}}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+	c, _, info, resp := setupResponsesStreamTest(body)
+	info.SetEstimatePromptTokens(9)
+
+	usage, err := OaiResponsesStreamHandler(c, info, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 9, usage.PromptTokens)
+	require.Greater(t, usage.CompletionTokens, 0)
+	require.Equal(t, usage.PromptTokens+usage.CompletionTokens, usage.TotalTokens)
 }
