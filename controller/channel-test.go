@@ -471,7 +471,8 @@ func testChannel(channel *model.Channel, testUserID int, testModel string, endpo
 			newAPIError: respErr,
 		}
 	}
-	usage, usageErr := coerceTestUsage(usageA, isStream, info.GetEstimatePromptTokens())
+	validateAsStream := shouldValidateChannelTestAsStream(info, isStream)
+	usage, usageErr := coerceTestUsage(usageA, validateAsStream, info.GetEstimatePromptTokens())
 	if usageErr != nil {
 		return testResult{
 			context:     c,
@@ -480,7 +481,7 @@ func testChannel(channel *model.Channel, testUserID int, testModel string, endpo
 		}
 	}
 	result := w.Result()
-	respBody, err := readTestResponseBody(result.Body, isStream)
+	respBody, err := readTestResponseBody(result.Body, validateAsStream)
 	if err != nil {
 		return testResult{
 			context:     c,
@@ -488,7 +489,7 @@ func testChannel(channel *model.Channel, testUserID int, testModel string, endpo
 			newAPIError: types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError),
 		}
 	}
-	if bodyErr := validateTestResponseBody(respBody, isStream); bodyErr != nil {
+	if bodyErr := validateTestResponseBody(respBody, validateAsStream); bodyErr != nil {
 		return testResult{
 			context:     c,
 			localErr:    bodyErr,
@@ -662,6 +663,13 @@ func validateTestResponseBody(respBody []byte, isStream bool) error {
 		return validateStreamTestResponseBody(respBody)
 	}
 	return nil
+}
+
+func shouldValidateChannelTestAsStream(info *relaycommon.RelayInfo, isStream bool) bool {
+	if !isStream {
+		return false
+	}
+	return info == nil || info.RelayMode != relayconstant.RelayModeResponsesCompact
 }
 
 func shouldUseStreamForAutomaticChannelTest(channel *model.Channel) bool {

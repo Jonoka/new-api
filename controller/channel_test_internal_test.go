@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -68,6 +69,18 @@ func TestBuildTestLogOtherInjectsTieredInfo(t *testing.T) {
 	require.Equal(t, "tiered_expr", other["billing_mode"])
 	require.Equal(t, "base", other["matched_tier"])
 	require.NotEmpty(t, other["expr_b64"])
+}
+
+func TestShouldValidateChannelTestAsStreamSkipsCompact(t *testing.T) {
+	require.False(t, shouldValidateChannelTestAsStream(&relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponsesCompact,
+	}, true))
+	require.True(t, shouldValidateChannelTestAsStream(&relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+	}, true))
+	require.False(t, shouldValidateChannelTestAsStream(&relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+	}, false))
 }
 
 func TestResolveChannelTestUserIDUsesRequestUser(t *testing.T) {
