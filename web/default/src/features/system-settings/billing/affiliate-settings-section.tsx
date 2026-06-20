@@ -59,6 +59,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import {
   bindAdminAffiliateInviter,
+  unbindAdminAffiliateInviter,
   getAdminAffiliateInvitations,
   getAdminAffiliateRecords,
   getAdminAffiliateWithdrawals,
@@ -67,10 +68,13 @@ import {
   updateAdminAffiliateApplication,
   getAdminFraudAlerts,
   adminScanFraud,
+  adminScanFraudDeep,
   adminResolveFraudAlert,
+  adminDeleteFraudAlert,
 } from '@/features/affiliate/api'
 import type {
   AdminBindAffiliateInviterResult,
+  AdminUnbindAffiliateInviterResult,
   AffiliateAdminInvitation,
   AffiliateAdminRecord,
   AffiliateWithdrawal,
@@ -363,6 +367,9 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
   const [bindLoading, setBindLoading] = useState(false)
   const [bindResult, setBindResult] =
     useState<AdminBindAffiliateInviterResult | null>(null)
+  const [unbindLoading, setUnbindLoading] = useState(false)
+  const [unbindResult, setUnbindResult] =
+    useState<AdminUnbindAffiliateInviterResult | null>(null)
   // Anti-fraud: Applications state
   const [applications, setApplications] = useState<any[]>([])
   const [appStatus, setAppStatus] = useState('')
@@ -370,16 +377,25 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
   const [appPage, setAppPage] = useState(1)
   const [appPageSize, setAppPageSize] = useState(DEFAULT_ADMIN_PAGE_SIZE)
   const [appTotal, setAppTotal] = useState(0)
-  const [appActionLoadingId, setAppActionLoadingId] = useState<number | null>(null)
+  const [appActionLoadingId, setAppActionLoadingId] = useState<number | null>(
+    null
+  )
   // Anti-fraud: Fraud alerts state
   const [fraudAlerts, setFraudAlerts] = useState<any[]>([])
   const [fraudStatus, setFraudStatus] = useState('')
+  const [fraudKeyword, setFraudKeyword] = useState('')
+  const [fraudKeywordSearch, setFraudKeywordSearch] = useState('')
+  const [fraudIP, setFraudIP] = useState('')
+  const [fraudIPSearch, setFraudIPSearch] = useState('')
   const [fraudLoading, setFraudLoading] = useState(false)
   const [fraudPage, setFraudPage] = useState(1)
   const [fraudPageSize, setFraudPageSize] = useState(DEFAULT_ADMIN_PAGE_SIZE)
   const [fraudTotal, setFraudTotal] = useState(0)
+  const [fraudScanDays, setFraudScanDays] = useState('30')
   const [fraudScanning, setFraudScanning] = useState(false)
-  const [fraudActionLoadingId, setFraudActionLoadingId] = useState<number | null>(null)
+  const [fraudActionLoadingId, setFraudActionLoadingId] = useState<
+    number | null
+  >(null)
   const displayDefaultValues = useMemo<AffiliateFormValues>(
     () => ({
       affiliate_setting: {
@@ -512,7 +528,11 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
   const loadApplications = useCallback(async () => {
     try {
       setAppsLoading(true)
-      const res = await getAdminAffiliateApplications(appStatus, appPage, appPageSize)
+      const res = await getAdminAffiliateApplications(
+        appStatus,
+        appPage,
+        appPageSize
+      )
       if (res.success) {
         setApplications(res.data?.items || [])
         setAppTotal(res.data?.total || 0)
@@ -526,7 +546,13 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
   const loadFraudAlerts = useCallback(async () => {
     try {
       setFraudLoading(true)
-      const res = await getAdminFraudAlerts(fraudStatus, fraudPage, fraudPageSize)
+      const res = await getAdminFraudAlerts({
+        status: fraudStatus,
+        keyword: fraudKeywordSearch,
+        ip: fraudIPSearch,
+        page: fraudPage,
+        pageSize: fraudPageSize,
+      })
       if (res.success) {
         setFraudAlerts(res.data?.items || [])
         setFraudTotal(res.data?.total || 0)
@@ -534,7 +560,7 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
     } finally {
       setFraudLoading(false)
     }
-  }, [fraudPage, fraudPageSize, fraudStatus])
+  }, [fraudIPSearch, fraudKeywordSearch, fraudPage, fraudPageSize, fraudStatus])
 
   useEffect(() => {
     loadApplications()
@@ -545,12 +571,21 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
   }, [loadFraudAlerts])
 
   const handleAppAction = async (id: number, action: 'approve' | 'reject') => {
-    const msg = action === 'approve' ? t('Approve this application?') : t('Reject this application?')
-    const reason = action === 'reject' ? window.prompt(t('Rejection reason (optional)')) : undefined
+    const msg =
+      action === 'approve'
+        ? t('Approve this application?')
+        : t('Reject this application?')
+    const reason =
+      action === 'reject'
+        ? window.prompt(t('Rejection reason (optional)'))
+        : undefined
     if (!window.confirm(msg)) return
     try {
       setAppActionLoadingId(id)
-      const res = await updateAdminAffiliateApplication(id, action, { remark: '', reason: reason || '' })
+      const res = await updateAdminAffiliateApplication(id, action, {
+        remark: '',
+        reason: reason || '',
+      })
       if (res.success) {
         toast.success(t('Operation successful'))
         loadApplications()
@@ -565,12 +600,24 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
   }
 
   const handleFraudScan = async () => {
-    if (!window.confirm(t('Scan all affiliate relationships for IP overlap? This may take a while.'))) return
+    const days = Math.max(0, Number(fraudScanDays) || 0)
+    if (
+      !window.confirm(
+        t(
+          'Scan affiliate relationships for IP overlap in the selected time window? This may take a while.'
+        )
+      )
+    )
+      return
     try {
       setFraudScanning(true)
-      const res = await adminScanFraud()
+      const res = await adminScanFraud(days)
       if (res.success) {
-        toast.success(t('Scan completed, {{count}} new alerts found', { count: res.data?.new_alerts || 0 }))
+        toast.success(
+          t('Scan completed, {{count}} new alerts found', {
+            count: res.data?.new_alerts || 0,
+          })
+        )
         loadFraudAlerts()
       } else {
         toast.error(res.message || t('Scan failed'))
@@ -582,16 +629,69 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
     }
   }
 
-  const handleFraudAction = async (id: number, action: 'unbind' | 'clawback' | 'dismiss') => {
+  const handleFraudDeepScan = async () => {
+    const days = Math.max(0, Number(fraudScanDays) || 0)
+    if (
+      !window.confirm(
+        t(
+          'Scan all affiliate relationships including historical logs? This may take a while.'
+        )
+      )
+    )
+      return
+    try {
+      setFraudScanning(true)
+      const res = await adminScanFraudDeep(days)
+      if (res.success) {
+        toast.success(
+          t('Scan completed, {{count}} new alerts found', {
+            count: res.data?.new_alerts || 0,
+          })
+        )
+        loadFraudAlerts()
+      } else {
+        toast.error(res.message || t('Scan failed'))
+      }
+    } catch {
+      toast.error(t('Scan failed'))
+    } finally {
+      setFraudScanning(false)
+    }
+  }
+
+  const applyFraudSearch = () => {
+    setFraudKeywordSearch(fraudKeyword.trim())
+    setFraudIPSearch(fraudIP.trim())
+    setFraudPage(1)
+  }
+
+  const resetFraudSearch = () => {
+    setFraudKeyword('')
+    setFraudKeywordSearch('')
+    setFraudIP('')
+    setFraudIPSearch('')
+    setFraudPage(1)
+  }
+
+  const handleFraudAction = async (
+    id: number,
+    action: 'unbind' | 'clawback' | 'dismiss' | 'delete'
+  ) => {
     const msgs: Record<string, string> = {
       unbind: t('Unbind this invitation relationship?'),
-      clawback: t('Unbind and clawback all affiliate earnings for this relationship?'),
+      clawback: t(
+        'Unbind and clawback all affiliate earnings for this relationship?'
+      ),
       dismiss: t('Dismiss this alert?'),
+      delete: t('Delete this alert?'),
     }
     if (!window.confirm(msgs[action])) return
     try {
       setFraudActionLoadingId(id)
-      const res = await adminResolveFraudAlert(id, action)
+      const res =
+        action === 'delete'
+          ? await adminDeleteFraudAlert(id)
+          : await adminResolveFraudAlert(id, action)
       if (res.success) {
         toast.success(t('Operation successful'))
         loadFraudAlerts()
@@ -631,6 +731,8 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
     try {
       setBindUserSearching(true)
       setSelectedBindUser(null)
+      setBindResult(null)
+      setUnbindResult(null)
       const res = await searchUsers({ keyword, p: 1, page_size: 10 })
       if (res.success) {
         setBindUserCandidates(res.data?.items || [])
@@ -655,10 +757,58 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
       })
       if (res.success) {
         setBindResult(res.data)
+        setUnbindResult(null)
         toast.success(t('Referral binding saved'))
+        setSelectedBindUser((user) =>
+          user ? { ...user, inviter_id: res.data.inviter_id } : user
+        )
+        setBindUserCandidates((users) =>
+          users.map((user) =>
+            user.id === res.data.user_id
+              ? { ...user, inviter_id: res.data.inviter_id }
+              : user
+          )
+        )
       }
     } finally {
       setBindLoading(false)
+    }
+  }
+
+  const unbindInviter = async () => {
+    if (!selectedBindUser) {
+      toast.error(t('Search and select target user first'))
+      return
+    }
+    if (!selectedBindUser.inviter_id) {
+      toast.error(t('Selected user has no inviter'))
+      return
+    }
+    if (!window.confirm(t('Unbind selected user from current inviter?'))) return
+    try {
+      setUnbindLoading(true)
+      const res = await unbindAdminAffiliateInviter({
+        user_id: selectedBindUser.id,
+      })
+      if (res.success) {
+        setUnbindResult(res.data)
+        setBindResult(null)
+        toast.success(t('Referral binding removed'))
+        setSelectedBindUser((user) =>
+          user ? { ...user, inviter_id: 0 } : user
+        )
+        setBindUserCandidates((users) =>
+          users.map((user) =>
+            user.id === res.data.user_id ? { ...user, inviter_id: 0 } : user
+          )
+        )
+      } else {
+        toast.error(res.message || t('Operation failed'))
+      }
+    } catch {
+      toast.error(t('Operation failed'))
+    } finally {
+      setUnbindLoading(false)
     }
   }
 
@@ -673,7 +823,9 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
           <TabsTrigger value='withdrawals'>{t('Withdrawals')}</TabsTrigger>
           <TabsTrigger value='anti-fraud'>{t('Anti-Fraud')}</TabsTrigger>
           <TabsTrigger value='applications'>{t('Applications')}</TabsTrigger>
-          <TabsTrigger value='fraud-detection'>{t('Fraud Detection')}</TabsTrigger>
+          <TabsTrigger value='fraud-detection'>
+            {t('Fraud Detection')}
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value='rules'>
@@ -1034,9 +1186,19 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
               </span>
             </span>
           </label>
-          <Button onClick={bindInviter} disabled={bindLoading}>
-            {bindLoading ? t('Binding...') : t('Bind inviter')}
-          </Button>
+          <div className='flex flex-wrap gap-2'>
+            <Button onClick={bindInviter} disabled={bindLoading}>
+              {bindLoading ? t('Binding...') : t('Bind inviter')}
+            </Button>
+            <Button
+              type='button'
+              variant='outline'
+              onClick={unbindInviter}
+              disabled={unbindLoading || !selectedBindUser?.inviter_id}
+            >
+              {unbindLoading ? t('Unbinding...') : t('Unbind inviter')}
+            </Button>
+          </div>
           {bindResult && (
             <div className='bg-muted/40 space-y-2 rounded-lg border p-4 text-sm'>
               <div className='font-medium'>{t('Binding result')}</div>
@@ -1051,6 +1213,19 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
               <div className='text-muted-foreground'>
                 {t('Previous inviter')}:{' '}
                 {bindResult.previous_inviter_id || t('No Inviter')}
+              </div>
+            </div>
+          )}
+          {unbindResult && (
+            <div className='bg-muted/40 space-y-2 rounded-lg border p-4 text-sm'>
+              <div className='font-medium'>{t('Unbind result')}</div>
+              <div>
+                {t('Target user')}: #{unbindResult.user_id}{' '}
+                {unbindResult.display_name || unbindResult.username || ''}
+              </div>
+              <div className='text-muted-foreground'>
+                {t('Previous inviter')}:{' '}
+                {unbindResult.previous_inviter_id || t('No Inviter')}
               </div>
             </div>
           )}
@@ -1452,76 +1627,179 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
           <Form {...form}>
             <form onSubmit={handleSubmit} className='space-y-6'>
               <div className='space-y-1'>
-                <h3 className='text-base font-semibold'>{t('Inviter Review')}</h3>
-                <p className='text-muted-foreground text-sm'>{t('Require inviters to apply and be approved before earning commissions')}</p>
+                <h3 className='text-base font-semibold'>
+                  {t('Inviter Review')}
+                </h3>
+                <p className='text-muted-foreground text-sm'>
+                  {t(
+                    'Require inviters to apply and be approved before earning commissions'
+                  )}
+                </p>
               </div>
-              <FormField control={form.control} name='affiliate_setting.review_enabled' render={({ field }) => (
-                <FormItem className='flex items-center gap-3'>
-                  <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} /></FormControl>
-                  <FormLabel>{t('Enable affiliate review')}</FormLabel>
-                </FormItem>
-              )} />
-              <FormField control={form.control} name='affiliate_setting.auto_approve_after_days' render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('Auto-approve after days')}</FormLabel>
-                  <FormControl><Input type='number' min={0} {...field} onChange={handleNumberChange(field.onChange)} /></FormControl>
-                  <FormDescription>{t('Set to 0 for manual approval only')}</FormDescription>
-                </FormItem>
-              )} />
+              <FormField
+                control={form.control}
+                name='affiliate_setting.review_enabled'
+                render={({ field }) => (
+                  <FormItem className='flex items-center gap-3'>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                    <FormLabel>{t('Enable affiliate review')}</FormLabel>
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name='affiliate_setting.auto_approve_after_days'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Auto-approve after days')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        min={0}
+                        {...field}
+                        onChange={handleNumberChange(field.onChange)}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t('Set to 0 for manual approval only')}
+                    </FormDescription>
+                  </FormItem>
+                )}
+              />
 
-              <div className='border-t pt-4 space-y-1'>
+              <div className='space-y-1 border-t pt-4'>
                 <h3 className='text-base font-semibold'>{t('Agreement')}</h3>
-                <p className='text-muted-foreground text-sm'>{t('Require inviters to accept anti-fraud agreement when applying')}</p>
+                <p className='text-muted-foreground text-sm'>
+                  {t(
+                    'Require inviters to accept anti-fraud agreement when applying'
+                  )}
+                </p>
               </div>
-              <FormField control={form.control} name='affiliate_setting.agreement_enabled' render={({ field }) => (
-                <FormItem className='flex items-center gap-3'>
-                  <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} /></FormControl>
-                  <FormLabel>{t('Enable agreement')}</FormLabel>
-                </FormItem>
-              )} />
-              <FormField control={form.control} name='affiliate_setting.agreement_text' render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('Agreement text')}</FormLabel>
-                  <FormControl><Textarea rows={4} {...field} /></FormControl>
-                  <FormDescription>{t('Displayed to users when applying for affiliate program')}</FormDescription>
-                </FormItem>
-              )} />
+              <FormField
+                control={form.control}
+                name='affiliate_setting.agreement_enabled'
+                render={({ field }) => (
+                  <FormItem className='flex items-center gap-3'>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                    <FormLabel>{t('Enable agreement')}</FormLabel>
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name='affiliate_setting.agreement_text'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Agreement text')}</FormLabel>
+                    <FormControl>
+                      <Textarea rows={4} {...field} />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'Displayed to users when applying for affiliate program'
+                      )}
+                    </FormDescription>
+                  </FormItem>
+                )}
+              />
 
-              <div className='border-t pt-4 space-y-1'>
-                <h3 className='text-base font-semibold'>{t('Inviter eligibility')}</h3>
+              <div className='space-y-1 border-t pt-4'>
+                <h3 className='text-base font-semibold'>
+                  {t('Inviter eligibility')}
+                </h3>
               </div>
               <div className='grid gap-4 sm:grid-cols-2'>
-                <FormField control={form.control} name='affiliate_setting.inviter_min_account_age_days' render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Min account age (days)')}</FormLabel>
-                    <FormControl><Input type='number' min={0} {...field} onChange={handleNumberChange(field.onChange)} /></FormControl>
-                  </FormItem>
-                )} />
-                <FormField control={form.control} name='affiliate_setting.inviter_min_recharge_amount' render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Min recharge amount (quota)')}</FormLabel>
-                    <FormControl><Input type='number' min={0} {...field} onChange={handleNumberChange(field.onChange)} /></FormControl>
-                  </FormItem>
-                )} />
+                <FormField
+                  control={form.control}
+                  name='affiliate_setting.inviter_min_account_age_days'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Min account age (days)')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min={0}
+                          {...field}
+                          onChange={handleNumberChange(field.onChange)}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name='affiliate_setting.inviter_min_recharge_amount'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Min recharge amount (quota)')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min={0}
+                          {...field}
+                          onChange={handleNumberChange(field.onChange)}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
               </div>
 
-              <div className='border-t pt-4 space-y-1'>
-                <h3 className='text-base font-semibold'>{t('Invitee eligibility')}</h3>
-                <p className='text-muted-foreground text-sm'>{t('Invitee must meet these conditions for commissions to be generated')}</p>
+              <div className='space-y-1 border-t pt-4'>
+                <h3 className='text-base font-semibold'>
+                  {t('Invitee eligibility')}
+                </h3>
+                <p className='text-muted-foreground text-sm'>
+                  {t(
+                    'Invitee must meet these conditions for commissions to be generated'
+                  )}
+                </p>
               </div>
               <div className='grid gap-4 sm:grid-cols-2'>
-                <FormField control={form.control} name='affiliate_setting.invitee_min_account_age_days' render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Min account age (days)')}</FormLabel>
-                    <FormControl><Input type='number' min={0} {...field} onChange={handleNumberChange(field.onChange)} /></FormControl>
-                  </FormItem>
-                )} />
-                <FormField control={form.control} name='affiliate_setting.invitee_min_recharge_amount' render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Min recharge amount (quota)')}</FormLabel>
-                    <FormControl><Input type='number' min={0} {...field} onChange={handleNumberChange(field.onChange)} /></FormControl>
-                  </FormItem>
-                )} />
+                <FormField
+                  control={form.control}
+                  name='affiliate_setting.invitee_min_account_age_days'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Min account age (days)')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min={0}
+                          {...field}
+                          onChange={handleNumberChange(field.onChange)}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name='affiliate_setting.invitee_min_recharge_amount'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Min recharge amount (quota)')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min={0}
+                          {...field}
+                          onChange={handleNumberChange(field.onChange)}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
               </div>
 
               <Button type='submit' disabled={isSubmitting || !isDirty}>
@@ -1535,14 +1813,32 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
         <TabsContent value='applications' className='space-y-3'>
           <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
             <div>
-              <h3 className='text-base font-semibold'>{t('Affiliate Applications')}</h3>
-              <p className='text-muted-foreground text-sm'>{t('Review inviter applications for affiliate program')}</p>
+              <h3 className='text-base font-semibold'>
+                {t('Affiliate Applications')}
+              </h3>
+              <p className='text-muted-foreground text-sm'>
+                {t('Review inviter applications for affiliate program')}
+              </p>
             </div>
-            <NativeSelect value={appStatus} onChange={(e) => { setAppStatus(e.target.value); setAppPage(1) }}>
-              <NativeSelectOption value=''>{t('All statuses')}</NativeSelectOption>
-              <NativeSelectOption value='pending'>{t('Pending')}</NativeSelectOption>
-              <NativeSelectOption value='approved'>{t('Approved')}</NativeSelectOption>
-              <NativeSelectOption value='rejected'>{t('Rejected')}</NativeSelectOption>
+            <NativeSelect
+              value={appStatus}
+              onChange={(e) => {
+                setAppStatus(e.target.value)
+                setAppPage(1)
+              }}
+            >
+              <NativeSelectOption value=''>
+                {t('All statuses')}
+              </NativeSelectOption>
+              <NativeSelectOption value='pending'>
+                {t('Pending')}
+              </NativeSelectOption>
+              <NativeSelectOption value='approved'>
+                {t('Approved')}
+              </NativeSelectOption>
+              <NativeSelectOption value='rejected'>
+                {t('Rejected')}
+              </NativeSelectOption>
             </NativeSelect>
           </div>
           <Table>
@@ -1556,32 +1852,75 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
             </TableHeader>
             <TableBody>
               {appsLoading ? (
-                <TableRow><TableCell colSpan={4} className='text-center py-8 text-muted-foreground'>{t('Loading...')}</TableCell></TableRow>
+                <TableRow>
+                  <TableCell
+                    colSpan={4}
+                    className='text-muted-foreground py-8 text-center'
+                  >
+                    {t('Loading...')}
+                  </TableCell>
+                </TableRow>
               ) : applications.length === 0 ? (
-                <TableRow><TableCell colSpan={4} className='text-center py-8 text-muted-foreground'>{t('No applications found')}</TableCell></TableRow>
+                <TableRow>
+                  <TableCell
+                    colSpan={4}
+                    className='text-muted-foreground py-8 text-center'
+                  >
+                    {t('No applications found')}
+                  </TableCell>
+                </TableRow>
               ) : (
                 applications.map((app) => (
                   <TableRow key={app.id}>
-                    <TableCell>{adminUserLine(app.user_id, app.username, app.display_name, app.email)}</TableCell>
                     <TableCell>
-                      <Badge variant={app.status === 'approved' ? 'default' : app.status === 'rejected' ? 'destructive' : 'outline'}>
+                      {adminUserLine(
+                        app.user_id,
+                        app.username,
+                        app.display_name,
+                        app.email
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={
+                          app.status === 'approved'
+                            ? 'default'
+                            : app.status === 'rejected'
+                              ? 'destructive'
+                              : 'outline'
+                        }
+                      >
                         {t(app.status)}
                       </Badge>
                     </TableCell>
-                    <TableCell className='text-sm'>{formatTimestampToDate(app.created_at)}</TableCell>
+                    <TableCell className='text-sm'>
+                      {formatTimestampToDate(app.created_at)}
+                    </TableCell>
                     <TableCell>
                       {app.status === 'pending' && (
                         <div className='flex gap-1'>
-                          <Button size='sm' variant='default' disabled={appActionLoadingId === app.id} onClick={() => handleAppAction(app.id, 'approve')}>
+                          <Button
+                            size='sm'
+                            variant='default'
+                            disabled={appActionLoadingId === app.id}
+                            onClick={() => handleAppAction(app.id, 'approve')}
+                          >
                             {t('Approve')}
                           </Button>
-                          <Button size='sm' variant='destructive' disabled={appActionLoadingId === app.id} onClick={() => handleAppAction(app.id, 'reject')}>
+                          <Button
+                            size='sm'
+                            variant='destructive'
+                            disabled={appActionLoadingId === app.id}
+                            onClick={() => handleAppAction(app.id, 'reject')}
+                          >
                             {t('Reject')}
                           </Button>
                         </div>
                       )}
                       {app.status === 'rejected' && app.rejected_reason && (
-                        <span className='text-xs text-muted-foreground'>{app.rejected_reason}</span>
+                        <span className='text-muted-foreground text-xs'>
+                          {app.rejected_reason}
+                        </span>
                       )}
                     </TableCell>
                   </TableRow>
@@ -1589,24 +1928,115 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
               )}
             </TableBody>
           </Table>
-          <AdminTablePagination page={appPage} pageSize={appPageSize} total={appTotal} loading={appsLoading} onPageChange={setAppPage} onPageSizeChange={(ps) => { setAppPageSize(ps); setAppPage(1) }} />
+          <AdminTablePagination
+            page={appPage}
+            pageSize={appPageSize}
+            total={appTotal}
+            loading={appsLoading}
+            onPageChange={setAppPage}
+            onPageSizeChange={(ps) => {
+              setAppPageSize(ps)
+              setAppPage(1)
+            }}
+          />
         </TabsContent>
 
         <TabsContent value='fraud-detection' className='space-y-3'>
           <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
             <div>
-              <h3 className='text-base font-semibold'>{t('Fraud Detection')}</h3>
-              <p className='text-muted-foreground text-sm'>{t('Detect and manage suspicious affiliate relationships based on shared IP addresses')}</p>
+              <h3 className='text-base font-semibold'>
+                {t('Fraud Detection')}
+              </h3>
+              <p className='text-muted-foreground text-sm'>
+                {t(
+                  'Detect and manage suspicious affiliate relationships based on shared IP addresses'
+                )}
+              </p>
             </div>
-            <div className='flex gap-2'>
-              <NativeSelect value={fraudStatus} onChange={(e) => { setFraudStatus(e.target.value); setFraudPage(1) }}>
-                <NativeSelectOption value=''>{t('All statuses')}</NativeSelectOption>
-                <NativeSelectOption value='detected'>{t('Detected')}</NativeSelectOption>
-                <NativeSelectOption value='resolved'>{t('Resolved')}</NativeSelectOption>
-                <NativeSelectOption value='dismissed'>{t('Dismissed')}</NativeSelectOption>
+            <div className='flex flex-wrap gap-2'>
+              <Input
+                value={fraudKeyword}
+                onChange={(event) => setFraudKeyword(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    applyFraudSearch()
+                  }
+                }}
+                placeholder={t('Search users')}
+                className='w-full sm:w-[180px]'
+              />
+              <Input
+                value={fraudIP}
+                onChange={(event) => setFraudIP(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    applyFraudSearch()
+                  }
+                }}
+                placeholder={t('Search shared IP')}
+                className='w-full sm:w-[180px]'
+              />
+              <NativeSelect
+                value={fraudStatus}
+                onChange={(e) => {
+                  setFraudStatus(e.target.value)
+                  setFraudPage(1)
+                }}
+              >
+                <NativeSelectOption value=''>
+                  {t('All statuses')}
+                </NativeSelectOption>
+                <NativeSelectOption value='detected'>
+                  {t('Detected')}
+                </NativeSelectOption>
+                <NativeSelectOption value='resolved'>
+                  {t('Resolved')}
+                </NativeSelectOption>
+                <NativeSelectOption value='dismissed'>
+                  {t('Dismissed')}
+                </NativeSelectOption>
               </NativeSelect>
-              <Button variant='outline' disabled={fraudScanning} onClick={handleFraudScan}>
+              <Button
+                variant='outline'
+                disabled={fraudLoading}
+                onClick={applyFraudSearch}
+              >
+                <Search className='size-4' />
+                {t('Search')}
+              </Button>
+              {(fraudKeywordSearch || fraudIPSearch) && (
+                <Button
+                  variant='ghost'
+                  disabled={fraudLoading}
+                  onClick={resetFraudSearch}
+                >
+                  {t('Reset')}
+                </Button>
+              )}
+              <Input
+                type='number'
+                min={0}
+                step={1}
+                value={fraudScanDays}
+                onChange={(event) => setFraudScanDays(event.target.value)}
+                placeholder={t('Detection days')}
+                className='w-full sm:w-[132px]'
+              />
+              <Button
+                variant='outline'
+                disabled={fraudScanning}
+                onClick={handleFraudScan}
+              >
                 {fraudScanning ? t('Scanning...') : t('Scan all')}
+              </Button>
+              <Button
+                variant='outline'
+                disabled={fraudScanning}
+                onClick={handleFraudDeepScan}
+              >
+                {fraudScanning ? t('Scanning...') : t('Deep scan')}
               </Button>
             </div>
           </div>
@@ -1622,55 +2052,133 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
             </TableHeader>
             <TableBody>
               {fraudLoading ? (
-                <TableRow><TableCell colSpan={5} className='text-center py-8 text-muted-foreground'>{t('Loading...')}</TableCell></TableRow>
+                <TableRow>
+                  <TableCell
+                    colSpan={5}
+                    className='text-muted-foreground py-8 text-center'
+                  >
+                    {t('Loading...')}
+                  </TableCell>
+                </TableRow>
               ) : fraudAlerts.length === 0 ? (
-                <TableRow><TableCell colSpan={5} className='text-center py-8 text-muted-foreground'>{t('No fraud alerts found')}</TableCell></TableRow>
+                <TableRow>
+                  <TableCell
+                    colSpan={5}
+                    className='text-muted-foreground py-8 text-center'
+                  >
+                    {t('No fraud alerts found')}
+                  </TableCell>
+                </TableRow>
               ) : (
                 fraudAlerts.map((alert) => {
                   let parsedIps: string[] = []
-                  try { parsedIps = JSON.parse(alert.shared_ips || '[]') } catch {}
+                  try {
+                    parsedIps = JSON.parse(alert.shared_ips || '[]')
+                  } catch {}
                   return (
                     <TableRow key={alert.id}>
                       <TableCell>
                         <span className='font-medium'>#{alert.inviter_id}</span>
-                        {alert.inviter_username && <span className='ml-1 text-muted-foreground'>{alert.inviter_username}</span>}
+                        {alert.inviter_username && (
+                          <span className='text-muted-foreground ml-1'>
+                            {alert.inviter_username}
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell>
                         <span className='font-medium'>#{alert.invitee_id}</span>
-                        {alert.invitee_username && <span className='ml-1 text-muted-foreground'>{alert.invitee_username}</span>}
+                        {alert.invitee_username && (
+                          <span className='text-muted-foreground ml-1'>
+                            {alert.invitee_username}
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell>
                         <div className='flex flex-wrap gap-1'>
                           {parsedIps.slice(0, 3).map((ip) => (
-                            <Badge key={ip} variant='outline' className='text-xs'>{ip}</Badge>
+                            <Badge
+                              key={ip}
+                              variant='outline'
+                              className='text-xs'
+                            >
+                              {ip}
+                            </Badge>
                           ))}
-                          {parsedIps.length > 3 && <Badge variant='outline' className='text-xs'>+{parsedIps.length - 3}</Badge>}
+                          {parsedIps.length > 3 && (
+                            <Badge variant='outline' className='text-xs'>
+                              +{parsedIps.length - 3}
+                            </Badge>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={alert.status === 'detected' ? 'destructive' : alert.status === 'resolved' ? 'default' : 'secondary'}>
+                        <Badge
+                          variant={
+                            alert.status === 'detected'
+                              ? 'destructive'
+                              : alert.status === 'resolved'
+                                ? 'default'
+                                : 'secondary'
+                          }
+                        >
                           {t(alert.status)}
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        {alert.status === 'detected' && (
-                          <div className='flex gap-1'>
-                            <Button size='sm' variant='outline' disabled={fraudActionLoadingId === alert.id} onClick={() => handleFraudAction(alert.id, 'unbind')}>
-                              {t('Unbind')}
-                            </Button>
-                            <Button size='sm' variant='destructive' disabled={fraudActionLoadingId === alert.id} onClick={() => handleFraudAction(alert.id, 'clawback')}>
-                              {t('Clawback')}
-                            </Button>
-                            <Button size='sm' variant='secondary' disabled={fraudActionLoadingId === alert.id} onClick={() => handleFraudAction(alert.id, 'dismiss')}>
-                              {t('Dismiss')}
-                            </Button>
-                          </div>
-                        )}
-                        {alert.status !== 'detected' && alert.resolved_action && (
-                          <span className='text-xs text-muted-foreground'>
-                            {t(alert.resolved_action)}{alert.clawback_quota > 0 && ` (${formatQuota(alert.clawback_quota)})`}
-                          </span>
-                        )}
+                        <div className='flex flex-wrap items-center gap-1'>
+                          {alert.status === 'detected' && (
+                            <>
+                              <Button
+                                size='sm'
+                                variant='outline'
+                                disabled={fraudActionLoadingId === alert.id}
+                                onClick={() =>
+                                  handleFraudAction(alert.id, 'unbind')
+                                }
+                              >
+                                {t('Unbind')}
+                              </Button>
+                              <Button
+                                size='sm'
+                                variant='destructive'
+                                disabled={fraudActionLoadingId === alert.id}
+                                onClick={() =>
+                                  handleFraudAction(alert.id, 'clawback')
+                                }
+                              >
+                                {t('Clawback')}
+                              </Button>
+                              <Button
+                                size='sm'
+                                variant='secondary'
+                                disabled={fraudActionLoadingId === alert.id}
+                                onClick={() =>
+                                  handleFraudAction(alert.id, 'dismiss')
+                                }
+                              >
+                                {t('Dismiss')}
+                              </Button>
+                            </>
+                          )}
+                          <Button
+                            size='sm'
+                            variant='ghost'
+                            disabled={fraudActionLoadingId === alert.id}
+                            onClick={() =>
+                              handleFraudAction(alert.id, 'delete')
+                            }
+                          >
+                            {t('Delete')}
+                          </Button>
+                          {alert.status !== 'detected' &&
+                            alert.resolved_action && (
+                              <span className='text-muted-foreground text-xs'>
+                                {t(alert.resolved_action)}
+                                {alert.clawback_quota > 0 &&
+                                  ` (${formatQuota(alert.clawback_quota)})`}
+                              </span>
+                            )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   )
@@ -1678,7 +2186,17 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
               )}
             </TableBody>
           </Table>
-          <AdminTablePagination page={fraudPage} pageSize={fraudPageSize} total={fraudTotal} loading={fraudLoading} onPageChange={setFraudPage} onPageSizeChange={(ps) => { setFraudPageSize(ps); setFraudPage(1) }} />
+          <AdminTablePagination
+            page={fraudPage}
+            pageSize={fraudPageSize}
+            total={fraudTotal}
+            loading={fraudLoading}
+            onPageChange={setFraudPage}
+            onPageSizeChange={(ps) => {
+              setFraudPageSize(ps)
+              setFraudPage(1)
+            }}
+          />
         </TabsContent>
       </Tabs>
     </SettingsSection>

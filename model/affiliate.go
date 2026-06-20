@@ -197,6 +197,14 @@ type AffiliateInviterBindResult struct {
 	Updated           bool   `json:"updated"`
 }
 
+type AffiliateInviterUnbindResult struct {
+	UserId            int    `json:"user_id"`
+	Username          string `json:"username"`
+	DisplayName       string `json:"display_name"`
+	PreviousInviterId int    `json:"previous_inviter_id"`
+	Updated           bool   `json:"updated"`
+}
+
 func isAffiliateSourceEnabled(sourceType string) bool {
 	affiliateSetting := setting.GetAffiliateSetting()
 	switch sourceType {
@@ -1151,6 +1159,47 @@ func BindUserInviterByAffCode(userId int, userIdentifier string, affCode string,
 		if result.InviterId > 0 {
 			_ = invalidateUserCache(result.InviterId)
 		}
+		if result.PreviousInviterId > 0 {
+			_ = invalidateUserCache(result.PreviousInviterId)
+		}
+	}
+	return result, nil
+}
+
+func UnbindUserInviter(userId int, userIdentifier string) (*AffiliateInviterUnbindResult, error) {
+	var result *AffiliateInviterUnbindResult
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		invitee, err := findAffiliateBindUserTx(tx, userId, userIdentifier)
+		if err != nil {
+			return err
+		}
+		previousInviterId := invitee.InviterId
+		result = &AffiliateInviterUnbindResult{
+			UserId:            invitee.Id,
+			Username:          invitee.Username,
+			DisplayName:       invitee.DisplayName,
+			PreviousInviterId: previousInviterId,
+			Updated:           false,
+		}
+		if previousInviterId <= 0 {
+			return nil
+		}
+		if err := tx.Model(&User{}).Where("id = ?", invitee.Id).Update("inviter_id", 0).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&User{}).
+			Where("id = ? AND aff_count > 0", previousInviterId).
+			Update("aff_count", gorm.Expr("aff_count - ?", 1)).Error; err != nil {
+			return err
+		}
+		result.Updated = true
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if result != nil && result.Updated {
+		_ = invalidateUserCache(result.UserId)
 		if result.PreviousInviterId > 0 {
 			_ = invalidateUserCache(result.PreviousInviterId)
 		}

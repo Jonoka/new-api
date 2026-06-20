@@ -4866,6 +4866,18 @@
     "Zero retention": "Без хранения данных",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
+    "Deep scan": "Глубокая проверка",
+    "Referral binding removed": "Привязка приглашения удалена",
+    "Scan all affiliate relationships including historical logs? This may take a while.": "Проверить все реферальные связи с учетом исторических журналов? Это может занять некоторое время.",
+    "Search shared IP": "Поиск общего IP",
+    "Selected user has no inviter": "У выбранного пользователя нет пригласившего",
+    "Unbind inviter": "Отвязать пригласившего",
+    "Unbind result": "Результат отвязки",
+    "Unbind selected user from current inviter?": "Отвязать выбранного пользователя от текущего пригласившего?",
+    "Unbinding...": "Отвязка...",
+    "Detection days": "Дней для проверки",
+    "Delete this alert?": "Удалить это предупреждение?",
+    "Scan affiliate relationships for IP overlap in the selected time window? This may take a while.": "Проверить реферальные связи на совпадение IP за выбранный период? Это может занять некоторое время.",
     "Zoom": "Zoom"
   }
 }

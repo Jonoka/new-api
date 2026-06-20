@@ -4866,6 +4866,18 @@
     "Zero retention": "Không lưu dữ liệu",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
+    "Deep scan": "Quét sâu",
+    "Referral binding removed": "Đã gỡ liên kết giới thiệu",
+    "Scan all affiliate relationships including historical logs? This may take a while.": "Quét tất cả quan hệ giới thiệu bao gồm nhật ký lịch sử? Việc này có thể mất một lúc.",
+    "Search shared IP": "Tìm IP dùng chung",
+    "Selected user has no inviter": "Người dùng đã chọn chưa có người mời",
+    "Unbind inviter": "Gỡ người mời",
+    "Unbind result": "Kết quả gỡ liên kết",
+    "Unbind selected user from current inviter?": "Gỡ người dùng đã chọn khỏi người mời hiện tại?",
+    "Unbinding...": "Đang gỡ...",
+    "Detection days": "Số ngày phát hiện",
+    "Delete this alert?": "Xóa cảnh báo này?",
+    "Scan affiliate relationships for IP overlap in the selected time window? This may take a while.": "Quét quan hệ giới thiệu để tìm IP trùng trong khoảng thời gian đã chọn? Việc này có thể mất một lúc.",
     "Zoom": "Zoom"
   }
 }

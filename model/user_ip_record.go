@@ -1,6 +1,8 @@
 package model
 
 import (
+	"net"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/bytedance/gopkg/util/gopool"
 )
@@ -55,38 +57,71 @@ func GetDistinctIPsByUserId(userId int) ([]string, error) {
 	return ips, err
 }
 
-func GetIPOverlap(userIdA, userIdB int) ([]string, error) {
+func normalizeAffiliateFraudIP(ip string) (string, bool) {
+	parsed := net.ParseIP(ip)
+	if parsed == nil || parsed.IsLoopback() || parsed.To4() == nil {
+		return "", false
+	}
+	return parsed.String(), true
+}
+
+func filterAffiliateFraudIPs(ips []string) []string {
+	seen := make(map[string]bool, len(ips))
+	filtered := make([]string, 0, len(ips))
+	for _, rawIP := range ips {
+		ip, ok := normalizeAffiliateFraudIP(rawIP)
+		if !ok || seen[ip] {
+			continue
+		}
+		seen[ip] = true
+		filtered = append(filtered, ip)
+	}
+	return filtered
+}
+
+func GetIPOverlap(userIdA, userIdB int, sinceTimestamp int64) ([]string, error) {
 	var ipsA []string
-	if err := DB.Model(&UserIPRecord{}).
+	inviterQuery := DB.Model(&UserIPRecord{}).
 		Where("user_id = ? AND ip != ''", userIdA).
-		Distinct("ip").
-		Pluck("ip", &ipsA).Error; err != nil {
+		Distinct("ip")
+	if sinceTimestamp > 0 {
+		inviterQuery = inviterQuery.Where("created_at >= ?", sinceTimestamp)
+	}
+	if err := inviterQuery.Pluck("ip", &ipsA).Error; err != nil {
 		return nil, err
 	}
+	ipsA = filterAffiliateFraudIPs(ipsA)
 	if len(ipsA) == 0 {
 		return nil, nil
 	}
 
 	var shared []string
-	err := DB.Model(&UserIPRecord{}).
+	inviteeQuery := DB.Model(&UserIPRecord{}).
 		Where("user_id = ? AND ip IN ?", userIdB, ipsA).
-		Distinct("ip").
-		Pluck("ip", &shared).Error
-	return shared, err
+		Distinct("ip")
+	if sinceTimestamp > 0 {
+		inviteeQuery = inviteeQuery.Where("created_at >= ?", sinceTimestamp)
+	}
+	err := inviteeQuery.Pluck("ip", &shared).Error
+	return filterAffiliateFraudIPs(shared), err
 }
 
-func GetIPOverlapBatch(inviterId int, inviteeIds []int) (map[int][]string, error) {
+func GetIPOverlapBatch(inviterId int, inviteeIds []int, sinceTimestamp int64) (map[int][]string, error) {
 	if len(inviteeIds) == 0 {
 		return nil, nil
 	}
 
 	var inviterIPs []string
-	if err := DB.Model(&UserIPRecord{}).
+	inviterQuery := DB.Model(&UserIPRecord{}).
 		Where("user_id = ? AND ip != ''", inviterId).
-		Distinct("ip").
-		Pluck("ip", &inviterIPs).Error; err != nil {
+		Distinct("ip")
+	if sinceTimestamp > 0 {
+		inviterQuery = inviterQuery.Where("created_at >= ?", sinceTimestamp)
+	}
+	if err := inviterQuery.Pluck("ip", &inviterIPs).Error; err != nil {
 		return nil, err
 	}
+	inviterIPs = filterAffiliateFraudIPs(inviterIPs)
 	if len(inviterIPs) == 0 {
 		return nil, nil
 	}
@@ -96,17 +131,22 @@ func GetIPOverlapBatch(inviterId int, inviteeIds []int) (map[int][]string, error
 		Ip     string
 	}
 	var rows []ipUserRow
-	err := DB.Model(&UserIPRecord{}).
+	inviteeQuery := DB.Model(&UserIPRecord{}).
 		Select("DISTINCT user_id, ip").
-		Where("user_id IN ? AND ip IN ?", inviteeIds, inviterIPs).
-		Find(&rows).Error
+		Where("user_id IN ? AND ip IN ?", inviteeIds, inviterIPs)
+	if sinceTimestamp > 0 {
+		inviteeQuery = inviteeQuery.Where("created_at >= ?", sinceTimestamp)
+	}
+	err := inviteeQuery.Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
 
 	result := make(map[int][]string)
 	for _, r := range rows {
-		result[r.UserId] = append(result[r.UserId], r.Ip)
+		if ip, ok := normalizeAffiliateFraudIP(r.Ip); ok {
+			result[r.UserId] = append(result[r.UserId], ip)
+		}
 	}
 	return result, nil
 }

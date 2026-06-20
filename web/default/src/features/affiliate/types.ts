@@ -184,3 +184,16 @@ export type AdminBindAffiliateInviterResult = {
   previous_inviter_id: number
   updated: boolean
 }
+
+export type AdminUnbindAffiliateInviterRequest = {
+  user_id?: number
+  user_identifier?: string
+}
+
+export type AdminUnbindAffiliateInviterResult = {
+  user_id: number
+  username: string
+  display_name: string
+  previous_inviter_id: number
+  updated: boolean
+}

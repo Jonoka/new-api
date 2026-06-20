@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
@@ -46,7 +47,22 @@ type FraudAlertWithUsers struct {
 	InviteeUsername string `json:"invitee_username"`
 }
 
-func DetectFraudForInviter(inviterId int) (int, error) {
+type FraudAlertQuery struct {
+	Status   string
+	IP       string
+	Keyword  string
+	Page     int
+	PageSize int
+}
+
+func fraudDetectionSinceTimestamp(days int) int64 {
+	if days <= 0 {
+		return 0
+	}
+	return common.GetTimestamp() - int64(days)*86400
+}
+
+func DetectFraudForInviter(inviterId int, days int) (int, error) {
 	var inviteeIds []int
 	if err := DB.Model(&User{}).Where("inviter_id = ?", inviterId).Pluck("id", &inviteeIds).Error; err != nil {
 		return 0, err
@@ -55,43 +71,34 @@ func DetectFraudForInviter(inviterId int) (int, error) {
 		return 0, nil
 	}
 
-	overlaps, err := GetIPOverlapBatch(inviterId, inviteeIds)
+	overlaps, err := GetIPOverlapBatch(inviterId, inviteeIds, fraudDetectionSinceTimestamp(days))
 	if err != nil {
 		return 0, err
+	}
+	if overlaps == nil {
+		overlaps = make(map[int][]string)
+	}
+	for _, inviteeId := range inviteeIds {
+		if _, ok := overlaps[inviteeId]; !ok {
+			overlaps[inviteeId] = nil
+		}
 	}
 
 	newAlerts := 0
 	for inviteeId, sharedIPs := range overlaps {
-		if len(sharedIPs) == 0 {
+		created, err := upsertFraudAlertForPair(inviterId, inviteeId, sharedIPs)
+		if err != nil {
 			continue
 		}
-
-		var existing int64
-		DB.Model(&AffiliateFraudAlert{}).
-			Where("inviter_id = ? AND invitee_id = ? AND status = ?", inviterId, inviteeId, FraudAlertStatusDetected).
-			Count(&existing)
-		if existing > 0 {
-			continue
+		if created {
+			newAlerts++
 		}
-
-		ipsJSON, _ := common.Marshal(sharedIPs)
-		alert := &AffiliateFraudAlert{
-			InviterId:     inviterId,
-			InviteeId:     inviteeId,
-			SharedIps:     string(ipsJSON),
-			SharedIpCount: len(sharedIPs),
-			Status:        FraudAlertStatusDetected,
-			DetectedAt:    common.GetTimestamp(),
-		}
-		if err := DB.Create(alert).Error; err != nil {
-			continue
-		}
-		newAlerts++
 	}
+	_ = refreshDetectedFraudAlertsForInviter(inviterId, overlaps)
 	return newAlerts, nil
 }
 
-func DetectFraudBulk() (int, error) {
+func DetectFraudBulk(days int) (int, error) {
 	var inviterIds []int
 	if err := DB.Model(&User{}).
 		Where("aff_count > 0").
@@ -101,7 +108,7 @@ func DetectFraudBulk() (int, error) {
 
 	totalNew := 0
 	for _, inviterId := range inviterIds {
-		n, err := DetectFraudForInviter(inviterId)
+		n, err := DetectFraudForInviter(inviterId, days)
 		if err != nil {
 			continue
 		}
@@ -113,7 +120,7 @@ func DetectFraudBulk() (int, error) {
 // DetectFraudDeep scans the logs table (LOG_DB) for IP overlaps between
 // inviters and their invitees. This catches historical activity that happened
 // before the user_ip_records table was introduced.
-func DetectFraudDeep() (int, error) {
+func DetectFraudDeep(days int) (int, error) {
 	var inviterIds []int
 	if err := DB.Model(&User{}).
 		Where("aff_count > 0").
@@ -123,7 +130,7 @@ func DetectFraudDeep() (int, error) {
 
 	totalNew := 0
 	for _, inviterId := range inviterIds {
-		n, err := detectFraudDeepForInviter(inviterId)
+		n, err := detectFraudDeepForInviter(inviterId, days)
 		if err != nil {
 			continue
 		}
@@ -132,7 +139,7 @@ func DetectFraudDeep() (int, error) {
 	return totalNew, nil
 }
 
-func detectFraudDeepForInviter(inviterId int) (int, error) {
+func detectFraudDeepForInviter(inviterId int, days int) (int, error) {
 	var inviteeIds []int
 	if err := DB.Model(&User{}).Where("inviter_id = ?", inviterId).Pluck("id", &inviteeIds).Error; err != nil {
 		return 0, err
@@ -143,73 +150,123 @@ func detectFraudDeepForInviter(inviterId int) (int, error) {
 
 	// Get inviter's distinct IPs from logs
 	var inviterIPs []string
-	if err := LOG_DB.Model(&Log{}).
-		Where("user_id = ? AND ip != ''", inviterId).
-		Distinct("ip").
-		Pluck("ip", &inviterIPs).Error; err != nil {
+	sinceTimestamp := fraudDetectionSinceTimestamp(days)
+	inviterLogQuery := LOG_DB.Model(&Log{}).
+		Where("user_id = ? AND ip != '' AND type != ?", inviterId, LogTypeTopup).
+		Distinct("ip")
+	if sinceTimestamp > 0 {
+		inviterLogQuery = inviterLogQuery.Where("created_at >= ?", sinceTimestamp)
+	}
+	if err := inviterLogQuery.Pluck("ip", &inviterIPs).Error; err != nil {
 		return 0, err
 	}
-	if len(inviterIPs) == 0 {
-		return 0, nil
-	}
+	inviterIPs = filterAffiliateFraudIPs(inviterIPs)
 
 	// For each invitee, check IP overlap from logs
 	newAlerts := 0
+	currentOverlaps := make(map[int][]string)
 	for _, inviteeId := range inviteeIds {
 		var sharedIPs []string
-		if err := LOG_DB.Model(&Log{}).
-			Where("user_id = ? AND ip IN ? AND ip != ''", inviteeId, inviterIPs).
-			Distinct("ip").
-			Pluck("ip", &sharedIPs).Error; err != nil {
-			continue
-		}
-		if len(sharedIPs) == 0 {
-			continue
+		if len(inviterIPs) > 0 {
+			inviteeLogQuery := LOG_DB.Model(&Log{}).
+				Where("user_id = ? AND ip IN ? AND ip != '' AND type != ?", inviteeId, inviterIPs, LogTypeTopup).
+				Distinct("ip")
+			if sinceTimestamp > 0 {
+				inviteeLogQuery = inviteeLogQuery.Where("created_at >= ?", sinceTimestamp)
+			}
+			if err := inviteeLogQuery.Pluck("ip", &sharedIPs).Error; err != nil {
+				continue
+			}
 		}
 
 		// Also merge with user_ip_records overlaps
-		ipRecordOverlaps, _ := GetIPOverlap(inviterId, inviteeId)
+		ipRecordOverlaps, _ := GetIPOverlap(inviterId, inviteeId, sinceTimestamp)
 		allShared := mergeUniqueStrings(sharedIPs, ipRecordOverlaps)
-
-		// Skip if alert already exists
-		var existing int64
-		DB.Model(&AffiliateFraudAlert{}).
-			Where("inviter_id = ? AND invitee_id = ? AND status = ?", inviterId, inviteeId, FraudAlertStatusDetected).
-			Count(&existing)
-		if existing > 0 {
+		currentOverlaps[inviteeId] = allShared
+		if len(allShared) == 0 {
 			continue
 		}
 
-		ipsJSON, _ := common.Marshal(allShared)
-		alert := &AffiliateFraudAlert{
-			InviterId:     inviterId,
-			InviteeId:     inviteeId,
-			SharedIps:     string(ipsJSON),
-			SharedIpCount: len(allShared),
-			Status:        FraudAlertStatusDetected,
-			DetectedAt:    common.GetTimestamp(),
-		}
-		if err := DB.Create(alert).Error; err != nil {
+		created, err := upsertFraudAlertForPair(inviterId, inviteeId, allShared)
+		if err != nil {
 			continue
 		}
-		newAlerts++
+		if created {
+			newAlerts++
+		}
 	}
+	_ = refreshDetectedFraudAlertsForInviter(inviterId, currentOverlaps)
 	return newAlerts, nil
 }
 
 func mergeUniqueStrings(a, b []string) []string {
-	seen := make(map[string]bool, len(a)+len(b))
-	for _, s := range a {
-		seen[s] = true
+	return filterAffiliateFraudIPs(append(a, b...))
+}
+
+func upsertFraudAlertForPair(inviterId, inviteeId int, sharedIPs []string) (bool, error) {
+	sharedIPs = filterAffiliateFraudIPs(sharedIPs)
+	if len(sharedIPs) == 0 {
+		return false, deleteDetectedFraudAlertForPair(inviterId, inviteeId)
 	}
-	for _, s := range b {
-		seen[s] = true
+
+	ipsJSON, _ := common.Marshal(sharedIPs)
+	var alert AffiliateFraudAlert
+	err := DB.Where("inviter_id = ? AND invitee_id = ? AND status = ?", inviterId, inviteeId, FraudAlertStatusDetected).
+		First(&alert).Error
+	if err == nil {
+		return false, DB.Model(&alert).Updates(map[string]interface{}{
+			"shared_ips":      string(ipsJSON),
+			"shared_ip_count": len(sharedIPs),
+			"resolved_action": "",
+			"resolved_at":     0,
+			"admin_remark":    "",
+		}).Error
 	}
-	result := make([]string, 0, len(seen))
-	for s := range seen {
-		result = append(result, s)
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, err
 	}
-	return result
+
+	alert = AffiliateFraudAlert{
+		InviterId:     inviterId,
+		InviteeId:     inviteeId,
+		SharedIps:     string(ipsJSON),
+		SharedIpCount: len(sharedIPs),
+		Status:        FraudAlertStatusDetected,
+		DetectedAt:    common.GetTimestamp(),
+	}
+	if err := DB.Create(&alert).Error; err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func deleteDetectedFraudAlertForPair(inviterId, inviteeId int) error {
+	return DB.Where("inviter_id = ? AND invitee_id = ? AND status = ?", inviterId, inviteeId, FraudAlertStatusDetected).
+		Delete(&AffiliateFraudAlert{}).Error
+}
+
+func refreshDetectedFraudAlertsForInviter(inviterId int, overlaps map[int][]string) error {
+	var alerts []AffiliateFraudAlert
+	if err := DB.Where("inviter_id = ? AND status = ?", inviterId, FraudAlertStatusDetected).Find(&alerts).Error; err != nil {
+		return err
+	}
+	for _, alert := range alerts {
+		sharedIPs := filterAffiliateFraudIPs(overlaps[alert.InviteeId])
+		if len(sharedIPs) == 0 {
+			if err := deleteDetectedFraudAlertForPair(alert.InviterId, alert.InviteeId); err != nil {
+				return err
+			}
+			continue
+		}
+		ipsJSON, _ := common.Marshal(sharedIPs)
+		if err := DB.Model(&alert).Updates(map[string]interface{}{
+			"shared_ips":      string(ipsJSON),
+			"shared_ip_count": len(sharedIPs),
+		}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func UnbindAffiliateRelationship(alertId, adminId int, doClawback bool) error {
@@ -232,8 +289,10 @@ func UnbindAffiliateRelationship(alertId, adminId int, doClawback bool) error {
 			Update("inviter_id", 0).Error; err != nil {
 			return err
 		}
-		tx.Model(&User{}).Where("id = ? AND aff_count > 0", alert.InviterId).
-			UpdateColumn("aff_count", gorm.Expr("aff_count - 1"))
+		if err := tx.Model(&User{}).Where("id = ? AND aff_count > 0", alert.InviterId).
+			Update("aff_count", gorm.Expr("aff_count - ?", 1)).Error; err != nil {
+			return err
+		}
 
 		action := FraudActionUnbind
 		if doClawback {
@@ -316,19 +375,65 @@ func DismissFraudAlert(alertId, adminId int, remark string) error {
 	}).Error
 }
 
+func DeleteFraudAlert(alertId int) error {
+	if alertId <= 0 {
+		return errors.New("invalid alert ID")
+	}
+	result := DB.Delete(&AffiliateFraudAlert{}, alertId)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("alert not found")
+	}
+	return nil
+}
+
 func GetFraudAlerts(status string, page, pageSize int) ([]FraudAlertWithUsers, int64, error) {
+	return SearchFraudAlerts(FraudAlertQuery{Status: status, Page: page, PageSize: pageSize})
+}
+
+func SearchFraudAlerts(params FraudAlertQuery) ([]FraudAlertWithUsers, int64, error) {
 	var total int64
 	var alerts []AffiliateFraudAlert
 
 	query := DB.Model(&AffiliateFraudAlert{})
-	if status != "" {
+	if status := strings.TrimSpace(params.Status); status != "" {
 		query = query.Where("status = ?", status)
+	}
+	if ip := strings.TrimSpace(params.IP); ip != "" {
+		pattern, err := sanitizeLikePattern(ip)
+		if err != nil {
+			return nil, 0, err
+		}
+		if !strings.Contains(pattern, "%") {
+			pattern = "%" + pattern + "%"
+		}
+		query = query.Where("shared_ips LIKE ? ESCAPE '!'", pattern)
+	}
+	if keyword := strings.TrimSpace(params.Keyword); keyword != "" {
+		userIds, err := findAffiliateAdminMatchedUserIds(keyword)
+		if err != nil {
+			return nil, 0, err
+		}
+		if len(userIds) == 0 {
+			return []FraudAlertWithUsers{}, 0, nil
+		}
+		query = query.Where("inviter_id IN ? OR invitee_id IN ?", userIds, userIds)
 	}
 
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
+	page := params.Page
+	if page <= 0 {
+		page = 1
+	}
+	pageSize := params.PageSize
+	if pageSize <= 0 {
+		pageSize = 50
+	}
 	offset := (page - 1) * pageSize
 	if err := query.Order("detected_at DESC").Offset(offset).Limit(pageSize).Find(&alerts).Error; err != nil {
 		return nil, 0, err

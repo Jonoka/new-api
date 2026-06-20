@@ -4942,6 +4942,18 @@
     "Zero retention": "零数据保留",
     "Zhipu": "智谱",
     "Zhipu V4": "智谱 V4",
+    "Deep scan": "深度检测",
+    "Referral binding removed": "邀请关系已解除",
+    "Scan all affiliate relationships including historical logs? This may take a while.": "扫描所有邀请关系并包含历史日志？这可能需要一些时间。",
+    "Search shared IP": "搜索共享 IP",
+    "Selected user has no inviter": "所选用户没有邀请人",
+    "Unbind inviter": "解除邀请人",
+    "Unbind result": "解除结果",
+    "Unbind selected user from current inviter?": "确认解除所选用户当前邀请关系？",
+    "Unbinding...": "解除中...",
+    "Detection days": "检测天数",
+    "Delete this alert?": "确认删除此异常记录？",
+    "Scan affiliate relationships for IP overlap in the selected time window? This may take a while.": "按所选时间范围扫描邀请关系的 IP 重叠？这可能需要一些时间。",
     "Zoom": "缩放"
   }
 }

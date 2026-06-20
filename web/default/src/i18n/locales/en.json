@@ -4877,6 +4877,18 @@
     "Zero retention": "Zero retention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
+    "Deep scan": "Deep scan",
+    "Referral binding removed": "Referral binding removed",
+    "Scan all affiliate relationships including historical logs? This may take a while.": "Scan all affiliate relationships including historical logs? This may take a while.",
+    "Search shared IP": "Search shared IP",
+    "Selected user has no inviter": "Selected user has no inviter",
+    "Unbind inviter": "Unbind inviter",
+    "Unbind result": "Unbind result",
+    "Unbind selected user from current inviter?": "Unbind selected user from current inviter?",
+    "Unbinding...": "Unbinding...",
+    "Detection days": "Detection days",
+    "Delete this alert?": "Delete this alert?",
+    "Scan affiliate relationships for IP overlap in the selected time window? This may take a while.": "Scan affiliate relationships for IP overlap in the selected time window? This may take a while.",
     "Zoom": "Zoom"
   }
 }

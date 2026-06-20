@@ -797,6 +797,188 @@ func TestBindUserInviterByAffCodeRejectsDuplicateAffCode(t *testing.T) {
 	assert.Contains(t, err.Error(), "邀请代码存在冲突")
 }
 
+func TestAffiliateFraudDetectionFiltersIPv6AndTopupLogs(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	now := common.GetTimestamp()
+	require.NoError(t, DB.Create(&User{Id: 201, Username: "fraud-parent", Email: "parent@example.com", AffCode: "aff201", Status: common.UserStatusEnabled, AffCount: 2}).Error)
+	require.NoError(t, DB.Create(&User{Id: 202, Username: "ipv6-child", Email: "ipv6@example.com", AffCode: "aff202", Status: common.UserStatusEnabled, InviterId: 201}).Error)
+	require.NoError(t, DB.Create(&User{Id: 203, Username: "topup-child", Email: "topup@example.com", AffCode: "aff203", Status: common.UserStatusEnabled, InviterId: 201}).Error)
+	require.NoError(t, DB.Create(&UserIPRecord{UserId: 201, Ip: "2a0a:4cc0:2000:2ae1:a487:f9ff:fe89:6ccf", Action: "login", CreatedAt: now}).Error)
+	require.NoError(t, DB.Create(&UserIPRecord{UserId: 202, Ip: "2a0a:4cc0:2000:2ae1:a487:f9ff:fe89:6ccf", Action: "login", CreatedAt: now}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{UserId: 201, Username: "fraud-parent", Type: LogTypeTopup, Ip: "45.205.31.18", CreatedAt: now}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{UserId: 203, Username: "topup-child", Type: LogTypeTopup, Ip: "45.205.31.18", CreatedAt: now}).Error)
+
+	newAlerts, err := DetectFraudDeep(30)
+	require.NoError(t, err)
+	assert.Equal(t, 0, newAlerts)
+
+	var count int64
+	require.NoError(t, DB.Model(&AffiliateFraudAlert{}).Where("status = ?", FraudAlertStatusDetected).Count(&count).Error)
+	assert.EqualValues(t, 0, count)
+}
+
+func TestAffiliateFraudDeepDetectsIPv4AndRescansExistingAlerts(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	now := common.GetTimestamp()
+	require.NoError(t, DB.Create(&User{Id: 211, Username: "deep-parent", Email: "deep-parent@example.com", AffCode: "aff211", Status: common.UserStatusEnabled, AffCount: 1}).Error)
+	require.NoError(t, DB.Create(&User{Id: 212, Username: "deep-child", Email: "deep-child@example.com", AffCode: "aff212", Status: common.UserStatusEnabled, InviterId: 211}).Error)
+	require.NoError(t, DB.Create(&AffiliateFraudAlert{
+		InviterId:     211,
+		InviteeId:     212,
+		SharedIps:     `["2a0a:4cc0:2000:2ae1:a487:f9ff:fe89:6ccf","203.0.113.10"]`,
+		SharedIpCount: 2,
+		Status:        FraudAlertStatusDetected,
+		DetectedAt:    now - 10,
+	}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{UserId: 211, Username: "deep-parent", Type: LogTypeConsume, Ip: "203.0.113.10", CreatedAt: now}).Error)
+	require.NoError(t, LOG_DB.Create(&Log{UserId: 212, Username: "deep-child", Type: LogTypeError, Ip: "203.0.113.10", CreatedAt: now}).Error)
+
+	newAlerts, err := DetectFraudDeep(30)
+	require.NoError(t, err)
+	assert.Equal(t, 0, newAlerts)
+
+	var alert AffiliateFraudAlert
+	require.NoError(t, DB.Where("inviter_id = ? AND invitee_id = ?", 211, 212).First(&alert).Error)
+	assert.Equal(t, FraudAlertStatusDetected, alert.Status)
+	assert.Equal(t, 1, alert.SharedIpCount)
+	assert.Equal(t, `["203.0.113.10"]`, alert.SharedIps)
+}
+
+func TestAffiliateFraudRescanDismissesStaleAlerts(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	now := common.GetTimestamp()
+	require.NoError(t, DB.Create(&User{Id: 221, Username: "stale-parent", AffCode: "aff221", Status: common.UserStatusEnabled, AffCount: 1}).Error)
+	require.NoError(t, DB.Create(&User{Id: 222, Username: "stale-child", AffCode: "aff222", Status: common.UserStatusEnabled, InviterId: 221}).Error)
+	require.NoError(t, DB.Create(&AffiliateFraudAlert{
+		InviterId:     221,
+		InviteeId:     222,
+		SharedIps:     `["2a0a:4cc0:2000:2ae1:a487:f9ff:fe89:6ccf"]`,
+		SharedIpCount: 1,
+		Status:        FraudAlertStatusDetected,
+		DetectedAt:    now - 10,
+	}).Error)
+
+	newAlerts, err := DetectFraudDeep(30)
+	require.NoError(t, err)
+	assert.Equal(t, 0, newAlerts)
+
+	var count int64
+	require.NoError(t, DB.Model(&AffiliateFraudAlert{}).Where("inviter_id = ? AND invitee_id = ?", 221, 222).Count(&count).Error)
+	assert.EqualValues(t, 0, count)
+}
+
+func TestAffiliateFraudBulkRescanDismissesStaleAlerts(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	now := common.GetTimestamp()
+	require.NoError(t, DB.Create(&User{Id: 225, Username: "bulk-stale-parent", AffCode: "aff225", Status: common.UserStatusEnabled, AffCount: 1}).Error)
+	require.NoError(t, DB.Create(&User{Id: 226, Username: "bulk-stale-child", AffCode: "aff226", Status: common.UserStatusEnabled, InviterId: 225}).Error)
+	require.NoError(t, DB.Create(&UserIPRecord{UserId: 225, Ip: "2a0a:4cc0:2000:2ae1:a487:f9ff:fe89:6ccf", Action: "login", CreatedAt: now}).Error)
+	require.NoError(t, DB.Create(&UserIPRecord{UserId: 226, Ip: "2a0a:4cc0:2000:2ae1:a487:f9ff:fe89:6ccf", Action: "login", CreatedAt: now}).Error)
+	require.NoError(t, DB.Create(&AffiliateFraudAlert{
+		InviterId:     225,
+		InviteeId:     226,
+		SharedIps:     `["2a0a:4cc0:2000:2ae1:a487:f9ff:fe89:6ccf"]`,
+		SharedIpCount: 1,
+		Status:        FraudAlertStatusDetected,
+		DetectedAt:    now - 10,
+	}).Error)
+
+	newAlerts, err := DetectFraudBulk(30)
+	require.NoError(t, err)
+	assert.Equal(t, 0, newAlerts)
+
+	var count int64
+	require.NoError(t, DB.Model(&AffiliateFraudAlert{}).Where("inviter_id = ? AND invitee_id = ?", 225, 226).Count(&count).Error)
+	assert.EqualValues(t, 0, count)
+}
+
+func TestAffiliateFraudDetectionRespectsRecentDaysWindow(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	now := common.GetTimestamp()
+	old := now - 40*86400
+	require.NoError(t, DB.Create(&User{Id: 227, Username: "window-parent", AffCode: "aff227", Status: common.UserStatusEnabled, AffCount: 1}).Error)
+	require.NoError(t, DB.Create(&User{Id: 228, Username: "window-child", AffCode: "aff228", Status: common.UserStatusEnabled, InviterId: 227}).Error)
+	require.NoError(t, DB.Create(&UserIPRecord{UserId: 227, Ip: "198.51.100.88", Action: "login", CreatedAt: old}).Error)
+	require.NoError(t, DB.Create(&UserIPRecord{UserId: 228, Ip: "198.51.100.88", Action: "login", CreatedAt: old}).Error)
+
+	newAlerts, err := DetectFraudBulk(30)
+	require.NoError(t, err)
+	assert.Equal(t, 0, newAlerts)
+
+	var count int64
+	require.NoError(t, DB.Model(&AffiliateFraudAlert{}).Where("inviter_id = ? AND invitee_id = ?", 227, 228).Count(&count).Error)
+	assert.EqualValues(t, 0, count)
+
+	newAlerts, err = DetectFraudBulk(0)
+	require.NoError(t, err)
+	assert.Equal(t, 1, newAlerts)
+	require.NoError(t, DB.Model(&AffiliateFraudAlert{}).Where("inviter_id = ? AND invitee_id = ?", 227, 228).Count(&count).Error)
+	assert.EqualValues(t, 1, count)
+}
+
+func TestSearchFraudAlertsFiltersByIPAndUserKeyword(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	now := common.GetTimestamp()
+	require.NoError(t, DB.Create(&User{Id: 231, Username: "needle-parent", DisplayName: "Needle Parent", Email: "needle-parent@example.com", AffCode: "needle-aff", Status: common.UserStatusEnabled}).Error)
+	require.NoError(t, DB.Create(&User{Id: 232, Username: "needle-child", DisplayName: "Needle Child", Email: "needle-child@example.com", AffCode: "child-aff", Status: common.UserStatusEnabled, InviterId: 231}).Error)
+	require.NoError(t, DB.Create(&User{Id: 233, Username: "other-parent", Email: "other-parent@example.com", AffCode: "other-aff", Status: common.UserStatusEnabled}).Error)
+	require.NoError(t, DB.Create(&User{Id: 234, Username: "other-child", Email: "other-child@example.com", AffCode: "other-child-aff", Status: common.UserStatusEnabled, InviterId: 233}).Error)
+	require.NoError(t, DB.Create(&AffiliateFraudAlert{InviterId: 231, InviteeId: 232, SharedIps: `["203.0.113.99"]`, SharedIpCount: 1, Status: FraudAlertStatusDetected, DetectedAt: now}).Error)
+	require.NoError(t, DB.Create(&AffiliateFraudAlert{InviterId: 233, InviteeId: 234, SharedIps: `["198.51.100.20"]`, SharedIpCount: 1, Status: FraudAlertStatusDetected, DetectedAt: now - 1}).Error)
+
+	items, total, err := SearchFraudAlerts(FraudAlertQuery{Status: FraudAlertStatusDetected, IP: "203.0.113", Keyword: "needle", Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, total)
+	require.Len(t, items, 1)
+	assert.Equal(t, 231, items[0].InviterId)
+	assert.Equal(t, "needle-parent", items[0].InviterUsername)
+	assert.Equal(t, "needle-child", items[0].InviteeUsername)
+
+	items, total, err = SearchFraudAlerts(FraudAlertQuery{Keyword: "missing-user", Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, total)
+	assert.Empty(t, items)
+}
+
+func TestUnbindUserInviterClearsRelationshipAndDecrementsCount(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	require.NoError(t, DB.Create(&User{Id: 241, Username: "unbind-parent", AffCode: "aff241", Status: common.UserStatusEnabled, AffCount: 1}).Error)
+	require.NoError(t, DB.Create(&User{Id: 242, Username: "unbind-child", AffCode: "aff242", Status: common.UserStatusEnabled, InviterId: 241}).Error)
+
+	result, err := UnbindUserInviter(242, "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Updated)
+	assert.Equal(t, 241, result.PreviousInviterId)
+
+	var invitee User
+	require.NoError(t, DB.Select("inviter_id").Where("id = ?", 242).First(&invitee).Error)
+	assert.Equal(t, 0, invitee.InviterId)
+	var inviter User
+	require.NoError(t, DB.Select("aff_count").Where("id = ?", 241).First(&inviter).Error)
+	assert.Equal(t, 0, inviter.AffCount)
+
+	result, err = UnbindUserInviter(242, "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.False(t, result.Updated)
+	assert.Equal(t, 0, result.PreviousInviterId)
+}
+
 func TestGetAffiliateRecordsWithDetailsBuildsSourceDetails(t *testing.T) {
 	truncateTables(t)
 	resetAffiliateSettingForTest(t)

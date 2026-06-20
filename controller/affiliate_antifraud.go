@@ -185,8 +185,13 @@ func AdminRejectAffiliateApplication(c *gin.Context) {
 
 func AdminListFraudAlerts(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
-	status := c.DefaultQuery("status", "")
-	alerts, total, err := model.GetFraudAlerts(status, pageInfo.Page, pageInfo.PageSize)
+	alerts, total, err := model.SearchFraudAlerts(model.FraudAlertQuery{
+		Status:   c.DefaultQuery("status", ""),
+		IP:       c.Query("ip"),
+		Keyword:  c.Query("keyword"),
+		Page:     pageInfo.Page,
+		PageSize: pageInfo.PageSize,
+	})
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -197,7 +202,8 @@ func AdminListFraudAlerts(c *gin.Context) {
 }
 
 func AdminScanAffiliateFraud(c *gin.Context) {
-	newAlerts, err := model.DetectFraudBulk()
+	days := common.String2Int(c.DefaultQuery("days", "30"))
+	newAlerts, err := model.DetectFraudBulk(days)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -208,7 +214,8 @@ func AdminScanAffiliateFraud(c *gin.Context) {
 }
 
 func AdminScanAffiliateFraudDeep(c *gin.Context) {
-	newAlerts, err := model.DetectFraudDeep()
+	days := common.String2Int(c.DefaultQuery("days", "30"))
+	newAlerts, err := model.DetectFraudDeep(days)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -267,6 +274,19 @@ func AdminDismissFraudAlert(c *gin.Context) {
 
 	adminId := c.GetInt("id")
 	if err := model.DismissFraudAlert(id, adminId, req.Remark); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, nil)
+}
+
+func AdminDeleteFraudAlert(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiErrorMsg(c, "invalid alert ID")
+		return
+	}
+	if err := model.DeleteFraudAlert(id); err != nil {
 		common.ApiError(c, err)
 		return
 	}

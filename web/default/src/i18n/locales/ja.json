@@ -4866,6 +4866,18 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
+    "Deep scan": "詳細スキャン",
+    "Referral binding removed": "紹介関係を解除しました",
+    "Scan all affiliate relationships including historical logs? This may take a while.": "履歴ログを含めてすべての紹介関係をスキャンしますか？時間がかかる場合があります。",
+    "Search shared IP": "共有 IP を検索",
+    "Selected user has no inviter": "選択したユーザーに紹介者はいません",
+    "Unbind inviter": "紹介者を解除",
+    "Unbind result": "解除結果",
+    "Unbind selected user from current inviter?": "選択したユーザーを現在の紹介者から解除しますか？",
+    "Unbinding...": "解除中...",
+    "Detection days": "検出日数",
+    "Delete this alert?": "このアラートを削除しますか？",
+    "Scan affiliate relationships for IP overlap in the selected time window? This may take a while.": "選択した期間内で紹介関係の IP 重複をスキャンしますか？時間がかかる場合があります。",
     "Zoom": "ズーム"
   }
 }

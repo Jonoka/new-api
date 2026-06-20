@@ -22,6 +22,8 @@ import type {
   PageResponse,
   AdminBindAffiliateInviterRequest,
   AdminBindAffiliateInviterResult,
+  AdminUnbindAffiliateInviterRequest,
+  AdminUnbindAffiliateInviterResult,
   AffiliateAdminInvitation,
   AffiliateAdminRecord,
   AffiliatePayoutAccount,
@@ -136,10 +138,11 @@ export async function getAdminAffiliateInvitations(
   page = 1,
   pageSize = 50
 ) {
-  const res = await api.get<ApiResponse<PageResponse<AffiliateAdminInvitation>>>(
-    '/api/affiliate/admin/invitations',
-    { params: { keyword, p: page, page_size: pageSize } }
-  )
+  const res = await api.get<
+    ApiResponse<PageResponse<AffiliateAdminInvitation>>
+  >('/api/affiliate/admin/invitations', {
+    params: { keyword, p: page, page_size: pageSize },
+  })
   return res.data
 }
 
@@ -151,7 +154,9 @@ export async function getAdminAffiliateRecords(
 ) {
   const res = await api.get<ApiResponse<PageResponse<AffiliateAdminRecord>>>(
     '/api/affiliate/admin/records',
-    { params: { source_type: sourceType, status, p: page, page_size: pageSize } }
+    {
+      params: { source_type: sourceType, status, p: page, page_size: pageSize },
+    }
   )
   return res.data
 }
@@ -173,6 +178,16 @@ export async function bindAdminAffiliateInviter(
 ) {
   const res = await api.post<ApiResponse<AdminBindAffiliateInviterResult>>(
     '/api/affiliate/admin/bind-inviter',
+    payload
+  )
+  return res.data
+}
+
+export async function unbindAdminAffiliateInviter(
+  payload: AdminUnbindAffiliateInviterRequest
+) {
+  const res = await api.post<ApiResponse<AdminUnbindAffiliateInviterResult>>(
+    '/api/affiliate/admin/unbind-inviter',
     payload
   )
   return res.data
@@ -227,28 +242,47 @@ export async function updateAdminAffiliateApplication(
   return res.data
 }
 
-export async function getAdminFraudAlerts(
+export async function getAdminFraudAlerts({
   status = '',
+  keyword = '',
+  ip = '',
   page = 1,
-  pageSize = 50
-) {
+  pageSize = 50,
+}: {
+  status?: string
+  keyword?: string
+  ip?: string
+  page?: number
+  pageSize?: number
+} = {}) {
   const res = await api.get<ApiResponse<PageResponse<any>>>(
     '/api/affiliate/admin/fraud-alerts',
-    { params: { status, p: page, page_size: pageSize } }
+    { params: { status, keyword, ip, p: page, page_size: pageSize } }
   )
   return res.data
 }
 
-export async function adminScanFraud() {
+export async function adminScanFraud(days = 30) {
   const res = await api.post<ApiResponse<{ new_alerts: number }>>(
-    '/api/affiliate/admin/fraud-alerts/scan'
+    '/api/affiliate/admin/fraud-alerts/scan',
+    null,
+    { params: { days } }
   )
   return res.data
 }
 
-export async function adminScanFraudDeep() {
+export async function adminScanFraudDeep(days = 30) {
   const res = await api.post<ApiResponse<{ new_alerts: number }>>(
-    '/api/affiliate/admin/fraud-alerts/scan-deep'
+    '/api/affiliate/admin/fraud-alerts/scan-deep',
+    null,
+    { params: { days } }
+  )
+  return res.data
+}
+
+export async function adminDeleteFraudAlert(id: number) {
+  const res = await api.delete<ApiResponse<null>>(
+    `/api/affiliate/admin/fraud-alerts/${id}`
   )
   return res.data
 }

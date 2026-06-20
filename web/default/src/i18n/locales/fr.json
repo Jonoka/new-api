@@ -4866,6 +4866,18 @@
     "Zero retention": "Aucune rétention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
+    "Deep scan": "Analyse approfondie",
+    "Referral binding removed": "Lien de parrainage supprimé",
+    "Scan all affiliate relationships including historical logs? This may take a while.": "Analyser toutes les relations de parrainage, journaux historiques inclus ? Cela peut prendre un certain temps.",
+    "Search shared IP": "Rechercher l'IP partagée",
+    "Selected user has no inviter": "L'utilisateur sélectionné n'a pas de parrain",
+    "Unbind inviter": "Dissocier le parrain",
+    "Unbind result": "Résultat de dissociation",
+    "Unbind selected user from current inviter?": "Dissocier l'utilisateur sélectionné de son parrain actuel ?",
+    "Unbinding...": "Dissociation...",
+    "Detection days": "Jours à analyser",
+    "Delete this alert?": "Supprimer cette alerte ?",
+    "Scan affiliate relationships for IP overlap in the selected time window? This may take a while.": "Analyser les relations de parrainage pour les chevauchements d'IP dans la période sélectionnée ? Cela peut prendre un certain temps.",
     "Zoom": "Zoom"
   }
 }

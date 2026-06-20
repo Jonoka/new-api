@@ -64,6 +64,11 @@ type affiliateAdminBindInviterRequest struct {
 	Force          bool   `json:"force"`
 }
 
+type affiliateAdminUnbindInviterRequest struct {
+	UserId         int    `json:"user_id"`
+	UserIdentifier string `json:"user_identifier"`
+}
+
 func affiliateSettingPayload() affiliateSettingResponse {
 	affiliateSetting := setting.GetAffiliateSetting()
 	return affiliateSettingResponse{
@@ -428,6 +433,20 @@ func AdminBindAffiliateInviter(c *gin.Context) {
 		return
 	}
 	result, err := model.BindUserInviterByAffCode(req.UserId, req.UserIdentifier, req.AffCode, req.Force)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, result)
+}
+
+func AdminUnbindAffiliateInviter(c *gin.Context) {
+	req := affiliateAdminUnbindInviterRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	result, err := model.UnbindUserInviter(req.UserId, req.UserIdentifier)
 	if err != nil {
 		common.ApiError(c, err)
 		return
