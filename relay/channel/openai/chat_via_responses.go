@@ -84,7 +84,7 @@ func convertResponsesSSEToJSON(sseBody []byte) ([]byte, error) {
 		switch streamResp.Type {
 		case "response.output_text.delta":
 			outputText.WriteString(streamResp.Delta)
-		case "response.completed":
+		case "response.completed", "response.done", "response.incomplete", "response.cancelled", "response.canceled":
 			if streamResp.Response != nil {
 				completedResp = streamResp.Response
 			}
@@ -415,6 +415,15 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			sr.Error(err)
 			return
 		}
+		if isResponsesTerminalUsageEvent(streamResp.Type) && streamResp.Response != nil {
+			if streamResp.Response.Model != "" {
+				model = streamResp.Response.Model
+			}
+			if streamResp.Response.CreatedAt != 0 {
+				createAt = int64(streamResp.Response.CreatedAt)
+			}
+			applyResponsesUsageToOpenAIUsage(usage, streamResp.Response)
+		}
 
 		switch streamResp.Type {
 		case "response.created":
@@ -549,39 +558,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 
 		case "response.function_call_arguments.done":
 
-		case "response.completed":
-			if streamResp.Response != nil {
-				if streamResp.Response.Model != "" {
-					model = streamResp.Response.Model
-				}
-				if streamResp.Response.CreatedAt != 0 {
-					createAt = int64(streamResp.Response.CreatedAt)
-				}
-				if streamResp.Response.Usage != nil {
-					if streamResp.Response.Usage.InputTokens != 0 {
-						usage.PromptTokens = streamResp.Response.Usage.InputTokens
-						usage.InputTokens = streamResp.Response.Usage.InputTokens
-					}
-					if streamResp.Response.Usage.OutputTokens != 0 {
-						usage.CompletionTokens = streamResp.Response.Usage.OutputTokens
-						usage.OutputTokens = streamResp.Response.Usage.OutputTokens
-					}
-					if streamResp.Response.Usage.TotalTokens != 0 {
-						usage.TotalTokens = streamResp.Response.Usage.TotalTokens
-					} else {
-						usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
-					}
-					if streamResp.Response.Usage.InputTokensDetails != nil {
-						usage.PromptTokensDetails.CachedTokens = streamResp.Response.Usage.InputTokensDetails.CachedTokens
-						usage.PromptTokensDetails.ImageTokens = streamResp.Response.Usage.InputTokensDetails.ImageTokens
-						usage.PromptTokensDetails.AudioTokens = streamResp.Response.Usage.InputTokensDetails.AudioTokens
-					}
-					if streamResp.Response.Usage.CompletionTokenDetails.ReasoningTokens != 0 {
-						usage.CompletionTokenDetails.ReasoningTokens = streamResp.Response.Usage.CompletionTokenDetails.ReasoningTokens
-					}
-				}
-			}
-
+		case "response.completed", "response.done", "response.incomplete", "response.cancelled", "response.canceled":
 			if !sendStartIfNeeded() {
 				sr.Stop(streamErr)
 				return
