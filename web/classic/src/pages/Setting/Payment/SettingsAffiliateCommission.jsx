@@ -298,6 +298,31 @@ function ApplicationsPanel() {
     });
   };
 
+  const handleRevoke = (id, status) => {
+    Modal.confirm({
+      title: status === 'approved' ? t('撤销申请') : t('重置申请'),
+      content:
+        status === 'approved'
+          ? t('撤销后该用户将失去邀请权限，并可重新提交返佣申请。')
+          : t('重置后该用户可重新提交返佣申请。'),
+      onOk: async () => {
+        try {
+          const res = await API.post(
+            `/api/affiliate/admin/applications/${id}/revoke`,
+          );
+          if (res.data.success) {
+            showSuccess(t('已撤销，用户可重新提交申请'));
+            await loadApplications();
+          } else {
+            showError(res.data.message);
+          }
+        } catch (error) {
+          showError(t('操作失败'));
+        }
+      },
+    });
+  };
+
   const applicationStatusText = (status) => {
     const map = {
       pending: t('待审核'),
@@ -341,7 +366,7 @@ function ApplicationsPanel() {
     {
       title: t('操作'),
       key: 'action',
-      width: 180,
+      width: 220,
       render: (_, record) => (
         <Space>
           {record.status === 'pending' && (
@@ -361,6 +386,15 @@ function ApplicationsPanel() {
                 {t('驳回')}
               </Button>
             </>
+          )}
+          {record.status !== 'pending' && (
+            <Button
+              size='small'
+              type='warning'
+              onClick={() => handleRevoke(record.id, record.status)}
+            >
+              {record.status === 'approved' ? t('撤销') : t('重置')}
+            </Button>
           )}
         </Space>
       ),
@@ -411,7 +445,7 @@ function ApplicationsPanel() {
           }}
           empty={<Empty description={t('暂无申请记录')} />}
           size='small'
-          scroll={{ x: 790 }}
+          scroll={{ x: 830 }}
           className='w-full'
         />
       </Space>

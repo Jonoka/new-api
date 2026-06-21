@@ -233,7 +233,7 @@ export async function getAdminAffiliateApplications(
 
 export async function updateAdminAffiliateApplication(
   id: number,
-  action: 'approve' | 'reject',
+  action: 'approve' | 'reject' | 'revoke',
   payload: { remark?: string; reason?: string } = {}
 ) {
   const res = await api.post<ApiResponse<null>>(

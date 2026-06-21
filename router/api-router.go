@@ -222,6 +222,7 @@ func SetApiRouter(router *gin.Engine) {
 			affiliateAdminRoute.GET("/applications", controller.AdminListAffiliateApplications)
 			affiliateAdminRoute.POST("/applications/:id/approve", controller.AdminApproveAffiliateApplication)
 			affiliateAdminRoute.POST("/applications/:id/reject", controller.AdminRejectAffiliateApplication)
+			affiliateAdminRoute.POST("/applications/:id/revoke", controller.AdminRevokeAffiliateApplication)
 			affiliateAdminRoute.GET("/fraud-alerts", controller.AdminListFraudAlerts)
 			affiliateAdminRoute.POST("/fraud-alerts/scan", controller.AdminScanAffiliateFraud)
 			affiliateAdminRoute.POST("/fraud-alerts/scan-deep", controller.AdminScanAffiliateFraudDeep)

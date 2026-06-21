@@ -1005,6 +1005,37 @@ func TestAffiliateAgreementRequiredWithoutReviewApprovesConsent(t *testing.T) {
 	assert.EqualValues(t, 1, count)
 }
 
+func TestRevokeAffiliateApplicationAllowsReapply(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	affiliateSetting := setting.GetAffiliateSetting()
+	affiliateSetting.AgreementEnabled = true
+	affiliateSetting.AgreementText = "review terms"
+	affiliateSetting.ReviewEnabled = true
+
+	require.NoError(t, DB.Create(&User{Id: 240, Username: "reapply-parent", AffCode: "aff240", Status: common.UserStatusEnabled}).Error)
+
+	require.NoError(t, CreateAffiliateApplication(240, affiliateSetting.AgreementText))
+	var app AffiliateApplication
+	require.NoError(t, DB.Where("user_id = ?", 240).First(&app).Error)
+	require.Equal(t, AffiliateAppStatusPending, app.Status)
+	require.NoError(t, ApproveAffiliateApplication(app.Id, 1, "approved for test"))
+	assert.True(t, AffiliateUserCanInvite(240, affiliateSetting))
+
+	require.NoError(t, RevokeAffiliateApplication(app.Id))
+	current, err := GetAffiliateApplicationByUserId(240)
+	require.NoError(t, err)
+	assert.Nil(t, current)
+	assert.False(t, AffiliateUserCanInvite(240, affiliateSetting))
+
+	require.NoError(t, CreateAffiliateApplication(240, affiliateSetting.AgreementText))
+	var reapplied AffiliateApplication
+	require.NoError(t, DB.Where("user_id = ?", 240).First(&reapplied).Error)
+	assert.Equal(t, AffiliateAppStatusPending, reapplied.Status)
+	assert.Equal(t, 240, reapplied.UserId)
+}
+
 func TestUnbindUserInviterClearsRelationshipAndDecrementsCount(t *testing.T) {
 	truncateTables(t)
 	resetAffiliateSettingForTest(t)

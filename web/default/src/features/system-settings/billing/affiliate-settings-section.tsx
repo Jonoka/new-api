@@ -571,11 +571,18 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
     loadFraudAlerts()
   }, [loadFraudAlerts])
 
-  const handleAppAction = async (id: number, action: 'approve' | 'reject') => {
+  const handleAppAction = async (
+    id: number,
+    action: 'approve' | 'reject' | 'revoke'
+  ) => {
     const msg =
       action === 'approve'
         ? t('Approve this application?')
-        : t('Reject this application?')
+        : action === 'reject'
+          ? t('Reject this application?')
+          : t(
+              'Revoke this application? The user will lose inviter access and can apply again.'
+            )
     const reason =
       action === 'reject'
         ? window.prompt(t('Rejection reason (optional)'))
@@ -1911,31 +1918,45 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
                       {formatTimestampToDate(app.created_at)}
                     </TableCell>
                     <TableCell>
-                      {app.status === 'pending' && (
-                        <div className='flex gap-1'>
+                      <div className='flex flex-col gap-1'>
+                        {app.status === 'pending' && (
+                          <div className='flex gap-1'>
+                            <Button
+                              size='sm'
+                              variant='default'
+                              disabled={appActionLoadingId === app.id}
+                              onClick={() => handleAppAction(app.id, 'approve')}
+                            >
+                              {t('Approve')}
+                            </Button>
+                            <Button
+                              size='sm'
+                              variant='destructive'
+                              disabled={appActionLoadingId === app.id}
+                              onClick={() => handleAppAction(app.id, 'reject')}
+                            >
+                              {t('Reject')}
+                            </Button>
+                          </div>
+                        )}
+                        {app.status !== 'pending' && (
                           <Button
                             size='sm'
-                            variant='default'
+                            variant='outline'
                             disabled={appActionLoadingId === app.id}
-                            onClick={() => handleAppAction(app.id, 'approve')}
+                            onClick={() => handleAppAction(app.id, 'revoke')}
                           >
-                            {t('Approve')}
+                            {app.status === 'approved'
+                              ? t('Revoke')
+                              : t('Reset')}
                           </Button>
-                          <Button
-                            size='sm'
-                            variant='destructive'
-                            disabled={appActionLoadingId === app.id}
-                            onClick={() => handleAppAction(app.id, 'reject')}
-                          >
-                            {t('Reject')}
-                          </Button>
-                        </div>
-                      )}
-                      {app.status === 'rejected' && app.rejected_reason && (
-                        <span className='text-muted-foreground text-xs'>
-                          {app.rejected_reason}
-                        </span>
-                      )}
+                        )}
+                        {app.status === 'rejected' && app.rejected_reason && (
+                          <span className='text-muted-foreground text-xs'>
+                            {app.rejected_reason}
+                          </span>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))

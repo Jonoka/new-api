@@ -222,6 +222,19 @@ func AdminRejectAffiliateApplication(c *gin.Context) {
 	common.ApiSuccess(c, nil)
 }
 
+func AdminRevokeAffiliateApplication(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiErrorMsg(c, "invalid application ID")
+		return
+	}
+	if err := model.RevokeAffiliateApplication(id); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, nil)
+}
+
 // Admin: Fraud Detection
 
 func AdminListFraudAlerts(c *gin.Context) {

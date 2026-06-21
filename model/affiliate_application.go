@@ -195,6 +195,14 @@ func RejectAffiliateApplication(appId, adminId int, reason string) error {
 	}).Error
 }
 
+func RevokeAffiliateApplication(appId int) error {
+	var app AffiliateApplication
+	if err := DB.Where("id = ?", appId).First(&app).Error; err != nil {
+		return errors.New("application not found")
+	}
+	return DB.Delete(&app).Error
+}
+
 func GetAffiliateApplicationByUserId(userId int) (*AffiliateApplication, error) {
 	var app AffiliateApplication
 	err := DB.Where("user_id = ?", userId).First(&app).Error
