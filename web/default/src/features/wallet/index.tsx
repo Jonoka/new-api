@@ -89,6 +89,7 @@ export function Wallet(props: WalletProps) {
   }, [currency?.quotaDisplayType, currency?.usdExchangeRate])
   const {
     amount: paymentAmount,
+    amountText: paymentAmountText,
     calculating,
     processing,
     calculatePaymentAmount,
@@ -303,6 +304,7 @@ export function Wallet(props: WalletProps) {
                   topupAmount={topupAmount}
                   onTopupAmountChange={handleTopupAmountChange}
                   paymentAmount={paymentAmount}
+                  paymentAmountText={paymentAmountText}
                   calculating={calculating}
                   promoCode={promoCode}
                   onPromoCodeChange={handlePromoCodeChange}
@@ -347,6 +349,7 @@ export function Wallet(props: WalletProps) {
         onConfirm={handlePaymentConfirm}
         topupAmount={topupAmount}
         paymentAmount={paymentAmount}
+        paymentAmountText={paymentAmountText}
         paymentMethod={selectedPaymentMethod}
         calculating={calculating}
         processing={processing || pancakeProcessing || okpayProcessing}

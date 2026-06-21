@@ -36,6 +36,10 @@ export default function SettingsPaymentGatewayOkpay(props) {
     OkpayMerchantId: '',
     OkpayMerchantToken: '',
     OkpayExchangeRate: 7.3,
+    OkpayAutoExchangeEnabled: true,
+    OkpayUsdtCnyRate: 7.2,
+    OkpayRateApiUrl:
+      'https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=cny&include_last_updated_at=true',
     OkpayMinTopUp: 1,
     OkpayCoin: 'USDT',
   });
@@ -51,6 +55,18 @@ export default function SettingsPaymentGatewayOkpay(props) {
           props.options.OkpayExchangeRate !== undefined
             ? parseFloat(props.options.OkpayExchangeRate)
             : 7.3,
+        OkpayAutoExchangeEnabled:
+          props.options.OkpayAutoExchangeEnabled !== undefined
+            ? props.options.OkpayAutoExchangeEnabled === true ||
+              props.options.OkpayAutoExchangeEnabled === 'true'
+            : true,
+        OkpayUsdtCnyRate:
+          props.options.OkpayUsdtCnyRate !== undefined
+            ? parseFloat(props.options.OkpayUsdtCnyRate)
+            : 7.2,
+        OkpayRateApiUrl:
+          props.options.OkpayRateApiUrl ||
+          'https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=cny&include_last_updated_at=true',
         OkpayMinTopUp:
           props.options.OkpayMinTopUp !== undefined
             ? parseInt(props.options.OkpayMinTopUp)
@@ -95,6 +111,20 @@ export default function SettingsPaymentGatewayOkpay(props) {
           value: inputs.OkpayExchangeRate.toString(),
         });
       }
+      options.push({
+        key: 'OkpayAutoExchangeEnabled',
+        value: String(Boolean(inputs.OkpayAutoExchangeEnabled)),
+      });
+      if (inputs.OkpayUsdtCnyRate !== '') {
+        options.push({
+          key: 'OkpayUsdtCnyRate',
+          value: inputs.OkpayUsdtCnyRate.toString(),
+        });
+      }
+      options.push({
+        key: 'OkpayRateApiUrl',
+        value: removeTrailingSlash(inputs.OkpayRateApiUrl || ''),
+      });
       if (inputs.OkpayMinTopUp !== '') {
         options.push({
           key: 'OkpayMinTopUp',
@@ -167,8 +197,8 @@ export default function SettingsPaymentGatewayOkpay(props) {
               <Form.InputNumber
                 field='OkpayExchangeRate'
                 precision={2}
-                label={t('充值价格（x元/美金）')}
-                placeholder={t('例如：7，就是7元/美金')}
+                label={t('站内充值单价（CNY/USD）')}
+                placeholder={t('例如：7.2，表示 1 美元额度标价 7.2 元')}
               />
             </Col>
             <Col xs={24} sm={24} md={8} lg={8} xl={8}>
@@ -183,6 +213,32 @@ export default function SettingsPaymentGatewayOkpay(props) {
                 field='OkpayCoin'
                 label={t('币种')}
                 placeholder='USDT'
+              />
+            </Col>
+          </Row>
+          <Row
+            gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
+            style={{ marginTop: 16 }}
+          >
+            <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+              <Form.Switch
+                field='OkpayAutoExchangeEnabled'
+                label={t('自动获取 USDT/CNY 汇率')}
+              />
+            </Col>
+            <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+              <Form.InputNumber
+                field='OkpayUsdtCnyRate'
+                precision={4}
+                label={t('USDT/CNY 兜底汇率')}
+                placeholder={t('自动汇率失败时使用')}
+              />
+            </Col>
+            <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+              <Form.Input
+                field='OkpayRateApiUrl'
+                label={t('汇率接口地址')}
+                placeholder='https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=cny&include_last_updated_at=true'
               />
             </Col>
           </Row>

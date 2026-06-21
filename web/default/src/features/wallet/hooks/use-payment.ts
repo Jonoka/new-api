@@ -21,6 +21,7 @@ import i18next from 'i18next'
 import { toast } from 'sonner'
 import {
   calculateAmount,
+  calculateOkpayAmount,
   calculateStripeAmount,
   calculateWaffoPancakeAmount,
   requestPayment,
@@ -29,6 +30,7 @@ import {
 } from '../api'
 import {
   isStripePayment,
+  isOkpayPayment,
   isWaffoPancakePayment,
   submitPaymentForm,
 } from '../lib'
@@ -39,6 +41,7 @@ import {
 
 export function usePayment() {
   const [amount, setAmount] = useState<number>(0)
+  const [amountText, setAmountText] = useState<string>('')
   const [calculating, setCalculating] = useState(false)
   const [processing, setProcessing] = useState(false)
 
@@ -50,6 +53,7 @@ export function usePayment() {
 
         const isStripe = isStripePayment(paymentType)
         const isPancake = isWaffoPancakePayment(paymentType)
+        const isOkpay = isOkpayPayment(paymentType)
         const response = isStripe
           ? await calculateStripeAmount({
               amount: topupAmount,
@@ -60,6 +64,11 @@ export function usePayment() {
                 amount: topupAmount,
                 promo_code: promoCode,
               })
+            : isOkpay
+              ? await calculateOkpayAmount({
+                  amount: topupAmount,
+                  promo_code: promoCode,
+                })
             : await calculateAmount({
                 amount: topupAmount,
                 promo_code: promoCode,
@@ -68,14 +77,17 @@ export function usePayment() {
         if (isApiSuccess(response) && response.data) {
           const calculatedAmount = parseFloat(response.data)
           setAmount(calculatedAmount)
+          setAmountText(response.amount_text || '')
           return calculatedAmount
         }
 
         // Don't show error for calculation, just set to 0
         setAmount(0)
+        setAmountText('')
         return 0
       } catch (_error) {
         setAmount(0)
+        setAmountText('')
         return 0
       } finally {
         setCalculating(false)
@@ -151,6 +163,7 @@ export function usePayment() {
 
   return {
     amount,
+    amountText,
     calculating,
     processing,
     calculatePaymentAmount,

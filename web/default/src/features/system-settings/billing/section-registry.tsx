@@ -162,6 +162,12 @@ const BILLING_SECTIONS = [
           OkpayMerchantId: settings.OkpayMerchantId ?? '',
           OkpayMerchantToken: settings.OkpayMerchantToken ?? '',
           OkpayExchangeRate: settings.OkpayExchangeRate ?? 7.2,
+          OkpayAutoExchangeEnabled:
+            settings.OkpayAutoExchangeEnabled ?? true,
+          OkpayUsdtCnyRate: settings.OkpayUsdtCnyRate ?? 7.2,
+          OkpayRateApiUrl:
+            settings.OkpayRateApiUrl ??
+            'https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=cny&include_last_updated_at=true',
           OkpayMinTopUp: settings.OkpayMinTopUp ?? 1,
           OkpayCoin: settings.OkpayCoin ?? 'USDT',
         }}

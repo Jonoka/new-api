@@ -102,6 +102,9 @@ func InitOptionMap() {
 	common.OptionMap["OkpayMerchantId"] = setting.OkpayMerchantId
 	common.OptionMap["OkpayMerchantToken"] = setting.OkpayMerchantToken
 	common.OptionMap["OkpayExchangeRate"] = strconv.FormatFloat(setting.OkpayExchangeRate, 'f', -1, 64)
+	common.OptionMap["OkpayAutoExchangeEnabled"] = strconv.FormatBool(setting.OkpayAutoExchangeEnabled)
+	common.OptionMap["OkpayUsdtCnyRate"] = strconv.FormatFloat(setting.OkpayUsdtCnyRate, 'f', -1, 64)
+	common.OptionMap["OkpayRateApiUrl"] = setting.OkpayRateApiUrl
 	common.OptionMap["OkpayMinTopUp"] = strconv.Itoa(setting.OkpayMinTopUp)
 	common.OptionMap["OkpayCoin"] = setting.OkpayCoin
 	common.OptionMap["WaffoEnabled"] = strconv.FormatBool(setting.WaffoEnabled)
@@ -466,6 +469,12 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.OkpayMerchantToken = value
 	case "OkpayExchangeRate":
 		setting.OkpayExchangeRate, _ = strconv.ParseFloat(value, 64)
+	case "OkpayAutoExchangeEnabled":
+		setting.OkpayAutoExchangeEnabled = value == "true"
+	case "OkpayUsdtCnyRate":
+		setting.OkpayUsdtCnyRate, _ = strconv.ParseFloat(value, 64)
+	case "OkpayRateApiUrl":
+		setting.OkpayRateApiUrl = value
 	case "OkpayMinTopUp":
 		setting.OkpayMinTopUp, _ = strconv.Atoi(value)
 	case "OkpayCoin":

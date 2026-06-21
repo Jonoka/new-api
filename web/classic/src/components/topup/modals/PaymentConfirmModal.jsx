@@ -40,6 +40,7 @@ const PaymentConfirmModal = ({
   promoCode,
   setPromoCode,
   promoDiscount,
+  amountText,
   onPromoCodeBlur,
 }) => {
   const hasPromoDiscount =
@@ -47,6 +48,7 @@ const PaymentConfirmModal = ({
   const originalAmount = Number(promoDiscount?.original_amount || 0);
   const discountAmount = Number(promoDiscount?.discount_amount || 0);
   const paidAmount = Number(promoDiscount?.paid_amount ?? amountNumber ?? 0);
+  const paidAmountText = payWay === 'okpay' && amountText ? amountText : `${paidAmount.toFixed(2)} ${t('元')}`;
   return (
     <Modal
       title={
@@ -122,7 +124,7 @@ const PaymentConfirmModal = ({
                     {t('优惠后')}：
                   </Text>
                   <Text className='text-slate-700 dark:text-slate-200'>
-                    {`${paidAmount.toFixed(2)} ${t('元')}`}
+                    {paidAmountText}
                   </Text>
                 </div>
               </>

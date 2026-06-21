@@ -40,6 +40,7 @@ interface PaymentConfirmDialogProps {
   onConfirm: () => void
   topupAmount: number
   paymentAmount: number
+  paymentAmountText?: string
   paymentMethod: PaymentMethod | undefined
   calculating: boolean
   processing: boolean
@@ -53,6 +54,7 @@ export function PaymentConfirmDialog({
   onConfirm,
   topupAmount,
   paymentAmount,
+  paymentAmountText,
   paymentMethod,
   calculating,
   processing,
@@ -99,7 +101,7 @@ export function PaymentConfirmDialog({
             ) : (
               <div className='flex items-baseline gap-2'>
                 <span className='text-2xl font-semibold'>
-                  {formatCurrency(paymentAmount)}
+                  {paymentAmountText || formatCurrency(paymentAmount)}
                 </span>
                 {hasDiscount && (
                   <span className='text-muted-foreground text-sm line-through'>

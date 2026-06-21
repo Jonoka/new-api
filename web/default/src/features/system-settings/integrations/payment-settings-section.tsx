@@ -177,6 +177,9 @@ const paymentSchema = z.object({
   OkpayMerchantId: z.string(),
   OkpayMerchantToken: z.string(),
   OkpayExchangeRate: z.coerce.number().min(0),
+  OkpayAutoExchangeEnabled: z.boolean(),
+  OkpayUsdtCnyRate: z.coerce.number().min(0),
+  OkpayRateApiUrl: z.string(),
   OkpayMinTopUp: z.coerce.number().min(0),
   OkpayCoin: z.string(),
 })
@@ -363,6 +366,9 @@ export function PaymentSettingsSection({
       OkpayMerchantId: initialFormValues.OkpayMerchantId,
       OkpayMerchantToken: initialFormValues.OkpayMerchantToken,
       OkpayExchangeRate: initialFormValues.OkpayExchangeRate,
+      OkpayAutoExchangeEnabled: initialFormValues.OkpayAutoExchangeEnabled,
+      OkpayUsdtCnyRate: initialFormValues.OkpayUsdtCnyRate,
+      OkpayRateApiUrl: initialFormValues.OkpayRateApiUrl,
       OkpayMinTopUp: initialFormValues.OkpayMinTopUp,
       OkpayCoin: initialFormValues.OkpayCoin,
     },
@@ -427,6 +433,9 @@ export function PaymentSettingsSection({
       OkpayMerchantId: parsedDefaults.OkpayMerchantId,
       OkpayMerchantToken: parsedDefaults.OkpayMerchantToken,
       OkpayExchangeRate: parsedDefaults.OkpayExchangeRate,
+      OkpayAutoExchangeEnabled: parsedDefaults.OkpayAutoExchangeEnabled,
+      OkpayUsdtCnyRate: parsedDefaults.OkpayUsdtCnyRate,
+      OkpayRateApiUrl: parsedDefaults.OkpayRateApiUrl,
       OkpayMinTopUp: parsedDefaults.OkpayMinTopUp,
       OkpayCoin: parsedDefaults.OkpayCoin,
     })
@@ -463,6 +472,9 @@ export function PaymentSettingsSection({
       OkpayMerchantId: values.OkpayMerchantId.trim(),
       OkpayMerchantToken: values.OkpayMerchantToken.trim(),
       OkpayExchangeRate: values.OkpayExchangeRate,
+      OkpayAutoExchangeEnabled: values.OkpayAutoExchangeEnabled,
+      OkpayUsdtCnyRate: values.OkpayUsdtCnyRate,
+      OkpayRateApiUrl: removeTrailingSlash(values.OkpayRateApiUrl.trim()),
       OkpayMinTopUp: values.OkpayMinTopUp,
       OkpayCoin: values.OkpayCoin.trim(),
       WaffoEnabled: values.WaffoEnabled,
@@ -520,6 +532,12 @@ export function PaymentSettingsSection({
       OkpayMerchantId: initialRef.current.OkpayMerchantId.trim(),
       OkpayMerchantToken: initialRef.current.OkpayMerchantToken.trim(),
       OkpayExchangeRate: initialRef.current.OkpayExchangeRate,
+      OkpayAutoExchangeEnabled:
+        initialRef.current.OkpayAutoExchangeEnabled,
+      OkpayUsdtCnyRate: initialRef.current.OkpayUsdtCnyRate,
+      OkpayRateApiUrl: removeTrailingSlash(
+        initialRef.current.OkpayRateApiUrl.trim()
+      ),
       OkpayMinTopUp: initialRef.current.OkpayMinTopUp,
       OkpayCoin: initialRef.current.OkpayCoin.trim(),
       WaffoEnabled: initialRef.current.WaffoEnabled,
@@ -730,6 +748,29 @@ export function PaymentSettingsSection({
       updates.push({
         key: 'OkpayExchangeRate',
         value: sanitized.OkpayExchangeRate,
+      })
+    }
+
+    if (
+      sanitized.OkpayAutoExchangeEnabled !== initial.OkpayAutoExchangeEnabled
+    ) {
+      updates.push({
+        key: 'OkpayAutoExchangeEnabled',
+        value: sanitized.OkpayAutoExchangeEnabled,
+      })
+    }
+
+    if (sanitized.OkpayUsdtCnyRate !== initial.OkpayUsdtCnyRate) {
+      updates.push({
+        key: 'OkpayUsdtCnyRate',
+        value: sanitized.OkpayUsdtCnyRate,
+      })
+    }
+
+    if (sanitized.OkpayRateApiUrl !== initial.OkpayRateApiUrl) {
+      updates.push({
+        key: 'OkpayRateApiUrl',
+        value: sanitized.OkpayRateApiUrl,
       })
     }
 
@@ -1855,13 +1896,16 @@ export function PaymentSettingsSection({
                 name='OkpayExchangeRate'
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>{t('Exchange Rate (CNY/USD)')}</FormLabel>
+                    <FormLabel>{t('Top-up unit price (CNY/USD)')}</FormLabel>
                     <FormControl>
                       <Input
                         type='number'
                         {...safeNumberFieldProps(field)}
                       />
                     </FormControl>
+                    <FormDescription>
+                      {t('CNY price for 1 USD of account credit')}
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -1879,6 +1923,72 @@ export function PaymentSettingsSection({
                         {...safeNumberFieldProps(field)}
                       />
                     </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            <div className='grid gap-6 md:grid-cols-3'>
+              <FormField
+                control={form.control}
+                name='OkpayAutoExchangeEnabled'
+                render={({ field }) => (
+                  <SettingsSwitchItem>
+                    <SettingsSwitchContent>
+                      <FormLabel>{t('Auto USDT/CNY rate')}</FormLabel>
+                      <FormDescription>
+                        {t('Fetch live USDT/CNY rate before creating OKPay order')}
+                      </FormDescription>
+                    </SettingsSwitchContent>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </SettingsSwitchItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='OkpayUsdtCnyRate'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Fallback USDT/CNY rate')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        step='0.0001'
+                        min={0}
+                        {...safeNumberFieldProps(field)}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t('Used when live rate fetching fails')}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='OkpayRateApiUrl'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Rate API URL')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder='https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=cny&include_last_updated_at=true'
+                        {...field}
+                        onChange={(event) => field.onChange(event.target.value)}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t('CoinGecko simple price compatible response')}
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}

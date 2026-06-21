@@ -58,6 +58,7 @@ interface RechargeFormCardProps {
   topupAmount: number
   onTopupAmountChange: (amount: number) => void
   paymentAmount: number
+  paymentAmountText?: string
   calculating: boolean
   promoCode: string
   onPromoCodeChange: (code: string) => void
@@ -90,6 +91,7 @@ export function RechargeFormCard({
   topupAmount,
   onTopupAmountChange,
   paymentAmount,
+  paymentAmountText,
   calculating,
   promoCode,
   onPromoCodeChange,
@@ -131,6 +133,8 @@ export function RechargeFormCard({
   const hasConfigurableTopup =
     topupInfo?.enable_online_topup ||
     topupInfo?.enable_stripe_topup ||
+    topupInfo?.enable_bepusdt_topup ||
+    topupInfo?.enable_okpay_topup ||
     enableWaffoTopup ||
     enableWaffoPancakeTopup
   const hasAnyTopup = hasConfigurableTopup || enableCreemTopup
@@ -300,7 +304,7 @@ export function RechargeFormCard({
                       <Skeleton className='h-5 w-16' />
                     ) : (
                       <span className='text-sm font-semibold'>
-                        {formatCurrency(paymentAmount)}
+                        {paymentAmountText || formatCurrency(paymentAmount)}
                       </span>
                     )}
                   </div>

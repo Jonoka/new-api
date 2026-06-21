@@ -157,6 +157,7 @@ func GetTopUpInfo(c *gin.Context) {
 		"creem_products":          setting.CreemProducts,
 		"bepusdt_chains":          bepusdtChains,
 		"bepusdt_min_topup":       setting.BepusdtMinTopUp,
+		"okpay_min_topup":         setting.OkpayMinTopUp,
 		"pay_methods":             payMethods,
 		"min_topup":               operation_setting.MinTopUp,
 		"stripe_min_topup":        setting.StripeMinTopUp,

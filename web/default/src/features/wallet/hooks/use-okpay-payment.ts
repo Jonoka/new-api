@@ -3,6 +3,10 @@ import i18next from 'i18next'
 import { toast } from 'sonner'
 import { requestOkpayPayment, isApiSuccess } from '../api'
 
+function getPaymentErrorMessage(data: unknown, fallback?: string): string {
+  return typeof data === 'string' && data.trim() ? data : fallback || ''
+}
+
 /**
  * Hook for handling OKPay payment processing
  */
@@ -45,9 +49,8 @@ export function useOkpayPayment() {
         }
 
         const errorMsg =
-          typeof response.data === 'string' && response.data.trim()
-            ? response.data
-            : response.message || i18next.t('Payment request failed')
+          getPaymentErrorMessage(response.data, response.message) ||
+          i18next.t('Payment request failed')
         toast.error(errorMsg)
         return false
       } catch (_error) {

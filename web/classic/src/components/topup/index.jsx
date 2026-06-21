@@ -103,6 +103,7 @@ const TopUp = () => {
   const [payMethods, setPayMethods] = useState([]);
   const [promoCode, setPromoCode] = useState('');
   const [promoDiscount, setPromoDiscount] = useState(null);
+  const [amountText, setAmountText] = useState('');
 
   // 账单Modal状态
   const [openHistory, setOpenHistory] = useState(false);
@@ -176,10 +177,12 @@ const TopUp = () => {
       const { message, data, discount } = response.data;
       if (message === 'success') {
         setAmount(parseFloat(data));
+        setAmountText(response.data.amount_text || '');
         setPromoDiscount(discount || null);
         return true;
       }
       setAmount(0);
+      setAmountText('');
       setPromoDiscount(null);
       Toast.error({ content: '错误：' + (data || fallbackError), id: 'getAmount' });
       return false;
@@ -836,6 +839,9 @@ const TopUp = () => {
   }, [statusState?.status]);
 
   const renderAmount = () => {
+    if (payWay === 'okpay' && amountText) {
+      return amountText;
+    }
     return amount + ' ' + t('元');
   };
 
@@ -977,6 +983,7 @@ const TopUp = () => {
         promoCode={promoCode}
         setPromoCode={setPromoCode}
         promoDiscount={promoDiscount}
+        amountText={amountText}
         onPromoCodeBlur={() => requestAmountByPayment(payWay)}
       />
 

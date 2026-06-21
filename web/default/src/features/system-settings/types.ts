@@ -251,6 +251,9 @@ export type BillingSettings = {
   OkpayMerchantId: string
   OkpayMerchantToken: string
   OkpayExchangeRate: number
+  OkpayAutoExchangeEnabled: boolean
+  OkpayUsdtCnyRate: number
+  OkpayRateApiUrl: string
   OkpayMinTopUp: number
   OkpayCoin: string
   WaffoEnabled: boolean
@@ -271,6 +274,8 @@ export type BillingSettings = {
   WaffoPancakeMerchantID: string
   WaffoPancakePrivateKey: string
   WaffoPancakeReturnURL: string
+  WaffoPancakeUnitPrice: number
+  WaffoPancakeMinTopUp: number
   // Bound by the operator through the catalog flow in the admin Pancake
   // section (saved via /api/option/waffo-pancake/save).
   WaffoPancakeStoreID: string

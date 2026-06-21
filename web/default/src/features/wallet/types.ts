@@ -34,7 +34,16 @@ export interface ApiResponse<T = unknown> {
  */
 export type TopupInfoResponse = ApiResponse<TopupInfo>
 export type RedemptionResponse = ApiResponse<number>
-export type AmountResponse = ApiResponse<string>
+export type AmountResponse = ApiResponse<string> & {
+  amount?: string
+  amount_text?: string
+  coin?: string
+  fiat_amount?: string
+  fiat_currency?: string
+  rate?: string
+  rate_source?: string
+  auto_rate_failed?: boolean
+}
 export type PaymentResponse = ApiResponse<Record<string, unknown>> & {
   url?: string
 }
@@ -199,6 +208,8 @@ export interface TopupInfo {
   bepusdt_min_topup?: number
   /** Whether OKPay topup is enabled */
   enable_okpay_topup?: boolean
+  /** Minimum topup amount for OKPay */
+  okpay_min_topup?: number
   /** Whether redemption code usage is enabled */
   enable_redemption?: boolean
   /** Whether compliance confirmation has been completed */

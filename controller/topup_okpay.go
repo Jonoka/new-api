@@ -4,11 +4,13 @@ import (
 	"crypto/md5"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -33,6 +35,28 @@ type OkpayAmountRequest struct {
 	Amount    int64  `json:"amount"`
 	PromoCode string `json:"promo_code"`
 }
+
+type okpayPaymentAmount struct {
+	FiatAmount     float64
+	CoinAmount     float64
+	Rate           float64
+	RateSource     string
+	AutoRateFailed bool
+	Coin           string
+}
+
+type okpayRateCacheEntry struct {
+	rate      float64
+	source    string
+	expiresAt time.Time
+}
+
+var (
+	okpayRateCacheMu sync.Mutex
+	okpayRateCache   okpayRateCacheEntry
+)
+
+const okpayRateCacheTTL = 5 * time.Minute
 
 // generateOkpaySignature 按 OKPay 规范生成 MD5 签名
 // 1. 所有非空参数按 key 排序
@@ -78,8 +102,8 @@ func verifyOkpayCallbackSignature(formValues url.Values, merchantToken string) b
 	return strings.EqualFold(expected, actual)
 }
 
-// getOkpayPayMoney 计算 OKPay 支付金额
-func getOkpayPayMoney(amount int64, group string) float64 {
+// getOkpayFiatPayMoney 计算站内 OKPay 标价金额（CNY）。
+func getOkpayFiatPayMoney(amount int64, group string) float64 {
 	dAmount := decimal.NewFromInt(amount)
 	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
 		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
@@ -103,6 +127,150 @@ func getOkpayPayMoney(amount int64, group string) float64 {
 
 	payMoney := dAmount.Mul(dExchangeRate).Mul(dTopupGroupRatio).Mul(dDiscount)
 	return payMoney.InexactFloat64()
+}
+
+// getOkpayPayMoney 保持旧测试/调用兼容，返回站内 CNY 标价金额。
+func getOkpayPayMoney(amount int64, group string) float64 {
+	return getOkpayFiatPayMoney(amount, group)
+}
+
+func getOkpayCoin() string {
+	coin := strings.ToUpper(strings.TrimSpace(setting.OkpayCoin))
+	if coin == "" {
+		return "USDT"
+	}
+	return coin
+}
+
+func getOkpayFallbackUsdtCnyRate() float64 {
+	if setting.OkpayUsdtCnyRate > 0 && !math.IsNaN(setting.OkpayUsdtCnyRate) && !math.IsInf(setting.OkpayUsdtCnyRate, 0) {
+		return setting.OkpayUsdtCnyRate
+	}
+	if setting.OkpayExchangeRate > 0 && !math.IsNaN(setting.OkpayExchangeRate) && !math.IsInf(setting.OkpayExchangeRate, 0) {
+		return setting.OkpayExchangeRate
+	}
+	return 1
+}
+
+func parseOkpayRateFromBody(body []byte) (float64, error) {
+	var payload map[string]interface{}
+	if err := common.Unmarshal(body, &payload); err != nil {
+		return 0, err
+	}
+	tether, ok := payload["tether"].(map[string]interface{})
+	if !ok {
+		return 0, fmt.Errorf("missing tether price")
+	}
+	rawRate, ok := tether["cny"]
+	if !ok {
+		return 0, fmt.Errorf("missing cny price")
+	}
+	rate, err := strconv.ParseFloat(fmt.Sprintf("%v", rawRate), 64)
+	if err != nil || rate <= 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+		return 0, fmt.Errorf("invalid cny price")
+	}
+	return rate, nil
+}
+
+func fetchOkpayUsdtCnyRate() (float64, string, error) {
+	rateUrl := strings.TrimSpace(setting.OkpayRateApiUrl)
+	if rateUrl == "" {
+		return 0, "", fmt.Errorf("rate api url is empty")
+	}
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, err := client.Get(rateUrl)
+	if err != nil {
+		return 0, "", err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, "", err
+	}
+	if resp.StatusCode/100 != 2 {
+		return 0, "", fmt.Errorf("rate api http %d", resp.StatusCode)
+	}
+	rate, err := parseOkpayRateFromBody(body)
+	if err != nil {
+		return 0, "", err
+	}
+	return rate, "coingecko", nil
+}
+
+func getOkpayUsdtCnyRate() (float64, string, bool) {
+	fallbackRate := getOkpayFallbackUsdtCnyRate()
+	if !setting.OkpayAutoExchangeEnabled {
+		return fallbackRate, "fallback", false
+	}
+
+	now := time.Now()
+	okpayRateCacheMu.Lock()
+	if okpayRateCache.rate > 0 && now.Before(okpayRateCache.expiresAt) {
+		cached := okpayRateCache
+		okpayRateCacheMu.Unlock()
+		return cached.rate, cached.source, false
+	}
+	okpayRateCacheMu.Unlock()
+
+	rate, source, err := fetchOkpayUsdtCnyRate()
+	if err != nil {
+		common.SysLog("failed to fetch OKPay USDT/CNY rate, using fallback: " + err.Error())
+		return fallbackRate, "fallback", true
+	}
+
+	okpayRateCacheMu.Lock()
+	okpayRateCache = okpayRateCacheEntry{
+		rate:      rate,
+		source:    source,
+		expiresAt: now.Add(okpayRateCacheTTL),
+	}
+	okpayRateCacheMu.Unlock()
+	return rate, source, false
+}
+
+func getOkpayPaymentAmountFromFiat(fiatAmount float64) okpayPaymentAmount {
+	coin := getOkpayCoin()
+	if coin != "USDT" {
+		return okpayPaymentAmount{
+			FiatAmount: fiatAmount,
+			CoinAmount: fiatAmount,
+			Rate:       1,
+			RateSource: "coin",
+			Coin:       coin,
+		}
+	}
+
+	rate, source, failed := getOkpayUsdtCnyRate()
+	if rate <= 0 {
+		rate = 1
+		source = "fallback"
+		failed = true
+	}
+	coinAmount := decimal.NewFromFloat(fiatAmount).Div(decimal.NewFromFloat(rate)).Round(8).InexactFloat64()
+	return okpayPaymentAmount{
+		FiatAmount:     fiatAmount,
+		CoinAmount:     coinAmount,
+		Rate:           rate,
+		RateSource:     source,
+		AutoRateFailed: failed,
+		Coin:           coin,
+	}
+}
+
+func calculateOkpayAffiliateSourceQuota(storedAmount int64, originalFiatAmount float64, paidFiatAmount float64) int {
+	if storedAmount <= 0 || originalFiatAmount <= 0 || paidFiatAmount <= 0 {
+		return 0
+	}
+	ratio := decimal.NewFromFloat(paidFiatAmount).Div(decimal.NewFromFloat(originalFiatAmount))
+	if ratio.GreaterThan(decimal.NewFromInt(1)) {
+		ratio = decimal.NewFromInt(1)
+	}
+	quota := decimal.NewFromInt(storedAmount).
+		Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
+		Mul(ratio).
+		Round(0).
+		IntPart()
+	return int(quota)
 }
 
 // getOkpayMinTopup 获取最低充值额度
@@ -137,20 +305,35 @@ func RequestOkpayAmount(c *gin.Context) {
 		return
 	}
 
-	payMoney := getOkpayPayMoney(req.Amount, group)
-	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetTopUp, 0, payMoney)
+	originalFiatPayMoney := getOkpayFiatPayMoney(req.Amount, group)
+	fiatPayMoney := originalFiatPayMoney
+	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetTopUp, 0, fiatPayMoney)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
 		return
 	}
 	if discount != nil {
-		payMoney = discount.PaidAmount
+		fiatPayMoney = discount.PaidAmount
 	}
+	paymentAmount := getOkpayPaymentAmountFromFiat(fiatPayMoney)
+	coinAmountText := decimal.NewFromFloat(paymentAmount.CoinAmount).StringFixed(8)
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "success",
-		"data":    strconv.FormatFloat(payMoney, 'f', 2, 64),
-	})
+	response := gin.H{
+		"message":          "success",
+		"data":             coinAmountText,
+		"amount":           coinAmountText,
+		"amount_text":      fmt.Sprintf("%s %s", coinAmountText, paymentAmount.Coin),
+		"coin":             paymentAmount.Coin,
+		"fiat_amount":      strconv.FormatFloat(paymentAmount.FiatAmount, 'f', 2, 64),
+		"fiat_currency":    "CNY",
+		"rate":             strconv.FormatFloat(paymentAmount.Rate, 'f', -1, 64),
+		"rate_source":      paymentAmount.RateSource,
+		"auto_rate_failed": paymentAmount.AutoRateFailed,
+	}
+	if discount != nil {
+		response["discount"] = discount
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 // RequestOkpayPay 创建 OKPay 支付订单
@@ -174,16 +357,17 @@ func RequestOkpayPay(c *gin.Context) {
 		return
 	}
 
-	payMoney := getOkpayPayMoney(req.Amount, group)
-	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetTopUp, 0, payMoney)
+	originalFiatPayMoney := getOkpayFiatPayMoney(req.Amount, group)
+	fiatPayMoney := originalFiatPayMoney
+	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetTopUp, 0, fiatPayMoney)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
 		return
 	}
 	if discount != nil {
-		payMoney = discount.PaidAmount
+		fiatPayMoney = discount.PaidAmount
 	}
-	if payMoney < 0 {
+	if fiatPayMoney < 0 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
 	}
@@ -194,7 +378,7 @@ func RequestOkpayPay(c *gin.Context) {
 	topUp := &model.TopUp{
 		UserId:          id,
 		Amount:          amount,
-		Money:           payMoney,
+		Money:           fiatPayMoney,
 		TradeNo:         tradeNo,
 		PaymentMethod:   model.PaymentMethodOkpay,
 		PaymentProvider: model.PaymentProviderOkpay,
@@ -202,6 +386,9 @@ func RequestOkpayPay(c *gin.Context) {
 		Status:          common.TopUpStatusPending,
 	}
 	model.ApplyPromoCodeResultToTopUp(topUp, discount)
+	if discount != nil {
+		topUp.AffiliateSourceQuota = calculateOkpayAffiliateSourceQuota(amount, originalFiatPayMoney, fiatPayMoney)
+	}
 	err = topUp.Insert()
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay 创建充值订单失败 user_id=%d trade_no=%s amount=%d error=%q", id, tradeNo, req.Amount, err.Error()))
@@ -210,7 +397,7 @@ func RequestOkpayPay(c *gin.Context) {
 	}
 
 	// 处理 0 元优惠订单
-	if payMoney < 0.01 {
+	if fiatPayMoney < 0.01 {
 		completedTopUp, quotaToAdd, completedNow, err := model.CompleteFreeTopUp(tradeNo, model.PaymentProviderOkpay)
 		if err != nil {
 			logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay 0元优惠充值完成失败 user_id=%d trade_no=%s amount=%d error=%q", id, tradeNo, req.Amount, err.Error()))
@@ -230,14 +417,15 @@ func RequestOkpayPay(c *gin.Context) {
 	redirectUrl := paymentReturnPath("/console/log")
 
 	// OKPay 金额需要 8 位小数
-	dPayMoney := decimal.NewFromFloat(payMoney)
+	paymentAmount := getOkpayPaymentAmountFromFiat(fiatPayMoney)
+	dPayMoney := decimal.NewFromFloat(paymentAmount.CoinAmount)
 
 	payload := map[string]string{
 		"unique_id":    tradeNo,
 		"amount":       dPayMoney.StringFixed(8),
 		"return_url":   redirectUrl,
 		"callback_url": callbackUrl,
-		"coin":         strings.ToUpper(strings.TrimSpace(setting.OkpayCoin)),
+		"coin":         paymentAmount.Coin,
 		"name":         fmt.Sprintf("TopUp-%s", tradeNo),
 		"id":           setting.OkpayMerchantId,
 	}
@@ -309,13 +497,21 @@ func RequestOkpayPay(c *gin.Context) {
 		return
 	}
 
-	logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay 充值订单创建成功 user_id=%d trade_no=%s amount=%d money=%.2f coin=%s", id, tradeNo, req.Amount, payMoney, setting.OkpayCoin))
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay 充值订单创建成功 user_id=%d trade_no=%s amount=%d fiat_money=%.2f CNY coin_amount=%s coin=%s rate=%.8f rate_source=%s auto_rate_failed=%t", id, tradeNo, req.Amount, fiatPayMoney, payload["amount"], paymentAmount.Coin, paymentAmount.Rate, paymentAmount.RateSource, paymentAmount.AutoRateFailed))
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "success",
 		"data": gin.H{
-			"payment_url": payUrl,
-			"trade_no":    tradeNo,
+			"payment_url":      payUrl,
+			"trade_no":         tradeNo,
+			"amount":           payload["amount"],
+			"amount_text":      fmt.Sprintf("%s %s", payload["amount"], paymentAmount.Coin),
+			"coin":             paymentAmount.Coin,
+			"fiat_amount":      strconv.FormatFloat(paymentAmount.FiatAmount, 'f', 2, 64),
+			"fiat_currency":    "CNY",
+			"rate":             strconv.FormatFloat(paymentAmount.Rate, 'f', -1, 64),
+			"rate_source":      paymentAmount.RateSource,
+			"auto_rate_failed": paymentAmount.AutoRateFailed,
 		},
 	})
 }
