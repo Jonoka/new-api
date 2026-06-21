@@ -25,6 +25,7 @@ import {
   Empty,
   Form,
   Input,
+  InputNumber,
   Modal,
   Select,
   Space,
