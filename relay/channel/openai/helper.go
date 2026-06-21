@@ -88,6 +88,21 @@ func ProcessStreamResponse(streamResponse dto.ChatCompletionsStreamResponse, res
 	return nil
 }
 
+func HasMeaningfulStreamOutput(streamResponse dto.ChatCompletionsStreamResponse) bool {
+	for _, choice := range streamResponse.Choices {
+		if choice.Delta.GetContentString() != "" {
+			return true
+		}
+		if choice.Delta.GetReasoningContent() != "" {
+			return true
+		}
+		if len(choice.Delta.ToolCalls) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func processTokenData(relayMode int, data string, responseTextBuilder *strings.Builder, toolCount *int) error {
 	switch relayMode {
 	case relayconstant.RelayModeChatCompletions:

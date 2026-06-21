@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/channel/openrouter"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 
@@ -122,6 +123,7 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var usage = &dto.Usage{}
 	var lastStreamData string
 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
+	var hasMeaningfulOutput bool
 
 	// 检查是否为音频模型
 	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
@@ -141,6 +143,12 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			if err := processTokenData(info.RelayMode, data, &responseTextBuilder, &toolCount); err != nil {
 				logger.LogError(c, "error processing stream token data: "+err.Error())
 				sr.Error(err)
+			}
+			if !hasMeaningfulOutput && info.RelayMode == relayconstant.RelayModeChatCompletions {
+				var streamResponse dto.ChatCompletionsStreamResponse
+				if err := common.UnmarshalJsonStr(data, &streamResponse); err == nil && HasMeaningfulStreamOutput(streamResponse) {
+					hasMeaningfulOutput = true
+				}
 			}
 			if info.RelayFormat == types.RelayFormatOpenAI && !shouldForwardOpenAIStreamData(data, info) {
 				return
@@ -183,6 +191,9 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	if !containStreamUsage {
 		usage = service.ResponseText2Usage(c, responseTextBuilder.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
 		usage.CompletionTokens += toolCount * 7
+	}
+	if info.RelayMode == relayconstant.RelayModeChatCompletions && !hasMeaningfulOutput {
+		usage = &dto.Usage{}
 	}
 
 	applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))

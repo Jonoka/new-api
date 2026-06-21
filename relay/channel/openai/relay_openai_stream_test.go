@@ -101,6 +101,24 @@ func TestOaiStreamHandlerSkipsUsageOnlyChunkWhenNotRequested(t *testing.T) {
 	assert.Contains(t, output, "[DONE]")
 }
 
+func TestOaiStreamHandlerDoesNotBillEmptyStream(t *testing.T) {
+	body := strings.Join([]string{
+		chatCompletionSSE(`{"id":"chatcmpl-empty","object":"chat.completion.chunk","created":1,"model":"gpt-test","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`),
+		chatCompletionSSE(`{"id":"chatcmpl-empty","object":"chat.completion.chunk","created":1,"model":"gpt-test","choices":[{"index":0,"delta":{"content":""},"finish_reason":"stop"}]}`),
+		chatCompletionSSE(`{"id":"chatcmpl-empty","object":"chat.completion.chunk","created":1,"model":"gpt-test","choices":[],"usage":{"prompt_tokens":291300,"completion_tokens":0,"total_tokens":291300}}`),
+		"data: [DONE]\n",
+	}, "")
+	c, _, info, resp := setupOaiStreamTest(strings.NewReader(body))
+	info.ShouldIncludeUsage = true
+
+	usage, err := OaiStreamHandler(c, info, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	assert.Equal(t, 0, usage.PromptTokens)
+	assert.Equal(t, 0, usage.CompletionTokens)
+	assert.Equal(t, 0, usage.TotalTokens)
+}
+
 func TestOaiStreamHandlerKeepsToolCallChunkWithUsageWhenNotRequested(t *testing.T) {
 	body := strings.Join([]string{
 		chatCompletionSSE(`{"id":"chatcmpl-test","object":"chat.completion.chunk","created":1,"model":"gpt-test","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]},"finish_reason":null}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`),
