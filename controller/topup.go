@@ -224,6 +224,13 @@ func getPayMoney(amount int64, group string) float64 {
 	return payMoney.InexactFloat64()
 }
 
+func getEpayPayMoneyFromUSD(amount float64) float64 {
+	return decimal.NewFromFloat(amount).
+		Mul(decimal.NewFromFloat(operation_setting.Price)).
+		Round(2).
+		InexactFloat64()
+}
+
 func getMinTopup() int64 {
 	minTopup := operation_setting.MinTopUp
 	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {

@@ -290,6 +290,71 @@ func TestSubscriptionEpay_FreePromoCompletesWithoutEpayConfig(t *testing.T) {
 	assert.Equal(t, model.PaymentProviderEpay, order.PaymentProvider)
 }
 
+func TestSubscriptionEpayPay_UsesEpayPriceForOrderAndGatewayAmount(t *testing.T) {
+	db := setupSubscriptionPaymentControllerTestDB(t)
+	withConfirmedPaymentCompliance(t)
+	plan := seedSubscriptionPaymentUserAndPlan(t, db, func(plan *model.SubscriptionPlan) {
+		plan.PriceAmount = 10
+	})
+
+	require.NoError(t, db.Create(&model.PromoCode{
+		Name:                     "订阅半价",
+		Code:                     "HALF_SUB",
+		Status:                   common.RedemptionCodeStatusEnabled,
+		DiscountType:             model.PromoCodeDiscountTypePercent,
+		DiscountValue:            50,
+		AppliesToAllSubscription: true,
+		MaxRedeemCount:           10,
+		CreatedTime:              common.GetTimestamp(),
+	}).Error)
+
+	originalPayAddress := operation_setting.PayAddress
+	originalEpayID := operation_setting.EpayId
+	originalEpayKey := operation_setting.EpayKey
+	originalPayMethods := operation_setting.PayMethods
+	originalPrice := operation_setting.Price
+	operation_setting.PayAddress = "https://pay.example.com"
+	operation_setting.EpayId = "epay_id"
+	operation_setting.EpayKey = "epay_key"
+	operation_setting.PayMethods = []map[string]string{{"type": "alipay", "name": "支付宝"}}
+	operation_setting.Price = 1.03
+	t.Cleanup(func() {
+		operation_setting.PayAddress = originalPayAddress
+		operation_setting.EpayId = originalEpayID
+		operation_setting.EpayKey = originalEpayKey
+		operation_setting.PayMethods = originalPayMethods
+		operation_setting.Price = originalPrice
+	})
+
+	ctx, recorder := newSubscriptionPaymentContext(t, SubscriptionEpayPayRequest{
+		PlanId:        plan.Id,
+		PaymentMethod: "alipay",
+		PromoCode:     "HALF_SUB",
+	}, 901)
+	SubscriptionRequestEpay(ctx)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Message string            `json:"message"`
+		Data    map[string]string `json:"data"`
+		URL     string            `json:"url"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Equal(t, "success", response.Message)
+	require.NotEmpty(t, response.URL)
+	require.Equal(t, "5.15", response.Data["money"])
+
+	var order model.SubscriptionOrder
+	require.NoError(t, db.First(&order).Error)
+	assert.Equal(t, common.TopUpStatusPending, order.Status)
+	assert.Equal(t, model.PaymentProviderEpay, order.PaymentProvider)
+	assert.InDelta(t, 10.30, order.OriginalMoney, 0.000001)
+	assert.InDelta(t, 5.15, order.DiscountMoney, 0.000001)
+	assert.InDelta(t, 5.15, order.ActualMoney, 0.000001)
+	assert.InDelta(t, 5.15, order.Money, 0.000001)
+	assert.Equal(t, int(5*common.QuotaPerUnit), order.AffiliateSourceQuota)
+}
+
 func TestSubscriptionWaffoPancakePay_FreePromoCompletesWithoutPancakeConfig(t *testing.T) {
 	db := setupSubscriptionPaymentControllerTestDB(t)
 	withConfirmedPaymentCompliance(t)

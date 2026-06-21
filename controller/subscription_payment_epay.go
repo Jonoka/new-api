@@ -72,14 +72,16 @@ func SubscriptionRequestEpay(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	payMoney := plan.PriceAmount
+	basePayMoney := plan.PriceAmount
 	if discount != nil {
-		payMoney = discount.PaidAmount
+		basePayMoney = discount.PaidAmount
 	}
-	if payMoney < 0 {
+	if basePayMoney < 0 {
 		common.ApiErrorMsg(c, "套餐金额过低")
 		return
 	}
+	payMoney := getEpayPayMoneyFromUSD(basePayMoney)
+	epayDiscount := convertSubscriptionDiscountToEpayMoney(discount)
 
 	var returnUrl *url.URL
 	var notifyUrl *url.URL
@@ -114,7 +116,10 @@ func SubscriptionRequestEpay(c *gin.Context) {
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}
-	model.ApplyPromoCodeResultToSubscriptionOrder(order, discount)
+	if discount == nil {
+		order.AffiliateSourceQuota = subscriptionPaidQuotaFromUSD(basePayMoney)
+	}
+	model.ApplyPromoCodeResultToSubscriptionOrder(order, epayDiscount)
 	if err := order.Insert(); err != nil {
 		common.ApiErrorMsg(c, "创建订单失败")
 		return
@@ -151,6 +156,26 @@ func SubscriptionRequestEpay(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "success", "data": params, "url": uri})
+}
+
+func convertSubscriptionDiscountToEpayMoney(discount *model.PromoCodeDiscountResult) *model.PromoCodeDiscountResult {
+	if discount == nil {
+		return nil
+	}
+	converted := *discount
+	converted.OriginalAmount = getEpayPayMoneyFromUSD(discount.OriginalAmount)
+	converted.PaidAmount = getEpayPayMoneyFromUSD(discount.PaidAmount)
+	converted.DiscountAmount = getEpayPayMoneyFromUSD(discount.DiscountAmount)
+	// 返佣按套餐美元价折后金额计算，订单金额按易支付实收金额记录。
+	converted.ActualPaidQuota = discount.ActualPaidQuota
+	return &converted
+}
+
+func subscriptionPaidQuotaFromUSD(amount float64) int {
+	if amount <= 0 {
+		return 0
+	}
+	return int(amount * common.QuotaPerUnit)
 }
 
 func SubscriptionEpayNotify(c *gin.Context) {
