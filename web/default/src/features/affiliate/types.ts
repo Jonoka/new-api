@@ -60,6 +60,28 @@ export type AffiliateSummary = {
   invite_link: string
   promotion_text: string
   setting: AffiliateSetting
+  can_invite: boolean
+}
+
+export type AffiliateApplicationStatus = {
+  review_enabled: boolean
+  agreement_enabled: boolean
+  status: string
+  can_invite: boolean
+  rejected_reason?: string
+  eligibility?: {
+    eligible: boolean
+    reason?: string
+    conditions?: AffiliateEligibilityCondition[]
+  }
+}
+
+export type AffiliateEligibilityCondition = {
+  type: string
+  required: number
+  current: number
+  unit: string
+  met: boolean
 }
 
 export type AffiliateRecord = {

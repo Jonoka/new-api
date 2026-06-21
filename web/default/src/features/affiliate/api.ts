@@ -26,6 +26,7 @@ import type {
   AdminUnbindAffiliateInviterResult,
   AffiliateAdminInvitation,
   AffiliateAdminRecord,
+  AffiliateApplicationStatus,
   AffiliatePayoutAccount,
   AffiliateLeaderboardItem,
   AffiliateRecord,
@@ -205,7 +206,7 @@ export async function getAffiliateAgreement() {
 }
 
 export async function getAffiliateApplicationStatus() {
-  const res = await api.get<ApiResponse<any>>(
+  const res = await api.get<ApiResponse<AffiliateApplicationStatus>>(
     '/api/affiliate/application-status'
   )
   return res.data

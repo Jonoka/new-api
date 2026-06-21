@@ -83,6 +83,8 @@ import {
   applyAffiliate,
 } from './api'
 import type {
+  AffiliateApplicationStatus,
+  AffiliateEligibilityCondition,
   AffiliatePayoutAccount,
   AffiliateLeaderboardItem,
   AffiliateRecord,
@@ -220,11 +222,15 @@ export function Affiliate() {
   // Anti-fraud: Application state
   const [appStatus, setAppStatus] = useState<string>('loading')
   const [appRejectedReason, setAppRejectedReason] = useState('')
+  const [canInvite, setCanInvite] = useState(false)
+  const [reviewEnabled, setReviewEnabled] = useState(false)
   const [agreementText, setAgreementText] = useState('')
   const [agreementEnabled, setAgreementEnabled] = useState(false)
   const [confirmInput, setConfirmInput] = useState('')
   const [applying, setApplying] = useState(false)
-  const [eligibility, setEligibility] = useState<{eligible: boolean; reason?: string} | null>(null)
+  const [eligibility, setEligibility] = useState<NonNullable<
+    AffiliateApplicationStatus['eligibility']
+  > | null>(null)
 
   useEffect(() => {
     async function checkAppStatus() {
@@ -234,13 +240,14 @@ export function Affiliate() {
           getAffiliateAgreement(),
         ])
         if (statusRes.success) {
-          if (!statusRes.data.review_enabled) {
-            setAppStatus('not_required')
-          } else {
-            setAppStatus(statusRes.data.status || 'none')
-            if (statusRes.data.rejected_reason) setAppRejectedReason(statusRes.data.rejected_reason)
-            if (statusRes.data.eligibility) setEligibility(statusRes.data.eligibility)
+          setReviewEnabled(Boolean(statusRes.data.review_enabled))
+          setCanInvite(Boolean(statusRes.data.can_invite))
+          setAppStatus(statusRes.data.status || 'none')
+          if (statusRes.data.rejected_reason) {
+            setAppRejectedReason(statusRes.data.rejected_reason)
           }
+          if (statusRes.data.eligibility)
+            setEligibility(statusRes.data.eligibility)
         }
         if (agreementRes.success) {
           setAgreementEnabled(agreementRes.data.agreement_enabled)
@@ -248,6 +255,7 @@ export function Affiliate() {
         }
       } catch {
         setAppStatus('not_required')
+        setCanInvite(true)
       }
     }
     checkAppStatus()
@@ -263,8 +271,23 @@ export function Affiliate() {
       setApplying(true)
       const res = await applyAffiliate(true)
       if (res.success) {
-        toast.success(t('Application submitted successfully'))
-        setAppStatus('pending')
+        toast.success(
+          reviewEnabled
+            ? t('Application submitted successfully')
+            : t('Referral permission enabled')
+        )
+        const statusRes = await getAffiliateApplicationStatus()
+        if (statusRes.success) {
+          setReviewEnabled(Boolean(statusRes.data.review_enabled))
+          setCanInvite(Boolean(statusRes.data.can_invite))
+          setAppStatus(statusRes.data.status || 'none')
+        } else {
+          setCanInvite(!reviewEnabled)
+          setAppStatus(reviewEnabled ? 'pending' : 'approved')
+        }
+        if (!reviewEnabled) {
+          await refresh()
+        }
       } else {
         toast.error(res.message || t('Application failed'))
       }
@@ -275,7 +298,21 @@ export function Affiliate() {
     }
   }
 
-  const needsApplication = appStatus !== 'not_required' && appStatus !== 'approved' && appStatus !== 'loading'
+  const needsApplication = appStatus !== 'loading' && !canInvite
+
+  const formatEligibilityValue = (
+    condition: AffiliateEligibilityCondition,
+    value: number
+  ) => {
+    if (condition.unit === 'quota') return formatQuota(value || 0)
+    return `${value || 0} ${t('days')}`
+  }
+
+  const eligibilityLabel = (type: string) => {
+    if (type === 'account_age_days') return t('Account age')
+    if (type === 'recharge_quota') return t('Total successful recharge')
+    return t('Requirement')
+  }
 
   const refresh = useCallback(async () => {
     try {
@@ -436,32 +473,81 @@ export function Affiliate() {
                       ? t('Application Pending Review')
                       : appStatus === 'rejected'
                         ? t('Application Rejected')
-                        : t('Apply for Affiliate Program')}
+                        : reviewEnabled
+                          ? t('Apply for Affiliate Program')
+                          : t('Confirm affiliate agreement')}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className='space-y-4 p-4 pt-0'>
                   {appStatus === 'pending' && (
                     <p className='text-muted-foreground text-sm'>
-                      {t('Your affiliate application is being reviewed. You will be notified once it is approved.')}
+                      {t(
+                        'Your affiliate application is being reviewed. You will be notified once it is approved.'
+                      )}
                     </p>
                   )}
                   {appStatus === 'rejected' && (
                     <div className='space-y-2'>
                       <p className='text-destructive text-sm'>
                         {t('Your application was rejected.')}
-                        {appRejectedReason && ` ${t('Reason')}: ${appRejectedReason}`}
+                        {appRejectedReason &&
+                          ` ${t('Reason')}: ${appRejectedReason}`}
                       </p>
                       <p className='text-muted-foreground text-sm'>
-                        {t('You can submit a new application below.')}
+                        {reviewEnabled
+                          ? t('You can submit a new application below.')
+                          : t('Please agree again to enable referral access.')}
                       </p>
                     </div>
                   )}
                   {(appStatus === 'none' || appStatus === 'rejected') && (
                     <>
                       {eligibility && !eligibility.eligible && (
-                        <div className='bg-destructive/10 text-destructive rounded-md p-3 text-sm'>
-                          {t('You do not meet the eligibility requirements yet.')}
-                          {eligibility.reason && ` ${t(eligibility.reason)}`}
+                        <div className='bg-destructive/10 rounded-md p-3 text-sm'>
+                          <div className='text-destructive font-medium'>
+                            {t(
+                              'You do not meet the eligibility requirements yet.'
+                            )}
+                          </div>
+                          {eligibility.conditions?.length ? (
+                            <div className='mt-2 space-y-1.5'>
+                              {eligibility.conditions.map((condition) => (
+                                <div
+                                  key={condition.type}
+                                  className='flex flex-wrap items-center gap-2'
+                                >
+                                  <span className='font-medium'>
+                                    {eligibilityLabel(condition.type)}
+                                  </span>
+                                  <span className='text-muted-foreground'>
+                                    {t('Required')}{' '}
+                                    {formatEligibilityValue(
+                                      condition,
+                                      condition.required
+                                    )}
+                                    , {t('Current')}{' '}
+                                    {formatEligibilityValue(
+                                      condition,
+                                      condition.current
+                                    )}
+                                  </span>
+                                  <Badge
+                                    variant={
+                                      condition.met ? 'secondary' : 'outline'
+                                    }
+                                  >
+                                    {condition.met ? t('Met') : t('Not met')}
+                                  </Badge>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            eligibility.reason && (
+                              <div className='text-destructive mt-1'>
+                                {t(eligibility.reason)}
+                              </div>
+                            )
+                          )}
                         </div>
                       )}
                       {agreementEnabled && agreementText && (
@@ -470,7 +556,9 @@ export function Affiliate() {
                             {agreementText}
                           </div>
                           <div className='space-y-2'>
-                            <Label>{t('Type the confirmation text to agree')}</Label>
+                            <Label>
+                              {t('Type the confirmation text to agree')}
+                            </Label>
                             <Input
                               value={confirmInput}
                               onChange={(e) => setConfirmInput(e.target.value)}
@@ -484,10 +572,15 @@ export function Affiliate() {
                         disabled={
                           applying ||
                           (eligibility !== null && !eligibility.eligible) ||
-                          (agreementEnabled && confirmInput !== t('agreement_confirm_text'))
+                          (agreementEnabled &&
+                            confirmInput !== t('agreement_confirm_text'))
                         }
                       >
-                        {applying ? t('Submitting...') : t('Submit Application')}
+                        {applying
+                          ? t('Submitting...')
+                          : reviewEnabled
+                            ? t('Submit Application')
+                            : t('Agree and enable referrals')}
                       </Button>
                     </>
                   )}
@@ -495,503 +588,522 @@ export function Affiliate() {
               </Card>
             </div>
           ) : (
-          <div className='mx-auto flex w-full max-w-7xl flex-col gap-4 sm:gap-5'>
-            {/* Anti-fraud notice for approved/existing users */}
-            {agreementEnabled && agreementText && (
-              <Card className='border-yellow-500/50 py-0'>
-                <CardContent className='p-4'>
-                  <div className='flex items-start gap-3'>
-                    <Badge variant='outline' className='shrink-0 border-yellow-500 text-yellow-700'>{t('Notice')}</Badge>
-                    <div className='min-w-0'>
-                      <p className='text-sm font-medium'>{t('Affiliate Anti-Fraud Agreement')}</p>
-                      <p className='text-muted-foreground mt-1 whitespace-pre-wrap text-xs'>{agreementText}</p>
+            <div className='mx-auto flex w-full max-w-7xl flex-col gap-4 sm:gap-5'>
+              {/* Anti-fraud notice for approved/existing users */}
+              {agreementEnabled && agreementText && (
+                <Card className='border-yellow-500/50 py-0'>
+                  <CardContent className='p-4'>
+                    <div className='flex items-start gap-3'>
+                      <Badge
+                        variant='outline'
+                        className='shrink-0 border-yellow-500 text-yellow-700'
+                      >
+                        {t('Notice')}
+                      </Badge>
+                      <div className='min-w-0'>
+                        <p className='text-sm font-medium'>
+                          {t('Affiliate Anti-Fraud Agreement')}
+                        </p>
+                        <p className='text-muted-foreground mt-1 text-xs whitespace-pre-wrap'>
+                          {agreementText}
+                        </p>
+                      </div>
                     </div>
+                  </CardContent>
+                </Card>
+              )}
+              <Card className='py-0'>
+                <CardHeader className='pb-2'>
+                  <div className='flex items-center justify-between gap-3'>
+                    <CardTitle className='flex items-center gap-2 text-base'>
+                      <WalletCards className='size-4' />
+                      {t('Overview')}
+                    </CardTitle>
+                    <Button
+                      variant='ghost'
+                      size='icon'
+                      onClick={refresh}
+                      disabled={loading}
+                      aria-label={t('Refresh')}
+                    >
+                      <RefreshCw className='size-4' />
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent className='grid gap-4 p-4 pt-0 xl:grid-cols-[minmax(0,1fr)_280px] xl:items-end'>
+                  <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>
+                    {[
+                      [t('Available'), balance?.available_quota ?? 0],
+                      [t('Pending Settlement'), balance?.pending_quota ?? 0],
+                      [t('Frozen'), balance?.frozen_quota ?? 0],
+                      [t('Total Commission'), balance?.total_quota ?? 0],
+                    ].map(([label, value], index) => (
+                      <div key={String(label)} className='min-w-0'>
+                        <div className='text-muted-foreground text-xs font-medium'>
+                          {label}
+                        </div>
+                        <div
+                          className={`mt-1 font-semibold tabular-nums ${
+                            index === 0 ? 'text-2xl' : 'text-lg'
+                          }`}
+                        >
+                          {formatQuota(Number(value))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className='grid gap-2 sm:grid-cols-2 xl:grid-cols-1'>
+                    <Button
+                      onClick={() => {
+                        if (!payoutMethods.length) {
+                          toast.error(t('No payout methods are available'))
+                          return
+                        }
+                        setWithdrawAmount(
+                          availableDisplayAmount > 0
+                            ? String(Number(availableDisplayAmount.toFixed(4)))
+                            : ''
+                        )
+                        setWithdrawOpen(true)
+                      }}
+                      disabled={!balance?.available_quota || loading}
+                    >
+                      <Banknote className='size-4' />
+                      {t('Withdraw')}
+                    </Button>
+                    <Button
+                      variant='outline'
+                      onClick={transferAllToBalance}
+                      disabled={!balance?.available_quota || transferring}
+                    >
+                      <Send className='size-4' />
+                      {transferring
+                        ? t('Transferring...')
+                        : t('Transfer to Balance')}
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
-            )}
-            <Card className='py-0'>
-              <CardHeader className='pb-2'>
-                <div className='flex items-center justify-between gap-3'>
-                  <CardTitle className='flex items-center gap-2 text-base'>
-                    <WalletCards className='size-4' />
-                    {t('Overview')}
-                  </CardTitle>
-                  <Button
-                    variant='ghost'
-                    size='icon'
-                    onClick={refresh}
-                    disabled={loading}
-                    aria-label={t('Refresh')}
-                  >
-                    <RefreshCw className='size-4' />
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent className='grid gap-4 p-4 pt-0 xl:grid-cols-[minmax(0,1fr)_280px] xl:items-end'>
-                <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>
-                  {[
-                    [t('Available'), balance?.available_quota ?? 0],
-                    [t('Pending Settlement'), balance?.pending_quota ?? 0],
-                    [t('Frozen'), balance?.frozen_quota ?? 0],
-                    [t('Total Commission'), balance?.total_quota ?? 0],
-                  ].map(([label, value], index) => (
-                    <div key={String(label)} className='min-w-0'>
-                      <div className='text-muted-foreground text-xs font-medium'>
-                        {label}
-                      </div>
-                      <div
-                        className={`mt-1 font-semibold tabular-nums ${
-                          index === 0 ? 'text-2xl' : 'text-lg'
-                        }`}
-                      >
-                        {formatQuota(Number(value))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className='grid gap-2 sm:grid-cols-2 xl:grid-cols-1'>
-                  <Button
-                    onClick={() => {
-                      if (!payoutMethods.length) {
-                        toast.error(t('No payout methods are available'))
-                        return
-                      }
-                      setWithdrawAmount(
-                        availableDisplayAmount > 0
-                          ? String(Number(availableDisplayAmount.toFixed(4)))
-                          : ''
-                      )
-                      setWithdrawOpen(true)
-                    }}
-                    disabled={!balance?.available_quota || loading}
-                  >
-                    <Banknote className='size-4' />
-                    {t('Withdraw')}
-                  </Button>
-                  <Button
-                    variant='outline'
-                    onClick={transferAllToBalance}
-                    disabled={!balance?.available_quota || transferring}
-                  >
-                    <Send className='size-4' />
-                    {transferring
-                      ? t('Transferring...')
-                      : t('Transfer to Balance')}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
 
-            <Card className='py-0'>
-              <CardHeader className='pb-2'>
-                <CardTitle className='flex items-center gap-2 text-base'>
-                  <Link2 className='size-4' />
-                  {t('Promotion Copy')}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className='space-y-3 p-4 pt-0'>
-                <div className='grid gap-2 sm:grid-cols-[1fr_auto]'>
-                  <Input
-                    readOnly
-                    value={summary?.invite_link ?? ''}
-                    className='font-mono text-xs'
-                  />
-                  <CopyButton
-                    value={summary?.invite_link ?? ''}
-                    tooltip={t('Copy referral link')}
-                    aria-label={t('Copy referral link')}
-                  />
-                </div>
-                <div className='grid gap-2 sm:grid-cols-[1fr_auto] sm:items-start'>
-                  <Textarea
-                    readOnly
-                    value={summary?.promotion_text ?? ''}
-                    className='min-h-20 text-sm'
-                  />
-                  <CopyButton
-                    value={summary?.promotion_text ?? ''}
-                    tooltip={t('Copy promotion copy')}
-                    aria-label={t('Copy promotion copy')}
-                  />
-                </div>
-                <div className='text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs'>
-                  <span>
-                    {t('Invites')}: {summary?.aff_count ?? 0}
-                  </span>
-                  <span>
-                    {t('Level 1')}: {summary?.setting.first_level_ratio ?? 0}%
-                    {summary?.setting.first_level_enabled
-                      ? ''
-                      : ` ${t('Disabled')}`}
-                  </span>
-                  <span>
-                    {t('Level 2')}: {summary?.setting.second_level_ratio ?? 0}%
-                    {summary?.setting.second_level_enabled
-                      ? ''
-                      : ` ${t('Disabled')}`}
-                  </span>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Collapsible open={accountOpen} onOpenChange={setAccountOpen}>
               <Card className='py-0'>
-                <CollapsibleTrigger className='hover:bg-muted/40 flex w-full items-center justify-between px-4 py-3 text-left'>
-                  <div>
-                    <CardTitle className='text-base'>
-                      {t('Payout Account')}
-                    </CardTitle>
-                    <div className='text-muted-foreground mt-1 flex flex-wrap gap-2 text-xs'>
-                      {payoutMethods.map((method) => (
-                        <Badge key={method} variant='outline'>
-                          {methodLabel(method)}
-                        </Badge>
-                      ))}
-                    </div>
+                <CardHeader className='pb-2'>
+                  <CardTitle className='flex items-center gap-2 text-base'>
+                    <Link2 className='size-4' />
+                    {t('Promotion Copy')}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className='space-y-3 p-4 pt-0'>
+                  <div className='grid gap-2 sm:grid-cols-[1fr_auto]'>
+                    <Input
+                      readOnly
+                      value={summary?.invite_link ?? ''}
+                      className='font-mono text-xs'
+                    />
+                    <CopyButton
+                      value={summary?.invite_link ?? ''}
+                      tooltip={t('Copy referral link')}
+                      aria-label={t('Copy referral link')}
+                    />
                   </div>
-                  <ChevronDown
-                    className={`size-4 transition-transform ${
-                      accountOpen ? 'rotate-180' : ''
-                    }`}
-                  />
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <CardContent className='space-y-4 p-4 pt-0'>
-                    <div className='grid gap-4 lg:grid-cols-3'>
-                      {isPayoutMethodEnabled('usdt') && (
-                        <div className='space-y-2'>
-                          <Label>{t('USDT Address')}</Label>
-                          <Input
-                            value={account.usdt_address || ''}
-                            onChange={(event) =>
-                              handleAccountChange(
-                                'usdt_address',
-                                event.target.value
-                              )
-                            }
-                            placeholder={t('Enter USDT address')}
-                          />
-                          <p className='text-muted-foreground text-xs'>
-                            {t('USDT withdrawals use the configured chain')}
-                            :&nbsp;
-                            <span className='font-medium'>
-                              {summary?.setting.usdt_chain ||
-                                account.usdt_chain}
-                            </span>
-                          </p>
-                        </div>
-                      )}
-                      {isPayoutMethodEnabled('alipay') && (
-                        <div className='space-y-2'>
-                          <Label>{t('Alipay Account')}</Label>
-                          <Input
-                            value={account.alipay_account || ''}
-                            onChange={(event) =>
-                              handleAccountChange(
-                                'alipay_account',
-                                event.target.value
-                              )
-                            }
-                            placeholder={t('Account or phone number')}
-                          />
-                          <Input
-                            value={account.alipay_name || ''}
-                            onChange={(event) =>
-                              handleAccountChange(
-                                'alipay_name',
-                                event.target.value
-                              )
-                            }
-                            placeholder={t('Recipient name')}
-                          />
-                          <Label className='border-input flex h-9 cursor-pointer items-center justify-center gap-2 rounded-lg border text-sm'>
-                            <Upload className='size-4' />
-                            {uploadingMethod === 'alipay'
-                              ? t('Uploading...')
-                              : t('Upload QR code')}
-                            <input
-                              type='file'
-                              accept='image/*'
-                              className='sr-only'
-                              onChange={(event) => {
-                                void handleQrUpload(
-                                  'alipay',
-                                  event.target.files?.[0]
-                                )
-                                event.currentTarget.value = ''
-                              }}
-                            />
-                          </Label>
-                          {account.alipay_qr_path && (
-                            <div className='flex items-center gap-2'>
-                              <img
-                                src={account.alipay_qr_path}
-                                alt={t('Alipay QR code')}
-                                className='border-border size-12 rounded-md border object-cover'
-                              />
-                              <Button
-                                type='button'
-                                variant='outline'
-                                size='sm'
-                                onClick={() => handleQrDelete('alipay')}
-                              >
-                                <Trash2 className='size-4' />
-                                {t('Delete QR code')}
-                              </Button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      {isPayoutMethodEnabled('wechat') && (
-                        <div className='space-y-2'>
-                          <Label>{t('WeChat Account')}</Label>
-                          <Input
-                            value={account.wechat_account || ''}
-                            onChange={(event) =>
-                              handleAccountChange(
-                                'wechat_account',
-                                event.target.value
-                              )
-                            }
-                            placeholder={t('Account or phone number')}
-                          />
-                          <Input
-                            value={account.wechat_name || ''}
-                            onChange={(event) =>
-                              handleAccountChange(
-                                'wechat_name',
-                                event.target.value
-                              )
-                            }
-                            placeholder={t('Recipient name')}
-                          />
-                          <Label className='border-input flex h-9 cursor-pointer items-center justify-center gap-2 rounded-lg border text-sm'>
-                            <Upload className='size-4' />
-                            {uploadingMethod === 'wechat'
-                              ? t('Uploading...')
-                              : t('Upload QR code')}
-                            <input
-                              type='file'
-                              accept='image/*'
-                              className='sr-only'
-                              onChange={(event) => {
-                                void handleQrUpload(
-                                  'wechat',
-                                  event.target.files?.[0]
-                                )
-                                event.currentTarget.value = ''
-                              }}
-                            />
-                          </Label>
-                          {account.wechat_qr_path && (
-                            <div className='flex items-center gap-2'>
-                              <img
-                                src={account.wechat_qr_path}
-                                alt={t('WeChat QR code')}
-                                className='border-border size-12 rounded-md border object-cover'
-                              />
-                              <Button
-                                type='button'
-                                variant='outline'
-                                size='sm'
-                                onClick={() => handleQrDelete('wechat')}
-                              >
-                                <Trash2 className='size-4' />
-                                {t('Delete QR code')}
-                              </Button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    <Button onClick={saveAccount} disabled={savingAccount}>
-                      {savingAccount
-                        ? t('Saving...')
-                        : t('Save payout account')}
-                    </Button>
-                  </CardContent>
-                </CollapsibleContent>
+                  <div className='grid gap-2 sm:grid-cols-[1fr_auto] sm:items-start'>
+                    <Textarea
+                      readOnly
+                      value={summary?.promotion_text ?? ''}
+                      className='min-h-20 text-sm'
+                    />
+                    <CopyButton
+                      value={summary?.promotion_text ?? ''}
+                      tooltip={t('Copy promotion copy')}
+                      aria-label={t('Copy promotion copy')}
+                    />
+                  </div>
+                  <div className='text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs'>
+                    <span>
+                      {t('Invites')}: {summary?.aff_count ?? 0}
+                    </span>
+                    <span>
+                      {t('Level 1')}: {summary?.setting.first_level_ratio ?? 0}%
+                      {summary?.setting.first_level_enabled
+                        ? ''
+                        : ` ${t('Disabled')}`}
+                    </span>
+                    <span>
+                      {t('Level 2')}: {summary?.setting.second_level_ratio ?? 0}
+                      %
+                      {summary?.setting.second_level_enabled
+                        ? ''
+                        : ` ${t('Disabled')}`}
+                    </span>
+                  </div>
+                </CardContent>
               </Card>
-            </Collapsible>
 
-            <Card className='py-0'>
-              <CardHeader className='pb-2'>
-                <CardTitle className='text-base'>
-                  {t('Affiliate Activity')}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className='p-4 pt-0'>
-                <Tabs defaultValue='leaderboard' className='gap-4'>
-                  <TabsList className='max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto'>
-                    <TabsTrigger value='leaderboard'>
-                      {t('Leaderboard')}
-                    </TabsTrigger>
-                    <TabsTrigger value='records'>{t('Records')}</TabsTrigger>
-                    <TabsTrigger value='withdrawals'>
-                      {t('Withdrawals')}
-                    </TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value='leaderboard' className='space-y-3'>
-                    <div className='grid gap-2 sm:w-fit sm:grid-cols-2'>
-                      <NativeSelect
-                        value={leaderboardPeriod}
-                        onChange={(event) =>
-                          setLeaderboardPeriod(event.target.value)
-                        }
-                        className='w-full sm:w-40'
-                      >
-                        <NativeSelectOption value='day'>
-                          {t('Today')}
-                        </NativeSelectOption>
-                        <NativeSelectOption value='week'>
-                          {t('This week')}
-                        </NativeSelectOption>
-                        <NativeSelectOption value='month'>
-                          {t('This month')}
-                        </NativeSelectOption>
-                      </NativeSelect>
-                      <NativeSelect
-                        value={leaderboardSort}
-                        onChange={(event) =>
-                          setLeaderboardSort(event.target.value)
-                        }
-                        className='w-full sm:w-44'
-                      >
-                        <NativeSelectOption value='commission'>
-                          {t('Sort by commission')}
-                        </NativeSelectOption>
-                        <NativeSelectOption value='invites'>
-                          {t('Sort by invites')}
-                        </NativeSelectOption>
-                      </NativeSelect>
+              <Collapsible open={accountOpen} onOpenChange={setAccountOpen}>
+                <Card className='py-0'>
+                  <CollapsibleTrigger className='hover:bg-muted/40 flex w-full items-center justify-between px-4 py-3 text-left'>
+                    <div>
+                      <CardTitle className='text-base'>
+                        {t('Payout Account')}
+                      </CardTitle>
+                      <div className='text-muted-foreground mt-1 flex flex-wrap gap-2 text-xs'>
+                        {payoutMethods.map((method) => (
+                          <Badge key={method} variant='outline'>
+                            {methodLabel(method)}
+                          </Badge>
+                        ))}
+                      </div>
                     </div>
-                    <Table className='min-w-[520px]'>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>{t('Rank')}</TableHead>
-                          <TableHead>{t('User')}</TableHead>
-                          <TableHead>{t('Invites')}</TableHead>
-                          <TableHead>{t('Commission')}</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {leaderboard.length === 0 ? (
-                          <TableRow>
-                            <TableCell colSpan={4} className='h-24 text-center'>
-                              {t('No leaderboard data')}
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          leaderboard.map((item) => (
-                            <TableRow key={item.user_id}>
-                              <TableCell className='font-medium'>
-                                #{item.rank}
-                              </TableCell>
-                              <TableCell>
-                                {item.masked_name || `User #${item.user_id}`}
-                              </TableCell>
-                              <TableCell>{item.invite_count}</TableCell>
-                              <TableCell>
-                                {formatQuota(item.commission_quota)}
-                              </TableCell>
-                            </TableRow>
-                          ))
+                    <ChevronDown
+                      className={`size-4 transition-transform ${
+                        accountOpen ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <CardContent className='space-y-4 p-4 pt-0'>
+                      <div className='grid gap-4 lg:grid-cols-3'>
+                        {isPayoutMethodEnabled('usdt') && (
+                          <div className='space-y-2'>
+                            <Label>{t('USDT Address')}</Label>
+                            <Input
+                              value={account.usdt_address || ''}
+                              onChange={(event) =>
+                                handleAccountChange(
+                                  'usdt_address',
+                                  event.target.value
+                                )
+                              }
+                              placeholder={t('Enter USDT address')}
+                            />
+                            <p className='text-muted-foreground text-xs'>
+                              {t('USDT withdrawals use the configured chain')}
+                              :&nbsp;
+                              <span className='font-medium'>
+                                {summary?.setting.usdt_chain ||
+                                  account.usdt_chain}
+                              </span>
+                            </p>
+                          </div>
                         )}
-                      </TableBody>
-                    </Table>
-                  </TabsContent>
-
-                  <TabsContent value='records'>
-                    <Table className='min-w-[680px]'>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>{t('Level')}</TableHead>
-                          <TableHead>{t('Purchase details')}</TableHead>
-                          <TableHead>{t('Commission')}</TableHead>
-                          <TableHead>{t('Status')}</TableHead>
-                          <TableHead>{t('Available Time')}</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {records.length === 0 ? (
-                          <TableRow>
-                            <TableCell colSpan={5} className='h-24 text-center'>
-                              {t('No commission records')}
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          records.map((record) => (
-                            <TableRow key={record.id}>
-                              <TableCell>{record.level}</TableCell>
-                              <TableCell>
-                                <SourceDetailCell record={record} t={t} />
-                              </TableCell>
-                              <TableCell>
-                                {formatQuota(record.reward_quota)}
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant={statusVariant(record.status)}>
-                                  {t(record.status)}
-                                </Badge>
-                              </TableCell>
-                              <TableCell>
-                                {formatTimestampToDate(record.available_time)}
-                              </TableCell>
-                            </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                    </Table>
-                  </TabsContent>
-
-                  <TabsContent value='withdrawals'>
-                    <Table className='min-w-[560px]'>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>{t('Method')}</TableHead>
-                          <TableHead>{t('Amount')}</TableHead>
-                          <TableHead>{t('Status')}</TableHead>
-                          <TableHead>{t('Created At')}</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {withdrawals.length === 0 ? (
-                          <TableRow>
-                            <TableCell colSpan={4} className='h-24 text-center'>
-                              {t('No withdrawal records')}
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          withdrawals.map((withdrawal) => (
-                            <TableRow key={withdrawal.id}>
-                              <TableCell>
-                                {methodLabel(withdrawal.method)}
-                              </TableCell>
-                              <TableCell>
-                                {formatQuota(withdrawal.quota)}
-                              </TableCell>
-                              <TableCell>
-                                <Badge
-                                  variant={statusVariant(withdrawal.status)}
+                        {isPayoutMethodEnabled('alipay') && (
+                          <div className='space-y-2'>
+                            <Label>{t('Alipay Account')}</Label>
+                            <Input
+                              value={account.alipay_account || ''}
+                              onChange={(event) =>
+                                handleAccountChange(
+                                  'alipay_account',
+                                  event.target.value
+                                )
+                              }
+                              placeholder={t('Account or phone number')}
+                            />
+                            <Input
+                              value={account.alipay_name || ''}
+                              onChange={(event) =>
+                                handleAccountChange(
+                                  'alipay_name',
+                                  event.target.value
+                                )
+                              }
+                              placeholder={t('Recipient name')}
+                            />
+                            <Label className='border-input flex h-9 cursor-pointer items-center justify-center gap-2 rounded-lg border text-sm'>
+                              <Upload className='size-4' />
+                              {uploadingMethod === 'alipay'
+                                ? t('Uploading...')
+                                : t('Upload QR code')}
+                              <input
+                                type='file'
+                                accept='image/*'
+                                className='sr-only'
+                                onChange={(event) => {
+                                  void handleQrUpload(
+                                    'alipay',
+                                    event.target.files?.[0]
+                                  )
+                                  event.currentTarget.value = ''
+                                }}
+                              />
+                            </Label>
+                            {account.alipay_qr_path && (
+                              <div className='flex items-center gap-2'>
+                                <img
+                                  src={account.alipay_qr_path}
+                                  alt={t('Alipay QR code')}
+                                  className='border-border size-12 rounded-md border object-cover'
+                                />
+                                <Button
+                                  type='button'
+                                  variant='outline'
+                                  size='sm'
+                                  onClick={() => handleQrDelete('alipay')}
                                 >
-                                  {t(withdrawal.status)}
-                                </Badge>
-                              </TableCell>
-                              <TableCell>
-                                {formatTimestampToDate(withdrawal.created_at)}
+                                  <Trash2 className='size-4' />
+                                  {t('Delete QR code')}
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {isPayoutMethodEnabled('wechat') && (
+                          <div className='space-y-2'>
+                            <Label>{t('WeChat Account')}</Label>
+                            <Input
+                              value={account.wechat_account || ''}
+                              onChange={(event) =>
+                                handleAccountChange(
+                                  'wechat_account',
+                                  event.target.value
+                                )
+                              }
+                              placeholder={t('Account or phone number')}
+                            />
+                            <Input
+                              value={account.wechat_name || ''}
+                              onChange={(event) =>
+                                handleAccountChange(
+                                  'wechat_name',
+                                  event.target.value
+                                )
+                              }
+                              placeholder={t('Recipient name')}
+                            />
+                            <Label className='border-input flex h-9 cursor-pointer items-center justify-center gap-2 rounded-lg border text-sm'>
+                              <Upload className='size-4' />
+                              {uploadingMethod === 'wechat'
+                                ? t('Uploading...')
+                                : t('Upload QR code')}
+                              <input
+                                type='file'
+                                accept='image/*'
+                                className='sr-only'
+                                onChange={(event) => {
+                                  void handleQrUpload(
+                                    'wechat',
+                                    event.target.files?.[0]
+                                  )
+                                  event.currentTarget.value = ''
+                                }}
+                              />
+                            </Label>
+                            {account.wechat_qr_path && (
+                              <div className='flex items-center gap-2'>
+                                <img
+                                  src={account.wechat_qr_path}
+                                  alt={t('WeChat QR code')}
+                                  className='border-border size-12 rounded-md border object-cover'
+                                />
+                                <Button
+                                  type='button'
+                                  variant='outline'
+                                  size='sm'
+                                  onClick={() => handleQrDelete('wechat')}
+                                >
+                                  <Trash2 className='size-4' />
+                                  {t('Delete QR code')}
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <Button onClick={saveAccount} disabled={savingAccount}>
+                        {savingAccount
+                          ? t('Saving...')
+                          : t('Save payout account')}
+                      </Button>
+                    </CardContent>
+                  </CollapsibleContent>
+                </Card>
+              </Collapsible>
+
+              <Card className='py-0'>
+                <CardHeader className='pb-2'>
+                  <CardTitle className='text-base'>
+                    {t('Affiliate Activity')}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className='p-4 pt-0'>
+                  <Tabs defaultValue='leaderboard' className='gap-4'>
+                    <TabsList className='max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto'>
+                      <TabsTrigger value='leaderboard'>
+                        {t('Leaderboard')}
+                      </TabsTrigger>
+                      <TabsTrigger value='records'>{t('Records')}</TabsTrigger>
+                      <TabsTrigger value='withdrawals'>
+                        {t('Withdrawals')}
+                      </TabsTrigger>
+                    </TabsList>
+
+                    <TabsContent value='leaderboard' className='space-y-3'>
+                      <div className='grid gap-2 sm:w-fit sm:grid-cols-2'>
+                        <NativeSelect
+                          value={leaderboardPeriod}
+                          onChange={(event) =>
+                            setLeaderboardPeriod(event.target.value)
+                          }
+                          className='w-full sm:w-40'
+                        >
+                          <NativeSelectOption value='day'>
+                            {t('Today')}
+                          </NativeSelectOption>
+                          <NativeSelectOption value='week'>
+                            {t('This week')}
+                          </NativeSelectOption>
+                          <NativeSelectOption value='month'>
+                            {t('This month')}
+                          </NativeSelectOption>
+                        </NativeSelect>
+                        <NativeSelect
+                          value={leaderboardSort}
+                          onChange={(event) =>
+                            setLeaderboardSort(event.target.value)
+                          }
+                          className='w-full sm:w-44'
+                        >
+                          <NativeSelectOption value='commission'>
+                            {t('Sort by commission')}
+                          </NativeSelectOption>
+                          <NativeSelectOption value='invites'>
+                            {t('Sort by invites')}
+                          </NativeSelectOption>
+                        </NativeSelect>
+                      </div>
+                      <Table className='min-w-[520px]'>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>{t('Rank')}</TableHead>
+                            <TableHead>{t('User')}</TableHead>
+                            <TableHead>{t('Invites')}</TableHead>
+                            <TableHead>{t('Commission')}</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {leaderboard.length === 0 ? (
+                            <TableRow>
+                              <TableCell
+                                colSpan={4}
+                                className='h-24 text-center'
+                              >
+                                {t('No leaderboard data')}
                               </TableCell>
                             </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                    </Table>
-                  </TabsContent>
-                </Tabs>
-              </CardContent>
-            </Card>
-          </div>
+                          ) : (
+                            leaderboard.map((item) => (
+                              <TableRow key={item.user_id}>
+                                <TableCell className='font-medium'>
+                                  #{item.rank}
+                                </TableCell>
+                                <TableCell>
+                                  {item.masked_name || `User #${item.user_id}`}
+                                </TableCell>
+                                <TableCell>{item.invite_count}</TableCell>
+                                <TableCell>
+                                  {formatQuota(item.commission_quota)}
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          )}
+                        </TableBody>
+                      </Table>
+                    </TabsContent>
+
+                    <TabsContent value='records'>
+                      <Table className='min-w-[680px]'>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>{t('Level')}</TableHead>
+                            <TableHead>{t('Purchase details')}</TableHead>
+                            <TableHead>{t('Commission')}</TableHead>
+                            <TableHead>{t('Status')}</TableHead>
+                            <TableHead>{t('Available Time')}</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {records.length === 0 ? (
+                            <TableRow>
+                              <TableCell
+                                colSpan={5}
+                                className='h-24 text-center'
+                              >
+                                {t('No commission records')}
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            records.map((record) => (
+                              <TableRow key={record.id}>
+                                <TableCell>{record.level}</TableCell>
+                                <TableCell>
+                                  <SourceDetailCell record={record} t={t} />
+                                </TableCell>
+                                <TableCell>
+                                  {formatQuota(record.reward_quota)}
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant={statusVariant(record.status)}>
+                                    {t(record.status)}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  {formatTimestampToDate(record.available_time)}
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          )}
+                        </TableBody>
+                      </Table>
+                    </TabsContent>
+
+                    <TabsContent value='withdrawals'>
+                      <Table className='min-w-[560px]'>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>{t('Method')}</TableHead>
+                            <TableHead>{t('Amount')}</TableHead>
+                            <TableHead>{t('Status')}</TableHead>
+                            <TableHead>{t('Created At')}</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {withdrawals.length === 0 ? (
+                            <TableRow>
+                              <TableCell
+                                colSpan={4}
+                                className='h-24 text-center'
+                              >
+                                {t('No withdrawal records')}
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            withdrawals.map((withdrawal) => (
+                              <TableRow key={withdrawal.id}>
+                                <TableCell>
+                                  {methodLabel(withdrawal.method)}
+                                </TableCell>
+                                <TableCell>
+                                  {formatQuota(withdrawal.quota)}
+                                </TableCell>
+                                <TableCell>
+                                  <Badge
+                                    variant={statusVariant(withdrawal.status)}
+                                  >
+                                    {t(withdrawal.status)}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  {formatTimestampToDate(withdrawal.created_at)}
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          )}
+                        </TableBody>
+                      </Table>
+                    </TabsContent>
+                  </Tabs>
+                </CardContent>
+              </Card>
+            </div>
           )}
         </SectionPageLayout.Content>
       </SectionPageLayout>

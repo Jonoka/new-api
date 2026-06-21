@@ -131,25 +131,36 @@ func GetAffiliateSummary(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	if err := ensureAffiliateCode(user); err != nil {
-		common.ApiError(c, err)
-		return
+	affiliateSetting := setting.GetAffiliateSetting()
+	canInvite := model.AffiliateUserCanInvite(userId, affiliateSetting)
+	if canInvite {
+		if err := ensureAffiliateCode(user); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 	}
 	balance, err := model.GetAffiliateBalance(userId)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	inviteLink := buildAffiliateInviteLink(c, user.AffCode)
-	promotionText := strings.ReplaceAll(setting.GetAffiliateSetting().PromotionTemplate, "{invite_link}", inviteLink)
+	affCode := ""
+	inviteLink := ""
+	promotionText := ""
+	if canInvite {
+		affCode = user.AffCode
+		inviteLink = buildAffiliateInviteLink(c, user.AffCode)
+		promotionText = strings.ReplaceAll(affiliateSetting.PromotionTemplate, "{invite_link}", inviteLink)
+	}
 	common.ApiSuccess(c, gin.H{
 		"balance":        balance,
-		"aff_code":       user.AffCode,
+		"aff_code":       affCode,
 		"aff_count":      user.AffCount,
 		"invite_link":    inviteLink,
 		"promotion_text": promotionText,
 		"setting":        affiliateSettingPayload(),
 		"display":        affiliateDisplayPayload(),
+		"can_invite":     canInvite,
 	})
 }
 

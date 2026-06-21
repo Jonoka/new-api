@@ -273,7 +273,9 @@ function ApplicationsPanel() {
       content: (
         <Input
           placeholder={t('驳回原因（可选）')}
-          onChange={(value) => { reason = value; }}
+          onChange={(value) => {
+            reason = value;
+          }}
         />
       ),
       onOk: async () => {
@@ -416,7 +418,7 @@ function ApplicationsPanel() {
   );
 }
 
-function FraudAlertsPanel() {
+function FraudAlertsPanel({ onQueryInviter }) {
   const { t } = useTranslation();
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -425,6 +427,11 @@ function FraudAlertsPanel() {
   const [pageSize, setPageSize] = useState(ITEMS_PER_PAGE);
   const [total, setTotal] = useState(0);
   const [statusFilter, setStatusFilter] = useState('');
+  const [keyword, setKeyword] = useState('');
+  const [keywordSearch, setKeywordSearch] = useState('');
+  const [ipKeyword, setIpKeyword] = useState('');
+  const [ipSearch, setIpSearch] = useState('');
+  const [scanDays, setScanDays] = useState(30);
 
   const loadAlerts = async () => {
     setLoading(true);
@@ -434,6 +441,8 @@ function FraudAlertsPanel() {
           p: page,
           page_size: pageSize,
           status: statusFilter || undefined,
+          keyword: keywordSearch || undefined,
+          ip: ipSearch || undefined,
         },
       });
       if (res.data.success) {
@@ -452,15 +461,23 @@ function FraudAlertsPanel() {
 
   useEffect(() => {
     loadAlerts();
-  }, [page, pageSize, statusFilter]);
+  }, [page, pageSize, statusFilter, keywordSearch, ipSearch]);
 
   const handleScan = async () => {
     setScanning(true);
     try {
-      const res = await API.post('/api/affiliate/admin/fraud-alerts/scan');
+      const res = await API.post(
+        '/api/affiliate/admin/fraud-alerts/scan',
+        null,
+        {
+          params: { days: Number(scanDays) || 0 },
+        },
+      );
       if (res.data.success) {
         const newAlerts = res.data.data?.new_alerts || 0;
-        showSuccess(t('检测完成') + `，${t('新增')} ${newAlerts} ${t('条警报')}`);
+        showSuccess(
+          t('检测完成') + `，${t('新增')} ${newAlerts} ${t('条警报')}`,
+        );
         await loadAlerts();
       } else {
         showError(res.data.message);
@@ -475,10 +492,18 @@ function FraudAlertsPanel() {
   const handleScanDeep = async () => {
     setScanning(true);
     try {
-      const res = await API.post('/api/affiliate/admin/fraud-alerts/scan-deep');
+      const res = await API.post(
+        '/api/affiliate/admin/fraud-alerts/scan-deep',
+        null,
+        {
+          params: { days: Number(scanDays) || 0 },
+        },
+      );
       if (res.data.success) {
         const newAlerts = res.data.data?.new_alerts || 0;
-        showSuccess(t('深度检测完成') + `，${t('新增')} ${newAlerts} ${t('条警报')}`);
+        showSuccess(
+          t('深度检测完成') + `，${t('新增')} ${newAlerts} ${t('条警报')}`,
+        );
         await loadAlerts();
       } else {
         showError(res.data.message);
@@ -495,7 +520,31 @@ function FraudAlertsPanel() {
       unbind: t('解绑邀请关系'),
       clawback: t('追回返佣'),
       dismiss: t('忽略'),
+      delete: t('删除'),
     }[action];
+
+    if (action === 'delete') {
+      Modal.confirm({
+        title: t('删除警报'),
+        content: t('确认删除该异常警报？'),
+        onOk: async () => {
+          try {
+            const res = await API.delete(
+              `/api/affiliate/admin/fraud-alerts/${id}`,
+            );
+            if (res.data.success) {
+              showSuccess(t('已删除'));
+              await loadAlerts();
+            } else {
+              showError(res.data.message);
+            }
+          } catch (error) {
+            showError(t('删除失败'));
+          }
+        },
+      });
+      return;
+    }
 
     if (action === 'dismiss') {
       let remark = '';
@@ -504,7 +553,9 @@ function FraudAlertsPanel() {
         content: (
           <Input
             placeholder={t('备注（可选）')}
-            onChange={(value) => { remark = value; }}
+            onChange={(value) => {
+              remark = value;
+            }}
           />
         ),
         onOk: async () => {
@@ -550,59 +601,131 @@ function FraudAlertsPanel() {
 
   const alertStatusText = (status) => {
     const map = {
-      pending: t('待处理'),
+      detected: t('待处理'),
+      resolved: t('已处理'),
       dismissed: t('已忽略'),
-      unbound: t('已解绑'),
-      clawback: t('已追回'),
     };
     return map[status] || status;
   };
 
   const alertStatusColor = (status) => {
     if (status === 'dismissed') return 'grey';
-    if (status === 'unbound' || status === 'clawback') return 'green';
+    if (status === 'resolved') return 'green';
     return 'orange';
   };
 
+  const parseSharedIps = (value) => {
+    if (Array.isArray(value)) return value;
+    try {
+      return typeof value === 'string' ? JSON.parse(value) : value || [];
+    } catch {
+      return [];
+    }
+  };
+
+  const getChildAlerts = (record) => {
+    if (Array.isArray(record?.alerts) && record.alerts.length > 0) {
+      return record.alerts;
+    }
+    return record?.id ? [record] : [];
+  };
+
+  const jumpToInviterData = (record) => {
+    onQueryInviter?.(record);
+    showSuccess(t('已切换到该邀请人的邀请数据'));
+  };
+
+  const renderAlertActions = (alert) => (
+    <Space wrap>
+      {alert.status === 'detected' && (
+        <>
+          <Button
+            size='small'
+            type='warning'
+            onClick={() => handleAction(alert.id, 'unbind')}
+          >
+            {t('解绑')}
+          </Button>
+          <Button
+            size='small'
+            type='danger'
+            onClick={() => handleAction(alert.id, 'clawback')}
+          >
+            {t('追回')}
+          </Button>
+          <Button
+            size='small'
+            theme='outline'
+            onClick={() => handleAction(alert.id, 'dismiss')}
+          >
+            {t('忽略')}
+          </Button>
+        </>
+      )}
+      <Button
+        size='small'
+        theme='borderless'
+        type='danger'
+        onClick={() => handleAction(alert.id, 'delete')}
+      >
+        {t('删除')}
+      </Button>
+    </Space>
+  );
+
   const alertColumns = [
-    { title: 'ID', dataIndex: 'id', width: 80 },
     {
       title: t('邀请人'),
       dataIndex: 'inviter_id',
-      width: 160,
+      width: 220,
       render: (_, record) =>
         renderAdminUser(
           record.inviter_id,
           record.inviter_username,
           record.inviter_name,
-          '',
+          record.inviter_email,
         ),
     },
     {
-      title: t('被邀请人'),
-      dataIndex: 'invitee_id',
-      width: 160,
-      render: (_, record) =>
-        renderAdminUser(
-          record.invitee_id,
-          record.invitee_username,
-          record.invitee_name,
-          '',
-        ),
+      title: t('可疑被邀请人'),
+      dataIndex: 'alerts',
+      width: 280,
+      render: (_, record) => {
+        const childAlerts = getChildAlerts(record);
+        return (
+          <Space vertical align='start' spacing={4}>
+            {childAlerts.map((alert) => (
+              <div key={alert.id}>
+                {renderAdminUser(
+                  alert.invitee_id,
+                  alert.invitee_username,
+                  alert.invitee_name,
+                  alert.invitee_email,
+                )}
+              </div>
+            ))}
+            {childAlerts.length === 0 && '-'}
+          </Space>
+        );
+      },
     },
     {
       title: t('共享 IP'),
       dataIndex: 'shared_ips',
-      width: 200,
-      render: (value) => {
-        let ips = [];
-        try {
-          ips = typeof value === 'string' ? JSON.parse(value) : (value || []);
-        } catch { ips = []; }
+      width: 260,
+      render: (value, record) => {
+        const childIps = getChildAlerts(record).flatMap((alert) =>
+          parseSharedIps(alert.shared_ips),
+        );
+        const ips = Array.from(
+          new Set([...parseSharedIps(value), ...childIps]),
+        );
         return (
           <Space wrap>
             {ips.slice(0, 5).map((ip) => (
-              <Tag key={ip} size='small'>{ip}</Tag>
+              <Tag key={ip} size='small'>
+                {ip}
+              </Tag>
             ))}
             {ips.length > 5 && <Tag size='small'>+{ips.length - 5}</Tag>}
             {ips.length === 0 && '-'}
@@ -621,36 +744,27 @@ function FraudAlertsPanel() {
     {
       title: t('操作'),
       key: 'action',
-      width: 240,
-      render: (_, record) => (
-        <Space>
-          {record.status === 'pending' && (
-            <>
-              <Button
-                size='small'
-                type='warning'
-                onClick={() => handleAction(record.id, 'unbind')}
-              >
-                {t('解绑')}
-              </Button>
-              <Button
-                size='small'
-                type='danger'
-                onClick={() => handleAction(record.id, 'clawback')}
-              >
-                {t('追回')}
-              </Button>
-              <Button
-                size='small'
-                theme='outline'
-                onClick={() => handleAction(record.id, 'dismiss')}
-              >
-                {t('忽略')}
-              </Button>
-            </>
-          )}
-        </Space>
-      ),
+      width: 360,
+      render: (_, record) => {
+        const childAlerts = getChildAlerts(record);
+        return (
+          <Space vertical align='start' spacing={6}>
+            <Button
+              size='small'
+              theme='outline'
+              onClick={() => jumpToInviterData(record)}
+            >
+              {t('查询邀请人数据')}
+            </Button>
+            {childAlerts.map((alert) => (
+              <Space key={alert.id} wrap>
+                <Text type='secondary'>#{alert.invitee_id}</Text>
+                {renderAlertActions(alert)}
+              </Space>
+            ))}
+          </Space>
+        );
+      },
     },
   ];
 
@@ -662,20 +776,32 @@ function FraudAlertsPanel() {
           description={t('检测可疑的邀请关系（如共享 IP）')}
         />
         <Space wrap>
-          <Button
-            type='primary'
-            loading={scanning}
-            onClick={handleScan}
-          >
+          <Button type='primary' loading={scanning} onClick={handleScan}>
             {t('一键检测')}
           </Button>
-          <Button
-            type='warning'
-            loading={scanning}
-            onClick={handleScanDeep}
-          >
+          <Button type='warning' loading={scanning} onClick={handleScanDeep}>
             {t('深度检测（含历史日志）')}
           </Button>
+          <Input
+            value={keyword}
+            placeholder={t('搜索邀请人或被邀请人')}
+            style={{ width: 200 }}
+            onChange={setKeyword}
+            onEnterPress={() => {
+              setPage(1);
+              setKeywordSearch(keyword.trim());
+            }}
+          />
+          <Input
+            value={ipKeyword}
+            placeholder={t('搜索共享 IP')}
+            style={{ width: 160 }}
+            onChange={setIpKeyword}
+            onEnterPress={() => {
+              setPage(1);
+              setIpSearch(ipKeyword.trim());
+            }}
+          />
           <Select
             value={statusFilter}
             onChange={(value) => {
@@ -685,20 +811,90 @@ function FraudAlertsPanel() {
             style={{ width: 140 }}
           >
             <Select.Option value=''>{t('全部状态')}</Select.Option>
-            <Select.Option value='pending'>{t('待处理')}</Select.Option>
+            <Select.Option value='detected'>{t('待处理')}</Select.Option>
+            <Select.Option value='resolved'>{t('已处理')}</Select.Option>
             <Select.Option value='dismissed'>{t('已忽略')}</Select.Option>
-            <Select.Option value='unbound'>{t('已解绑')}</Select.Option>
-            <Select.Option value='clawback'>{t('已追回')}</Select.Option>
           </Select>
+          <InputNumber
+            min={0}
+            value={scanDays}
+            onChange={setScanDays}
+            style={{ width: 120 }}
+            placeholder={t('检测天数')}
+          />
+          <Button
+            theme='outline'
+            onClick={() => {
+              setPage(1);
+              setKeywordSearch(keyword.trim());
+              setIpSearch(ipKeyword.trim());
+            }}
+          >
+            {t('搜索')}
+          </Button>
           <Button theme='outline' onClick={loadAlerts}>
             {t('刷新')}
           </Button>
         </Space>
         <Table
-          rowKey='id'
+          rowKey={(record) =>
+            `${record.inviter_id || 0}-${record.id || record.latest_detected_at || record.alert_count || 0}`
+          }
           loading={loading}
           columns={alertColumns}
           dataSource={alerts}
+          expandedRowRender={(record) => (
+            <Table
+              rowKey='id'
+              size='small'
+              pagination={false}
+              dataSource={getChildAlerts(record)}
+              columns={[
+                {
+                  title: t('被邀请人'),
+                  width: 220,
+                  render: (_, alert) =>
+                    renderAdminUser(
+                      alert.invitee_id,
+                      alert.invitee_username,
+                      alert.invitee_name,
+                      alert.invitee_email,
+                    ),
+                },
+                {
+                  title: t('共享 IP'),
+                  width: 260,
+                  render: (_, alert) => {
+                    const ips = parseSharedIps(alert.shared_ips);
+                    return (
+                      <Space wrap>
+                        {ips.map((ip) => (
+                          <Tag key={ip} size='small'>
+                            {ip}
+                          </Tag>
+                        ))}
+                        {ips.length === 0 && '-'}
+                      </Space>
+                    );
+                  },
+                },
+                {
+                  title: t('状态'),
+                  width: 100,
+                  render: (_, alert) => (
+                    <Tag color={alertStatusColor(alert.status)}>
+                      {alertStatusText(alert.status)}
+                    </Tag>
+                  ),
+                },
+                {
+                  title: t('操作'),
+                  width: 260,
+                  render: (_, alert) => renderAlertActions(alert),
+                },
+              ]}
+            />
+          )}
           pagination={{
             currentPage: page,
             pageSize: pageSize,
@@ -713,7 +909,7 @@ function FraudAlertsPanel() {
           }}
           empty={<Empty description={t('暂无异常警报')} />}
           size='small'
-          scroll={{ x: 940 }}
+          scroll={{ x: 1040 }}
           className='w-full'
         />
       </Space>
@@ -754,6 +950,7 @@ export default function SettingsAffiliateCommission(props) {
   const [bindForce, setBindForce] = useState(false);
   const [bindLoading, setBindLoading] = useState(false);
   const [bindResult, setBindResult] = useState(null);
+  const [activeTab, setActiveTab] = useState('rules');
   const formApiRef = useRef(null);
   const antifraudFormApiRef = useRef(null);
 
@@ -810,6 +1007,14 @@ export default function SettingsAffiliateCommission(props) {
     } finally {
       setInvitationsLoading(false);
     }
+  };
+
+  const queryInviterInvitations = (record) => {
+    const nextKeyword = `#${record.inviter_id}`;
+    setInvitationKeyword(nextKeyword);
+    setInvitationSearch(nextKeyword);
+    setInvitationPage(1);
+    setActiveTab('invitations');
   };
 
   const loadRecords = async () => {
@@ -1116,13 +1321,15 @@ export default function SettingsAffiliateCommission(props) {
           type='danger'
           theme='borderless'
           onClick={async () => {
-            if (!window.confirm(t('确认解除该邀请关系？解除后不可恢复。'))) return;
+            if (!window.confirm(t('确认解除该邀请关系？解除后不可恢复。')))
+              return;
             try {
-              const res = await API.post('/api/affiliate/admin/bind-inviter', {
-                user_id: record.invitee_id,
-                aff_code: '',
-                force: true,
-              });
+              const res = await API.post(
+                '/api/affiliate/admin/unbind-inviter',
+                {
+                  user_id: record.invitee_id,
+                },
+              );
               if (res.data.success) {
                 showSuccess(t('已解除邀请关系'));
                 loadInvitations();
@@ -1285,7 +1492,7 @@ export default function SettingsAffiliateCommission(props) {
 
   return (
     <Spin spinning={saving}>
-      <Tabs type='line' defaultActiveKey='rules'>
+      <Tabs type='line' activeKey={activeTab} onChange={setActiveTab}>
         <Tabs.TabPane tab={t('返佣规则')} itemKey='rules'>
           <Form
             values={inputs}
@@ -1560,7 +1767,9 @@ export default function SettingsAffiliateCommission(props) {
                     {selectedBindUser.display_name ||
                       selectedBindUser.username ||
                       ''}
-                    {selectedBindUser.email ? ` (${selectedBindUser.email})` : ''}
+                    {selectedBindUser.email
+                      ? ` (${selectedBindUser.email})`
+                      : ''}
                   </Text>
                 </div>
               )}
@@ -1592,14 +1801,16 @@ export default function SettingsAffiliateCommission(props) {
                       showError(t('请先搜索并选择要解除绑定的用户'));
                       return;
                     }
-                    if (!window.confirm(t('确认解除该用户的邀请关系？'))) return;
+                    if (!window.confirm(t('确认解除该用户的邀请关系？')))
+                      return;
                     try {
                       setBindLoading(true);
-                      const res = await API.post('/api/affiliate/admin/bind-inviter', {
-                        user_id: selectedBindUser.id,
-                        aff_code: '',
-                        force: true,
-                      });
+                      const res = await API.post(
+                        '/api/affiliate/admin/unbind-inviter',
+                        {
+                          user_id: selectedBindUser.id,
+                        },
+                      );
                       if (res.data.success) {
                         showSuccess(t('已解除邀请关系'));
                         setBindResult(res.data.data);
@@ -1673,9 +1884,7 @@ export default function SettingsAffiliateCommission(props) {
                 </Button>
               </Space>
               <Table
-                rowKey={(record) =>
-                  `${record.inviter_id}-${record.invitee_id}`
-                }
+                rowKey={(record) => `${record.inviter_id}-${record.invitee_id}`}
                 loading={invitationsLoading}
                 columns={invitationColumns}
                 dataSource={invitations}
@@ -1831,7 +2040,9 @@ export default function SettingsAffiliateCommission(props) {
                     noLabel
                     checkedText='｜'
                     uncheckedText='〇'
-                    onChange={handleFieldChange('affiliate_setting.review_enabled')}
+                    onChange={handleFieldChange(
+                      'affiliate_setting.review_enabled',
+                    )}
                   />
                 </SwitchRow>
                 <Form.InputNumber
@@ -1840,7 +2051,9 @@ export default function SettingsAffiliateCommission(props) {
                   min={0}
                   precision={0}
                   style={COMPACT_INPUT_STYLE}
-                  onChange={handleFieldChange('affiliate_setting.auto_approve_after_days')}
+                  onChange={handleFieldChange(
+                    'affiliate_setting.auto_approve_after_days',
+                  )}
                 />
 
                 <SectionHeader
@@ -1853,7 +2066,9 @@ export default function SettingsAffiliateCommission(props) {
                     noLabel
                     checkedText='｜'
                     uncheckedText='〇'
-                    onChange={handleFieldChange('affiliate_setting.agreement_enabled')}
+                    onChange={handleFieldChange(
+                      'affiliate_setting.agreement_enabled',
+                    )}
                   />
                 </SwitchRow>
                 <Form.TextArea
@@ -1861,7 +2076,9 @@ export default function SettingsAffiliateCommission(props) {
                   label={t('协议内容')}
                   autosize={{ minRows: 4, maxRows: 10 }}
                   style={WIDE_INPUT_STYLE}
-                  onChange={handleFieldChange('affiliate_setting.agreement_text')}
+                  onChange={handleFieldChange(
+                    'affiliate_setting.agreement_text',
+                  )}
                 />
 
                 <SectionHeader
@@ -1875,14 +2092,18 @@ export default function SettingsAffiliateCommission(props) {
                     min={0}
                     precision={0}
                     style={COMPACT_INPUT_STYLE}
-                    onChange={handleFieldChange('affiliate_setting.inviter_min_account_age_days')}
+                    onChange={handleFieldChange(
+                      'affiliate_setting.inviter_min_account_age_days',
+                    )}
                   />
                   <Form.InputNumber
                     field='affiliate_setting.inviter_min_recharge_amount'
                     label={t('邀请人最少充值额度')}
                     min={0}
                     style={COMPACT_INPUT_STYLE}
-                    onChange={handleFieldChange('affiliate_setting.inviter_min_recharge_amount')}
+                    onChange={handleFieldChange(
+                      'affiliate_setting.inviter_min_recharge_amount',
+                    )}
                   />
                   <Form.InputNumber
                     field='affiliate_setting.invitee_min_account_age_days'
@@ -1890,19 +2111,27 @@ export default function SettingsAffiliateCommission(props) {
                     min={0}
                     precision={0}
                     style={COMPACT_INPUT_STYLE}
-                    onChange={handleFieldChange('affiliate_setting.invitee_min_account_age_days')}
+                    onChange={handleFieldChange(
+                      'affiliate_setting.invitee_min_account_age_days',
+                    )}
                   />
                   <Form.InputNumber
                     field='affiliate_setting.invitee_min_recharge_amount'
                     label={t('被邀请人最少充值额度')}
                     min={0}
                     style={COMPACT_INPUT_STYLE}
-                    onChange={handleFieldChange('affiliate_setting.invitee_min_recharge_amount')}
+                    onChange={handleFieldChange(
+                      'affiliate_setting.invitee_min_recharge_amount',
+                    )}
                   />
                 </div>
 
                 <div className='flex justify-end'>
-                  <Button type='primary' loading={saving} onClick={saveSettings}>
+                  <Button
+                    type='primary'
+                    loading={saving}
+                    onClick={saveSettings}
+                  >
                     {t('保存设置')}
                   </Button>
                 </div>
@@ -1916,7 +2145,7 @@ export default function SettingsAffiliateCommission(props) {
         </Tabs.TabPane>
 
         <Tabs.TabPane tab={t('异常检测')} itemKey='fraud'>
-          <FraudAlertsPanel />
+          <FraudAlertsPanel onQueryInviter={queryInviterInvitations} />
         </Tabs.TabPane>
       </Tabs>
     </Spin>

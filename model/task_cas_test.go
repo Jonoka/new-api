@@ -55,6 +55,7 @@ func TestMain(m *testing.M) {
 		&AffiliateBalance{},
 		&AffiliatePayoutAccount{},
 		&AffiliateWithdrawal{},
+		&AffiliateApplication{},
 		&AffiliateFraudAlert{},
 		&PerfMetric{},
 	); err != nil {
@@ -86,6 +87,7 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM affiliate_balances")
 		DB.Exec("DELETE FROM affiliate_payout_accounts")
 		DB.Exec("DELETE FROM affiliate_withdrawals")
+		DB.Exec("DELETE FROM affiliate_applications")
 		DB.Exec("DELETE FROM affiliate_fraud_alerts")
 		DB.Exec("DELETE FROM perf_metrics")
 	})

@@ -77,13 +77,40 @@ function AffiliateApplicationGate({
   handleApply,
 }) {
   const { status, eligibility, rejected_reason } = reviewStatus || {};
+  const renderEligibilityCondition = (condition) => {
+    const label =
+      condition.type === 'account_age_days'
+        ? t('账号注册天数')
+        : condition.type === 'recharge_quota'
+          ? t('累计成功充值')
+          : t('申请条件');
+    const formatValue = (value) =>
+      condition.unit === 'quota'
+        ? renderQuota(Number(value) || 0)
+        : `${Number(value) || 0} ${t('天')}`;
+    return (
+      <div key={condition.type} style={{ lineHeight: 1.8 }}>
+        <Text strong>{label}</Text>
+        <Text type='secondary'>
+          {' '}
+          {t('要求')}：{formatValue(condition.required)} · {t('当前')}：
+          {formatValue(condition.current)} ·{' '}
+        </Text>
+        <Tag color={condition.met ? 'green' : 'red'} size='small'>
+          {condition.met ? t('已满足') : t('未满足')}
+        </Tag>
+      </div>
+    );
+  };
 
   // Pending — waiting for admin review
   if (status === 'pending') {
     return (
       <Card style={{ marginTop: 24 }}>
         <Space vertical align='center' style={{ width: '100%', padding: 40 }}>
-          <Tag color='orange' size='large'>{t('审核中')}</Tag>
+          <Tag color='orange' size='large'>
+            {t('审核中')}
+          </Tag>
           <Text type='secondary'>
             {t('您的返佣参与申请正在审核中，请耐心等待管理员处理。')}
           </Text>
@@ -97,20 +124,16 @@ function AffiliateApplicationGate({
     return (
       <Card style={{ marginTop: 24 }}>
         <Space vertical align='start' style={{ width: '100%', padding: 20 }}>
-          <Tag color='red' size='large'>{t('申请被驳回')}</Tag>
+          <Tag color='red' size='large'>
+            {t('申请被驳回')}
+          </Tag>
           {rejected_reason && (
             <Text type='secondary'>
               {t('驳回原因')}：{rejected_reason}
             </Text>
           )}
-          <Text type='secondary'>
-            {t('您可以重新提交申请。')}
-          </Text>
-          <Button
-            type='primary'
-            loading={applyLoading}
-            onClick={handleApply}
-          >
+          <Text type='secondary'>{t('您可以重新提交申请。')}</Text>
+          <Button type='primary' loading={applyLoading} onClick={handleApply}>
             {t('重新申请')}
           </Button>
         </Space>
@@ -123,9 +146,18 @@ function AffiliateApplicationGate({
     return (
       <Card style={{ marginTop: 24 }}>
         <Space vertical align='start' style={{ width: '100%', padding: 20 }}>
-          <Tag color='grey' size='large'>{t('暂不满足申请条件')}</Tag>
-          {eligibility.reason && (
-            <Text type='secondary'>{eligibility.reason}</Text>
+          <Tag color='grey' size='large'>
+            {t('暂不满足申请条件')}
+          </Tag>
+          {Array.isArray(eligibility.conditions) &&
+          eligibility.conditions.length > 0 ? (
+            <div style={{ width: '100%' }}>
+              {eligibility.conditions.map(renderEligibilityCondition)}
+            </div>
+          ) : (
+            eligibility.reason && (
+              <Text type='secondary'>{t(eligibility.reason)}</Text>
+            )
           )}
         </Space>
       </Card>
@@ -136,13 +168,18 @@ function AffiliateApplicationGate({
   const agreementEnabled = reviewStatus?.agreement_enabled;
   const agreementText = reviewStatus?.agreement_text || '';
   const canSubmit = !agreementEnabled || agreementConfirm === '我已同意';
+  const reviewEnabled = Boolean(reviewStatus?.review_enabled);
 
   return (
     <Card style={{ marginTop: 24 }}>
       <Space vertical align='start' style={{ width: '100%', padding: 20 }}>
-        <Title heading={5}>{t('申请参与返佣')}</Title>
+        <Title heading={5}>
+          {reviewEnabled ? t('申请参与返佣') : t('确认返佣协议')}
+        </Title>
         <Text type='secondary'>
-          {t('您需要提交申请并通过审核后才能参与返佣分成。')}
+          {reviewEnabled
+            ? t('您需要提交申请并通过审核后才能参与返佣分成。')
+            : t('请先阅读并同意协议，之后才能开启邀请权限。')}
         </Text>
         {agreementEnabled && agreementText && (
           <>
@@ -170,7 +207,7 @@ function AffiliateApplicationGate({
           disabled={!canSubmit}
           onClick={handleApply}
         >
-          {t('提交申请')}
+          {reviewEnabled ? t('提交申请') : t('同意并开启邀请权限')}
         </Button>
       </Space>
     </Card>
@@ -297,7 +334,9 @@ function renderSourceDetail(t, record) {
 function renderUserName(t, user, fallbackId) {
   if (!user && !fallbackId) return '-';
   const display =
-    user?.display_name || user?.username || (fallbackId ? `ID ${fallbackId}` : '');
+    user?.display_name ||
+    user?.username ||
+    (fallbackId ? `ID ${fallbackId}` : '');
   return (
     <Space vertical align='start' spacing={2}>
       <Text strong>{display || '-'}</Text>
@@ -374,18 +413,18 @@ const Affiliate = () => {
             data.agreement_text = agr.agreement_text;
           }
           setReviewStatus(data);
-          // Show modal if agreement enabled and user hasn't confirmed yet
-          if (data.agreement_enabled && data.agreement_text) {
-            const confirmed = localStorage.getItem('affiliate_agreement_confirmed');
-            if (!confirmed) {
-              setAgreementModalVisible(true);
-            }
+          if (
+            data.can_invite &&
+            data.agreement_enabled &&
+            data.agreement_text
+          ) {
+            setAgreementModalVisible(true);
           }
         } else {
-          setReviewStatus({ review_enabled: false });
+          setReviewStatus({ review_enabled: false, can_invite: true });
         }
       } catch (error) {
-        setReviewStatus({ review_enabled: false });
+        setReviewStatus({ review_enabled: false, can_invite: true });
       } finally {
         setReviewLoading(false);
       }
@@ -400,11 +439,16 @@ const Affiliate = () => {
         agreement_accepted: true,
       });
       if (res.data.success) {
-        showSuccess(t('申请已提交'));
+        showSuccess(
+          reviewStatus?.review_enabled ? t('申请已提交') : t('邀请权限已开启'),
+        );
         // Reload status
         const statusRes = await API.get('/api/affiliate/application-status');
         if (statusRes.data.success) {
           setReviewStatus(statusRes.data.data);
+        }
+        if (!reviewStatus?.review_enabled) {
+          await refresh();
         }
       } else {
         showError(res.data.message);
@@ -674,7 +718,8 @@ const Affiliate = () => {
     {
       title: t('购买用户'),
       width: 160,
-      render: (_, record) => renderUserName(t, record.invitee, record.invitee_id),
+      render: (_, record) =>
+        renderUserName(t, record.invitee, record.invitee_id),
     },
     {
       title: t('购买明细'),
@@ -765,8 +810,7 @@ const Affiliate = () => {
     },
     {
       title: t('用户'),
-      render: (_, record) =>
-        record.masked_name || `ID ${record.user_id}`,
+      render: (_, record) => record.masked_name || `ID ${record.user_id}`,
     },
     { title: t('邀请人数'), dataIndex: 'invite_count' },
   ];
@@ -780,8 +824,7 @@ const Affiliate = () => {
     },
     {
       title: t('用户'),
-      render: (_, record) =>
-        record.masked_name || `ID ${record.user_id}`,
+      render: (_, record) => record.masked_name || `ID ${record.user_id}`,
     },
     {
       title: t('返利金额'),
@@ -796,7 +839,7 @@ const Affiliate = () => {
         <Spin spinning={true}>
           <div style={{ minHeight: 200 }} />
         </Spin>
-      ) : reviewStatus?.review_enabled && reviewStatus?.status !== 'approved' ? (
+      ) : !reviewStatus?.can_invite ? (
         <AffiliateApplicationGate
           t={t}
           reviewStatus={reviewStatus}
@@ -806,544 +849,584 @@ const Affiliate = () => {
           handleApply={handleApply}
         />
       ) : (
-      <>
-      {/* Anti-fraud agreement modal (first time) + collapsible banner (after) */}
-      {reviewStatus?.agreement_enabled && reviewStatus?.agreement_text && (
         <>
-          <Modal
-            title={t('参与返佣须知')}
-            visible={agreementModalVisible}
-            closable={false}
-            maskClosable={false}
-            footer={
-              <Button type='primary' onClick={() => {
-                localStorage.setItem('affiliate_agreement_confirmed', String(Date.now()));
-                setAgreementModalVisible(false);
-              }}>
-                {t('我已知悉')}
-              </Button>
-            }
-          >
-            <Text style={{ whiteSpace: 'pre-wrap' }}>{reviewStatus.agreement_text}</Text>
-          </Modal>
-          {!agreementModalVisible && (
-            <div
-              style={{ marginBottom: 12, padding: '8px 16px', borderRadius: 6, border: '1px solid var(--semi-color-warning)', cursor: 'pointer' }}
-              onClick={() => setAgreementBannerOpen(!agreementBannerOpen)}
-            >
-              <Space>
-                <Tag color='orange' size='small'>{t('反欺诈公告')}</Tag>
-                <Text type='secondary'>{agreementBannerOpen ? t('收起') : t('点击查看返佣须知')}</Text>
-              </Space>
-              {agreementBannerOpen && (
-                <div style={{ marginTop: 8 }}>
-                  <Text type='secondary' style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>
-                    {reviewStatus.agreement_text}
-                  </Text>
-                </div>
-              )}
-            </div>
-          )}
-        </>
-      )}
-      <Spin spinning={loading}>
-        <div className='flex flex-col gap-4'>
-          <div className='flex flex-col gap-1'>
-            <Title heading={3} style={{ margin: 0 }}>
-              {t('返佣分成')}
-            </Title>
-            <Text type='secondary'>
-              {t('查看邀请返佣、排行榜，并管理提现账户')}
-            </Text>
-          </div>
-
-          <Card
-            title={
-              <div className='flex items-center justify-between gap-3'>
-                <Space>
-                  <WalletCards size={16} />
-                  {t('概览')}
-                </Space>
-                <Button
-                  icon={<RefreshCw size={14} />}
-                  theme='borderless'
-                  type='tertiary'
-                  onClick={refresh}
-                  aria-label={t('刷新')}
-                />
-              </div>
-            }
-          >
-            <div className='grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px] xl:items-end'>
-              <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>
-                {[
-                  [t('可提现'), balance.available_quota || 0],
-                  [t('待到账'), balance.pending_quota || 0],
-                  [t('冻结中'), balance.frozen_quota || 0],
-                  [t('累计返佣'), balance.total_quota || 0],
-                ].map(([label, value], index) => (
-                  <div className='min-w-0' key={label}>
-                    <Text type='secondary'>{label}</Text>
-                    <div
-                      className={
-                        index === 0
-                          ? 'mt-1 text-2xl font-semibold'
-                          : 'mt-1 text-lg font-semibold'
-                      }
+          {/* Anti-fraud agreement modal (first time) + collapsible banner (after) */}
+          {reviewStatus?.can_invite &&
+            reviewStatus?.agreement_enabled &&
+            reviewStatus?.agreement_text && (
+              <>
+                <Modal
+                  title={t('参与返佣须知')}
+                  visible={agreementModalVisible}
+                  closable={false}
+                  maskClosable={false}
+                  footer={
+                    <Button
+                      type='primary'
+                      onClick={() => {
+                        setAgreementModalVisible(false);
+                      }}
                     >
-                      {renderQuota(value)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className='grid gap-2 sm:grid-cols-2 xl:grid-cols-1'>
-                <Button
-                  type='primary'
-                  icon={<Banknote size={14} />}
-                  block
-                  disabled={(balance.available_quota || 0) <= 0}
-                  onClick={() => {
-                    if (!payoutMethods.length) {
-                      showError(t('暂无可用提现渠道'));
-                      return;
-                    }
-                    setWithdrawAmount(Number(availableAmount.toFixed(4)));
-                    setWithdrawVisible(true);
-                  }}
-                >
-                  {t('申请提现')}
-                </Button>
-                <Button
-                  icon={<Send size={14} />}
-                  block
-                  disabled={(balance.available_quota || 0) <= 0}
-                  loading={transferLoading}
-                  onClick={transferAllToBalance}
-                >
-                  {t('转入余额')}
-                </Button>
-              </div>
-            </div>
-          </Card>
-
-          <Card
-            title={
-              <Space>
-                <Link2 size={16} />
-                {t('推广文案')}
-              </Space>
-            }
-          >
-            <Space vertical align='start' style={{ width: '100%' }}>
-              <div className='grid gap-2 sm:grid-cols-[1fr_auto] w-full'>
-                <Input
-                  value={summary?.invite_link || ''}
-                  readonly
-                  prefix={t('邀请链接')}
-                />
-                <Button
-                  icon={<Copy size={14} />}
-                  onClick={() =>
-                    copyText(summary?.invite_link, t('邀请链接已复制'))
+                      {t('我已知悉')}
+                    </Button>
                   }
                 >
-                  {t('复制')}
-                </Button>
+                  <Text style={{ whiteSpace: 'pre-wrap' }}>
+                    {reviewStatus.agreement_text}
+                  </Text>
+                </Modal>
+                {!agreementModalVisible && (
+                  <div
+                    style={{
+                      marginBottom: 12,
+                      padding: '8px 16px',
+                      borderRadius: 6,
+                      border: '1px solid var(--semi-color-warning)',
+                      cursor: 'pointer',
+                    }}
+                    onClick={() => setAgreementBannerOpen(!agreementBannerOpen)}
+                  >
+                    <Space>
+                      <Tag color='orange' size='small'>
+                        {t('反欺诈公告')}
+                      </Tag>
+                      <Text type='secondary'>
+                        {agreementBannerOpen
+                          ? t('收起')
+                          : t('点击查看返佣须知')}
+                      </Text>
+                    </Space>
+                    {agreementBannerOpen && (
+                      <div style={{ marginTop: 8 }}>
+                        <Text
+                          type='secondary'
+                          style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}
+                        >
+                          {reviewStatus.agreement_text}
+                        </Text>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          <Spin spinning={loading}>
+            <div className='flex flex-col gap-4'>
+              <div className='flex flex-col gap-1'>
+                <Title heading={3} style={{ margin: 0 }}>
+                  {t('返佣分成')}
+                </Title>
+                <Text type='secondary'>
+                  {t('查看邀请返佣、排行榜，并管理提现账户')}
+                </Text>
               </div>
-              <TextArea
-                value={summary?.promotion_text || ''}
-                readonly
-                rows={3}
-                style={{ width: '100%' }}
-              />
-              <Button
-                icon={<Copy size={14} />}
-                onClick={() =>
-                  copyText(summary?.promotion_text, t('推广文案已复制'))
+
+              <Card
+                title={
+                  <div className='flex items-center justify-between gap-3'>
+                    <Space>
+                      <WalletCards size={16} />
+                      {t('概览')}
+                    </Space>
+                    <Button
+                      icon={<RefreshCw size={14} />}
+                      theme='borderless'
+                      type='tertiary'
+                      onClick={refresh}
+                      aria-label={t('刷新')}
+                    />
+                  </div>
                 }
               >
-                {t('复制推广文案')}
-              </Button>
-              <Text type='secondary'>
-                {t('邀请人数')}：{summary?.aff_count || 0} · {t('一级返佣')}：
-                {summary?.setting?.first_level_ratio || 0}% · {t('二级返佣')}：
-                {summary?.setting?.second_level_ratio || 0}%
-              </Text>
-            </Space>
-          </Card>
-
-          <Card
-            title={
-              <div className='flex items-center justify-between gap-3'>
-                <Space>
-                  <HandCoins size={16} />
-                  {t('收款账户')}
-                </Space>
-                <Space wrap>
-                  {payoutMethods.map((method) => (
-                    <Tag key={method}>{methodText(t, method)}</Tag>
-                  ))}
-                </Space>
-              </div>
-            }
-          >
-            <Collapse>
-              <Collapse.Panel
-                header={t('编辑收款账户')}
-                itemKey='payout-account'
-              >
-                <Row gutter={[16, 16]}>
-                  {isPayoutMethodEnabled('usdt') && (
-                    <Col xs={24} lg={8}>
-                      <Space vertical align='start' style={{ width: '100%' }}>
-                        <Text strong>{t('USDT 地址')}</Text>
-                        <Input
-                          value={account.usdt_address || ''}
-                          placeholder={t('请输入 USDT 地址')}
-                          onChange={(value) =>
-                            handleAccountChange('usdt_address', value)
-                          }
-                        />
-                        <Text type='secondary'>
-                          {t('当前提现链')}：
-                          {summary?.setting?.usdt_chain || 'TRC20'}
-                        </Text>
-                      </Space>
-                    </Col>
-                  )}
-                  {isPayoutMethodEnabled('alipay') && (
-                    <Col xs={24} lg={8}>
-                      <Space vertical align='start' style={{ width: '100%' }}>
-                        <Text strong>{t('支付宝收款')}</Text>
-                        <Input
-                          value={account.alipay_account || ''}
-                          placeholder={t('账号或手机号')}
-                          onChange={(value) =>
-                            handleAccountChange('alipay_account', value)
-                          }
-                        />
-                        <Input
-                          value={account.alipay_name || ''}
-                          placeholder={t('收款人姓名')}
-                          onChange={(value) =>
-                            handleAccountChange('alipay_name', value)
-                          }
-                        />
-                        <Button
-                          icon={<Upload size={14} />}
-                          loading={uploadingMethod === 'alipay'}
-                          onClick={() =>
-                            document
-                              .getElementById('affiliate-alipay-qr')
-                              ?.click()
+                <div className='grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px] xl:items-end'>
+                  <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>
+                    {[
+                      [t('可提现'), balance.available_quota || 0],
+                      [t('待到账'), balance.pending_quota || 0],
+                      [t('冻结中'), balance.frozen_quota || 0],
+                      [t('累计返佣'), balance.total_quota || 0],
+                    ].map(([label, value], index) => (
+                      <div className='min-w-0' key={label}>
+                        <Text type='secondary'>{label}</Text>
+                        <div
+                          className={
+                            index === 0
+                              ? 'mt-1 text-2xl font-semibold'
+                              : 'mt-1 text-lg font-semibold'
                           }
                         >
-                          {account.alipay_qr_path
-                            ? t('重新上传收款码')
-                            : t('上传收款码')}
-                        </Button>
-                        {account.alipay_qr_path && (
-                          <Space>
-                            <img
-                              src={account.alipay_qr_path}
-                              alt={t('支付宝收款码')}
-                              style={{
-                                width: 48,
-                                height: 48,
-                                objectFit: 'cover',
-                                borderRadius: 6,
-                                border: '1px solid var(--semi-color-border)',
-                              }}
-                            />
-                            <Button
-                              type='danger'
-                              theme='borderless'
-                              icon={<Trash2 size={14} />}
-                              onClick={() => deleteQr('alipay')}
-                            >
-                              {t('删除收款码')}
-                            </Button>
-                          </Space>
-                        )}
-                        <input
-                          id='affiliate-alipay-qr'
-                          type='file'
-                          accept='image/*'
-                          className='hidden'
-                          onChange={(event) => {
-                            uploadQr('alipay', event.target.files?.[0]);
-                            event.target.value = '';
-                          }}
-                        />
-                      </Space>
-                    </Col>
-                  )}
-                  {isPayoutMethodEnabled('wechat') && (
-                    <Col xs={24} lg={8}>
-                      <Space vertical align='start' style={{ width: '100%' }}>
-                        <Text strong>{t('微信收款')}</Text>
-                        <Input
-                          value={account.wechat_account || ''}
-                          placeholder={t('账号或手机号')}
-                          onChange={(value) =>
-                            handleAccountChange('wechat_account', value)
-                          }
-                        />
-                        <Input
-                          value={account.wechat_name || ''}
-                          placeholder={t('收款人姓名')}
-                          onChange={(value) =>
-                            handleAccountChange('wechat_name', value)
-                          }
-                        />
-                        <Button
-                          icon={<Upload size={14} />}
-                          loading={uploadingMethod === 'wechat'}
-                          onClick={() =>
-                            document
-                              .getElementById('affiliate-wechat-qr')
-                              ?.click()
-                          }
-                        >
-                          {account.wechat_qr_path
-                            ? t('重新上传收款码')
-                            : t('上传收款码')}
-                        </Button>
-                        {account.wechat_qr_path && (
-                          <Space>
-                            <img
-                              src={account.wechat_qr_path}
-                              alt={t('微信收款码')}
-                              style={{
-                                width: 48,
-                                height: 48,
-                                objectFit: 'cover',
-                                borderRadius: 6,
-                                border: '1px solid var(--semi-color-border)',
-                              }}
-                            />
-                            <Button
-                              type='danger'
-                              theme='borderless'
-                              icon={<Trash2 size={14} />}
-                              onClick={() => deleteQr('wechat')}
-                            >
-                              {t('删除收款码')}
-                            </Button>
-                          </Space>
-                        )}
-                        <input
-                          id='affiliate-wechat-qr'
-                          type='file'
-                          accept='image/*'
-                          className='hidden'
-                          onChange={(event) => {
-                            uploadQr('wechat', event.target.files?.[0]);
-                            event.target.value = '';
-                          }}
-                        />
-                      </Space>
-                    </Col>
-                  )}
-                </Row>
-                <Button
-                  type='primary'
-                  loading={savingAccount}
-                  onClick={saveAccount}
-                  style={{ marginTop: 16 }}
-                >
-                  {t('保存收款账户')}
-                </Button>
-              </Collapse.Panel>
-            </Collapse>
-          </Card>
-
-          <Card
-            title={
-              <div className='flex items-center gap-3'>
-                <Space>
-                  <Trophy size={16} />
-                  {t('返佣动态')}
-                </Space>
-              </div>
-            }
-          >
-            <Tabs type='line' defaultActiveKey='leaderboard'>
-              <Tabs.TabPane tab={t('邀请排行榜')} itemKey='leaderboard'>
-                <Space wrap style={{ marginBottom: 12 }}>
-                  <Select
-                    value={leaderboardPeriod}
-                    onChange={(value) => {
-                      setLeaderboardPeriod(value);
-                      setInviteLeaderboardPage(1);
-                      setCommissionLeaderboardPage(1);
-                    }}
-                    style={{ width: 130 }}
-                  >
-                    <Select.Option value='day'>{t('今日')}</Select.Option>
-                    <Select.Option value='week'>{t('本周')}</Select.Option>
-                    <Select.Option value='month'>{t('本月')}</Select.Option>
-                  </Select>
-                </Space>
-                <div className='grid gap-4 xl:grid-cols-2'>
-                  <div>
-                    <Text strong>{t('邀请人数榜')}</Text>
-                    <Table
-                      rowKey='user_id'
-                      columns={inviteLeaderboardColumns}
-                      dataSource={inviteLeaderboard}
-                      pagination={{
-                        currentPage: inviteLeaderboardPage,
-                        pageSize: inviteLeaderboardPageSize,
-                        total: inviteLeaderboardTotal,
-                        pageSizeOpts: [10, 20, 50, 100],
-                        showSizeChanger: true,
-                        onPageChange: setInviteLeaderboardPage,
-                        onPageSizeChange: (pageSize) => {
-                          setInviteLeaderboardPageSize(pageSize);
-                          setInviteLeaderboardPage(1);
-                        },
-                      }}
-                      size='small'
-                      scroll={{ x: 420 }}
-                      empty={<Empty description={t('暂无邀请人数榜数据')} />}
-                      style={{ marginTop: 8 }}
-                    />
+                          {renderQuota(value)}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <div>
-                    <Text strong>{t('返利金额榜')}</Text>
-                    <Table
-                      rowKey='user_id'
-                      columns={commissionLeaderboardColumns}
-                      dataSource={commissionLeaderboard}
-                      pagination={{
-                        currentPage: commissionLeaderboardPage,
-                        pageSize: commissionLeaderboardPageSize,
-                        total: commissionLeaderboardTotal,
-                        pageSizeOpts: [10, 20, 50, 100],
-                        showSizeChanger: true,
-                        onPageChange: setCommissionLeaderboardPage,
-                        onPageSizeChange: (pageSize) => {
-                          setCommissionLeaderboardPageSize(pageSize);
-                          setCommissionLeaderboardPage(1);
-                        },
+                  <div className='grid gap-2 sm:grid-cols-2 xl:grid-cols-1'>
+                    <Button
+                      type='primary'
+                      icon={<Banknote size={14} />}
+                      block
+                      disabled={(balance.available_quota || 0) <= 0}
+                      onClick={() => {
+                        if (!payoutMethods.length) {
+                          showError(t('暂无可用提现渠道'));
+                          return;
+                        }
+                        setWithdrawAmount(Number(availableAmount.toFixed(4)));
+                        setWithdrawVisible(true);
                       }}
-                      size='small'
-                      scroll={{ x: 420 }}
-                      empty={<Empty description={t('暂无返利金额榜数据')} />}
-                      style={{ marginTop: 8 }}
-                    />
+                    >
+                      {t('申请提现')}
+                    </Button>
+                    <Button
+                      icon={<Send size={14} />}
+                      block
+                      disabled={(balance.available_quota || 0) <= 0}
+                      loading={transferLoading}
+                      onClick={transferAllToBalance}
+                    >
+                      {t('转入余额')}
+                    </Button>
                   </div>
                 </div>
-              </Tabs.TabPane>
-              <Tabs.TabPane tab={t('邀请动态')} itemKey='invitations'>
-                <Table
-                  rowKey={(record) => record.invitee?.id}
-                  columns={invitationColumns}
-                  dataSource={invitations}
-                  pagination={{
-                    currentPage: invitationPage,
-                    pageSize: invitationPageSize,
-                    total: invitationTotal,
-                    pageSizeOpts: [10, 20, 50, 100],
-                    showSizeChanger: true,
-                    onPageChange: setInvitationPage,
-                    onPageSizeChange: (pageSize) => {
-                      setInvitationPageSize(pageSize);
-                      setInvitationPage(1);
-                    },
-                  }}
-                  size='small'
-                  scroll={{ x: 840 }}
-                  empty={<Empty description={t('暂无邀请动态')} />}
-                />
-              </Tabs.TabPane>
-              <Tabs.TabPane tab={t('返佣明细')} itemKey='records'>
-                <Table
-                  rowKey='id'
-                  columns={recordColumns}
-                  dataSource={records}
-                  pagination={{
-                    currentPage: recordPage,
-                    pageSize: recordPageSize,
-                    total: recordTotal,
-                    pageSizeOpts: [10, 20, 50, 100],
-                    showSizeChanger: true,
-                    onPageChange: setRecordPage,
-                    onPageSizeChange: (pageSize) => {
-                      setRecordPageSize(pageSize);
-                      setRecordPage(1);
-                    },
-                  }}
-                  size='small'
-                  scroll={{ x: 820 }}
-                  empty={<Empty description={t('暂无返佣记录')} />}
-                />
-              </Tabs.TabPane>
-              <Tabs.TabPane tab={t('提现记录')} itemKey='withdrawals'>
-                <Table
-                  rowKey='id'
-                  columns={withdrawalColumns}
-                  dataSource={withdrawals}
-                  pagination={{
-                    currentPage: withdrawalPage,
-                    pageSize: withdrawalPageSize,
-                    total: withdrawalTotal,
-                    pageSizeOpts: [10, 20, 50, 100],
-                    showSizeChanger: true,
-                    onPageChange: setWithdrawalPage,
-                    onPageSizeChange: (pageSize) => {
-                      setWithdrawalPageSize(pageSize);
-                      setWithdrawalPage(1);
-                    },
-                  }}
-                  size='small'
-                  scroll={{ x: 560 }}
-                  empty={<Empty description={t('暂无提现记录')} />}
-                />
-              </Tabs.TabPane>
-            </Tabs>
-          </Card>
-        </div>
-      </Spin>
+              </Card>
 
-      <Modal
-        title={t('申请提现')}
-        visible={withdrawVisible}
-        onOk={submitWithdraw}
-        onCancel={() => setWithdrawVisible(false)}
-        confirmLoading={withdrawLoading}
-        maskClosable={false}
-        centered
-      >
-        <Space vertical align='start' style={{ width: '100%' }}>
-          <Text type='secondary'>
-            {t('提现申请提交后会冻结对应收益，管理员线下打款后标记完成。')}
-          </Text>
-          <Select
-            value={withdrawMethod}
-            onChange={setWithdrawMethod}
-            style={{ width: '100%' }}
+              <Card
+                title={
+                  <Space>
+                    <Link2 size={16} />
+                    {t('推广文案')}
+                  </Space>
+                }
+              >
+                <Space vertical align='start' style={{ width: '100%' }}>
+                  <div className='grid gap-2 sm:grid-cols-[1fr_auto] w-full'>
+                    <Input
+                      value={summary?.invite_link || ''}
+                      readonly
+                      prefix={t('邀请链接')}
+                    />
+                    <Button
+                      icon={<Copy size={14} />}
+                      onClick={() =>
+                        copyText(summary?.invite_link, t('邀请链接已复制'))
+                      }
+                    >
+                      {t('复制')}
+                    </Button>
+                  </div>
+                  <TextArea
+                    value={summary?.promotion_text || ''}
+                    readonly
+                    rows={3}
+                    style={{ width: '100%' }}
+                  />
+                  <Button
+                    icon={<Copy size={14} />}
+                    onClick={() =>
+                      copyText(summary?.promotion_text, t('推广文案已复制'))
+                    }
+                  >
+                    {t('复制推广文案')}
+                  </Button>
+                  <Text type='secondary'>
+                    {t('邀请人数')}：{summary?.aff_count || 0} · {t('一级返佣')}
+                    ：{summary?.setting?.first_level_ratio || 0}% ·{' '}
+                    {t('二级返佣')}：{summary?.setting?.second_level_ratio || 0}
+                    %
+                  </Text>
+                </Space>
+              </Card>
+
+              <Card
+                title={
+                  <div className='flex items-center justify-between gap-3'>
+                    <Space>
+                      <HandCoins size={16} />
+                      {t('收款账户')}
+                    </Space>
+                    <Space wrap>
+                      {payoutMethods.map((method) => (
+                        <Tag key={method}>{methodText(t, method)}</Tag>
+                      ))}
+                    </Space>
+                  </div>
+                }
+              >
+                <Collapse>
+                  <Collapse.Panel
+                    header={t('编辑收款账户')}
+                    itemKey='payout-account'
+                  >
+                    <Row gutter={[16, 16]}>
+                      {isPayoutMethodEnabled('usdt') && (
+                        <Col xs={24} lg={8}>
+                          <Space
+                            vertical
+                            align='start'
+                            style={{ width: '100%' }}
+                          >
+                            <Text strong>{t('USDT 地址')}</Text>
+                            <Input
+                              value={account.usdt_address || ''}
+                              placeholder={t('请输入 USDT 地址')}
+                              onChange={(value) =>
+                                handleAccountChange('usdt_address', value)
+                              }
+                            />
+                            <Text type='secondary'>
+                              {t('当前提现链')}：
+                              {summary?.setting?.usdt_chain || 'TRC20'}
+                            </Text>
+                          </Space>
+                        </Col>
+                      )}
+                      {isPayoutMethodEnabled('alipay') && (
+                        <Col xs={24} lg={8}>
+                          <Space
+                            vertical
+                            align='start'
+                            style={{ width: '100%' }}
+                          >
+                            <Text strong>{t('支付宝收款')}</Text>
+                            <Input
+                              value={account.alipay_account || ''}
+                              placeholder={t('账号或手机号')}
+                              onChange={(value) =>
+                                handleAccountChange('alipay_account', value)
+                              }
+                            />
+                            <Input
+                              value={account.alipay_name || ''}
+                              placeholder={t('收款人姓名')}
+                              onChange={(value) =>
+                                handleAccountChange('alipay_name', value)
+                              }
+                            />
+                            <Button
+                              icon={<Upload size={14} />}
+                              loading={uploadingMethod === 'alipay'}
+                              onClick={() =>
+                                document
+                                  .getElementById('affiliate-alipay-qr')
+                                  ?.click()
+                              }
+                            >
+                              {account.alipay_qr_path
+                                ? t('重新上传收款码')
+                                : t('上传收款码')}
+                            </Button>
+                            {account.alipay_qr_path && (
+                              <Space>
+                                <img
+                                  src={account.alipay_qr_path}
+                                  alt={t('支付宝收款码')}
+                                  style={{
+                                    width: 48,
+                                    height: 48,
+                                    objectFit: 'cover',
+                                    borderRadius: 6,
+                                    border:
+                                      '1px solid var(--semi-color-border)',
+                                  }}
+                                />
+                                <Button
+                                  type='danger'
+                                  theme='borderless'
+                                  icon={<Trash2 size={14} />}
+                                  onClick={() => deleteQr('alipay')}
+                                >
+                                  {t('删除收款码')}
+                                </Button>
+                              </Space>
+                            )}
+                            <input
+                              id='affiliate-alipay-qr'
+                              type='file'
+                              accept='image/*'
+                              className='hidden'
+                              onChange={(event) => {
+                                uploadQr('alipay', event.target.files?.[0]);
+                                event.target.value = '';
+                              }}
+                            />
+                          </Space>
+                        </Col>
+                      )}
+                      {isPayoutMethodEnabled('wechat') && (
+                        <Col xs={24} lg={8}>
+                          <Space
+                            vertical
+                            align='start'
+                            style={{ width: '100%' }}
+                          >
+                            <Text strong>{t('微信收款')}</Text>
+                            <Input
+                              value={account.wechat_account || ''}
+                              placeholder={t('账号或手机号')}
+                              onChange={(value) =>
+                                handleAccountChange('wechat_account', value)
+                              }
+                            />
+                            <Input
+                              value={account.wechat_name || ''}
+                              placeholder={t('收款人姓名')}
+                              onChange={(value) =>
+                                handleAccountChange('wechat_name', value)
+                              }
+                            />
+                            <Button
+                              icon={<Upload size={14} />}
+                              loading={uploadingMethod === 'wechat'}
+                              onClick={() =>
+                                document
+                                  .getElementById('affiliate-wechat-qr')
+                                  ?.click()
+                              }
+                            >
+                              {account.wechat_qr_path
+                                ? t('重新上传收款码')
+                                : t('上传收款码')}
+                            </Button>
+                            {account.wechat_qr_path && (
+                              <Space>
+                                <img
+                                  src={account.wechat_qr_path}
+                                  alt={t('微信收款码')}
+                                  style={{
+                                    width: 48,
+                                    height: 48,
+                                    objectFit: 'cover',
+                                    borderRadius: 6,
+                                    border:
+                                      '1px solid var(--semi-color-border)',
+                                  }}
+                                />
+                                <Button
+                                  type='danger'
+                                  theme='borderless'
+                                  icon={<Trash2 size={14} />}
+                                  onClick={() => deleteQr('wechat')}
+                                >
+                                  {t('删除收款码')}
+                                </Button>
+                              </Space>
+                            )}
+                            <input
+                              id='affiliate-wechat-qr'
+                              type='file'
+                              accept='image/*'
+                              className='hidden'
+                              onChange={(event) => {
+                                uploadQr('wechat', event.target.files?.[0]);
+                                event.target.value = '';
+                              }}
+                            />
+                          </Space>
+                        </Col>
+                      )}
+                    </Row>
+                    <Button
+                      type='primary'
+                      loading={savingAccount}
+                      onClick={saveAccount}
+                      style={{ marginTop: 16 }}
+                    >
+                      {t('保存收款账户')}
+                    </Button>
+                  </Collapse.Panel>
+                </Collapse>
+              </Card>
+
+              <Card
+                title={
+                  <div className='flex items-center gap-3'>
+                    <Space>
+                      <Trophy size={16} />
+                      {t('返佣动态')}
+                    </Space>
+                  </div>
+                }
+              >
+                <Tabs type='line' defaultActiveKey='leaderboard'>
+                  <Tabs.TabPane tab={t('邀请排行榜')} itemKey='leaderboard'>
+                    <Space wrap style={{ marginBottom: 12 }}>
+                      <Select
+                        value={leaderboardPeriod}
+                        onChange={(value) => {
+                          setLeaderboardPeriod(value);
+                          setInviteLeaderboardPage(1);
+                          setCommissionLeaderboardPage(1);
+                        }}
+                        style={{ width: 130 }}
+                      >
+                        <Select.Option value='day'>{t('今日')}</Select.Option>
+                        <Select.Option value='week'>{t('本周')}</Select.Option>
+                        <Select.Option value='month'>{t('本月')}</Select.Option>
+                      </Select>
+                    </Space>
+                    <div className='grid gap-4 xl:grid-cols-2'>
+                      <div>
+                        <Text strong>{t('邀请人数榜')}</Text>
+                        <Table
+                          rowKey='user_id'
+                          columns={inviteLeaderboardColumns}
+                          dataSource={inviteLeaderboard}
+                          pagination={{
+                            currentPage: inviteLeaderboardPage,
+                            pageSize: inviteLeaderboardPageSize,
+                            total: inviteLeaderboardTotal,
+                            pageSizeOpts: [10, 20, 50, 100],
+                            showSizeChanger: true,
+                            onPageChange: setInviteLeaderboardPage,
+                            onPageSizeChange: (pageSize) => {
+                              setInviteLeaderboardPageSize(pageSize);
+                              setInviteLeaderboardPage(1);
+                            },
+                          }}
+                          size='small'
+                          scroll={{ x: 420 }}
+                          empty={
+                            <Empty description={t('暂无邀请人数榜数据')} />
+                          }
+                          style={{ marginTop: 8 }}
+                        />
+                      </div>
+                      <div>
+                        <Text strong>{t('返利金额榜')}</Text>
+                        <Table
+                          rowKey='user_id'
+                          columns={commissionLeaderboardColumns}
+                          dataSource={commissionLeaderboard}
+                          pagination={{
+                            currentPage: commissionLeaderboardPage,
+                            pageSize: commissionLeaderboardPageSize,
+                            total: commissionLeaderboardTotal,
+                            pageSizeOpts: [10, 20, 50, 100],
+                            showSizeChanger: true,
+                            onPageChange: setCommissionLeaderboardPage,
+                            onPageSizeChange: (pageSize) => {
+                              setCommissionLeaderboardPageSize(pageSize);
+                              setCommissionLeaderboardPage(1);
+                            },
+                          }}
+                          size='small'
+                          scroll={{ x: 420 }}
+                          empty={
+                            <Empty description={t('暂无返利金额榜数据')} />
+                          }
+                          style={{ marginTop: 8 }}
+                        />
+                      </div>
+                    </div>
+                  </Tabs.TabPane>
+                  <Tabs.TabPane tab={t('邀请动态')} itemKey='invitations'>
+                    <Table
+                      rowKey={(record) => record.invitee?.id}
+                      columns={invitationColumns}
+                      dataSource={invitations}
+                      pagination={{
+                        currentPage: invitationPage,
+                        pageSize: invitationPageSize,
+                        total: invitationTotal,
+                        pageSizeOpts: [10, 20, 50, 100],
+                        showSizeChanger: true,
+                        onPageChange: setInvitationPage,
+                        onPageSizeChange: (pageSize) => {
+                          setInvitationPageSize(pageSize);
+                          setInvitationPage(1);
+                        },
+                      }}
+                      size='small'
+                      scroll={{ x: 840 }}
+                      empty={<Empty description={t('暂无邀请动态')} />}
+                    />
+                  </Tabs.TabPane>
+                  <Tabs.TabPane tab={t('返佣明细')} itemKey='records'>
+                    <Table
+                      rowKey='id'
+                      columns={recordColumns}
+                      dataSource={records}
+                      pagination={{
+                        currentPage: recordPage,
+                        pageSize: recordPageSize,
+                        total: recordTotal,
+                        pageSizeOpts: [10, 20, 50, 100],
+                        showSizeChanger: true,
+                        onPageChange: setRecordPage,
+                        onPageSizeChange: (pageSize) => {
+                          setRecordPageSize(pageSize);
+                          setRecordPage(1);
+                        },
+                      }}
+                      size='small'
+                      scroll={{ x: 820 }}
+                      empty={<Empty description={t('暂无返佣记录')} />}
+                    />
+                  </Tabs.TabPane>
+                  <Tabs.TabPane tab={t('提现记录')} itemKey='withdrawals'>
+                    <Table
+                      rowKey='id'
+                      columns={withdrawalColumns}
+                      dataSource={withdrawals}
+                      pagination={{
+                        currentPage: withdrawalPage,
+                        pageSize: withdrawalPageSize,
+                        total: withdrawalTotal,
+                        pageSizeOpts: [10, 20, 50, 100],
+                        showSizeChanger: true,
+                        onPageChange: setWithdrawalPage,
+                        onPageSizeChange: (pageSize) => {
+                          setWithdrawalPageSize(pageSize);
+                          setWithdrawalPage(1);
+                        },
+                      }}
+                      size='small'
+                      scroll={{ x: 560 }}
+                      empty={<Empty description={t('暂无提现记录')} />}
+                    />
+                  </Tabs.TabPane>
+                </Tabs>
+              </Card>
+            </div>
+          </Spin>
+
+          <Modal
+            title={t('申请提现')}
+            visible={withdrawVisible}
+            onOk={submitWithdraw}
+            onCancel={() => setWithdrawVisible(false)}
+            confirmLoading={withdrawLoading}
+            maskClosable={false}
+            centered
           >
-            {payoutMethods.map((method) => (
-              <Select.Option key={method} value={method}>
-                {methodText(t, method)}
-              </Select.Option>
-            ))}
-          </Select>
-          <InputNumber
-            value={withdrawAmount}
-            min={0}
-            precision={4}
-            onChange={(value) => setWithdrawAmount(Number(value || 0))}
-            style={{ width: '100%' }}
-          />
-          <Text type='secondary'>
-            {t('当前可提现')}：{renderQuota(balance.available_quota || 0)}
-          </Text>
-        </Space>
-      </Modal>
-      </>
+            <Space vertical align='start' style={{ width: '100%' }}>
+              <Text type='secondary'>
+                {t('提现申请提交后会冻结对应收益，管理员线下打款后标记完成。')}
+              </Text>
+              <Select
+                value={withdrawMethod}
+                onChange={setWithdrawMethod}
+                style={{ width: '100%' }}
+              >
+                {payoutMethods.map((method) => (
+                  <Select.Option key={method} value={method}>
+                    {methodText(t, method)}
+                  </Select.Option>
+                ))}
+              </Select>
+              <InputNumber
+                value={withdrawAmount}
+                min={0}
+                precision={4}
+                onChange={(value) => setWithdrawAmount(Number(value || 0))}
+                style={{ width: '100%' }}
+              />
+              <Text type='secondary'>
+                {t('当前可提现')}：{renderQuota(balance.available_quota || 0)}
+              </Text>
+            </Space>
+          </Modal>
+        </>
       )}
     </div>
   );

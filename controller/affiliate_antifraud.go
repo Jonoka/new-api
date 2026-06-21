@@ -22,10 +22,12 @@ func GetAffiliateApplicationStatus(c *gin.Context) {
 	userId := c.GetInt("id")
 	s := setting.GetAffiliateSetting()
 
-	if !s.ReviewEnabled {
+	if !model.AffiliateAccessRequired(s) {
 		common.ApiSuccess(c, gin.H{
-			"review_enabled": false,
-			"status":         "not_required",
+			"review_enabled":    false,
+			"agreement_enabled": false,
+			"status":            model.AffiliateGateStatusNotRequired,
+			"can_invite":        true,
 		})
 		return
 	}
@@ -38,24 +40,45 @@ func GetAffiliateApplicationStatus(c *gin.Context) {
 
 	if app == nil {
 		common.ApiSuccess(c, gin.H{
-			"review_enabled": true,
-			"status":         "none",
-			"eligibility":    checkUserEligibility(userId, s),
+			"review_enabled":    s.ReviewEnabled,
+			"agreement_enabled": s.AgreementEnabled,
+			"status":            model.AffiliateGateStatusNone,
+			"can_invite":        false,
+			"eligibility":       checkUserEligibility(userId, s),
 		})
 		return
 	}
 
+	canInvite := model.AffiliateUserCanInvite(userId, s)
+	status := app.Status
+	if s.AgreementEnabled && !model.AffiliateApplicationSatisfiesAgreement(app, s) {
+		status = model.AffiliateGateStatusNone
+	} else if !canInvite && !s.ReviewEnabled && s.AgreementEnabled {
+		status = model.AffiliateGateStatusNone
+	}
 	common.ApiSuccess(c, gin.H{
-		"review_enabled":  true,
-		"status":          app.Status,
-		"application":     app,
-		"rejected_reason": app.RejectedReason,
+		"review_enabled":    s.ReviewEnabled,
+		"agreement_enabled": s.AgreementEnabled,
+		"status":            status,
+		"can_invite":        canInvite,
+		"application":       app,
+		"rejected_reason":   app.RejectedReason,
+		"eligibility":       checkUserEligibility(userId, s),
 	})
 }
 
 type eligibilityResult struct {
-	Eligible bool   `json:"eligible"`
-	Reason   string `json:"reason,omitempty"`
+	Eligible   bool                   `json:"eligible"`
+	Reason     string                 `json:"reason,omitempty"`
+	Conditions []eligibilityCondition `json:"conditions,omitempty"`
+}
+
+type eligibilityCondition struct {
+	Type     string `json:"type"`
+	Required int64  `json:"required"`
+	Current  int64  `json:"current"`
+	Unit     string `json:"unit"`
+	Met      bool   `json:"met"`
 }
 
 func checkUserEligibility(userId int, s *setting.AffiliateSetting) eligibilityResult {
@@ -68,13 +91,23 @@ func checkUserEligibility(userId int, s *setting.AffiliateSetting) eligibilityRe
 		return eligibilityResult{Eligible: false, Reason: "user not found"}
 	}
 
+	result := eligibilityResult{Eligible: true}
 	if s.InviterMinAccountAgeDays > 0 {
-		requiredAge := int64(s.InviterMinAccountAgeDays) * 86400
-		if common.GetTimestamp()-user.CreatedAt < requiredAge {
-			return eligibilityResult{
-				Eligible: false,
-				Reason:   "account age requirement not met",
-			}
+		currentAgeDays := (common.GetTimestamp() - user.CreatedAt) / 86400
+		if currentAgeDays < 0 {
+			currentAgeDays = 0
+		}
+		condition := eligibilityCondition{
+			Type:     "account_age_days",
+			Required: int64(s.InviterMinAccountAgeDays),
+			Current:  currentAgeDays,
+			Unit:     "days",
+			Met:      currentAgeDays >= int64(s.InviterMinAccountAgeDays),
+		}
+		result.Conditions = append(result.Conditions, condition)
+		if !condition.Met {
+			result.Eligible = false
+			result.Reason = "account age requirement not met"
 		}
 	}
 
@@ -84,15 +117,23 @@ func checkUserEligibility(userId int, s *setting.AffiliateSetting) eligibilityRe
 			Where("user_id = ? AND status = ?", userId, common.TopUpStatusSuccess).
 			Select("COALESCE(SUM(quota), 0)").
 			Scan(&totalRecharge)
-		if totalRecharge < int64(s.InviterMinRechargeAmount) {
-			return eligibilityResult{
-				Eligible: false,
-				Reason:   "recharge requirement not met",
+		condition := eligibilityCondition{
+			Type:     "recharge_quota",
+			Required: int64(s.InviterMinRechargeAmount),
+			Current:  totalRecharge,
+			Unit:     "quota",
+			Met:      totalRecharge >= int64(s.InviterMinRechargeAmount),
+		}
+		result.Conditions = append(result.Conditions, condition)
+		if !condition.Met {
+			result.Eligible = false
+			if result.Reason == "" {
+				result.Reason = "recharge requirement not met"
 			}
 		}
 	}
 
-	return eligibilityResult{Eligible: true}
+	return result
 }
 
 type applyAffiliateRequest struct {
@@ -103,8 +144,8 @@ func ApplyAffiliate(c *gin.Context) {
 	userId := c.GetInt("id")
 	s := setting.GetAffiliateSetting()
 
-	if !s.ReviewEnabled {
-		common.ApiErrorMsg(c, "affiliate review is not enabled")
+	if !model.AffiliateAccessRequired(s) {
+		common.ApiErrorMsg(c, "affiliate application is not required")
 		return
 	}
 
@@ -185,13 +226,25 @@ func AdminRejectAffiliateApplication(c *gin.Context) {
 
 func AdminListFraudAlerts(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
-	alerts, total, err := model.SearchFraudAlerts(model.FraudAlertQuery{
+	query := model.FraudAlertQuery{
 		Status:   c.DefaultQuery("status", ""),
 		IP:       c.Query("ip"),
 		Keyword:  c.Query("keyword"),
 		Page:     pageInfo.Page,
 		PageSize: pageInfo.PageSize,
-	})
+	}
+	if c.Query("flat") == "true" {
+		alerts, total, err := model.SearchFraudAlerts(query)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		pageInfo.SetTotal(int(total))
+		pageInfo.SetItems(alerts)
+		common.ApiSuccess(c, pageInfo)
+		return
+	}
+	alerts, total, err := model.SearchFraudAlertGroups(query)
 	if err != nil {
 		common.ApiError(c, err)
 		return

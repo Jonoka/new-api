@@ -370,6 +370,7 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
   const [unbindLoading, setUnbindLoading] = useState(false)
   const [unbindResult, setUnbindResult] =
     useState<AdminUnbindAffiliateInviterResult | null>(null)
+  const [activeTab, setActiveTab] = useState('rules')
   // Anti-fraud: Applications state
   const [applications, setApplications] = useState<any[]>([])
   const [appStatus, setAppStatus] = useState('')
@@ -673,6 +674,15 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
     setFraudPage(1)
   }
 
+  const queryFraudInviter = (alert: any) => {
+    const keyword = `#${alert.inviter_id}`
+    setInvitationKeyword(keyword)
+    setInvitationSearch(keyword)
+    setInvitationPage(1)
+    setActiveTab('invitations')
+    toast.success(t('Switched to inviter invitation data'))
+  }
+
   const handleFraudAction = async (
     id: number,
     action: 'unbind' | 'clawback' | 'dismiss' | 'delete'
@@ -814,7 +824,11 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
 
   return (
     <SettingsSection title={t('Affiliate Commission')}>
-      <Tabs defaultValue='rules' className='space-y-6'>
+      <Tabs
+        value={activeTab}
+        onValueChange={setActiveTab}
+        className='space-y-6'
+      >
         <TabsList className='max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto'>
           <TabsTrigger value='rules'>{t('Commission rules')}</TabsTrigger>
           <TabsTrigger value='manual-bind'>{t('Manual referral')}</TabsTrigger>
@@ -2071,12 +2085,20 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
                 </TableRow>
               ) : (
                 fraudAlerts.map((alert) => {
-                  let parsedIps: string[] = []
-                  try {
-                    parsedIps = JSON.parse(alert.shared_ips || '[]')
-                  } catch {}
+                  const childAlerts = Array.isArray(alert.alerts)
+                    ? alert.alerts
+                    : [alert]
+                  const parsedIps: string[] = Array.isArray(alert.shared_ips)
+                    ? alert.shared_ips
+                    : (() => {
+                        try {
+                          return JSON.parse(alert.shared_ips || '[]')
+                        } catch {
+                          return []
+                        }
+                      })()
                   return (
-                    <TableRow key={alert.id}>
+                    <TableRow key={alert.inviter_id || alert.id}>
                       <TableCell>
                         <span className='font-medium'>#{alert.inviter_id}</span>
                         {alert.inviter_username && (
@@ -2086,12 +2108,25 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
                         )}
                       </TableCell>
                       <TableCell>
-                        <span className='font-medium'>#{alert.invitee_id}</span>
-                        {alert.invitee_username && (
-                          <span className='text-muted-foreground ml-1'>
-                            {alert.invitee_username}
-                          </span>
-                        )}
+                        <div className='space-y-2'>
+                          {childAlerts.map((item: any) => (
+                            <div key={item.id} className='min-w-0'>
+                              <span className='font-medium'>
+                                #{item.invitee_id}
+                              </span>
+                              {item.invitee_username && (
+                                <span className='text-muted-foreground ml-1'>
+                                  {item.invitee_username}
+                                </span>
+                              )}
+                              {item.invitee_email && (
+                                <div className='text-muted-foreground truncate text-xs'>
+                                  {item.invitee_email}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <div className='flex flex-wrap gap-1'>
@@ -2125,59 +2160,76 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <div className='flex flex-wrap items-center gap-1'>
-                          {alert.status === 'detected' && (
-                            <>
-                              <Button
-                                size='sm'
-                                variant='outline'
-                                disabled={fraudActionLoadingId === alert.id}
-                                onClick={() =>
-                                  handleFraudAction(alert.id, 'unbind')
-                                }
-                              >
-                                {t('Unbind')}
-                              </Button>
-                              <Button
-                                size='sm'
-                                variant='destructive'
-                                disabled={fraudActionLoadingId === alert.id}
-                                onClick={() =>
-                                  handleFraudAction(alert.id, 'clawback')
-                                }
-                              >
-                                {t('Clawback')}
-                              </Button>
-                              <Button
-                                size='sm'
-                                variant='secondary'
-                                disabled={fraudActionLoadingId === alert.id}
-                                onClick={() =>
-                                  handleFraudAction(alert.id, 'dismiss')
-                                }
-                              >
-                                {t('Dismiss')}
-                              </Button>
-                            </>
-                          )}
+                        <div className='space-y-2'>
                           <Button
                             size='sm'
-                            variant='ghost'
-                            disabled={fraudActionLoadingId === alert.id}
-                            onClick={() =>
-                              handleFraudAction(alert.id, 'delete')
-                            }
+                            variant='outline'
+                            onClick={() => queryFraudInviter(alert)}
                           >
-                            {t('Delete')}
+                            {t('View inviter data')}
                           </Button>
-                          {alert.status !== 'detected' &&
-                            alert.resolved_action && (
-                              <span className='text-muted-foreground text-xs'>
-                                {t(alert.resolved_action)}
-                                {alert.clawback_quota > 0 &&
-                                  ` (${formatQuota(alert.clawback_quota)})`}
+                          {childAlerts.map((item: any) => (
+                            <div
+                              key={item.id}
+                              className='flex flex-wrap items-center gap-1'
+                            >
+                              <span className='text-muted-foreground mr-1 text-xs'>
+                                #{item.invitee_id}
                               </span>
-                            )}
+                              {item.status === 'detected' && (
+                                <>
+                                  <Button
+                                    size='sm'
+                                    variant='outline'
+                                    disabled={fraudActionLoadingId === item.id}
+                                    onClick={() =>
+                                      handleFraudAction(item.id, 'unbind')
+                                    }
+                                  >
+                                    {t('Unbind')}
+                                  </Button>
+                                  <Button
+                                    size='sm'
+                                    variant='destructive'
+                                    disabled={fraudActionLoadingId === item.id}
+                                    onClick={() =>
+                                      handleFraudAction(item.id, 'clawback')
+                                    }
+                                  >
+                                    {t('Clawback')}
+                                  </Button>
+                                  <Button
+                                    size='sm'
+                                    variant='secondary'
+                                    disabled={fraudActionLoadingId === item.id}
+                                    onClick={() =>
+                                      handleFraudAction(item.id, 'dismiss')
+                                    }
+                                  >
+                                    {t('Dismiss')}
+                                  </Button>
+                                </>
+                              )}
+                              <Button
+                                size='sm'
+                                variant='ghost'
+                                disabled={fraudActionLoadingId === item.id}
+                                onClick={() =>
+                                  handleFraudAction(item.id, 'delete')
+                                }
+                              >
+                                {t('Delete')}
+                              </Button>
+                              {item.status !== 'detected' &&
+                                item.resolved_action && (
+                                  <span className='text-muted-foreground text-xs'>
+                                    {t(item.resolved_action)}
+                                    {item.clawback_quota > 0 &&
+                                      ` (${formatQuota(item.clawback_quota)})`}
+                                  </span>
+                                )}
+                            </div>
+                          ))}
                         </div>
                       </TableCell>
                     </TableRow>

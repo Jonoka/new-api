@@ -47,6 +47,28 @@ type FraudAlertWithUsers struct {
 	InviteeUsername string `json:"invitee_username"`
 }
 
+type FraudAlertInviteeItem struct {
+	AffiliateFraudAlert
+	InviteeUsername string `json:"invitee_username"`
+	InviteeName     string `json:"invitee_name"`
+	InviteeEmail    string `json:"invitee_email"`
+}
+
+type FraudAlertInviterGroup struct {
+	InviterId        int                     `json:"inviter_id"`
+	InviterUsername  string                  `json:"inviter_username"`
+	InviterName      string                  `json:"inviter_name"`
+	InviterEmail     string                  `json:"inviter_email"`
+	InviterAffCode   string                  `json:"inviter_aff_code"`
+	AlertCount       int                     `json:"alert_count"`
+	InviteeCount     int                     `json:"invitee_count"`
+	SharedIps        []string                `json:"shared_ips"`
+	SharedIpCount    int                     `json:"shared_ip_count"`
+	Status           string                  `json:"status"`
+	LatestDetectedAt int64                   `json:"latest_detected_at"`
+	Alerts           []FraudAlertInviteeItem `json:"alerts"`
+}
+
 type FraudAlertQuery struct {
 	Status   string
 	IP       string
@@ -394,6 +416,116 @@ func GetFraudAlerts(status string, page, pageSize int) ([]FraudAlertWithUsers, i
 }
 
 func SearchFraudAlerts(params FraudAlertQuery) ([]FraudAlertWithUsers, int64, error) {
+	alerts, total, err := searchFraudAlertRows(params)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	result := make([]FraudAlertWithUsers, 0, len(alerts))
+	userIds := make([]int, 0, len(alerts)*2)
+	for _, alert := range alerts {
+		userIds = append(userIds, alert.InviterId, alert.InviteeId)
+	}
+	usersById, err := getAffiliateAdminUsersByIds(userIds)
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, alert := range alerts {
+		item := FraudAlertWithUsers{AffiliateFraudAlert: alert}
+		item.InviterUsername = usersById[alert.InviterId].Username
+		item.InviteeUsername = usersById[alert.InviteeId].Username
+		result = append(result, item)
+	}
+
+	return result, total, nil
+}
+
+func SearchFraudAlertGroups(params FraudAlertQuery) ([]FraudAlertInviterGroup, int64, error) {
+	allParams := params
+	allParams.Page = 1
+	allParams.PageSize = 0
+	alerts, _, err := searchFraudAlertRows(allParams)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(alerts) == 0 {
+		return []FraudAlertInviterGroup{}, 0, nil
+	}
+
+	userIds := make([]int, 0, len(alerts)*2)
+	for _, alert := range alerts {
+		userIds = append(userIds, alert.InviterId, alert.InviteeId)
+	}
+	usersById, err := getAffiliateAdminUsersByIds(userIds)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	groupOrder := make([]int, 0)
+	groupsByInviter := make(map[int]*FraudAlertInviterGroup)
+	for _, alert := range alerts {
+		group := groupsByInviter[alert.InviterId]
+		if group == nil {
+			inviter := usersById[alert.InviterId]
+			group = &FraudAlertInviterGroup{
+				InviterId:       alert.InviterId,
+				InviterUsername: inviter.Username,
+				InviterName:     inviter.DisplayName,
+				InviterEmail:    inviter.Email,
+				InviterAffCode:  inviter.AffCode,
+				Status:          alert.Status,
+				Alerts:          make([]FraudAlertInviteeItem, 0),
+			}
+			groupsByInviter[alert.InviterId] = group
+			groupOrder = append(groupOrder, alert.InviterId)
+		}
+
+		invitee := usersById[alert.InviteeId]
+		group.Alerts = append(group.Alerts, FraudAlertInviteeItem{
+			AffiliateFraudAlert: alert,
+			InviteeUsername:     invitee.Username,
+			InviteeName:         invitee.DisplayName,
+			InviteeEmail:        invitee.Email,
+		})
+		group.AlertCount++
+		if alert.DetectedAt > group.LatestDetectedAt {
+			group.LatestDetectedAt = alert.DetectedAt
+		}
+		if fraudStatusPriority(alert.Status) > fraudStatusPriority(group.Status) {
+			group.Status = alert.Status
+		}
+		group.SharedIps = mergeUniqueStrings(group.SharedIps, decodeFraudSharedIPs(alert.SharedIps))
+	}
+
+	allGroups := make([]FraudAlertInviterGroup, 0, len(groupOrder))
+	for _, inviterId := range groupOrder {
+		group := groupsByInviter[inviterId]
+		group.InviteeCount = len(group.Alerts)
+		group.SharedIpCount = len(group.SharedIps)
+		allGroups = append(allGroups, *group)
+	}
+
+	total := int64(len(allGroups))
+	page := params.Page
+	if page <= 0 {
+		page = 1
+	}
+	pageSize := params.PageSize
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	start := (page - 1) * pageSize
+	if start >= len(allGroups) {
+		return []FraudAlertInviterGroup{}, total, nil
+	}
+	end := start + pageSize
+	if end > len(allGroups) {
+		end = len(allGroups)
+	}
+	return allGroups[start:end], total, nil
+}
+
+func searchFraudAlertRows(params FraudAlertQuery) ([]AffiliateFraudAlert, int64, error) {
 	var total int64
 	var alerts []AffiliateFraudAlert
 
@@ -417,7 +549,7 @@ func SearchFraudAlerts(params FraudAlertQuery) ([]FraudAlertWithUsers, int64, er
 			return nil, 0, err
 		}
 		if len(userIds) == 0 {
-			return []FraudAlertWithUsers{}, 0, nil
+			return []AffiliateFraudAlert{}, 0, nil
 		}
 		query = query.Where("inviter_id IN ? OR invitee_id IN ?", userIds, userIds)
 	}
@@ -434,23 +566,37 @@ func SearchFraudAlerts(params FraudAlertQuery) ([]FraudAlertWithUsers, int64, er
 	if pageSize <= 0 {
 		pageSize = 50
 	}
-	offset := (page - 1) * pageSize
-	if err := query.Order("detected_at DESC").Offset(offset).Limit(pageSize).Find(&alerts).Error; err != nil {
+	query = query.Order("detected_at DESC")
+	if params.PageSize > 0 {
+		query = query.Offset((page - 1) * pageSize).Limit(pageSize)
+	}
+	if err := query.Find(&alerts).Error; err != nil {
 		return nil, 0, err
 	}
 
-	result := make([]FraudAlertWithUsers, 0, len(alerts))
-	for _, alert := range alerts {
-		item := FraudAlertWithUsers{AffiliateFraudAlert: alert}
-		var inviter, invitee User
-		if DB.Select("username").Where("id = ?", alert.InviterId).First(&inviter).Error == nil {
-			item.InviterUsername = inviter.Username
-		}
-		if DB.Select("username").Where("id = ?", alert.InviteeId).First(&invitee).Error == nil {
-			item.InviteeUsername = invitee.Username
-		}
-		result = append(result, item)
-	}
+	return alerts, total, nil
+}
 
-	return result, total, nil
+func decodeFraudSharedIPs(raw string) []string {
+	var ips []string
+	if strings.TrimSpace(raw) == "" {
+		return ips
+	}
+	if err := common.Unmarshal([]byte(raw), &ips); err != nil {
+		return []string{}
+	}
+	return filterAffiliateFraudIPs(ips)
+}
+
+func fraudStatusPriority(status string) int {
+	switch status {
+	case FraudAlertStatusDetected:
+		return 3
+	case FraudAlertStatusResolved:
+		return 2
+	case FraudAlertStatusDismissed:
+		return 1
+	default:
+		return 0
+	}
 }

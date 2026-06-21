@@ -16,6 +16,11 @@ const (
 	AffiliateAppStatusRejected = "rejected"
 )
 
+const (
+	AffiliateGateStatusNotRequired = "not_required"
+	AffiliateGateStatusNone        = "none"
+)
+
 type AffiliateApplication struct {
 	Id             int    `json:"id" gorm:"primaryKey"`
 	UserId         int    `json:"user_id" gorm:"uniqueIndex"`
@@ -45,8 +50,61 @@ func HashAgreementText(text string) string {
 	return fmt.Sprintf("%x", h)
 }
 
+func affiliateAgreementHashForSetting(s *setting.AffiliateSetting) string {
+	if s == nil || !s.AgreementEnabled {
+		return ""
+	}
+	return HashAgreementText(s.AgreementText)
+}
+
+func affiliateApplicationSatisfiesAgreement(app *AffiliateApplication, s *setting.AffiliateSetting) bool {
+	if s == nil || !s.AgreementEnabled {
+		return true
+	}
+	if app == nil || app.AgreementHash == "" {
+		return false
+	}
+	return app.AgreementHash == affiliateAgreementHashForSetting(s)
+}
+
+func AffiliateApplicationSatisfiesAgreement(app *AffiliateApplication, s *setting.AffiliateSetting) bool {
+	return affiliateApplicationSatisfiesAgreement(app, s)
+}
+
+func AffiliateAccessRequired(s *setting.AffiliateSetting) bool {
+	return s != nil && (s.ReviewEnabled || s.AgreementEnabled)
+}
+
+func AffiliateUserCanInvite(userId int, s *setting.AffiliateSetting) bool {
+	return affiliateUserCanInviteWithDB(DB, userId, s)
+}
+
+func affiliateUserCanInviteWithDB(db *gorm.DB, userId int, s *setting.AffiliateSetting) bool {
+	if !AffiliateAccessRequired(s) {
+		return true
+	}
+	if db == nil {
+		return false
+	}
+	var app AffiliateApplication
+	if err := db.Where("user_id = ?", userId).First(&app).Error; err != nil {
+		return false
+	}
+	if !affiliateApplicationSatisfiesAgreement(&app, s) {
+		return false
+	}
+	if s.ReviewEnabled {
+		return app.Status == AffiliateAppStatusApproved
+	}
+	return app.Status == AffiliateAppStatusApproved || app.Status == AffiliateAppStatusPending
+}
+
 func CreateAffiliateApplication(userId int, agreementText string) error {
 	affiliateSetting := setting.GetAffiliateSetting()
+	status := AffiliateAppStatusPending
+	if !affiliateSetting.ReviewEnabled {
+		status = AffiliateAppStatusApproved
+	}
 
 	if err := checkInviterEligibility(userId, affiliateSetting); err != nil {
 		return err
@@ -55,10 +113,11 @@ func CreateAffiliateApplication(userId int, agreementText string) error {
 	var existing AffiliateApplication
 	err := DB.Where("user_id = ?", userId).First(&existing).Error
 	if err == nil {
-		if existing.Status == AffiliateAppStatusPending {
+		currentHash := affiliateAgreementHashForSetting(affiliateSetting)
+		if existing.Status == AffiliateAppStatusPending && existing.AgreementHash == currentHash {
 			return errors.New("application already pending")
 		}
-		if existing.Status == AffiliateAppStatusApproved {
+		if existing.Status == AffiliateAppStatusApproved && existing.AgreementHash == currentHash {
 			return errors.New("already approved")
 		}
 		DB.Delete(&existing)
@@ -66,7 +125,7 @@ func CreateAffiliateApplication(userId int, agreementText string) error {
 
 	app := &AffiliateApplication{
 		UserId:        userId,
-		Status:        AffiliateAppStatusPending,
+		Status:        status,
 		AgreedAt:      common.GetTimestamp(),
 		AgreementHash: HashAgreementText(agreementText),
 	}

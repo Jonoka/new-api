@@ -329,7 +329,7 @@ func createAffiliateRewardsForPaymentTx(tx *gorm.DB, inviteeId int, sourceType s
 
 	affiliateSetting := setting.GetAffiliateSetting()
 
-	if affiliateSetting.ReviewEnabled && !IsInviterApproved(invitee.InviterId) {
+	if !affiliateUserCanInviteWithDB(tx, invitee.InviterId, affiliateSetting) {
 		return nil
 	}
 
@@ -354,7 +354,7 @@ func createAffiliateRewardsForPaymentTx(tx *gorm.DB, inviteeId int, sourceType s
 	if parent.InviterId <= 0 {
 		return nil
 	}
-	if affiliateSetting.ReviewEnabled && !IsInviterApproved(parent.InviterId) {
+	if !affiliateUserCanInviteWithDB(tx, parent.InviterId, affiliateSetting) {
 		return nil
 	}
 	return createAffiliateRewardRecordTx(tx, parent.InviterId, inviteeId, 2, sourceType, sourceId, sourceQuota, affiliateSetting.SecondLevelRatio)
@@ -839,10 +839,11 @@ func findAffiliateAdminMatchedUserIds(keyword string) ([]int, error) {
 	if keyword == "" {
 		return []int{}, nil
 	}
+	numericKeyword := strings.TrimPrefix(keyword, "#")
 	query := DB.Model(&User{}).Select("id")
 	likeCondition := "username LIKE ? OR email LIKE ? OR display_name LIKE ? OR aff_code LIKE ?"
 	likeArgs := []interface{}{"%" + keyword + "%", "%" + keyword + "%", "%" + keyword + "%", "%" + keyword + "%"}
-	if keywordInt, err := strconv.Atoi(keyword); err == nil && keywordInt > 0 {
+	if keywordInt, err := strconv.Atoi(numericKeyword); err == nil && keywordInt > 0 {
 		likeCondition = "id = ? OR " + likeCondition
 		likeArgs = append([]interface{}{keywordInt}, likeArgs...)
 	}

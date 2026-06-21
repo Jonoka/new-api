@@ -952,6 +952,59 @@ func TestSearchFraudAlertsFiltersByIPAndUserKeyword(t *testing.T) {
 	assert.Empty(t, items)
 }
 
+func TestSearchFraudAlertGroupsAggregatesInviteesByInviter(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	now := common.GetTimestamp()
+	require.NoError(t, DB.Create(&User{Id: 235, Username: "group-parent", DisplayName: "Group Parent", Email: "group-parent@example.com", AffCode: "group-aff", Status: common.UserStatusEnabled}).Error)
+	require.NoError(t, DB.Create(&User{Id: 236, Username: "group-child-a", Email: "child-a@example.com", AffCode: "group-child-a", Status: common.UserStatusEnabled, InviterId: 235}).Error)
+	require.NoError(t, DB.Create(&User{Id: 237, Username: "group-child-b", Email: "child-b@example.com", AffCode: "group-child-b", Status: common.UserStatusEnabled, InviterId: 235}).Error)
+	require.NoError(t, DB.Create(&AffiliateFraudAlert{InviterId: 235, InviteeId: 236, SharedIps: `["203.0.113.10"]`, SharedIpCount: 1, Status: FraudAlertStatusDetected, DetectedAt: now}).Error)
+	require.NoError(t, DB.Create(&AffiliateFraudAlert{InviterId: 235, InviteeId: 237, SharedIps: `["203.0.113.10","203.0.113.11"]`, SharedIpCount: 2, Status: FraudAlertStatusDetected, DetectedAt: now - 1}).Error)
+
+	groups, total, err := SearchFraudAlertGroups(FraudAlertQuery{Status: FraudAlertStatusDetected, Keyword: "group-parent", Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, total)
+	require.Len(t, groups, 1)
+	assert.Equal(t, 235, groups[0].InviterId)
+	assert.Equal(t, 2, groups[0].InviteeCount)
+	assert.Equal(t, 2, groups[0].AlertCount)
+	assert.ElementsMatch(t, []string{"203.0.113.10", "203.0.113.11"}, groups[0].SharedIps)
+	require.Len(t, groups[0].Alerts, 2)
+}
+
+func TestAffiliateAgreementRequiredWithoutReviewApprovesConsent(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	affiliateSetting := setting.GetAffiliateSetting()
+	affiliateSetting.AgreementEnabled = true
+	affiliateSetting.AgreementText = "agree terms"
+	affiliateSetting.ReviewEnabled = false
+
+	require.NoError(t, DB.Create(&User{Id: 238, Username: "agreement-parent", AffCode: "aff238", Status: common.UserStatusEnabled}).Error)
+	require.NoError(t, DB.Create(&User{Id: 239, Username: "agreement-child", AffCode: "aff239", Status: common.UserStatusEnabled, InviterId: 238}).Error)
+
+	assert.False(t, AffiliateUserCanInvite(238, affiliateSetting))
+	require.NoError(t, CreateAffiliateRewardsForPayment(239, AffiliateSourceTopUp, "agreement-order-before", 10000))
+	var count int64
+	require.NoError(t, DB.Model(&AffiliateRecord{}).Where("user_id = ?", 238).Count(&count).Error)
+	assert.EqualValues(t, 0, count)
+
+	require.NoError(t, CreateAffiliateApplication(238, affiliateSetting.AgreementText))
+	assert.True(t, AffiliateUserCanInvite(238, affiliateSetting))
+	var app AffiliateApplication
+	require.NoError(t, DB.Where("user_id = ?", 238).First(&app).Error)
+	assert.Equal(t, AffiliateAppStatusApproved, app.Status)
+
+	affiliateSetting.FirstLevelEnabled = true
+	affiliateSetting.FirstLevelRatio = 10
+	require.NoError(t, CreateAffiliateRewardsForPayment(239, AffiliateSourceTopUp, "agreement-order-after", 10000))
+	require.NoError(t, DB.Model(&AffiliateRecord{}).Where("user_id = ?", 238).Count(&count).Error)
+	assert.EqualValues(t, 1, count)
+}
+
 func TestUnbindUserInviterClearsRelationshipAndDecrementsCount(t *testing.T) {
 	truncateTables(t)
 	resetAffiliateSettingForTest(t)

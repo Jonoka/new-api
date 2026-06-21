@@ -70,6 +70,14 @@ const PaymentSetting = ({
     'affiliate_setting.payout_methods': 'usdt,alipay,wechat',
     'affiliate_setting.usdt_chain': 'TRC20',
     'affiliate_setting.promotion_template': '邀请链接：{invite_link}',
+    'affiliate_setting.review_enabled': false,
+    'affiliate_setting.auto_approve_after_days': 0,
+    'affiliate_setting.agreement_enabled': false,
+    'affiliate_setting.agreement_text': '',
+    'affiliate_setting.inviter_min_account_age_days': 0,
+    'affiliate_setting.inviter_min_recharge_amount': 0,
+    'affiliate_setting.invitee_min_account_age_days': 0,
+    'affiliate_setting.invitee_min_recharge_amount': 0,
 
     'payment_setting.compliance_confirmed': false,
     'payment_setting.compliance_terms_version': '',
@@ -183,6 +191,11 @@ const PaymentSetting = ({
           case 'affiliate_setting.second_level_ratio':
           case 'affiliate_setting.settlement_delay_seconds':
           case 'affiliate_setting.min_withdrawal_amount':
+          case 'affiliate_setting.auto_approve_after_days':
+          case 'affiliate_setting.inviter_min_account_age_days':
+          case 'affiliate_setting.inviter_min_recharge_amount':
+          case 'affiliate_setting.invitee_min_account_age_days':
+          case 'affiliate_setting.invitee_min_recharge_amount':
             newInputs[item.key] = parseFloat(item.value);
             break;
           case 'affiliate_setting.first_level_enabled':
@@ -190,11 +203,14 @@ const PaymentSetting = ({
           case 'affiliate_setting.trigger_topup_enabled':
           case 'affiliate_setting.trigger_subscription_enabled':
           case 'affiliate_setting.filter_redemption_topup_enabled':
+          case 'affiliate_setting.review_enabled':
+          case 'affiliate_setting.agreement_enabled':
             newInputs[item.key] = toBoolean(item.value);
             break;
           case 'affiliate_setting.usdt_chain':
           case 'affiliate_setting.payout_methods':
           case 'affiliate_setting.promotion_template':
+          case 'affiliate_setting.agreement_text':
             newInputs[item.key] = item.value;
             break;
           default:
