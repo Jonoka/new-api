@@ -55,6 +55,7 @@ const ChannelsPage = () => {
         visible={channelsData.showEdit}
         handleClose={channelsData.closeEdit}
         editingChannel={channelsData.editingChannel}
+        vendors={channelsData.vendors}
       />
       <BatchTagModal {...channelsData} />
       <ModelTestModal {...channelsData} />

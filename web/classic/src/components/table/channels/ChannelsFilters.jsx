@@ -32,6 +32,9 @@ const ChannelsFilters = ({
   enableTagMode,
   formApi,
   groupOptions,
+  vendors,
+  channelVendorCounts,
+  setActiveVendorKey,
   loading,
   searching,
   t,
@@ -125,6 +128,40 @@ const ChannelsFilters = ({
               }}
             />
           </div>
+          <div className='w-full md:w-32'>
+            <Form.Select
+              size='small'
+              field='searchVendor'
+              placeholder={t('选择供应商')}
+              optionList={[
+                {
+                  label: `${t('全部供应商')} (${channelVendorCounts?.all || 0})`,
+                  value: 'all',
+                },
+                ...(vendors || []).map((vendor) => ({
+                  label: `${vendor.name} (${channelVendorCounts?.[vendor.id] || 0})`,
+                  value: String(vendor.id),
+                })),
+              ]}
+              className='w-full'
+              showClear
+              pure
+              onChange={(value) => {
+                setActiveVendorKey(value || 'all');
+                setTimeout(() => {
+                  searchChannels(
+                    enableTagMode,
+                    undefined,
+                    undefined,
+                    1,
+                    undefined,
+                    undefined,
+                    value || 'all',
+                  );
+                }, 0);
+              }}
+            />
+          </div>
           <Button
             size='small'
             type='tertiary'
@@ -140,9 +177,18 @@ const ChannelsFilters = ({
             onClick={() => {
               if (formApi) {
                 formApi.reset();
+                setActiveVendorKey('all');
                 // 重置后立即查询，使用setTimeout确保表单重置完成
                 setTimeout(() => {
-                  refresh();
+                  searchChannels(
+                    enableTagMode,
+                    undefined,
+                    undefined,
+                    1,
+                    undefined,
+                    undefined,
+                    'all',
+                  );
                 }, 100);
               }
             }}

@@ -78,6 +78,9 @@ export const useChannelsData = () => {
   // Type tabs states
   const [activeTypeKey, setActiveTypeKey] = useState('all');
   const [typeCounts, setTypeCounts] = useState({});
+  const [activeVendorKey, setActiveVendorKey] = useState('all');
+  const [vendorCounts, setVendorCounts] = useState({});
+  const [vendors, setVendors] = useState([]);
 
   // Model test states
   const [showModelTestModal, setShowModelTestModal] = useState(false);
@@ -127,6 +130,7 @@ export const useChannelsData = () => {
     searchKeyword: '',
     searchGroup: '',
     searchModel: '',
+    searchVendor: '',
   };
 
   // Column keys
@@ -165,6 +169,7 @@ export const useChannelsData = () => {
         showError(reason);
       });
     fetchGroups().then();
+    loadVendors().then();
     loadChannelModels().then();
     fetchGlobalPassThroughEnabled().then();
   }, []);
@@ -325,6 +330,7 @@ export const useChannelsData = () => {
       searchKeyword: formValues.searchKeyword || '',
       searchGroup: formValues.searchGroup || '',
       searchModel: formValues.searchModel || '',
+      searchVendor: formValues.searchVendor || '',
     };
   };
 
@@ -339,8 +345,9 @@ export const useChannelsData = () => {
   ) => {
     if (statusF === undefined) statusF = statusFilter;
 
-    const { searchKeyword, searchGroup, searchModel } = getFormValues();
-    if (searchKeyword !== '' || searchGroup !== '' || searchModel !== '') {
+    const { searchKeyword, searchGroup, searchModel, searchVendor } = getFormValues();
+    const vendorKey = searchVendor || activeVendorKey;
+    if (searchKeyword !== '' || searchGroup !== '' || searchModel !== '' || vendorKey !== 'all') {
       setLoading(true);
       await searchChannels(
         enableTagMode,
@@ -349,6 +356,7 @@ export const useChannelsData = () => {
         page,
         pageSize,
         idSort,
+        vendorKey,
       );
       setLoading(false);
       return;
@@ -368,13 +376,20 @@ export const useChannelsData = () => {
 
     const { success, message, data } = res.data;
     if (success) {
-      const { items, total, type_counts } = data;
+      const { items, total, type_counts, vendor_counts } = data;
       if (type_counts) {
         const sumAll = Object.values(type_counts).reduce(
           (acc, v) => acc + v,
           0,
         );
         setTypeCounts({ ...type_counts, all: sumAll });
+      }
+      if (vendor_counts) {
+        const sumAll = Object.values(vendor_counts).reduce(
+          (acc, v) => acc + v,
+          0,
+        );
+        setVendorCounts({ ...vendor_counts, all: sumAll });
       }
       setChannelFormat(items, enableTagMode);
       setChannelCount(total);
@@ -392,11 +407,13 @@ export const useChannelsData = () => {
     page = 1,
     pageSz = pageSize,
     sortFlag = idSort,
+    vendorKey,
   ) => {
-    const { searchKeyword, searchGroup, searchModel } = getFormValues();
+    const { searchKeyword, searchGroup, searchModel, searchVendor } = getFormValues();
+    const effectiveVendorKey = vendorKey || searchVendor || activeVendorKey;
     setSearching(true);
     try {
-      if (searchKeyword === '' && searchGroup === '' && searchModel === '') {
+      if (searchKeyword === '' && searchGroup === '' && searchModel === '' && effectiveVendorKey === 'all') {
         await loadChannels(
           page,
           pageSz,
@@ -410,17 +427,23 @@ export const useChannelsData = () => {
 
       const typeParam = typeKey !== 'all' ? `&type=${typeKey}` : '';
       const statusParam = statusF !== 'all' ? `&status=${statusF}` : '';
+      const vendorParam = effectiveVendorKey !== 'all' ? `&vendor=${effectiveVendorKey}` : '';
       const res = await API.get(
-        `/api/channel/search?keyword=${searchKeyword}&group=${searchGroup}&model=${searchModel}&id_sort=${sortFlag}&tag_mode=${enableTagMode}&p=${page}&page_size=${pageSz}${typeParam}${statusParam}`,
+        `/api/channel/search?keyword=${searchKeyword}&group=${searchGroup}&model=${searchModel}&id_sort=${sortFlag}&tag_mode=${enableTagMode}&p=${page}&page_size=${pageSz}${typeParam}${statusParam}${vendorParam}`,
       );
       const { success, message, data } = res.data;
       if (success) {
-        const { items = [], total = 0, type_counts = {} } = data;
+        const { items = [], total = 0, type_counts = {}, vendor_counts = {} } = data;
         const sumAll = Object.values(type_counts).reduce(
           (acc, v) => acc + v,
           0,
         );
         setTypeCounts({ ...type_counts, all: sumAll });
+        const vendorSumAll = Object.values(vendor_counts).reduce(
+          (acc, v) => acc + v,
+          0,
+        );
+        setVendorCounts({ ...vendor_counts, all: vendorSumAll });
         setChannelFormat(items, enableTagMode);
         setChannelCount(total);
         setActivePage(page);
@@ -434,8 +457,9 @@ export const useChannelsData = () => {
 
   // Refresh
   const refresh = async (page = activePage) => {
-    const { searchKeyword, searchGroup, searchModel } = getFormValues();
-    if (searchKeyword === '' && searchGroup === '' && searchModel === '') {
+    const { searchKeyword, searchGroup, searchModel, searchVendor } = getFormValues();
+    const vendorKey = searchVendor || activeVendorKey;
+    if (searchKeyword === '' && searchGroup === '' && searchModel === '' && vendorKey === 'all') {
       await loadChannels(page, pageSize, idSort, enableTagMode);
     } else {
       await searchChannels(
@@ -445,6 +469,7 @@ export const useChannelsData = () => {
         page,
         pageSize,
         idSort,
+        vendorKey,
       );
     }
   };
@@ -536,9 +561,10 @@ export const useChannelsData = () => {
 
   // Page handlers
   const handlePageChange = (page) => {
-    const { searchKeyword, searchGroup, searchModel } = getFormValues();
+    const { searchKeyword, searchGroup, searchModel, searchVendor } = getFormValues();
+    const vendorKey = searchVendor || activeVendorKey;
     setActivePage(page);
-    if (searchKeyword === '' && searchGroup === '' && searchModel === '') {
+    if (searchKeyword === '' && searchGroup === '' && searchModel === '' && vendorKey === 'all') {
       loadChannels(page, pageSize, idSort, enableTagMode).then(() => {});
     } else {
       searchChannels(
@@ -548,6 +574,7 @@ export const useChannelsData = () => {
         page,
         pageSize,
         idSort,
+        vendorKey,
       );
     }
   };
@@ -556,8 +583,9 @@ export const useChannelsData = () => {
     localStorage.setItem('page-size', size + '');
     setPageSize(size);
     setActivePage(1);
-    const { searchKeyword, searchGroup, searchModel } = getFormValues();
-    if (searchKeyword === '' && searchGroup === '' && searchModel === '') {
+    const { searchKeyword, searchGroup, searchModel, searchVendor } = getFormValues();
+    const vendorKey = searchVendor || activeVendorKey;
+    if (searchKeyword === '' && searchGroup === '' && searchModel === '' && vendorKey === 'all') {
       loadChannels(1, size, idSort, enableTagMode)
         .then()
         .catch((reason) => {
@@ -571,6 +599,7 @@ export const useChannelsData = () => {
         1,
         size,
         idSort,
+        vendorKey,
       );
     }
   };
@@ -588,6 +617,18 @@ export const useChannelsData = () => {
       );
     } catch (error) {
       showError(error.message);
+    }
+  };
+
+  const loadVendors = async () => {
+    try {
+      const res = await API.get('/api/vendors/?page_size=1000');
+      if (res?.data?.success) {
+        const items = res.data.data?.items || res.data.data || [];
+        setVendors(Array.isArray(items) ? items : []);
+      }
+    } catch (_) {
+      // ignore
     }
   };
 
@@ -1162,6 +1203,26 @@ export const useChannelsData = () => {
     return keys;
   }, [channelTypeCounts]);
 
+  // Vendor counts
+  const channelVendorCounts = useMemo(() => {
+    if (Object.keys(vendorCounts).length > 0) return vendorCounts;
+    const counts = { all: 0 };
+    channels.forEach((channel) => {
+      const collect = (ch) => {
+        const vendorId = ch.vendor_id;
+        if (!vendorId || vendorId <= 0) return;
+        counts[vendorId] = (counts[vendorId] || 0) + 1;
+        counts.all += 1;
+      };
+      if (channel.children !== undefined) {
+        channel.children.forEach(collect);
+      } else {
+        collect(channel);
+      }
+    });
+    return counts;
+  }, [vendorCounts, channels]);
+
   return {
     // Basic states
     channels,
@@ -1171,6 +1232,7 @@ export const useChannelsData = () => {
     pageSize,
     channelCount,
     groupOptions,
+    vendors,
     idSort,
     enableTagMode,
     enableBatchDelete,
@@ -1206,6 +1268,10 @@ export const useChannelsData = () => {
     typeCounts,
     channelTypeCounts,
     availableTypeKeys,
+    activeVendorKey,
+    setActiveVendorKey,
+    vendorCounts,
+    channelVendorCounts,
 
     // Model test states
     showModelTestModal,
@@ -1247,6 +1313,7 @@ export const useChannelsData = () => {
     loadChannels,
     searchChannels,
     refresh,
+    loadVendors,
     manageChannel,
     manageTag,
     handlePageChange,

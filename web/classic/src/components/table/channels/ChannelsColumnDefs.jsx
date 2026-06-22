@@ -478,7 +478,7 @@ export const getChannelsColumns = ({
     },
     {
       key: COLUMN_KEYS.TYPE,
-      title: t('类型'),
+      title: t('协议类型'),
       dataIndex: 'type',
       render: (text, record, index) => {
         if (record.children === undefined) {

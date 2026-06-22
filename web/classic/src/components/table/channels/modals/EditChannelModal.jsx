@@ -172,6 +172,7 @@ const EditChannelModal = (props) => {
   const originInputs = {
     name: '',
     type: 1,
+    vendor_id: 0,
     key: '',
     openai_organization: '',
     max_input_tokens: 0,
@@ -2267,6 +2268,17 @@ const EditChannelModal = (props) => {
     [],
   );
 
+  const vendorOptionList = useMemo(
+    () => [
+      { label: t('无供应商'), value: 0 },
+      ...(props.vendors || []).map((vendor) => ({
+        label: vendor.name,
+        value: vendor.id,
+      })),
+    ],
+    [props.vendors, t],
+  );
+
   const renderChannelOption = (renderProps) => {
     const {
       disabled,
@@ -2949,9 +2961,9 @@ const EditChannelModal = (props) => {
 
                     <Form.Select
                       field='type'
-                      label={t('类型')}
-                      placeholder={t('请选择渠道类型')}
-                      rules={[{ required: true, message: t('请选择渠道类型') }]}
+                      label={t('协议类型')}
+                      placeholder={t('请选择协议类型')}
+                      rules={[{ required: true, message: t('请选择协议类型') }]}
                       optionList={channelOptionList}
                       style={{ width: '100%' }}
                       filter={selectFilter}
@@ -2961,6 +2973,17 @@ const EditChannelModal = (props) => {
                       renderOptionItem={renderChannelOption}
                       onChange={(value) => handleInputChange('type', value)}
                       disabled={isIonetLocked}
+                    />
+
+                    <Form.Select
+                      field='vendor_id'
+                      label={t('供应商')}
+                      placeholder={t('请选择供应商')}
+                      optionList={vendorOptionList}
+                      style={{ width: '100%' }}
+                      showClear
+                      onChange={(value) => handleInputChange('vendor_id', value || 0)}
+                      extraText={t('仅用于管理和展示分组，不影响协议适配')}
                     />
 
                     {inputs.type === 57 && (
