@@ -54,6 +54,7 @@ import {
   getChannelModels,
   copy,
   getChannelIcon,
+  getLobeHubIcon,
   getModelCategories,
   selectFilter,
 } from '../../../../helpers';
@@ -2270,10 +2271,11 @@ const EditChannelModal = (props) => {
 
   const vendorOptionList = useMemo(
     () => [
-      { label: t('无供应商'), value: 0 },
+      { label: t('无供应商'), value: 0, icon: null },
       ...(props.vendors || []).map((vendor) => ({
         label: vendor.name,
         value: vendor.id,
+        icon: vendor.icon,
       })),
     ],
     [props.vendors, t],
@@ -2325,6 +2327,64 @@ const EditChannelModal = (props) => {
               searchWords={searchWords}
               className='text-sm font-medium truncate'
             />
+          </div>
+          {selected && (
+            <div className='flex-shrink-0 text-blue-600'>
+              <svg
+                width='16'
+                height='16'
+                viewBox='0 0 16 16'
+                fill='currentColor'
+              >
+                <path d='M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z' />
+              </svg>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderVendorOption = (renderProps) => {
+    const {
+      disabled,
+      selected,
+      label,
+      value,
+      focused,
+      className,
+      style,
+      onMouseEnter,
+      onClick,
+      icon,
+      ...rest
+    } = renderProps;
+
+    const optionClassName = [
+      'flex items-center gap-3 px-3 py-2 transition-all duration-200 rounded-lg mx-2 my-1',
+      focused && 'bg-blue-50 shadow-sm',
+      selected &&
+        'bg-blue-100 text-blue-700 shadow-lg ring-2 ring-blue-200 ring-opacity-50',
+      disabled && 'opacity-50 cursor-not-allowed',
+      !disabled && 'hover:bg-gray-50 hover:shadow-md cursor-pointer',
+      className,
+    ]
+      .filter(Boolean)
+      .join(' ');
+
+    return (
+      <div
+        style={style}
+        className={optionClassName}
+        onClick={() => !disabled && onClick()}
+        onMouseEnter={(e) => onMouseEnter()}
+      >
+        <div className='flex items-center gap-3 w-full'>
+          <div className='flex-shrink-0 w-5 h-5 flex items-center justify-center'>
+            {value === 0 ? null : getLobeHubIcon(icon || 'Layers', 16)}
+          </div>
+          <div className='flex-1 min-w-0'>
+            <span className='text-sm font-medium truncate'>{label}</span>
           </div>
           {selected && (
             <div className='flex-shrink-0 text-blue-600'>
@@ -2982,6 +3042,20 @@ const EditChannelModal = (props) => {
                       optionList={vendorOptionList}
                       style={{ width: '100%' }}
                       showClear
+                      renderOptionItem={renderVendorOption}
+                      renderSelectedItem={(optionNode) => {
+                        const vendorItem = vendorOptionList.find(
+                          (v) => v.value === optionNode?.value,
+                        );
+                        return (
+                          <span className='flex items-center gap-2'>
+                            {vendorItem?.icon
+                              ? getLobeHubIcon(vendorItem.icon, 14)
+                              : null}
+                            <span>{optionNode?.label}</span>
+                          </span>
+                        );
+                      }}
                       onChange={(value) => handleInputChange('vendor_id', value || 0)}
                       extraText={t('仅用于管理和展示分组，不影响协议适配')}
                     />
