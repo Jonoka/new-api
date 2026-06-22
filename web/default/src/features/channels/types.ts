@@ -37,6 +37,7 @@ export type ChannelInfo = z.infer<typeof channelInfoSchema>
 export const channelSchema = z.object({
   id: z.number(),
   type: z.number(),
+  vendor_id: z.number().nullish(),
   key: z.string(),
   openai_organization: z.string().nullish(),
   test_model: z.string().nullish(),
@@ -134,6 +135,7 @@ export interface GetChannelsResponse {
     page: number
     page_size: number
     type_counts?: Record<string, number>
+    vendor_counts?: Record<string, number>
   }
 }
 
@@ -144,6 +146,7 @@ export interface SearchChannelsResponse {
     items: Channel[]
     total: number
     type_counts?: Record<string, number>
+    vendor_counts?: Record<string, number>
   }
 }
 
@@ -241,6 +244,7 @@ export interface GetChannelsParams {
   page_size?: number
   status?: string // 'enabled', 'disabled', or empty for all
   type?: number
+  vendor?: number
   group?: string
   id_sort?: boolean
   tag_mode?: boolean
@@ -254,6 +258,7 @@ export interface SearchChannelsParams {
   model?: string
   status?: string
   type?: number
+  vendor?: number
   id_sort?: boolean
   tag_mode?: boolean
   sort_by?: ChannelSortBy

@@ -666,11 +666,11 @@ export function useChannelsColumns(): ColumnDef<Channel>[] {
       minSize: 200,
     },
 
-    // Type column
+    // Protocol type column
     {
       accessorKey: 'type',
-      meta: { label: t('Type') },
-      header: t('Type'),
+      meta: { label: t('Protocol Type') },
+      header: t('Protocol Type'),
       cell: ({ row }) => {
         const isTagRow = isTagAggregateRow(row.original)
 

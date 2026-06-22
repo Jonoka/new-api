@@ -34,6 +34,8 @@ import { useTranslation } from 'react-i18next'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 import { Input } from '@/components/ui/input'
+import { getVendors } from '@/features/models/api'
+import { vendorsQueryKeys } from '@/features/models/lib'
 import {
   DISABLED_ROW_DESKTOP,
   DISABLED_ROW_MOBILE,
@@ -108,6 +110,7 @@ export function ChannelsTable() {
     columnFilters: [
       { columnId: 'status', searchKey: 'status', type: 'array' },
       { columnId: 'type', searchKey: 'type', type: 'array' },
+      { columnId: 'vendor_id', searchKey: 'vendor', type: 'array' },
       { columnId: 'group', searchKey: 'group', type: 'array' },
       { columnId: 'model', searchKey: 'model', type: 'string' },
     ],
@@ -118,6 +121,8 @@ export function ChannelsTable() {
     (columnFilters.find((f) => f.id === 'status')?.value as string[]) || []
   const typeFilter =
     (columnFilters.find((f) => f.id === 'type')?.value as string[]) || []
+  const vendorFilter =
+    (columnFilters.find((f) => f.id === 'vendor_id')?.value as string[]) || []
   const groupFilter =
     (columnFilters.find((f) => f.id === 'group')?.value as string[]) || []
   const modelFilterFromUrl =
@@ -180,6 +185,16 @@ export function ChannelsTable() {
     queryFn: getGroups,
   })
 
+  const { data: vendorsData } = useQuery({
+    queryKey: vendorsQueryKeys.list({ page_size: 1000 }),
+    queryFn: () => getVendors({ page_size: 1000 }),
+  })
+
+  const vendors = useMemo(
+    () => vendorsData?.data?.items || [],
+    [vendorsData?.data?.items]
+  )
+
   const groupOptions = useMemo(
     () =>
       (groupsData?.data || []).map((g) => ({
@@ -207,6 +222,10 @@ export function ChannelsTable() {
         typeFilter.length > 0 && !typeFilter.includes('all')
           ? Number(typeFilter[0])
           : undefined,
+      vendor:
+        vendorFilter.length > 0 && !vendorFilter.includes('all')
+          ? Number(vendorFilter[0])
+          : undefined,
       tag_mode: enableTagMode,
       id_sort: idSort,
       ...sortParams,
@@ -230,6 +249,10 @@ export function ChannelsTable() {
             typeFilter.length > 0 && !typeFilter.includes('all')
               ? Number(typeFilter[0])
               : undefined,
+          vendor:
+            vendorFilter.length > 0 && !vendorFilter.includes('all')
+              ? Number(vendorFilter[0])
+              : undefined,
           tag_mode: enableTagMode,
           id_sort: idSort,
           ...sortParams,
@@ -249,6 +272,10 @@ export function ChannelsTable() {
           type:
             typeFilter.length > 0 && !typeFilter.includes('all')
               ? Number(typeFilter[0])
+              : undefined,
+          vendor:
+            vendorFilter.length > 0 && !vendorFilter.includes('all')
+              ? Number(vendorFilter[0])
               : undefined,
           tag_mode: enableTagMode,
           id_sort: idSort,
@@ -274,6 +301,7 @@ export function ChannelsTable() {
 
   const totalCount = data?.data?.total || 0
   const typeCounts = data?.data?.type_counts
+  const vendorCounts = data?.data?.vendor_counts
 
   // Columns configuration
   const columns = useChannelsColumns()
@@ -350,7 +378,7 @@ export function ChannelsTable() {
 
     return [
       {
-        label: 'All Types',
+        label: 'All Protocol Types',
         value: 'all',
         count: totalTypes,
       },
@@ -370,6 +398,22 @@ export function ChannelsTable() {
     { label: t('All Groups'), value: 'all' },
     ...groupOptions,
   ]
+
+  const vendorFilterOptions = useMemo(() => {
+    const counts = vendorCounts || {}
+    const totalVendors = Object.values(counts).reduce(
+      (sum, count) => sum + (Number(count) || 0),
+      0
+    )
+    return [
+      { label: t('All Vendors'), value: 'all', count: totalVendors },
+      ...vendors.map((vendor) => ({
+        label: vendor.name,
+        value: String(vendor.id),
+        count: Number(counts[String(vendor.id)]) || 0,
+      })),
+    ]
+  }, [t, vendorCounts, vendors])
 
   return (
     <DataTablePage
@@ -402,8 +446,14 @@ export function ChannelsTable() {
           },
           {
             columnId: 'type',
-            title: t('Type'),
+            title: t('Protocol Type'),
             options: typeFilterOptions,
+            singleSelect: true,
+          },
+          {
+            columnId: 'vendor_id',
+            title: t('Vendor'),
+            options: vendorFilterOptions,
             singleSelect: true,
           },
           {

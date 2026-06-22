@@ -51,6 +51,8 @@ import { toast } from 'sonner'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { useHiddenClickUnlock } from '@/hooks/use-hidden-click-unlock'
+import { getVendors } from '@/features/models/api'
+import { vendorsQueryKeys } from '@/features/models/lib'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -340,6 +342,11 @@ export function ChannelMutateDrawer({
     queryFn: () => getPrefillGroups('model'),
   })
 
+  const { data: vendorsData } = useQuery({
+    queryKey: vendorsQueryKeys.list({ page_size: 1000 }),
+    queryFn: () => getVendors({ page_size: 1000 }),
+  })
+
   const { copyToClipboard } = useCopyToClipboard()
 
   const {
@@ -472,6 +479,16 @@ export function ChannelMutateDrawer({
     }
     return options
   }, [currentType, t])
+
+  const vendors = useMemo(
+    () => vendorsData?.data?.items || [],
+    [vendorsData?.data?.items]
+  )
+
+  const vendorOptions = useMemo(
+    () => vendors.map((vendor) => ({ value: vendor.id, label: vendor.name })),
+    [vendors]
+  )
 
   // Extract redirect models from model_mapping (target values)
   const redirectModelList = useMemo(
@@ -1102,7 +1119,7 @@ export function ChannelMutateDrawer({
                         name='type'
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>{t('Type *')}</FormLabel>
+                            <FormLabel>{t('Protocol Type *')}</FormLabel>
                             <FormControl>
                               <Combobox
                                 options={channelTypeOptions}
@@ -1116,12 +1133,64 @@ export function ChannelMutateDrawer({
                                     field.onChange(nextType)
                                   }
                                 }}
-                                placeholder={t('Select channel type')}
-                                searchPlaceholder={t('Search channel type...')}
-                                emptyText={t('No channel type found.')}
+                                placeholder={t('Select protocol type')}
+                                searchPlaceholder={t('Search protocol type...')}
+                                emptyText={t('No protocol type found.')}
                                 allowCustomValue
                               />
                             </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name='vendor_id'
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>{t('Vendor')}</FormLabel>
+                            <Select
+                              items={[
+                                { value: 'none', label: t('No vendor') },
+                                ...vendorOptions.map((vendor) => ({
+                                  value: String(vendor.value),
+                                  label: vendor.label,
+                                })),
+                              ]}
+                              onValueChange={(value) =>
+                                field.onChange(
+                                  value && value !== 'none'
+                                    ? Number(value)
+                                    : undefined
+                                )
+                              }
+                              value={field.value ? String(field.value) : 'none'}
+                            >
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder={t('Select vendor')} />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent alignItemWithTrigger={false}>
+                                <SelectGroup>
+                                  <SelectItem value='none'>
+                                    {t('No vendor')}
+                                  </SelectItem>
+                                  {vendorOptions.map((vendor) => (
+                                    <SelectItem
+                                      key={vendor.value}
+                                      value={String(vendor.value)}
+                                    >
+                                      {vendor.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectGroup>
+                              </SelectContent>
+                            </Select>
+                            <FormDescription>
+                              {t('Used for management and display grouping only.')}
+                            </FormDescription>
                             <FormMessage />
                           </FormItem>
                         )}
