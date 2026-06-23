@@ -32,7 +32,7 @@ func TestChatCompletionsRequestToResponsesRequestPreservesStream(t *testing.T) {
 	}
 }
 
-func TestChatCompletionsRequestToResponsesRequestPreservesCacheControl(t *testing.T) {
+func TestChatCompletionsRequestToResponsesRequestStripsCacheControl(t *testing.T) {
 	req := &dto.GeneralOpenAIRequest{
 		Model: "test-model",
 		Messages: []dto.Message{
@@ -53,8 +53,8 @@ func TestChatCompletionsRequestToResponsesRequestPreservesCacheControl(t *testin
 	require.NoError(t, err)
 
 	cacheControl := gjson.GetBytes(respReq.Input, "0.content.0.cache_control.type")
-	require.True(t, cacheControl.Exists(), string(respReq.Input))
-	require.Equal(t, "ephemeral", cacheControl.String())
+	require.False(t, cacheControl.Exists(), string(respReq.Input))
+	require.Equal(t, "cache me", gjson.GetBytes(respReq.Input, "0.content.0.text").String())
 }
 
 func TestChatCompletionsRequestToResponsesRequestKeepsCachedSystemInInput(t *testing.T) {
@@ -83,6 +83,6 @@ func TestChatCompletionsRequestToResponsesRequestKeepsCachedSystemInInput(t *tes
 	require.Empty(t, respReq.Instructions)
 	require.Equal(t, "system", gjson.GetBytes(respReq.Input, "0.role").String())
 	require.Equal(t, "cached system", gjson.GetBytes(respReq.Input, "0.content.0.text").String())
-	require.Equal(t, "ephemeral", gjson.GetBytes(respReq.Input, "0.content.0.cache_control.type").String())
+	require.False(t, gjson.GetBytes(respReq.Input, "0.content.0.cache_control").Exists(), string(respReq.Input))
 	require.Equal(t, "user", gjson.GetBytes(respReq.Input, "1.role").String())
 }

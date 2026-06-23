@@ -73,17 +73,6 @@ func convertChatResponseFormatToResponsesText(reqFormat *dto.ResponseFormat) jso
 	return textRaw
 }
 
-func applyCacheControlToResponsesPart(part map[string]any, cacheControl json.RawMessage) {
-	if len(cacheControl) == 0 {
-		return
-	}
-	var cacheControlValue any
-	if err := common.Unmarshal(cacheControl, &cacheControlValue); err != nil || cacheControlValue == nil {
-		return
-	}
-	part["cache_control"] = cacheControlValue
-}
-
 func hasCacheControlContentPart(msg dto.Message) bool {
 	if msg.Content == nil || msg.IsStringContent() {
 		return false
@@ -246,7 +235,6 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 					"type": textType,
 					"text": part.Text,
 				}
-				applyCacheControlToResponsesPart(contentPart, part.CacheControl)
 				contentParts = append(contentParts, contentPart)
 			case dto.ContentTypeImageURL:
 				contentParts = append(contentParts, map[string]any{
