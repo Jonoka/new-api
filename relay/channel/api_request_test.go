@@ -3,6 +3,7 @@ package channel
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/constant"
@@ -391,7 +392,9 @@ func TestMergeOpenAISessionBridgeOverrideUsesPromptCacheKeyFromResponsesBody(t *
 	relaycommon.MergeOpenAISessionBridgeOverride(info, []byte(`{"model":"gpt-5","prompt_cache_key":"cache-key-123"}`))
 
 	require.True(t, info.UseRuntimeHeadersOverride)
-	require.Equal(t, "cache-key-123", info.RuntimeHeadersOverride["session_id"])
+	sessionID, _ := info.RuntimeHeadersOverride["session_id"].(string)
+	require.NotEmpty(t, sessionID)
+	require.Len(t, strings.Split(sessionID, "-"), 5)
 }
 
 func TestMergeOpenAISessionBridgeOverrideUsesClaudeCodeSessionHeader(t *testing.T) {
@@ -414,7 +417,9 @@ func TestMergeOpenAISessionBridgeOverrideUsesClaudeCodeSessionHeader(t *testing.
 	relaycommon.MergeOpenAISessionBridgeOverride(info, []byte(`{"model":"gpt-5"}`))
 
 	require.True(t, info.UseRuntimeHeadersOverride)
-	require.Equal(t, "cc-session-123", info.RuntimeHeadersOverride["session_id"])
+	sessionID, _ := info.RuntimeHeadersOverride["session_id"].(string)
+	require.NotEmpty(t, sessionID)
+	require.Len(t, strings.Split(sessionID, "-"), 5)
 }
 
 func TestMergeOpenAISessionBridgeOverrideKeepsExplicitSessionID(t *testing.T) {
@@ -441,7 +446,72 @@ func TestMergeOpenAISessionBridgeOverrideKeepsExplicitSessionID(t *testing.T) {
 	relaycommon.MergeOpenAISessionBridgeOverride(info, []byte(`{"model":"gpt-5","prompt_cache_key":"cache-key-123"}`))
 
 	require.True(t, info.UseRuntimeHeadersOverride)
-	require.Equal(t, "explicit-session", info.RuntimeHeadersOverride["session_id"])
+	require.NotEqual(t, "cc-session-123", info.RuntimeHeadersOverride["session_id"])
+	require.NotEqual(t, "cache-key-123", info.RuntimeHeadersOverride["session_id"])
+}
+
+func TestMergeOpenAISessionBridgeOverrideStableForSameSeed(t *testing.T) {
+	t.Parallel()
+
+	infoA := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		RequestConversionChain: []types.RelayFormat{
+			types.RelayFormatClaude,
+			types.RelayFormatOpenAIResponses,
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeOpenAI,
+			ChannelId: 1001,
+		},
+	}
+	infoB := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		RequestConversionChain: []types.RelayFormat{
+			types.RelayFormatClaude,
+			types.RelayFormatOpenAIResponses,
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeOpenAI,
+			ChannelId: 1001,
+		},
+	}
+
+	relaycommon.MergeOpenAISessionBridgeOverride(infoA, []byte(`{"model":"gpt-5","prompt_cache_key":"cache-key-123"}`))
+	relaycommon.MergeOpenAISessionBridgeOverride(infoB, []byte(`{"model":"gpt-5","prompt_cache_key":"cache-key-123"}`))
+
+	require.Equal(t, infoA.RuntimeHeadersOverride["session_id"], infoB.RuntimeHeadersOverride["session_id"])
+}
+
+func TestMergeOpenAISessionBridgeOverrideDiffersAcrossMultiKeyIndex(t *testing.T) {
+	t.Parallel()
+
+	infoA := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		RequestConversionChain: []types.RelayFormat{
+			types.RelayFormatClaude,
+			types.RelayFormatOpenAIResponses,
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeOpenAI,
+			ChannelMultiKeyIndex: 1,
+		},
+	}
+	infoB := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		RequestConversionChain: []types.RelayFormat{
+			types.RelayFormatClaude,
+			types.RelayFormatOpenAIResponses,
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeOpenAI,
+			ChannelMultiKeyIndex: 2,
+		},
+	}
+
+	relaycommon.MergeOpenAISessionBridgeOverride(infoA, []byte(`{"model":"gpt-5","prompt_cache_key":"cache-key-123"}`))
+	relaycommon.MergeOpenAISessionBridgeOverride(infoB, []byte(`{"model":"gpt-5","prompt_cache_key":"cache-key-123"}`))
+
+	require.NotEqual(t, infoA.RuntimeHeadersOverride["session_id"], infoB.RuntimeHeadersOverride["session_id"])
 }
 
 func TestShouldUseClaudeCodeTransportFingerprint(t *testing.T) {

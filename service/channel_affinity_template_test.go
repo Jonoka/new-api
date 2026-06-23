@@ -321,6 +321,47 @@ func TestExtractChannelAffinityValueUsesClaudeCodeSessionHeaderForVirtualPromptC
 	require.Equal(t, 9632, binding.ChannelID)
 }
 
+func TestExtractChannelAffinityValueUsesMetadataUserIDEmbeddedSessionForClaudeRequests(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rule := operation_setting.ChannelAffinityRule{
+		Name:       "claude-metadata-session-affinity",
+		ModelRegex: []string{"^gpt-.*$"},
+		PathRegex:  []string{"/v1/messages"},
+		KeySources: []operation_setting.ChannelAffinityKeySource{
+			{Type: "gjson", Path: "prompt_cache_key"},
+		},
+		IncludeRuleName:  true,
+		IncludeModelName: true,
+	}
+
+	affinityValue := fmt.Sprintf("sess-json-%d", time.Now().UnixNano())
+	cacheKeySuffix := buildChannelAffinityCacheKeySuffix(rule, "gpt-5", "default", affinityValue)
+
+	cache := getChannelAffinityCache()
+	require.NoError(t, cache.SetWithTTL(cacheKeySuffix, channelAffinityBinding{ChannelID: 9633}, time.Minute))
+	t.Cleanup(func() {
+		_, _ = cache.DeleteMany([]string{cacheKeySuffix})
+	})
+
+	setting := operation_setting.GetChannelAffinitySetting()
+	originalRules := setting.Rules
+	setting.Rules = append([]operation_setting.ChannelAffinityRule{rule}, originalRules...)
+	t.Cleanup(func() {
+		setting.Rules = originalRules
+	})
+
+	body := fmt.Sprintf(`{"model":"gpt-5","metadata":{"user_id":"{\"device_id\":\"dev-1\",\"account_uuid\":\"\",\"session_id\":\"%s\"}"},"messages":[{"role":"user","content":"hi"}]}`, affinityValue)
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	binding, found := GetPreferredChannelByAffinity(ctx, "gpt-5", "default")
+	require.True(t, found)
+	require.Equal(t, 9633, binding.ChannelID)
+}
+
 func TestChannelAffinityHitCodexTemplatePassHeadersEffective(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

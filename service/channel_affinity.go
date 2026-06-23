@@ -374,6 +374,11 @@ func extractVirtualPromptCacheKey(c *gin.Context) string {
 			switch res.Type {
 			case gjson.String, gjson.Number, gjson.True, gjson.False:
 				if value := strings.TrimSpace(res.String()); value != "" {
+					if path == "metadata.user_id" {
+						if sessionID := extractClaudeSessionID(value); sessionID != "" {
+							return sessionID
+						}
+					}
 					return value
 				}
 			default:

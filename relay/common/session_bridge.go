@@ -1,11 +1,13 @@
 package common
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"strings"
 
 	rootconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/types"
+	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 )
 
@@ -58,13 +60,15 @@ func buildOpenAISessionBridgeOverride(info *RelayInfo, jsonData []byte) map[stri
 	if !ok {
 		return nil
 	}
-	sessionID := strings.TrimSpace(fmt.Sprintf("%v", raw["session_id"]))
+	sessionID := normalizeOpenAIBridgeSessionID(info, raw["session_id"])
 	if sessionID == "" {
 		return nil
 	}
-	return map[string]interface{}{
-		"session_id": sessionID,
+	out := map[string]interface{}{"session_id": sessionID}
+	if conversationID := normalizeOpenAIBridgeSessionID(info, raw["conversation_id"]); conversationID != "" {
+		out["conversation_id"] = conversationID
 	}
+	return out
 }
 
 func hasPromptCacheKeyInJSON(jsonData []byte) bool {
@@ -95,6 +99,48 @@ func resolveOpenAISessionSeedFromRequestHeaders(context map[string]interface{}) 
 		}
 	}
 	return ""
+}
+
+func normalizeOpenAIBridgeSessionID(info *RelayInfo, value interface{}) string {
+	raw := strings.TrimSpace(fmt.Sprintf("%v", value))
+	if raw == "" {
+		return ""
+	}
+	return generateStableSessionUUID(isolateOpenAISessionSeed(info, raw))
+}
+
+func isolateOpenAISessionSeed(info *RelayInfo, raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	scope := 0
+	if info != nil {
+		switch {
+		case info.ChannelMeta != nil && info.ChannelMultiKeyIndex > 0:
+			scope = info.ChannelMultiKeyIndex
+		case info.ChannelMeta != nil && info.ChannelId > 0:
+			scope = info.ChannelId
+		}
+	}
+	sum := sha256.Sum256([]byte(fmt.Sprintf("scope:%d:%s", scope, raw)))
+	return fmt.Sprintf("%x", sum[:16])
+}
+
+func generateStableSessionUUID(seed string) string {
+	seed = strings.TrimSpace(seed)
+	if seed == "" {
+		return ""
+	}
+	hash := sha256.Sum256([]byte(seed))
+	bytes := hash[:16]
+	bytes[6] = (bytes[6] & 0x0f) | 0x40
+	bytes[8] = (bytes[8] & 0x3f) | 0x80
+	parsed, err := uuid.FromBytes(bytes)
+	if err != nil {
+		return ""
+	}
+	return parsed.String()
 }
 
 func MergeOpenAISessionBridgeOverride(info *RelayInfo, jsonData []byte) {

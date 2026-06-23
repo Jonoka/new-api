@@ -14,11 +14,35 @@ import (
 	"github.com/samber/lo"
 )
 
+func extractClaudeSessionID(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(raw, "{") {
+		var obj struct {
+			SessionID string `json:"session_id"`
+		}
+		if err := common.UnmarshalJsonStr(raw, &obj); err == nil {
+			return strings.TrimSpace(obj.SessionID)
+		}
+		return ""
+	}
+	const sessionPrefix = "_session_"
+	if idx := strings.LastIndex(raw, sessionPrefix); idx >= 0 {
+		return strings.TrimSpace(raw[idx+len(sessionPrefix):])
+	}
+	return ""
+}
+
 func resolveClaudePromptCacheKey(claudeRequest dto.ClaudeRequest, info *relaycommon.RelayInfo) string {
 	if len(claudeRequest.Metadata) > 0 {
 		var metadata dto.ClaudeMetadata
 		if err := common.Unmarshal(claudeRequest.Metadata, &metadata); err == nil {
 			if userID := strings.TrimSpace(metadata.UserId); userID != "" {
+				if sessionID := extractClaudeSessionID(userID); sessionID != "" {
+					return sessionID
+				}
 				return userID
 			}
 		}
