@@ -105,7 +105,8 @@ const RULES_JSON_PLACEHOLDER = `[
     "skip_retry_on_failure": false,
     "include_using_group": true,
     "include_model_name": false,
-    "include_rule_name": true
+    "include_rule_name": true,
+    "bind_multi_key_index": false
   }
 ]`;
 
@@ -214,6 +215,7 @@ const buildChannelAffinityRulePayload = ({
   include_using_group: !!values?.include_using_group,
   include_model_name: !!values?.include_model_name,
   include_rule_name: !!values?.include_rule_name,
+  bind_multi_key_index: !!values?.bind_multi_key_index,
   skip_retry_on_failure: !!values?.skip_retry_on_failure,
   ...(userAgentInclude.length > 0
     ? { user_agent_include: userAgentInclude }
@@ -280,6 +282,7 @@ export default function SettingsChannelAffinity(props) {
       include_using_group: r.include_using_group ?? true,
       include_model_name: !!r.include_model_name,
       include_rule_name: r.include_rule_name ?? true,
+      bind_multi_key_index: !!r.bind_multi_key_index,
       param_override_template_json: r.param_override_template
         ? stringifyPretty(r.param_override_template)
         : '',
@@ -615,6 +618,7 @@ export default function SettingsChannelAffinity(props) {
         if (record?.include_using_group) tags.push(t('分组'));
         if (record?.include_model_name) tags.push(t('模型'));
         if (record?.include_rule_name) tags.push(t('规则'));
+        if (record?.bind_multi_key_index) tags.push(t('固定 Key'));
         if (tags.length === 0) return '-';
         return tags.map((x) => (
           <Tag key={x} style={{ marginRight: 4 }}>
@@ -688,6 +692,7 @@ export default function SettingsChannelAffinity(props) {
       include_using_group: true,
       include_model_name: false,
       include_rule_name: true,
+      bind_multi_key_index: false,
     };
     setEditingRule(nextRule);
     setIsEdit(false);
@@ -1306,6 +1311,15 @@ export default function SettingsChannelAffinity(props) {
                   />
                   <Text type='tertiary' size='small'>
                     {t('开启后，规则名称会参与 cache key（不同规则隔离）。')}
+                  </Text>
+                </Col>
+                <Col xs={24} sm={8}>
+                  <Form.Switch
+                    field='bind_multi_key_index'
+                    label={t('固定多 Key 索引')}
+                  />
+                  <Text type='tertiary' size='small'>
+                    {t('开启后，命中亲和规则时会固定复用同一 multi_key_index。')}
                   </Text>
                 </Col>
               </Row>

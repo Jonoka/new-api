@@ -103,8 +103,8 @@ func Distribute() func(c *gin.Context) {
 					}
 				}
 
-				if preferredChannelID, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
-					preferred, err := model.CacheGetChannel(preferredChannelID)
+				if affinityBinding, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
+					preferred, err := model.CacheGetChannel(affinityBinding.ChannelID)
 					if err == nil && preferred != nil {
 						if preferred.Status != common.ChannelStatusEnabled {
 							if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
@@ -180,7 +180,13 @@ func Distribute() func(c *gin.Context) {
 			c.Next()
 			return
 		}
-		newAPIError := SetupContextForSelectedChannel(c, channel, modelRequest.Model)
+		var preferredMultiKeyIndex *int
+		if affinityBinding, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
+			if affinityBinding.ChannelID == channel.Id && affinityBinding.BindMultiKey {
+				preferredMultiKeyIndex = &affinityBinding.MultiKeyIndex
+			}
+		}
+		newAPIError := SetupContextForSelectedChannelWithPreferredMultiKeyIndex(c, channel, modelRequest.Model, preferredMultiKeyIndex)
 		if newAPIError != nil && !ok && shouldSelectChannel {
 			releaseChannelConcurrencyForContext(c)
 			channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
@@ -472,7 +478,35 @@ func isImageEditPath(path string) bool {
 	return strings.HasPrefix(path, "/v1/images/edits") || strings.HasPrefix(path, "/canvas/v1/images/edits")
 }
 
+func setupChannelKeyForContext(c *gin.Context, channel *model.Channel, preferredMultiKeyIndex *int) (newAPIError *types.NewAPIError) {
+	var (
+		key   string
+		index int
+	)
+	if preferredMultiKeyIndex != nil {
+		key, index, newAPIError = channel.GetKeyByIndex(*preferredMultiKeyIndex)
+	} else {
+		key, index, newAPIError = channel.GetNextEnabledKey()
+	}
+	if newAPIError != nil {
+		return newAPIError
+	}
+	if channel.ChannelInfo.IsMultiKey {
+		common.SetContextKey(c, constant.ContextKeyChannelIsMultiKey, true)
+		common.SetContextKey(c, constant.ContextKeyChannelMultiKeyIndex, index)
+	} else {
+		// 必须设置为 false，否则在重试到单个 key 的时候会导致日志显示错误
+		common.SetContextKey(c, constant.ContextKeyChannelIsMultiKey, false)
+	}
+	common.SetContextKey(c, constant.ContextKeyChannelKey, key)
+	return nil
+}
+
 func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, modelName string) (newAPIError *types.NewAPIError) {
+	return SetupContextForSelectedChannelWithPreferredMultiKeyIndex(c, channel, modelName, nil)
+}
+
+func SetupContextForSelectedChannelWithPreferredMultiKeyIndex(c *gin.Context, channel *model.Channel, modelName string, preferredMultiKeyIndex *int) (newAPIError *types.NewAPIError) {
 	common.SetContextKey(c, constant.ContextKeyOriginalModel, modelName)
 	if channel == nil {
 		return types.NewError(errors.New("channel is nil"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
@@ -505,19 +539,10 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	common.SetContextKey(c, constant.ContextKeyChannelModelMapping, channel.GetModelMapping())
 	common.SetContextKey(c, constant.ContextKeyChannelStatusCodeMapping, channel.GetStatusCodeMapping())
 
-	key, index, newAPIError := channel.GetNextEnabledKey()
+	newAPIError = setupChannelKeyForContext(c, channel, preferredMultiKeyIndex)
 	if newAPIError != nil {
 		return newAPIError
 	}
-	if channel.ChannelInfo.IsMultiKey {
-		common.SetContextKey(c, constant.ContextKeyChannelIsMultiKey, true)
-		common.SetContextKey(c, constant.ContextKeyChannelMultiKeyIndex, index)
-	} else {
-		// 必须设置为 false，否则在重试到单个 key 的时候会导致日志显示错误
-		common.SetContextKey(c, constant.ContextKeyChannelIsMultiKey, false)
-	}
-	// c.Request.Header.Set("Authorization", fmt.Sprintf("Bearer %s", key))
-	common.SetContextKey(c, constant.ContextKeyChannelKey, key)
 	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, channel.GetBaseURL())
 
 	common.SetContextKey(c, constant.ContextKeySystemPromptOverride, false)

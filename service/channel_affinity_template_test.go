@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
@@ -208,7 +210,7 @@ func TestGetPreferredChannelByAffinity_RequestHeaderKeySource(t *testing.T) {
 	cacheKeySuffix := buildChannelAffinityCacheKeySuffix(rule, "gpt-5", "default", affinityValue)
 
 	cache := getChannelAffinityCache()
-	require.NoError(t, cache.SetWithTTL(cacheKeySuffix, 9528, time.Minute))
+	require.NoError(t, cache.SetWithTTL(cacheKeySuffix, channelAffinityBinding{ChannelID: 9528}, time.Minute))
 	t.Cleanup(func() {
 		_, _ = cache.DeleteMany([]string{cacheKeySuffix})
 	})
@@ -225,9 +227,10 @@ func TestGetPreferredChannelByAffinity_RequestHeaderKeySource(t *testing.T) {
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	ctx.Request.Header.Set("X-Affinity-Key", affinityValue)
 
-	channelID, found := GetPreferredChannelByAffinity(ctx, "gpt-5", "default")
+	binding, found := GetPreferredChannelByAffinity(ctx, "gpt-5", "default")
 	require.True(t, found)
-	require.Equal(t, 9528, channelID)
+	require.Equal(t, 9528, binding.ChannelID)
+	require.False(t, binding.BindMultiKey)
 
 	meta, ok := getChannelAffinityMeta(ctx)
 	require.True(t, ok)
@@ -256,7 +259,7 @@ func TestChannelAffinityHitCodexTemplatePassHeadersEffective(t *testing.T) {
 	cacheKeySuffix := buildChannelAffinityCacheKeySuffix(*codexRule, "gpt-5", "default", affinityValue)
 
 	cache := getChannelAffinityCache()
-	require.NoError(t, cache.SetWithTTL(cacheKeySuffix, 9527, time.Minute))
+	require.NoError(t, cache.SetWithTTL(cacheKeySuffix, channelAffinityBinding{ChannelID: 9527}, time.Minute))
 	t.Cleanup(func() {
 		_, _ = cache.DeleteMany([]string{cacheKeySuffix})
 	})
@@ -266,9 +269,10 @@ func TestChannelAffinityHitCodexTemplatePassHeadersEffective(t *testing.T) {
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(fmt.Sprintf(`{"prompt_cache_key":"%s"}`, affinityValue)))
 	ctx.Request.Header.Set("Content-Type", "application/json")
 
-	channelID, found := GetPreferredChannelByAffinity(ctx, "gpt-5", "default")
+	binding, found := GetPreferredChannelByAffinity(ctx, "gpt-5", "default")
 	require.True(t, found)
-	require.Equal(t, 9527, channelID)
+	require.Equal(t, 9527, binding.ChannelID)
+	require.False(t, binding.BindMultiKey)
 
 	baseOverride := map[string]interface{}{
 		"temperature": 0.2,
@@ -304,4 +308,31 @@ func TestChannelAffinityHitCodexTemplatePassHeadersEffective(t *testing.T) {
 	require.False(t, exists)
 	_, exists = info.RuntimeHeadersOverride["x-codex-turn-metadata"]
 	require.False(t, exists)
+}
+
+func TestRecordChannelAffinityStoresBoundMultiKeyIndex(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	setChannelAffinityContext(ctx, channelAffinityMeta{
+		CacheKey:     channelAffinityCacheNamespace + ":bind-multi-key-test",
+		TTLSeconds:   60,
+		RuleName:     "bind-multi-key",
+		BindMultiKey: true,
+	})
+	common.SetContextKey(ctx, constant.ContextKeyChannelIsMultiKey, true)
+	common.SetContextKey(ctx, constant.ContextKeyChannelMultiKeyIndex, 3)
+
+	RecordChannelAffinity(ctx, 7788)
+
+	cache := getChannelAffinityCache()
+	binding, found, err := cache.Get("bind-multi-key-test")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, 7788, binding.ChannelID)
+	require.True(t, binding.BindMultiKey)
+	require.Equal(t, 3, binding.MultiKeyIndex)
+
+	_, _ = cache.DeleteMany([]string{"bind-multi-key-test"})
 }

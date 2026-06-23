@@ -14,6 +14,17 @@ import (
 	"github.com/samber/lo"
 )
 
+func mapClaudeEffortToOpenAIReasoningEffort(effort string) string {
+	switch strings.TrimSpace(strings.ToLower(effort)) {
+	case "low", "medium", "high", "minimal", "none", "xhigh":
+		return strings.TrimSpace(strings.ToLower(effort))
+	case "max":
+		return "xhigh"
+	default:
+		return ""
+	}
+}
+
 func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.RelayInfo) (*dto.GeneralOpenAIRequest, error) {
 	openAIRequest := dto.GeneralOpenAIRequest{
 		Model:       claudeRequest.Model,
@@ -41,6 +52,9 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 	}
 
 	isOpenRouter := info.ChannelType == constant.ChannelTypeOpenRouter
+	if effort := mapClaudeEffortToOpenAIReasoningEffort(claudeRequest.GetEfforts()); effort != "" {
+		openAIRequest.ReasoningEffort = effort
+	}
 
 	if isOpenRouter {
 		if effort := claudeRequest.GetEfforts(); effort != "" {

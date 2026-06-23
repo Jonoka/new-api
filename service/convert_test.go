@@ -142,3 +142,53 @@ func TestClaudeToOpenAIRequestMapsMetadataUserIDToPromptCacheKey(t *testing.T) {
 	require.NotNil(t, openAIReq)
 	require.Equal(t, "claude-cache-user", openAIReq.PromptCacheKey)
 }
+
+func TestClaudeToOpenAIRequestMapsClaudeEffortToOpenAIReasoningEffort(t *testing.T) {
+	req := dto.ClaudeRequest{
+		Model:        "gpt-5.5",
+		OutputConfig: json.RawMessage(`{"effort":"high"}`),
+		Messages: []dto.ClaudeMessage{
+			{
+				Role:    "user",
+				Content: "hello",
+			},
+		},
+	}
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.5",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:       constant.ChannelTypeOpenAI,
+			UpstreamModelName: "gpt-5.5",
+		},
+	}
+
+	openAIReq, err := ClaudeToOpenAIRequest(req, info)
+	require.NoError(t, err)
+	require.NotNil(t, openAIReq)
+	require.Equal(t, "high", openAIReq.ReasoningEffort)
+}
+
+func TestClaudeToOpenAIRequestMapsClaudeMaxEffortToXHigh(t *testing.T) {
+	req := dto.ClaudeRequest{
+		Model:        "gpt-5.5",
+		OutputConfig: json.RawMessage(`{"effort":"max"}`),
+		Messages: []dto.ClaudeMessage{
+			{
+				Role:    "user",
+				Content: "hello",
+			},
+		},
+	}
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.5",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:       constant.ChannelTypeOpenAI,
+			UpstreamModelName: "gpt-5.5",
+		},
+	}
+
+	openAIReq, err := ClaudeToOpenAIRequest(req, info)
+	require.NoError(t, err)
+	require.NotNil(t, openAIReq)
+	require.Equal(t, "xhigh", openAIReq.ReasoningEffort)
+}

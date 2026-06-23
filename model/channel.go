@@ -284,6 +284,28 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 	}
 }
 
+func (channel *Channel) GetKeyByIndex(index int) (string, int, *types.NewAPIError) {
+	if !channel.ChannelInfo.IsMultiKey {
+		return channel.Key, 0, nil
+	}
+
+	keys := channel.GetKeys()
+	if len(keys) == 0 {
+		return "", 0, types.NewError(errors.New("no keys available"), types.ErrorCodeChannelNoAvailableKey)
+	}
+	if index < 0 || index >= len(keys) {
+		return "", 0, types.NewError(errors.New("multi key index out of range"), types.ErrorCodeChannelNoAvailableKey)
+	}
+
+	statusList := channel.ChannelInfo.MultiKeyStatusList
+	if statusList != nil {
+		if status, ok := statusList[index]; ok && status != common.ChannelStatusEnabled {
+			return "", 0, types.NewError(errors.New("selected multi key is disabled"), types.ErrorCodeChannelNoAvailableKey)
+		}
+	}
+	return keys[index], index, nil
+}
+
 func (channel *Channel) SaveChannelInfo() error {
 	return DB.Model(channel).Update("channel_info", channel.ChannelInfo).Error
 }

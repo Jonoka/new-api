@@ -80,6 +80,7 @@ interface RuleFormValues {
   include_using_group: boolean
   include_model_name: boolean
   include_rule_name: boolean
+  bind_multi_key_index: boolean
   param_override_template_json: string
 }
 
@@ -124,6 +125,7 @@ export function RuleEditorDialog(props: Props) {
       include_using_group: true,
       include_model_name: false,
       include_rule_name: true,
+      bind_multi_key_index: false,
       param_override_template_json: '',
     },
   })
@@ -140,6 +142,7 @@ export function RuleEditorDialog(props: Props) {
       include_using_group: r.include_using_group ?? true,
       include_model_name: !!r.include_model_name,
       include_rule_name: r.include_rule_name ?? true,
+      bind_multi_key_index: !!r.bind_multi_key_index,
       param_override_template_json: r.param_override_template
         ? JSON.stringify(r.param_override_template, null, 2)
         : '',
@@ -168,6 +171,7 @@ export function RuleEditorDialog(props: Props) {
         include_using_group: true,
         include_model_name: false,
         include_rule_name: true,
+        bind_multi_key_index: false,
         param_override_template_json: '',
       })
       setKeySources([{ type: 'gjson', path: '' }])
@@ -222,6 +226,7 @@ export function RuleEditorDialog(props: Props) {
       include_using_group: values.include_using_group,
       include_model_name: values.include_model_name,
       include_rule_name: values.include_rule_name,
+      bind_multi_key_index: values.bind_multi_key_index,
       param_override_template: paramTemplate,
     }
 
@@ -413,7 +418,7 @@ export function RuleEditorDialog(props: Props) {
                 />
               </div>
 
-              <div className='grid gap-3 sm:grid-cols-3'>
+              <div className='grid gap-3 sm:grid-cols-4'>
                 <SettingsSwitchField
                   checked={form.watch('include_using_group')}
                   onCheckedChange={(v) =>
@@ -434,6 +439,14 @@ export function RuleEditorDialog(props: Props) {
                   checked={form.watch('include_rule_name')}
                   onCheckedChange={(v) => form.setValue('include_rule_name', v)}
                   label={t('Include Rule Name')}
+                  className='border-b-0 py-0'
+                />
+                <SettingsSwitchField
+                  checked={form.watch('bind_multi_key_index')}
+                  onCheckedChange={(v) =>
+                    form.setValue('bind_multi_key_index', v)
+                  }
+                  label={t('Bind Multi-Key Index')}
                   className='border-b-0 py-0'
                 />
               </div>
