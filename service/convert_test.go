@@ -1,11 +1,54 @@
 package service
 
 import (
+	"encoding/json"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
+
+func TestClaudeToOpenAIRequestPreservesSystemCacheControlForResponses(t *testing.T) {
+	systemText := "cache this system prompt"
+	req := dto.ClaudeRequest{
+		Model: "gpt-5.5",
+		System: []dto.ClaudeMediaMessage{
+			{
+				Type:         "text",
+				Text:         &systemText,
+				CacheControl: json.RawMessage(`{"type":"ephemeral"}`),
+			},
+		},
+		Messages: []dto.ClaudeMessage{
+			{
+				Role:    "user",
+				Content: "hello",
+			},
+		},
+	}
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.5",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:       constant.ChannelTypeOpenAI,
+			UpstreamModelName: "gpt-5.5",
+		},
+	}
+
+	openAIReq, err := ClaudeToOpenAIRequest(req, info)
+	require.NoError(t, err)
+	require.NotNil(t, openAIReq)
+	require.Len(t, openAIReq.Messages, 2)
+
+	body, err := common.Marshal(openAIReq.Messages[0].Content)
+	require.NoError(t, err)
+	require.Equal(t, "system", openAIReq.Messages[0].Role)
+	require.Equal(t, "cache this system prompt", gjson.GetBytes(body, "0.text").String())
+	require.Equal(t, "ephemeral", gjson.GetBytes(body, "0.cache_control.type").String())
+}
 
 func TestBuildClaudeUsageFromOpenAIUsageSubtractsCachedTokens(t *testing.T) {
 	usage := buildClaudeUsageFromOpenAIUsage(&dto.Usage{

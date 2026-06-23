@@ -73,6 +73,29 @@ func convertChatResponseFormatToResponsesText(reqFormat *dto.ResponseFormat) jso
 	return textRaw
 }
 
+func applyCacheControlToResponsesPart(part map[string]any, cacheControl json.RawMessage) {
+	if len(cacheControl) == 0 {
+		return
+	}
+	var cacheControlValue any
+	if err := common.Unmarshal(cacheControl, &cacheControlValue); err != nil || cacheControlValue == nil {
+		return
+	}
+	part["cache_control"] = cacheControlValue
+}
+
+func hasCacheControlContentPart(msg dto.Message) bool {
+	if msg.Content == nil || msg.IsStringContent() {
+		return false
+	}
+	for _, part := range msg.ParseContent() {
+		if len(part.CacheControl) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*dto.OpenAIResponsesRequest, error) {
 	if req == nil {
 		return nil, errors.New("request is nil")
@@ -126,7 +149,7 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 		}
 
 		// Prefer mapping system/developer messages into `instructions`.
-		if role == "system" || role == "developer" {
+		if (role == "system" || role == "developer") && !hasCacheControlContentPart(msg) {
 			if msg.Content == nil {
 				continue
 			}
@@ -219,10 +242,12 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 				if role == "assistant" {
 					textType = "output_text"
 				}
-				contentParts = append(contentParts, map[string]any{
+				contentPart := map[string]any{
 					"type": textType,
 					"text": part.Text,
-				})
+				}
+				applyCacheControlToResponsesPart(contentPart, part.CacheControl)
+				contentParts = append(contentParts, contentPart)
 			case dto.ContentTypeImageURL:
 				contentParts = append(contentParts, map[string]any{
 					"type":      "input_image",

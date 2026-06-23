@@ -22,6 +22,49 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func claudeRequestHasCacheControl(request *dto.ClaudeRequest) bool {
+	if request == nil {
+		return false
+	}
+	if len(request.CacheControl) > 0 {
+		return true
+	}
+	for _, system := range request.ParseSystem() {
+		if len(system.CacheControl) > 0 {
+			return true
+		}
+	}
+	for _, message := range request.Messages {
+		contents, _ := message.ParseContent()
+		for _, content := range contents {
+			if len(content.CacheControl) > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func shouldClaudeUseOpenAIResponses(info *relaycommon.RelayInfo, request *dto.ClaudeRequest) bool {
+	if info == nil {
+		return false
+	}
+	if service.ShouldChatCompletionsUseResponsesGlobal(info.ChannelId, info.ChannelType, info.OriginModelName) {
+		return true
+	}
+	if !claudeRequestHasCacheControl(request) {
+		return false
+	}
+	switch info.ChannelType {
+	case constant.ChannelTypeCodex:
+		return true
+	case constant.ChannelTypeOpenAI, constant.ChannelTypeAzure, constant.ChannelTypeXai:
+		return true
+	default:
+		return common.IsOpenAIResponseOnlyModel(info.OriginModelName)
+	}
+}
+
 func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 
 	info.InitChannelMeta(c)
@@ -130,7 +173,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	passThroughRequestBody := shouldPassThroughRequestBody(info)
 	if !passThroughRequestBody &&
 		!shouldUseClaudeCodeRequestFingerprint(info) &&
-		service.ShouldChatCompletionsUseResponsesGlobal(info.ChannelId, info.ChannelType, info.OriginModelName) {
+		shouldClaudeUseOpenAIResponses(info, request) {
 		openAIRequest, convErr := service.ClaudeToOpenAIRequest(*request, info)
 		if convErr != nil {
 			return types.NewError(convErr, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())

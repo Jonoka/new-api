@@ -106,7 +106,14 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 					Role: "system",
 				}
 				isOpenRouterClaude := isOpenRouter && strings.HasPrefix(info.UpstreamModelName, "anthropic/claude")
-				if isOpenRouterClaude {
+				hasSystemCacheControl := false
+				for _, system := range systems {
+					if len(system.CacheControl) > 0 {
+						hasSystemCacheControl = true
+						break
+					}
+				}
+				if isOpenRouterClaude || hasSystemCacheControl {
 					systemMediaMessages := make([]dto.MediaContent, 0, len(systems))
 					for _, system := range systems {
 						message := dto.MediaContent{
