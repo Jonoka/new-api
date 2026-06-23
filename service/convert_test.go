@@ -170,6 +170,33 @@ func TestClaudeToOpenAIRequestMapsSessionHeaderToPromptCacheKey(t *testing.T) {
 	require.Equal(t, "sess-claude-123", openAIReq.PromptCacheKey)
 }
 
+func TestClaudeToOpenAIRequestMapsClaudeCodeSessionHeaderToPromptCacheKey(t *testing.T) {
+	req := dto.ClaudeRequest{
+		Model: "gpt-5.5",
+		Messages: []dto.ClaudeMessage{
+			{
+				Role:    "user",
+				Content: "hello",
+			},
+		},
+	}
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.5",
+		RequestHeaders: map[string]string{
+			"X-Claude-Code-Session-Id": "cc-session-123",
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:       constant.ChannelTypeOpenAI,
+			UpstreamModelName: "gpt-5.5",
+		},
+	}
+
+	openAIReq, err := ClaudeToOpenAIRequest(req, info)
+	require.NoError(t, err)
+	require.NotNil(t, openAIReq)
+	require.Equal(t, "cc-session-123", openAIReq.PromptCacheKey)
+}
+
 func TestClaudeToOpenAIRequestMapsClaudeEffortToOpenAIReasoningEffort(t *testing.T) {
 	req := dto.ClaudeRequest{
 		Model:        "gpt-5.5",

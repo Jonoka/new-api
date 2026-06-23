@@ -351,7 +351,11 @@ func extractVirtualPromptCacheKey(c *gin.Context) string {
 	if c == nil || c.Request == nil {
 		return ""
 	}
-	for _, headerKey := range []string{"Session_id", "session_id", "X-Client-Request-Id", "x-client-request-id"} {
+	for _, headerKey := range []string{
+		"X-Claude-Code-Session-Id", "x-claude-code-session-id",
+		"Session_id", "session_id",
+		"X-Client-Request-Id", "x-client-request-id",
+	} {
 		if value := strings.TrimSpace(c.Request.Header.Get(headerKey)); value != "" {
 			return value
 		}
