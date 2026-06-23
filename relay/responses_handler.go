@@ -114,6 +114,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 				return newAPIErrorFromParamOverride(err)
 			}
 		}
+		relaycommon.MergeOpenAISessionBridgeOverride(info, jsonData)
 		syncResponsesStreamStateFromBody(c, info, jsonData)
 
 		logger.LogDebug(c, "requestBody: %s", jsonData)

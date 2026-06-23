@@ -227,6 +227,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 				return newAPIErrorFromParamOverride(err)
 			}
 		}
+		relaycommon.MergeOpenAISessionBridgeOverride(info, jsonData)
 
 		// Sign billing header CCH placeholder after all body modifications
 		if shouldUseClaudeCodeRequestFingerprint(info) {
