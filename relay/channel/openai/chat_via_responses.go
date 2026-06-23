@@ -39,6 +39,50 @@ func stringDeltaFromPrefix(prev string, next string) string {
 	return next
 }
 
+func isResponsesSSEBody(body []byte) bool {
+	trimmed := bytes.TrimSpace(body)
+	return bytes.HasPrefix(trimmed, []byte("data:")) ||
+		bytes.HasPrefix(trimmed, []byte("event:")) ||
+		bytes.HasPrefix(trimmed, []byte("id:")) ||
+		bytes.HasPrefix(trimmed, []byte("retry:")) ||
+		bytes.HasPrefix(trimmed, []byte(":"))
+}
+
+func normalizeResponsesStreamJSONData(data string) (string, bool) {
+	data = strings.TrimSpace(data)
+	for {
+		switch {
+		case data == "" || data == "[DONE]":
+			return "", false
+		case strings.HasPrefix(data, "data:"):
+			data = strings.TrimSpace(strings.TrimPrefix(data, "data:"))
+			continue
+		case strings.HasPrefix(data, "event:"),
+			strings.HasPrefix(data, "id:"),
+			strings.HasPrefix(data, "retry:"),
+			strings.HasPrefix(data, ":"):
+			return "", false
+		}
+		break
+	}
+	if !strings.HasPrefix(data, "{") {
+		return "", false
+	}
+	return data, true
+}
+
+func parseResponsesStreamEventData(data string) (dto.ResponsesStreamResponse, string, bool, error) {
+	var streamResp dto.ResponsesStreamResponse
+	jsonData, ok := normalizeResponsesStreamJSONData(data)
+	if !ok {
+		return streamResp, "", false, nil
+	}
+	if err := common.UnmarshalJsonStr(jsonData, &streamResp); err != nil {
+		return streamResp, jsonData, true, err
+	}
+	return streamResp, jsonData, true, nil
+}
+
 func convertResponsesSSEToJSON(sseBody []byte) ([]byte, error) {
 	lines := bytes.Split(sseBody, []byte("\n"))
 
@@ -61,8 +105,11 @@ func convertResponsesSSEToJSON(sseBody []byte) ([]byte, error) {
 			continue
 		}
 
-		var streamResp dto.ResponsesStreamResponse
-		if err := common.Unmarshal(data, &streamResp); err != nil {
+		streamResp, _, ok, err := parseResponsesStreamEventData(string(data))
+		if !ok {
+			continue
+		}
+		if err != nil {
 			return nil, fmt.Errorf("failed to unmarshal responses SSE event: %w", err)
 		}
 
@@ -150,7 +197,7 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
 
-	if bytes.HasPrefix(bytes.TrimSpace(body), []byte("data:")) {
+	if isResponsesSSEBody(body) {
 		converted, convErr := convertResponsesSSEToJSON(body)
 		if convErr != nil {
 			return nil, types.NewOpenAIError(convErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
@@ -409,8 +456,11 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			return
 		}
 
-		var streamResp dto.ResponsesStreamResponse
-		if err := common.UnmarshalJsonStr(data, &streamResp); err != nil {
+		streamResp, _, ok, err := parseResponsesStreamEventData(data)
+		if !ok {
+			return
+		}
+		if err != nil {
 			logger.LogError(c, "failed to unmarshal responses stream event: "+err.Error())
 			sr.Error(err)
 			return

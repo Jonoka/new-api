@@ -86,3 +86,22 @@ func TestChatCompletionsRequestToResponsesRequestKeepsCachedSystemInInput(t *tes
 	require.False(t, gjson.GetBytes(respReq.Input, "0.content.0.cache_control").Exists(), string(respReq.Input))
 	require.Equal(t, "user", gjson.GetBytes(respReq.Input, "1.role").String())
 }
+
+func TestChatCompletionsRequestToResponsesRequestPreservesPromptCacheFields(t *testing.T) {
+	req := &dto.GeneralOpenAIRequest{
+		Model:                "test-model",
+		PromptCacheKey:       "cache-key-123",
+		PromptCacheRetention: []byte(`"24h"`),
+		Messages: []dto.Message{
+			{
+				Role:    "user",
+				Content: "hello",
+			},
+		},
+	}
+
+	respReq, err := ChatCompletionsRequestToResponsesRequest(req)
+	require.NoError(t, err)
+	require.JSONEq(t, `"cache-key-123"`, string(respReq.PromptCacheKey))
+	require.JSONEq(t, `"24h"`, string(respReq.PromptCacheRetention))
+}

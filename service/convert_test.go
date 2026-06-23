@@ -117,3 +117,28 @@ func TestBuildClaudeUsageFromOpenAIUsageClampsNegativeInputTokens(t *testing.T) 
 	require.Equal(t, 30, usage.CacheCreationInputTokens)
 	require.Equal(t, 20, usage.OutputTokens)
 }
+
+func TestClaudeToOpenAIRequestMapsMetadataUserIDToPromptCacheKey(t *testing.T) {
+	req := dto.ClaudeRequest{
+		Model:    "gpt-5.5",
+		Metadata: json.RawMessage(`{"user_id":"claude-cache-user"}`),
+		Messages: []dto.ClaudeMessage{
+			{
+				Role:    "user",
+				Content: "hello",
+			},
+		},
+	}
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.5",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:       constant.ChannelTypeOpenAI,
+			UpstreamModelName: "gpt-5.5",
+		},
+	}
+
+	openAIReq, err := ClaudeToOpenAIRequest(req, info)
+	require.NoError(t, err)
+	require.NotNil(t, openAIReq)
+	require.Equal(t, "claude-cache-user", openAIReq.PromptCacheKey)
+}

@@ -26,6 +26,13 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
+	if isResponsesSSEBody(responseBody) {
+		converted, convErr := convertResponsesSSEToJSON(responseBody)
+		if convErr != nil {
+			return nil, types.NewOpenAIError(convErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+		}
+		responseBody = converted
+	}
 	err = common.Unmarshal(responseBody, &responsesResponse)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
@@ -79,13 +86,16 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		}
 
 		// 检查当前数据是否包含 completed 状态和 usage 信息
-		var streamResponse dto.ResponsesStreamResponse
-		if err := common.UnmarshalJsonStr(data, &streamResponse); err != nil {
+		streamResponse, normalizedData, ok, err := parseResponsesStreamEventData(data)
+		if !ok {
+			return
+		}
+		if err != nil {
 			logger.LogError(c, "failed to unmarshal stream response: "+err.Error())
 			sr.Error(err)
 			return
 		}
-		sendResponsesStreamData(c, streamResponse, data)
+		sendResponsesStreamData(c, streamResponse, normalizedData)
 		if c.GetBool("sensitive_response_stream_blocked") {
 			sr.Stop(service.ErrSensitiveResponseBlocked)
 			return

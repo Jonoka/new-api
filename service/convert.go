@@ -31,6 +31,14 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 	if claudeRequest.Stream != nil {
 		openAIRequest.Stream = lo.ToPtr(lo.FromPtr(claudeRequest.Stream))
 	}
+	if len(claudeRequest.Metadata) > 0 {
+		var metadata dto.ClaudeMetadata
+		if err := common.Unmarshal(claudeRequest.Metadata, &metadata); err == nil {
+			if userID := strings.TrimSpace(metadata.UserId); userID != "" {
+				openAIRequest.PromptCacheKey = userID
+			}
+		}
+	}
 
 	isOpenRouter := info.ChannelType == constant.ChannelTypeOpenRouter
 

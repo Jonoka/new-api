@@ -56,6 +56,28 @@ data: [DONE]
 	require.Equal(t, "Hi", resp.Output[0].Content[0].Text)
 }
 
+func TestConvertResponsesSSEToJSONWithEventLines(t *testing.T) {
+	body := []byte(`event: response.created
+data: {"type":"response.created","response":{"id":"resp_1","model":"test-model","created_at":1800000000}}
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","delta":"Hi"}
+event: response.done
+data: {"type":"response.done","response":{"id":"resp_1","model":"test-model","created_at":1800000000,"usage":{"input_tokens":10,"input_tokens_details":{"cached_tokens":8},"output_tokens":2,"total_tokens":12}}}
+data: [DONE]
+`)
+
+	converted, err := convertResponsesSSEToJSON(body)
+	require.NoError(t, err)
+
+	var resp dto.OpenAIResponsesResponse
+	require.NoError(t, common.Unmarshal(converted, &resp))
+	require.NotNil(t, resp.Usage)
+	require.NotNil(t, resp.Usage.InputTokensDetails)
+	require.Equal(t, 8, resp.Usage.InputTokensDetails.CachedTokens)
+	require.Len(t, resp.Output, 1)
+	require.Equal(t, "Hi", resp.Output[0].Content[0].Text)
+}
+
 func setupResponsesStreamTest(body string) (*gin.Context, *httptest.ResponseRecorder, *relaycommon.RelayInfo, *http.Response) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -105,6 +127,54 @@ func TestOaiResponsesToChatStreamHandlerReadsDoneUsage(t *testing.T) {
 	require.Equal(t, 2, usage.CompletionTokens)
 	require.Equal(t, 12, usage.TotalTokens)
 	require.Contains(t, recorder.Body.String(), `"content":"Hi"`)
+}
+
+func TestOaiResponsesToChatStreamHandlerSkipsNestedEventData(t *testing.T) {
+	body := strings.Join([]string{
+		`data: event: response.output_text.delta`,
+		`data: data: {"type":"response.output_text.delta","delta":"Hi"}`,
+		`data: event: response.done`,
+		`data: data: {"type":"response.done","response":{"id":"resp_1","model":"test-model","created_at":1800000000,"usage":{"input_tokens":10,"input_tokens_details":{"cached_tokens":8},"output_tokens":2,"total_tokens":12}}}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+	c, recorder, info, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesToChatStreamHandler(c, info, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 10, usage.PromptTokens)
+	require.Equal(t, 8, usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 2, usage.CompletionTokens)
+	require.Equal(t, 12, usage.TotalTokens)
+	require.Contains(t, recorder.Body.String(), `"content":"Hi"`)
+}
+
+func TestOaiResponsesHandlerConvertsEventPrefixedSSEBody(t *testing.T) {
+	body := strings.Join([]string{
+		`event: response.output_text.delta`,
+		`data: {"type":"response.output_text.delta","delta":"Hi"}`,
+		`event: response.done`,
+		`data: {"type":"response.done","response":{"id":"resp_1","model":"test-model","created_at":1800000000,"usage":{"input_tokens":10,"input_tokens_details":{"cached_tokens":8},"output_tokens":2,"total_tokens":12}}}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+	c, recorder, info, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesHandler(c, info, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 10, usage.PromptTokens)
+	require.Equal(t, 8, usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 2, usage.CompletionTokens)
+	require.Equal(t, 12, usage.TotalTokens)
+	var out dto.OpenAIResponsesResponse
+	require.NoError(t, common.Unmarshal([]byte(recorder.Body.String()), &out))
+	require.NotNil(t, out.Usage)
+	require.NotNil(t, out.Usage.InputTokensDetails)
+	require.Equal(t, 8, out.Usage.InputTokensDetails.CachedTokens)
+	require.Len(t, out.Output, 1)
+	require.Equal(t, "Hi", out.Output[0].Content[0].Text)
 }
 
 func TestOaiResponsesStreamHandlerDoesNotBillPromptOnlyWithoutUsageOrOutput(t *testing.T) {
