@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -80,9 +81,7 @@ func RelayImageTaskSubmit(c *gin.Context) {
 		}
 	}
 
-	capture := &imageTaskResponseCapture{ResponseWriter: c.Writer}
-	c.Writer = capture
-	apiErr := relayHandler(c, relayInfo)
+	capture, apiErr := relayImageTaskSubmitWithRetry(c, relayInfo)
 	if apiErr != nil {
 		if relayInfo.Billing != nil {
 			relayInfo.Billing.Refund(c)
@@ -139,6 +138,62 @@ func RelayImageTaskSubmit(c *gin.Context) {
 		return
 	}
 	common.SysLog(fmt.Sprintf("insert image task success: task_id=%s upstream_task_id=%s channel_id=%d status=%s", task.TaskID, task.PrivateData.UpstreamTaskID, task.ChannelId, task.Status))
+}
+
+func relayImageTaskSubmitWithRetry(c *gin.Context, relayInfo *relaycommon.RelayInfo) (*imageTaskResponseCapture, *types.NewAPIError) {
+	retryParam := &service.RetryParam{
+		Ctx:        c,
+		TokenGroup: relayInfo.TokenGroup,
+		ModelName:  relayInfo.OriginModelName,
+		Retry:      common.GetPointer(0),
+	}
+	relayInfo.RetryIndex = 0
+	relayInfo.LastError = nil
+	originalWriter := c.Writer
+	var lastErr *types.NewAPIError
+	var lastCapture *imageTaskResponseCapture
+
+	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+		relayInfo.RetryIndex = retryParam.GetRetry()
+		channel, channelErr := getChannel(c, relayInfo, retryParam)
+		if channelErr != nil {
+			lastErr = channelErr
+			break
+		}
+
+		addUsedChannel(c, channel.Id)
+		bodyStorage, bodyErr := common.GetBodyStorage(c)
+		if bodyErr != nil {
+			if common.IsRequestBodyTooLargeError(bodyErr) || errors.Is(bodyErr, common.ErrRequestBodyTooLarge) {
+				lastErr = types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusRequestEntityTooLarge, types.ErrOptionWithSkipRetry())
+			} else {
+				lastErr = types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+			}
+			break
+		}
+		c.Request.Body = io.NopCloser(bodyStorage)
+
+		capture := &imageTaskResponseCapture{ResponseWriter: originalWriter}
+		c.Writer = capture
+		apiErr := relayHandler(c, relayInfo)
+		if apiErr == nil {
+			relayInfo.LastError = nil
+			return capture, nil
+		}
+
+		lastCapture = capture
+		lastErr = service.NormalizeViolationFeeError(apiErr)
+		relayInfo.LastError = lastErr
+		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), lastErr)
+		c.Writer = originalWriter
+
+		if !shouldRetry(c, lastErr, common.RetryTimes-retryParam.GetRetry()) {
+			break
+		}
+	}
+
+	c.Writer = originalWriter
+	return lastCapture, lastErr
 }
 
 func imageTaskSubmitPlatform(c *gin.Context, relayInfo *relaycommon.RelayInfo) constant.TaskPlatform {
