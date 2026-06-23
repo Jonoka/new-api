@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -120,6 +121,71 @@ func TestRelayErrorHandlerKeepsOpenAIErrorMessage(t *testing.T) {
 
 	require.NotNil(t, newAPIError)
 	require.Equal(t, message, newAPIError.Error())
+}
+
+func TestRelayErrorHandlerRestoresEmbeddedClientStatusCodeFromOpenAIError(t *testing.T) {
+	body := `{"error":{"message":"status_code=400, Unsupported parameter: max_output_tokens","type":"upstream_error","code":"bad_request"}}`
+	resp := &http.Response{
+		StatusCode: http.StatusBadGateway,
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+
+	newAPIError := RelayErrorHandler(context.Background(), resp, false)
+
+	require.NotNil(t, newAPIError)
+	require.Equal(t, http.StatusBadRequest, newAPIError.StatusCode)
+	require.Equal(t, "status_code=400, Unsupported parameter: max_output_tokens", newAPIError.Error())
+}
+
+func TestRelayErrorHandlerRestoresEmbeddedClientStatusCodeFromMessage(t *testing.T) {
+	body := `{"message":"status code: 429, context length exceeded"}`
+	resp := &http.Response{
+		StatusCode: http.StatusBadGateway,
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+
+	newAPIError := RelayErrorHandler(context.Background(), resp, false)
+
+	require.NotNil(t, newAPIError)
+	require.Equal(t, http.StatusTooManyRequests, newAPIError.StatusCode)
+	require.Equal(t, "status code: 429, context length exceeded", newAPIError.Error())
+}
+
+func TestRelayErrorHandlerKeepsServerStatusCodeWithoutEmbeddedClientStatus(t *testing.T) {
+	body := `{"error":{"message":"upstream temporarily unavailable","type":"server_error","code":"server_error"}}`
+	resp := &http.Response{
+		StatusCode: http.StatusBadGateway,
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+
+	newAPIError := RelayErrorHandler(context.Background(), resp, false)
+
+	require.NotNil(t, newAPIError)
+	require.Equal(t, http.StatusBadGateway, newAPIError.StatusCode)
+	require.Equal(t, "upstream temporarily unavailable", newAPIError.Error())
+}
+
+func TestRelayErrorHandlerRestoredClientStatusAvoidsAutoDisableForBadGatewayRule(t *testing.T) {
+	origRanges := operation_setting.AutomaticDisableStatusCodeRanges
+	t.Cleanup(func() {
+		operation_setting.AutomaticDisableStatusCodeRanges = origRanges
+	})
+	operation_setting.AutomaticDisableStatusCodeRanges = []operation_setting.StatusCodeRange{
+		{Start: http.StatusBadGateway, End: http.StatusBadGateway},
+	}
+
+	body := `{"error":{"message":"status_code=400, Unsupported parameter: max_output_tokens","type":"upstream_error","code":"bad_request"}}`
+	resp := &http.Response{
+		StatusCode: http.StatusBadGateway,
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+
+	newAPIError := RelayErrorHandler(context.Background(), resp, false)
+
+	require.NotNil(t, newAPIError)
+	require.Equal(t, http.StatusBadRequest, newAPIError.StatusCode)
+	require.False(t, ShouldDisableChannelWithSwitch(newAPIError, true))
+	require.True(t, ShouldDisableChannelWithSwitch(&types.NewAPIError{StatusCode: http.StatusBadGateway}, true))
 }
 
 func TestRelayErrorHandlerKeepsInvalidJSONBodyInDebugLog(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -83,6 +84,45 @@ func ClaudeErrorWrapperLocal(err error, code string, statusCode int) *dto.Claude
 	return claudeErr
 }
 
+var embeddedStatusCodePatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\bstatus[_ -]?code\s*(?:[:=]|\s)\s*([1-5][0-9]{2})\b`),
+	regexp.MustCompile(`(?i)\bstatus\s*[:=]\s*([1-5][0-9]{2})\b`),
+}
+
+func normalizeUpstreamStatusCode(statusCode int, candidates ...string) int {
+	if statusCode < http.StatusInternalServerError || statusCode > 599 {
+		return statusCode
+	}
+	for _, candidate := range candidates {
+		if embeddedStatusCode, ok := extractEmbeddedClientStatusCode(candidate); ok {
+			return embeddedStatusCode
+		}
+	}
+	return statusCode
+}
+
+func extractEmbeddedClientStatusCode(text string) (int, bool) {
+	if text == "" {
+		return 0, false
+	}
+	for _, pattern := range embeddedStatusCodePatterns {
+		matches := pattern.FindAllStringSubmatch(text, -1)
+		for _, match := range matches {
+			if len(match) < 2 {
+				continue
+			}
+			statusCode, err := strconv.Atoi(match[1])
+			if err != nil {
+				continue
+			}
+			if statusCode >= http.StatusBadRequest && statusCode < http.StatusInternalServerError {
+				return statusCode, true
+			}
+		}
+	}
+	return 0, false
+}
+
 func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFail bool) (newApiErr *types.NewAPIError) {
 	newApiErr = types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
 
@@ -94,17 +134,18 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 	var errResponse dto.GeneralErrorResponse
 	responseBodyText := string(responseBody)
 	responseBodyPreview := common.LocalLogPreview(responseBodyText)
-	buildErrWithBody := func(message string) error {
+	buildErrWithBody := func(statusCode int, message string) error {
 		if message == "" {
-			return fmt.Errorf("bad response status code %d, body: %s", resp.StatusCode, responseBodyText)
+			return fmt.Errorf("bad response status code %d, body: %s", statusCode, responseBodyText)
 		}
-		return fmt.Errorf("bad response status code %d, message: %s, body: %s", resp.StatusCode, message, responseBodyText)
+		return fmt.Errorf("bad response status code %d, message: %s, body: %s", statusCode, message, responseBodyText)
 	}
 
 	err = common.Unmarshal(responseBody, &errResponse)
 	if err != nil {
+		newApiErr.StatusCode = normalizeUpstreamStatusCode(resp.StatusCode, responseBodyText)
 		if showBodyWhenFail {
-			newApiErr.Err = buildErrWithBody("")
+			newApiErr.Err = buildErrWithBody(newApiErr.StatusCode, "")
 		} else {
 			logger.LogError(ctx, fmt.Sprintf("bad response status code %d, body: %s", resp.StatusCode, responseBodyPreview))
 			newApiErr.Err = fmt.Errorf("bad response status code %d", resp.StatusCode)
@@ -116,16 +157,19 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 		// General format error (OpenAI, Anthropic, Gemini, etc.)
 		oaiError := errResponse.TryToOpenAIError()
 		if oaiError != nil {
-			newApiErr = types.WithOpenAIError(*oaiError, resp.StatusCode)
+			statusCode := normalizeUpstreamStatusCode(resp.StatusCode, oaiError.Message, responseBodyText)
+			newApiErr = types.WithOpenAIError(*oaiError, statusCode)
 			if showBodyWhenFail {
-				newApiErr.Err = buildErrWithBody(newApiErr.Error())
+				newApiErr.Err = buildErrWithBody(statusCode, newApiErr.Error())
 			}
 			return
 		}
 	}
-	newApiErr = types.NewOpenAIError(errors.New(errResponse.ToMessage()), types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
+	message := errResponse.ToMessage()
+	statusCode := normalizeUpstreamStatusCode(resp.StatusCode, message, responseBodyText)
+	newApiErr = types.NewOpenAIError(errors.New(message), types.ErrorCodeBadResponseStatusCode, statusCode)
 	if showBodyWhenFail {
-		newApiErr.Err = buildErrWithBody(newApiErr.Error())
+		newApiErr.Err = buildErrWithBody(statusCode, newApiErr.Error())
 	}
 	return
 }
