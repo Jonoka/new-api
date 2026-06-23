@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -58,6 +59,18 @@ func TestShouldRetryWithReasonReportsBlockingReason(t *testing.T) {
 		decision := shouldRetryWithReason(ctx, err, 2)
 		require.False(t, decision.Retry)
 		require.Equal(t, "channel_affinity_skip", decision.Reason)
+	})
+
+	t.Run("stream already started", func(t *testing.T) {
+		ctx := buildRelayRetryTestContext()
+		info := &relaycommon.RelayInfo{}
+		info.ResetFirstResponseTiming(time.Now())
+		info.SetFirstResponseTime()
+		info.ReceivedResponseCount = 1
+		ctx.Set("relay_info", info)
+		decision := shouldRetryWithReason(ctx, err, 2)
+		require.False(t, decision.Retry)
+		require.Equal(t, "no_retry_after_stream_started", decision.Reason)
 	})
 }
 
