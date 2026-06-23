@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -58,4 +59,16 @@ func TestShouldRetryWithReasonReportsBlockingReason(t *testing.T) {
 		require.False(t, decision.Retry)
 		require.Equal(t, "channel_affinity_skip", decision.Reason)
 	})
+}
+
+func TestAppendErrorLogRequestConversion(t *testing.T) {
+	other := map[string]interface{}{}
+	appendErrorLogRequestConversion(&relaycommon.RelayInfo{
+		RequestConversionChain: []types.RelayFormat{
+			types.RelayFormatClaude,
+			types.RelayFormatOpenAI,
+		},
+	}, other)
+
+	require.Equal(t, []string{"Claude Messages", "OpenAI Compatible"}, other["request_conversion"])
 }

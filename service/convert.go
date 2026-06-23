@@ -232,8 +232,12 @@ func buildClaudeUsageFromOpenAIUsage(oaiUsage *dto.Usage) *dto.ClaudeUsage {
 		oaiUsage.ClaudeCacheCreation5mTokens,
 		oaiUsage.ClaudeCacheCreation1hTokens,
 	)
+	inputTokens := lo.Max([]int{
+		oaiUsage.PromptTokens - oaiUsage.PromptTokensDetails.CachedTokens - oaiUsage.PromptTokensDetails.CachedCreationTokens,
+		0,
+	})
 	usage := &dto.ClaudeUsage{
-		InputTokens:              oaiUsage.PromptTokens,
+		InputTokens:              inputTokens,
 		OutputTokens:             oaiUsage.CompletionTokens,
 		CacheCreationInputTokens: oaiUsage.PromptTokensDetails.CachedCreationTokens,
 		CacheReadInputTokens:     oaiUsage.PromptTokensDetails.CachedTokens,

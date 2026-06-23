@@ -1,0 +1,76 @@
+package service
+
+import (
+	"testing"
+
+	"github.com/QuantumNous/new-api/dto"
+	"github.com/stretchr/testify/require"
+)
+
+func TestBuildClaudeUsageFromOpenAIUsageSubtractsCachedTokens(t *testing.T) {
+	usage := buildClaudeUsageFromOpenAIUsage(&dto.Usage{
+		PromptTokens:     1114,
+		CompletionTokens: 382,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens: 1108,
+		},
+	})
+
+	require.NotNil(t, usage)
+	require.Equal(t, 6, usage.InputTokens)
+	require.Equal(t, 1108, usage.CacheReadInputTokens)
+	require.Equal(t, 0, usage.CacheCreationInputTokens)
+	require.Equal(t, 382, usage.OutputTokens)
+}
+
+func TestBuildClaudeUsageFromOpenAIUsageSubtractsCacheCreationTokens(t *testing.T) {
+	usage := buildClaudeUsageFromOpenAIUsage(&dto.Usage{
+		PromptTokens:     2000,
+		CompletionTokens: 123,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:         700,
+			CachedCreationTokens: 300,
+		},
+		ClaudeCacheCreation5mTokens: 100,
+		ClaudeCacheCreation1hTokens: 50,
+	})
+
+	require.NotNil(t, usage)
+	require.Equal(t, 1000, usage.InputTokens)
+	require.Equal(t, 700, usage.CacheReadInputTokens)
+	require.Equal(t, 300, usage.CacheCreationInputTokens)
+	require.Equal(t, 123, usage.OutputTokens)
+	require.NotNil(t, usage.CacheCreation)
+	require.Equal(t, 250, usage.CacheCreation.Ephemeral5mInputTokens)
+	require.Equal(t, 50, usage.CacheCreation.Ephemeral1hInputTokens)
+}
+
+func TestBuildClaudeUsageFromOpenAIUsageKeepsPromptTokensWhenNoCache(t *testing.T) {
+	usage := buildClaudeUsageFromOpenAIUsage(&dto.Usage{
+		PromptTokens:     256,
+		CompletionTokens: 32,
+	})
+
+	require.NotNil(t, usage)
+	require.Equal(t, 256, usage.InputTokens)
+	require.Equal(t, 0, usage.CacheReadInputTokens)
+	require.Equal(t, 0, usage.CacheCreationInputTokens)
+	require.Equal(t, 32, usage.OutputTokens)
+}
+
+func TestBuildClaudeUsageFromOpenAIUsageClampsNegativeInputTokens(t *testing.T) {
+	usage := buildClaudeUsageFromOpenAIUsage(&dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 20,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:         90,
+			CachedCreationTokens: 30,
+		},
+	})
+
+	require.NotNil(t, usage)
+	require.Equal(t, 0, usage.InputTokens)
+	require.Equal(t, 90, usage.CacheReadInputTokens)
+	require.Equal(t, 30, usage.CacheCreationInputTokens)
+	require.Equal(t, 20, usage.OutputTokens)
+}
