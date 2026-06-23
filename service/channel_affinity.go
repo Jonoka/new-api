@@ -42,8 +42,8 @@ var (
 )
 
 type channelAffinityBinding struct {
-	ChannelID     int `json:"channel_id"`
-	MultiKeyIndex int `json:"multi_key_index,omitempty"`
+	ChannelID     int  `json:"channel_id"`
+	MultiKeyIndex int  `json:"multi_key_index,omitempty"`
 	BindMultiKey  bool `json:"bind_multi_key,omitempty"`
 }
 
@@ -319,6 +319,11 @@ func extractChannelAffinityValue(c *gin.Context, src operation_setting.ChannelAf
 		if src.Path == "" {
 			return ""
 		}
+		if src.Path == "prompt_cache_key" {
+			if value := strings.TrimSpace(extractVirtualPromptCacheKey(c)); value != "" {
+				return value
+			}
+		}
 		storage, err := common.GetBodyStorage(c)
 		if err != nil {
 			return ""
@@ -340,6 +345,41 @@ func extractChannelAffinityValue(c *gin.Context, src operation_setting.ChannelAf
 	default:
 		return ""
 	}
+}
+
+func extractVirtualPromptCacheKey(c *gin.Context) string {
+	if c == nil || c.Request == nil {
+		return ""
+	}
+	for _, headerKey := range []string{"Session_id", "session_id", "X-Client-Request-Id", "x-client-request-id"} {
+		if value := strings.TrimSpace(c.Request.Header.Get(headerKey)); value != "" {
+			return value
+		}
+	}
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return ""
+	}
+	body, err := storage.Bytes()
+	if err != nil || len(body) == 0 {
+		return ""
+	}
+	for _, path := range []string{"metadata.user_id", "metadata.session_id"} {
+		res := gjson.GetBytes(body, path)
+		if res.Exists() {
+			switch res.Type {
+			case gjson.String, gjson.Number, gjson.True, gjson.False:
+				if value := strings.TrimSpace(res.String()); value != "" {
+					return value
+				}
+			default:
+				if value := strings.TrimSpace(res.Raw); value != "" {
+					return value
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func buildChannelAffinityCacheKeySuffix(rule operation_setting.ChannelAffinityRule, modelName string, usingGroup string, affinityValue string) string {

@@ -73,3 +73,26 @@ func TestGetModelRequestReadsCanvasMultipartImageEditModel(t *testing.T) {
 	require.True(t, shouldSelectChannel)
 	require.Equal(t, "gpt-image-2", req.Model)
 }
+
+func TestSetupContextForSelectedChannelReusesPreferredMultiKeyIndexFromContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	channel := &model.Channel{
+		Id:  990002,
+		Key: "key-0\nkey-1\nkey-2",
+		ChannelInfo: model.ChannelInfo{
+			IsMultiKey:   true,
+			MultiKeyMode: constant.MultiKeyModeRandom,
+		},
+	}
+
+	common.SetContextKey(c, constant.ContextKeySelectedChannel, channel)
+	common.SetContextKey(c, constant.ContextKeyChannelPreferredMultiKeyIndex, 1)
+
+	err := SetupContextForSelectedChannel(c, channel, "test-model")
+
+	require.Nil(t, err)
+	require.Equal(t, 1, common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex))
+	require.Equal(t, "key-1", common.GetContextKeyString(c, constant.ContextKeyChannelKey))
+}

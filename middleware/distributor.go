@@ -494,6 +494,7 @@ func setupChannelKeyForContext(c *gin.Context, channel *model.Channel, preferred
 	if channel.ChannelInfo.IsMultiKey {
 		common.SetContextKey(c, constant.ContextKeyChannelIsMultiKey, true)
 		common.SetContextKey(c, constant.ContextKeyChannelMultiKeyIndex, index)
+		common.SetContextKey(c, constant.ContextKeyChannelPreferredMultiKeyIndex, index)
 	} else {
 		// 必须设置为 false，否则在重试到单个 key 的时候会导致日志显示错误
 		common.SetContextKey(c, constant.ContextKeyChannelIsMultiKey, false)
@@ -503,7 +504,7 @@ func setupChannelKeyForContext(c *gin.Context, channel *model.Channel, preferred
 }
 
 func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, modelName string) (newAPIError *types.NewAPIError) {
-	return SetupContextForSelectedChannelWithPreferredMultiKeyIndex(c, channel, modelName, nil)
+	return SetupContextForSelectedChannelWithPreferredMultiKeyIndex(c, channel, modelName, getPreferredMultiKeyIndexFromContext(c, channel))
 }
 
 func SetupContextForSelectedChannelWithPreferredMultiKeyIndex(c *gin.Context, channel *model.Channel, modelName string, preferredMultiKeyIndex *int) (newAPIError *types.NewAPIError) {
@@ -565,6 +566,19 @@ func SetupContextForSelectedChannelWithPreferredMultiKeyIndex(c *gin.Context, ch
 		c.Set("api_version", channel.Other)
 	case constant.ChannelTypeCoze:
 		c.Set("bot_id", channel.Other)
+	}
+	return nil
+}
+
+func getPreferredMultiKeyIndexFromContext(c *gin.Context, channel *model.Channel) *int {
+	if c == nil || channel == nil || !channel.ChannelInfo.IsMultiKey {
+		return nil
+	}
+	selectedChannel, ok := common.GetContextKeyType[*model.Channel](c, constant.ContextKeySelectedChannel)
+	if ok && selectedChannel != nil && selectedChannel.Id == channel.Id {
+		if index, ok := common.GetContextKeyType[int](c, constant.ContextKeyChannelPreferredMultiKeyIndex); ok && index >= 0 {
+			return common.GetPointer(index)
+		}
 	}
 	return nil
 }

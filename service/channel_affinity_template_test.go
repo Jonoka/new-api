@@ -239,6 +239,47 @@ func TestGetPreferredChannelByAffinity_RequestHeaderKeySource(t *testing.T) {
 	require.Equal(t, buildChannelAffinityKeyHint(affinityValue), meta.KeyHint)
 }
 
+func TestExtractChannelAffinityValueUsesVirtualPromptCacheKeyForClaudeRequests(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rule := operation_setting.ChannelAffinityRule{
+		Name:       "claude-prompt-cache-key",
+		ModelRegex: []string{"^gpt-.*$"},
+		PathRegex:  []string{"/v1/messages"},
+		KeySources: []operation_setting.ChannelAffinityKeySource{
+			{Type: "gjson", Path: "prompt_cache_key"},
+		},
+		IncludeRuleName:  true,
+		IncludeModelName: true,
+	}
+
+	affinityValue := fmt.Sprintf("sess-hit-%d", time.Now().UnixNano())
+	cacheKeySuffix := buildChannelAffinityCacheKeySuffix(rule, "gpt-5", "default", affinityValue)
+
+	cache := getChannelAffinityCache()
+	require.NoError(t, cache.SetWithTTL(cacheKeySuffix, channelAffinityBinding{ChannelID: 9631}, time.Minute))
+	t.Cleanup(func() {
+		_, _ = cache.DeleteMany([]string{cacheKeySuffix})
+	})
+
+	setting := operation_setting.GetChannelAffinitySetting()
+	originalRules := setting.Rules
+	setting.Rules = append([]operation_setting.ChannelAffinityRule{rule}, originalRules...)
+	t.Cleanup(func() {
+		setting.Rules = originalRules
+	})
+
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}]}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Request.Header.Set("Session_id", affinityValue)
+
+	binding, found := GetPreferredChannelByAffinity(ctx, "gpt-5", "default")
+	require.True(t, found)
+	require.Equal(t, 9631, binding.ChannelID)
+}
+
 func TestChannelAffinityHitCodexTemplatePassHeadersEffective(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

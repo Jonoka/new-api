@@ -14,6 +14,26 @@ import (
 	"github.com/samber/lo"
 )
 
+func resolveClaudePromptCacheKey(claudeRequest dto.ClaudeRequest, info *relaycommon.RelayInfo) string {
+	if len(claudeRequest.Metadata) > 0 {
+		var metadata dto.ClaudeMetadata
+		if err := common.Unmarshal(claudeRequest.Metadata, &metadata); err == nil {
+			if userID := strings.TrimSpace(metadata.UserId); userID != "" {
+				return userID
+			}
+		}
+	}
+	if info == nil {
+		return ""
+	}
+	for _, key := range []string{"Session_id", "session_id", "X-Client-Request-Id", "x-client-request-id"} {
+		if value := strings.TrimSpace(info.RequestHeaders[key]); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func mapClaudeEffortToOpenAIReasoningEffort(effort string) string {
 	switch strings.TrimSpace(strings.ToLower(effort)) {
 	case "low", "medium", "high", "minimal", "none", "xhigh":
@@ -42,13 +62,8 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 	if claudeRequest.Stream != nil {
 		openAIRequest.Stream = lo.ToPtr(lo.FromPtr(claudeRequest.Stream))
 	}
-	if len(claudeRequest.Metadata) > 0 {
-		var metadata dto.ClaudeMetadata
-		if err := common.Unmarshal(claudeRequest.Metadata, &metadata); err == nil {
-			if userID := strings.TrimSpace(metadata.UserId); userID != "" {
-				openAIRequest.PromptCacheKey = userID
-			}
-		}
+	if promptCacheKey := resolveClaudePromptCacheKey(claudeRequest, info); promptCacheKey != "" {
+		openAIRequest.PromptCacheKey = promptCacheKey
 	}
 
 	isOpenRouter := info.ChannelType == constant.ChannelTypeOpenRouter
