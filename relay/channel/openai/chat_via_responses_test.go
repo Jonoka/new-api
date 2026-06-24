@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -175,6 +176,39 @@ func TestOaiResponsesHandlerConvertsEventPrefixedSSEBody(t *testing.T) {
 	require.Equal(t, 8, out.Usage.InputTokensDetails.CachedTokens)
 	require.Len(t, out.Output, 1)
 	require.Equal(t, "Hi", out.Output[0].Content[0].Text)
+}
+
+func TestOaiResponsesToChatHandlerBindsContinuationResponseID(t *testing.T) {
+	body := `{"id":"resp_bind_1","model":"test-model","created_at":1800000000,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hi"}]}],"usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12}}`
+	c, _, info, resp := setupResponsesStreamTest(body)
+	req := &dto.OpenAIResponsesRequest{
+		PromptCacheKey: []byte(`"cache-bind-1"`),
+	}
+	info.Request = req
+
+	usage, err := OaiResponsesToChatHandler(c, info, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, "resp_bind_1", service.GetOpenAIResponsesContinuationResponseID(info, req))
+}
+
+func TestOaiResponsesToChatStreamHandlerBindsContinuationResponseID(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"type":"response.output_text.delta","delta":"Hi"}`,
+		`data: {"type":"response.done","response":{"id":"resp_bind_stream_1","model":"test-model","created_at":1800000000,"usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12}}}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+	c, _, info, resp := setupResponsesStreamTest(body)
+	req := &dto.OpenAIResponsesRequest{
+		PromptCacheKey: []byte(`"cache-bind-stream-1"`),
+	}
+	info.Request = req
+
+	usage, err := OaiResponsesToChatStreamHandler(c, info, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, "resp_bind_stream_1", service.GetOpenAIResponsesContinuationResponseID(info, req))
 }
 
 func TestOaiResponsesStreamHandlerDoesNotBillPromptOnlyWithoutUsageOrOutput(t *testing.T) {

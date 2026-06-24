@@ -212,6 +212,7 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	if oaiError := responsesResp.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
+	service.BindOpenAIResponsesContinuationResponseIDFromInfo(info, responsesResp.ID)
 
 	chatId := helper.GetResponseID(c)
 	chatResp, usage, err := service.ResponsesResponseToChatCompletionsResponse(&responsesResp, chatId)
@@ -471,6 +472,9 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			}
 			if streamResp.Response.CreatedAt != 0 {
 				createAt = int64(streamResp.Response.CreatedAt)
+			}
+			if streamResp.Type == "response.completed" || streamResp.Type == "response.done" {
+				service.BindOpenAIResponsesContinuationResponseIDFromInfo(info, streamResp.Response.ID)
 			}
 			applyResponsesUsageToOpenAIUsage(usage, streamResp.Response)
 		}

@@ -109,6 +109,10 @@ func normalizeOpenAIBridgeSessionID(info *RelayInfo, value interface{}) string {
 	return generateStableSessionUUID(isolateOpenAISessionSeed(info, raw))
 }
 
+func NormalizeOpenAIBridgeSessionIDForCache(info *RelayInfo, value string) string {
+	return normalizeOpenAIBridgeSessionID(info, value)
+}
+
 func isolateOpenAISessionSeed(info *RelayInfo, raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

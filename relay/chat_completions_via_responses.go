@@ -102,6 +102,7 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 	if err != nil {
 		return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
+	attachedPreviousResponseID := service.AttachOpenAIResponsesContinuation(info, responsesReq)
 	// 兼容转换必须按入口语义显式设置 stream。
 	// 流式请求要向 /v1/responses 传 true，否则部分上游会按非流生成后一次返回。
 	// 非流请求也传 false，避免部分上游默认返回 SSE。
@@ -110,13 +111,16 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 
 	savedRelayMode := info.RelayMode
 	savedRequestURLPath := info.RequestURLPath
+	savedRequest := info.Request
 	defer func() {
 		info.RelayMode = savedRelayMode
 		info.RequestURLPath = savedRequestURLPath
+		info.Request = savedRequest
 	}()
 
 	info.RelayMode = relayconstant.RelayModeResponses
 	info.RequestURLPath = "/v1/responses"
+	info.Request = responsesReq
 
 	convertedRequest, err := adaptor.ConvertOpenAIResponsesRequest(c, info, *responsesReq)
 	if err != nil {
@@ -127,6 +131,52 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 	jsonData, err := common.Marshal(convertedRequest)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+	}
+
+	statusCodeMappingStr := c.GetString("status_code_mapping")
+
+	retryWithoutPreviousResponse := func(statusCode int, message string) (*dto.Usage, *types.NewAPIError) {
+		if !attachedPreviousResponseID || !service.IsOpenAIResponsesPreviousResponseRetryable(statusCode, message) {
+			return nil, nil
+		}
+		service.DeleteOpenAIResponsesContinuationResponseID(info, responsesReq)
+		service.DropOpenAIResponsesPreviousResponseID(responsesReq)
+		jsonData = service.RemoveOpenAIResponsesPreviousResponseIDFromJSON(jsonData)
+		attachedPreviousResponseID = false
+		body, size, closer, bodyErr := relaycommon.NewOutboundJSONBody(jsonData)
+		if bodyErr != nil {
+			return nil, types.NewError(bodyErr, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		defer closer.Close()
+		info.UpstreamRequestBodySize = size
+		respRetry, doErr := adaptor.DoRequest(c, info, body)
+		if doErr != nil {
+			return nil, types.NewOpenAIError(doErr, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
+		}
+		if respRetry == nil {
+			return nil, types.NewOpenAIError(nil, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+		}
+		httpRespRetry := respRetry.(*http.Response)
+		if info.IsStream {
+			markActualStreamFromResponse(c, info, httpRespRetry)
+		}
+		if httpRespRetry.StatusCode != http.StatusOK {
+			newApiErr := service.RelayErrorHandler(c.Request.Context(), httpRespRetry, false)
+			service.ResetStatusCode(newApiErr, statusCodeMappingStr)
+			return nil, newApiErr
+		}
+		if info.IsStream {
+			usage, newApiErr := openaichannel.OaiResponsesToChatStreamHandler(c, info, httpRespRetry)
+			if newApiErr != nil {
+				service.ResetStatusCode(newApiErr, statusCodeMappingStr)
+			}
+			return usage, newApiErr
+		}
+		usage, newApiErr := openaichannel.OaiResponsesToChatHandler(c, info, httpRespRetry)
+		if newApiErr != nil {
+			service.ResetStatusCode(newApiErr, statusCodeMappingStr)
+		}
+		return usage, newApiErr
 	}
 
 	jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled)
@@ -153,14 +203,15 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 		return nil, types.NewOpenAIError(nil, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 	}
 
-	statusCodeMappingStr := c.GetString("status_code_mapping")
-
 	httpResp = resp.(*http.Response)
 	if info.IsStream {
 		markActualStreamFromResponse(c, info, httpResp)
 	}
 	if httpResp.StatusCode != http.StatusOK {
 		newApiErr := service.RelayErrorHandler(c.Request.Context(), httpResp, false)
+		if retryUsage, retryErr := retryWithoutPreviousResponse(newApiErr.StatusCode, newApiErr.ErrorWithStatusCode()); retryErr != nil || retryUsage != nil {
+			return retryUsage, retryErr
+		}
 		service.ResetStatusCode(newApiErr, statusCodeMappingStr)
 		return nil, newApiErr
 	}
@@ -168,6 +219,9 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 	if info.IsStream {
 		usage, newApiErr := openaichannel.OaiResponsesToChatStreamHandler(c, info, httpResp)
 		if newApiErr != nil {
+			if retryUsage, retryErr := retryWithoutPreviousResponse(newApiErr.StatusCode, newApiErr.ErrorWithStatusCode()); retryErr != nil || retryUsage != nil {
+				return retryUsage, retryErr
+			}
 			service.ResetStatusCode(newApiErr, statusCodeMappingStr)
 			return nil, newApiErr
 		}
@@ -176,6 +230,9 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 
 	usage, newApiErr := openaichannel.OaiResponsesToChatHandler(c, info, httpResp)
 	if newApiErr != nil {
+		if retryUsage, retryErr := retryWithoutPreviousResponse(newApiErr.StatusCode, newApiErr.ErrorWithStatusCode()); retryErr != nil || retryUsage != nil {
+			return retryUsage, retryErr
+		}
 		service.ResetStatusCode(newApiErr, statusCodeMappingStr)
 		return nil, newApiErr
 	}

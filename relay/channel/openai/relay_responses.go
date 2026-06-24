@@ -40,6 +40,7 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	if oaiError := responsesResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
+	service.BindOpenAIResponsesContinuationResponseIDFromInfo(info, responsesResponse.ID)
 
 	if responsesResponse.HasImageGenerationCall() {
 		c.Set("image_generation_call", true)
@@ -103,6 +104,9 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		switch streamResponse.Type {
 		case "response.completed", "response.done", "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
 			if streamResponse.Response != nil {
+				if streamResponse.Type == "response.completed" || streamResponse.Type == "response.done" {
+					service.BindOpenAIResponsesContinuationResponseIDFromInfo(info, streamResponse.Response.ID)
+				}
 				applyResponsesUsageToOpenAIUsage(usage, streamResponse.Response)
 				if streamResponse.Response.HasImageGenerationCall() {
 					c.Set("image_generation_call", true)
