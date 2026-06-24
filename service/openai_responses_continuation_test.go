@@ -97,6 +97,52 @@ func TestResolveOpenAIResponsesContinuationSessionIDUsesRuntimeSessionID(t *test
 	require.Equal(t, relaycommon.NormalizeOpenAIBridgeSessionIDForCache(info, "123e4567-e89b-12d3-a456-426614174000"), sessionID)
 }
 
+func TestIsOpenAIResponsesPreviousResponseRetryable(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		message    string
+		want       bool
+	}{
+		{
+			name:       "unsupported parameter",
+			statusCode: 400,
+			message:    "status_code=400, Unsupported parameter: previous_response_id",
+			want:       true,
+		},
+		{
+			name:       "websocket v2 only supported",
+			statusCode: 400,
+			message:    "status_code=400, previous_response_id is only supported on Responses WebSocket v2",
+			want:       true,
+		},
+		{
+			name:       "previous response not found",
+			statusCode: 404,
+			message:    "status_code=404, previous response not found",
+			want:       true,
+		},
+		{
+			name:       "other bad request",
+			statusCode: 400,
+			message:    "status_code=400, max_output_tokens is not supported for this model",
+			want:       false,
+		},
+		{
+			name:       "server error",
+			statusCode: 500,
+			message:    "status_code=500, previous_response_id is only supported on Responses WebSocket v2",
+			want:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, IsOpenAIResponsesPreviousResponseRetryable(tt.statusCode, tt.message))
+		})
+	}
+}
+
 func mustMarshalRaw(t *testing.T, value any) []byte {
 	t.Helper()
 	data, err := common.Marshal(value)

@@ -45,6 +45,7 @@ func TestSyncResponsesStreamFlagUsesRelayInfo(t *testing.T) {
 type captureResponsesAdaptor struct {
 	requests [][]byte
 	respBody string
+	responses []*http.Response
 }
 
 func (a *captureResponsesAdaptor) Init(info *relaycommon.RelayInfo) {}
@@ -78,6 +79,11 @@ func (a *captureResponsesAdaptor) DoRequest(c *gin.Context, info *relaycommon.Re
 		return nil, err
 	}
 	a.requests = append(a.requests, body)
+	if len(a.responses) > 0 {
+		resp := a.responses[0]
+		a.responses = a.responses[1:]
+		return resp, nil
+	}
 	respBody := a.respBody
 	if respBody == "" {
 		respBody = `{"id":"resp_default","model":"test-model","created_at":1800000000,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hi"}]}],"usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12}}`
@@ -161,4 +167,63 @@ func TestChatCompletionsViaResponsesAttachesPreviousResponseIDAndTrimsInput(t *t
 		{"type":"function_call_output","call_id":"call_1","output":"ok"},
 		{"role":"user","content":"next turn"}
 	]`, gjson.GetBytes(adaptor.requests[0], "input").Raw)
+}
+
+func TestChatCompletionsViaResponsesRetriesWithoutPreviousResponseIDOnWebSocketV2Error(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(nil))
+	c.Set(common.RequestIdKey, "req-test-2")
+
+	info := &relaycommon.RelayInfo{
+		RequestId: "req-test-2",
+		RequestHeaders: map[string]string{
+			"X-Claude-Code-Session-Id": "sess-retry-1",
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType:           0,
+			ChannelId:         7002,
+			UpstreamModelName: "test-model",
+		},
+		OriginModelName: "test-model",
+		RelayFormat:     types.RelayFormatClaude,
+	}
+
+	openAIReq := &dto.GeneralOpenAIRequest{
+		Model: "test-model",
+		Messages: []dto.Message{
+			{Role: "user", Content: "first"},
+			{Role: "user", Content: "second"},
+		},
+		PromptCacheKey: "sess-retry-1",
+	}
+	responsesSeed, err := service.ChatCompletionsRequestToResponsesRequest(openAIReq)
+	require.NoError(t, err)
+	service.BindOpenAIResponsesContinuationResponseID(info, responsesSeed, "resp_prev_retry_1")
+
+	adaptor := &captureResponsesAdaptor{
+		responses: []*http.Response{
+			{
+				StatusCode: http.StatusBadRequest,
+				Body: io.NopCloser(strings.NewReader(
+					`{"error":{"message":"previous_response_id is only supported on Responses WebSocket v2","type":"invalid_request_error"}}`,
+				)),
+			},
+			{
+				StatusCode: http.StatusOK,
+				Body: io.NopCloser(strings.NewReader(
+					`{"id":"resp_retry_ok","model":"test-model","created_at":1800000000,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hi again"}]}],"usage":{"input_tokens":11,"output_tokens":3,"total_tokens":14}}`,
+				)),
+			},
+		},
+	}
+
+	usage, apiErr := chatCompletionsViaResponses(c, info, adaptor, openAIReq)
+	require.Nil(t, apiErr)
+	require.NotNil(t, usage)
+	require.Len(t, adaptor.requests, 2)
+	require.Equal(t, "resp_prev_retry_1", gjson.GetBytes(adaptor.requests[0], "previous_response_id").String())
+	require.False(t, gjson.GetBytes(adaptor.requests[1], "previous_response_id").Exists())
+	require.Equal(t, "resp_retry_ok", service.GetOpenAIResponsesContinuationResponseID(info, responsesSeed))
 }

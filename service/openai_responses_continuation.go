@@ -265,11 +265,19 @@ func IsOpenAIResponsesPreviousResponseRetryable(statusCode int, message string) 
 		return false
 	}
 	lower := strings.ToLower(strings.TrimSpace(message))
-	if lower == "" || !strings.Contains(lower, "previous_response_id") {
+	if lower == "" {
+		return false
+	}
+	if strings.Contains(lower, "previous_response_not_found") ||
+		(strings.Contains(lower, "previous response") && strings.Contains(lower, "not found")) {
+		return true
+	}
+	if !strings.Contains(lower, "previous_response_id") {
 		return false
 	}
 	return strings.Contains(lower, "unsupported parameter") ||
 		strings.Contains(lower, "not supported") ||
-		strings.Contains(lower, "previous_response_not_found") ||
-		(strings.Contains(lower, "previous response") && strings.Contains(lower, "not found"))
+		((strings.Contains(lower, "only supported") || strings.Contains(lower, "supported only")) &&
+			(strings.Contains(lower, "responses websocket") || strings.Contains(lower, "websocket v2"))) ||
+		strings.Contains(lower, "invalid previous_response_id")
 }
