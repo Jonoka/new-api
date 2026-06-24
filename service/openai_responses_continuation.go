@@ -141,13 +141,10 @@ func AttachOpenAIResponsesContinuation(info *relaycommon.RelayInfo, req *dto.Ope
 		req.PreviousResponseID = normalizeOpenAIResponsesPreviousResponseID(req.PreviousResponseID)
 		return false
 	}
-	previousResponseID := GetOpenAIResponsesContinuationResponseID(info, req)
-	if previousResponseID == "" {
-		return false
-	}
-	req.PreviousResponseID = previousResponseID
-	TrimOpenAIResponsesInputToLatestTurn(req)
-	return true
+	// 默认不自动注入 previous_response_id。
+	// 大多数 OpenAI 兼容上游只支持 prompt_cache_key / session_id 亲和，
+	// 并不支持 Responses continuation 续链语义。
+	return false
 }
 
 func DropOpenAIResponsesPreviousResponseID(req *dto.OpenAIResponsesRequest) {

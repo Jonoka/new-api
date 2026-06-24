@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAttachOpenAIResponsesContinuationUsesCachedPreviousResponseID(t *testing.T) {
+func TestAttachOpenAIResponsesContinuationDoesNotAutoInjectCachedPreviousResponseID(t *testing.T) {
 	info := &relaycommon.RelayInfo{
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelId: 9527,
@@ -53,9 +53,11 @@ func TestAttachOpenAIResponsesContinuationUsesCachedPreviousResponseID(t *testin
 	BindOpenAIResponsesContinuationResponseID(info, req, "resp_prev_123")
 
 	attached := AttachOpenAIResponsesContinuation(info, req)
-	require.True(t, attached)
-	require.Equal(t, "resp_prev_123", req.PreviousResponseID)
+	require.False(t, attached)
+	require.Empty(t, req.PreviousResponseID)
 	require.JSONEq(t, `[
+		{"role":"system","content":[{"type":"input_text","text":"system"}]},
+		{"role":"assistant","content":[{"type":"output_text","text":"prior"}]},
 		{"type":"function_call","call_id":"call_1","name":"toolA","arguments":"{\"x\":1}"},
 		{"type":"function_call_output","call_id":"call_1","output":"ok"},
 		{"role":"user","content":[{"type":"input_text","text":"next"}]}
