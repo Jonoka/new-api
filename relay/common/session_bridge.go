@@ -121,10 +121,10 @@ func isolateOpenAISessionSeed(info *RelayInfo, raw string) string {
 	scope := 0
 	if info != nil {
 		switch {
-		case info.ChannelMeta != nil && info.ChannelMultiKeyIndex > 0:
-			scope = info.ChannelMultiKeyIndex
 		case info.ChannelMeta != nil && info.ChannelId > 0:
 			scope = info.ChannelId
+		case info.ChannelMeta != nil && info.ChannelMultiKeyIndex > 0:
+			scope = info.ChannelMultiKeyIndex
 		}
 	}
 	sum := sha256.Sum256([]byte(fmt.Sprintf("scope:%d:%s", scope, raw)))

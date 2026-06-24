@@ -482,7 +482,7 @@ func TestMergeOpenAISessionBridgeOverrideStableForSameSeed(t *testing.T) {
 	require.Equal(t, infoA.RuntimeHeadersOverride["session_id"], infoB.RuntimeHeadersOverride["session_id"])
 }
 
-func TestMergeOpenAISessionBridgeOverrideDiffersAcrossMultiKeyIndex(t *testing.T) {
+func TestMergeOpenAISessionBridgeOverrideStableAcrossMultiKeyIndexWithinChannel(t *testing.T) {
 	t.Parallel()
 
 	infoA := &relaycommon.RelayInfo{
@@ -493,6 +493,7 @@ func TestMergeOpenAISessionBridgeOverrideDiffersAcrossMultiKeyIndex(t *testing.T
 		},
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ApiType: constant.APITypeOpenAI,
+			ChannelId: 2001,
 			ChannelMultiKeyIndex: 1,
 		},
 	}
@@ -504,7 +505,40 @@ func TestMergeOpenAISessionBridgeOverrideDiffersAcrossMultiKeyIndex(t *testing.T
 		},
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ApiType: constant.APITypeOpenAI,
+			ChannelId: 2001,
 			ChannelMultiKeyIndex: 2,
+		},
+	}
+
+	relaycommon.MergeOpenAISessionBridgeOverride(infoA, []byte(`{"model":"gpt-5","prompt_cache_key":"cache-key-123"}`))
+	relaycommon.MergeOpenAISessionBridgeOverride(infoB, []byte(`{"model":"gpt-5","prompt_cache_key":"cache-key-123"}`))
+
+	require.Equal(t, infoA.RuntimeHeadersOverride["session_id"], infoB.RuntimeHeadersOverride["session_id"])
+}
+
+func TestMergeOpenAISessionBridgeOverrideDiffersAcrossChannelID(t *testing.T) {
+	t.Parallel()
+
+	infoA := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		RequestConversionChain: []types.RelayFormat{
+			types.RelayFormatClaude,
+			types.RelayFormatOpenAIResponses,
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType:   constant.APITypeOpenAI,
+			ChannelId: 3001,
+		},
+	}
+	infoB := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		RequestConversionChain: []types.RelayFormat{
+			types.RelayFormatClaude,
+			types.RelayFormatOpenAIResponses,
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType:   constant.APITypeOpenAI,
+			ChannelId: 3002,
 		},
 	}
 
