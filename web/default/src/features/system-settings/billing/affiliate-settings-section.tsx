@@ -233,6 +233,19 @@ function adminRecordDetailLine(record: AffiliateAdminRecord) {
   )
 }
 
+async function copyTextToClipboard(text: string, t: (key: string) => string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    toast.success(t('Copied to clipboard'))
+  } catch {
+    toast.error(t('Copy failed'))
+  }
+}
+
+function sharedIpText(ips: string[]) {
+  return [...new Set(ips.filter(Boolean))].join('\n')
+}
+
 function AdminTablePagination({
   page,
   pageSize,
@@ -1904,6 +1917,14 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
                   <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4'>
                     <div className='bg-muted/40 rounded-lg border p-3'>
                       <div className='text-muted-foreground text-xs'>
+                        {t('Total Commission')}
+                      </div>
+                      <div className='font-medium'>
+                        {formatQuota(riskPreview.balance.total_quota)}
+                      </div>
+                    </div>
+                    <div className='bg-muted/40 rounded-lg border p-3'>
+                      <div className='text-muted-foreground text-xs'>
                         {t('Available')}
                       </div>
                       <div className='font-medium'>
@@ -2970,6 +2991,7 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
                           return []
                         }
                       })()
+                  const sharedIps = sharedIpText(parsedIps)
                   return (
                     <TableRow key={alert.inviter_id || alert.id}>
                       <TableCell>
@@ -3002,22 +3024,23 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div className='flex flex-wrap gap-1'>
-                          {parsedIps.slice(0, 3).map((ip) => (
-                            <Badge
-                              key={ip}
-                              variant='outline'
-                              className='text-xs'
+                        {sharedIps ? (
+                          <div className='space-y-1'>
+                            <div className='bg-muted/40 rounded px-2 py-1 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap select-text'>
+                              {sharedIps}
+                            </div>
+                            <Button
+                              size='sm'
+                              variant='ghost'
+                              className='h-7 px-2 text-xs'
+                              onClick={() => copyTextToClipboard(sharedIps, t)}
                             >
-                              {ip}
-                            </Badge>
-                          ))}
-                          {parsedIps.length > 3 && (
-                            <Badge variant='outline' className='text-xs'>
-                              +{parsedIps.length - 3}
-                            </Badge>
-                          )}
-                        </div>
+                              {t('Copy All')}
+                            </Button>
+                          </div>
+                        ) : (
+                          <span className='text-muted-foreground'>-</span>
+                        )}
                       </TableCell>
                       <TableCell>
                         <Badge

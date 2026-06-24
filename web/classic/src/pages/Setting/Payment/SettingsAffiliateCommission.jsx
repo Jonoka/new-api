@@ -918,6 +918,10 @@ function RiskControlPanel() {
                   </Space>
                   <div className='grid grid-cols-2 gap-3 md:grid-cols-4 w-full'>
                     <Text>
+                      {t('累计返佣')}：
+                      {renderQuota(preview.balance?.total_quota || 0)}
+                    </Text>
+                    <Text>
                       {t('可提现')}：
                       {renderQuota(preview.balance?.available_quota || 0)}
                     </Text>
@@ -1303,6 +1307,44 @@ function FraudAlertsPanel({ onQueryInviter }) {
     }
   };
 
+  const copySharedIps = async (ips) => {
+    const text = ips.filter(Boolean).join('\n');
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      showSuccess(t('已复制到剪贴板'));
+    } catch {
+      showError(t('复制失败，请手动选择文本复制'));
+    }
+  };
+
+  const renderSharedIps = (ips) => {
+    const uniqueIps = Array.from(new Set(ips.filter(Boolean)));
+    if (uniqueIps.length === 0) return '-';
+    return (
+      <Space vertical align='start' spacing={4}>
+        <Text
+          code
+          style={{
+            userSelect: 'text',
+            whiteSpace: 'normal',
+            wordBreak: 'break-all',
+            lineHeight: 1.7,
+          }}
+        >
+          {uniqueIps.join('  ')}
+        </Text>
+        <Button
+          size='small'
+          theme='borderless'
+          onClick={() => copySharedIps(uniqueIps)}
+        >
+          {t('复制全部')}
+        </Button>
+      </Space>
+    );
+  };
+
   const getChildAlerts = (record) => {
     if (Array.isArray(record?.alerts) && record.alerts.length > 0) {
       return record.alerts;
@@ -1400,17 +1442,7 @@ function FraudAlertsPanel({ onQueryInviter }) {
         const ips = Array.from(
           new Set([...parseSharedIps(value), ...childIps]),
         );
-        return (
-          <Space wrap>
-            {ips.slice(0, 5).map((ip) => (
-              <Tag key={ip} size='small'>
-                {ip}
-              </Tag>
-            ))}
-            {ips.length > 5 && <Tag size='small'>+{ips.length - 5}</Tag>}
-            {ips.length === 0 && '-'}
-          </Space>
-        );
+        return renderSharedIps(ips);
       },
     },
     {
@@ -1546,16 +1578,7 @@ function FraudAlertsPanel({ onQueryInviter }) {
                   width: 260,
                   render: (_, alert) => {
                     const ips = parseSharedIps(alert.shared_ips);
-                    return (
-                      <Space wrap>
-                        {ips.map((ip) => (
-                          <Tag key={ip} size='small'>
-                            {ip}
-                          </Tag>
-                        ))}
-                        {ips.length === 0 && '-'}
-                      </Space>
-                    );
+                    return renderSharedIps(ips);
                   },
                 },
                 {
