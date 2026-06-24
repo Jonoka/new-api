@@ -57,6 +57,9 @@ func TestMain(m *testing.M) {
 		&AffiliateWithdrawal{},
 		&AffiliateApplication{},
 		&AffiliateFraudAlert{},
+		&AffiliateRiskUser{},
+		&AffiliateRiskEvent{},
+		&AffiliateRiskDetachedInvitee{},
 		&PerfMetric{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
@@ -89,6 +92,9 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM affiliate_withdrawals")
 		DB.Exec("DELETE FROM affiliate_applications")
 		DB.Exec("DELETE FROM affiliate_fraud_alerts")
+		DB.Exec("DELETE FROM affiliate_risk_detached_invitees")
+		DB.Exec("DELETE FROM affiliate_risk_events")
+		DB.Exec("DELETE FROM affiliate_risk_users")
 		DB.Exec("DELETE FROM perf_metrics")
 	})
 }

@@ -312,6 +312,9 @@ func GetUserIdByAffCode(affCode string) (int, error) {
 	}
 	var user User
 	err := DB.Select("id").First(&user, "aff_code = ?", affCode).Error
+	if err == nil && IsAffiliateUserInviteCodeBlocked(user.Id) {
+		return 0, errors.New("该邀请码已失效")
+	}
 	return user.Id, err
 }
 

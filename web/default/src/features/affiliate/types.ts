@@ -34,6 +34,8 @@ export type AffiliateBalance = {
   pending_quota: number
   available_quota: number
   frozen_quota: number
+  risk_frozen_quota: number
+  confiscated_quota: number
   withdrawn_quota: number
   transferred_quota: number
   total_quota: number
@@ -94,9 +96,10 @@ export type AffiliateRecord = {
   source_quota: number
   reward_quota: number
   ratio: number
-  status: 'pending' | 'available'
+  status: 'pending' | 'available' | 'confiscated'
   available_time: number
   settled_time: number
+  balance_after_quota: number
   created_at: number
   detail?: AffiliateSourceDetail
 }
@@ -187,6 +190,65 @@ export type AffiliateAdminInvitation = {
 export type AffiliateAdminRecord = AffiliateRecord & {
   inviter: AffiliateAdminUserInfo
   invitee: AffiliateAdminUserInfo
+}
+
+export type AffiliateRiskUser = {
+  id: number
+  user_id: number
+  status: 'active' | 'removed'
+  freeze_assets: boolean
+  block_invite_code: boolean
+  detached_invitees: boolean
+  cleared_quota: number
+  reason: string
+  admin_id: number
+  removed_by: number
+  remove_remark: string
+  removed_at: number
+  created_at: number
+  updated_at: number
+}
+
+export type AffiliateRiskUserWithDetail = AffiliateRiskUser & {
+  user: AffiliateAdminUserInfo
+  balance: AffiliateBalance
+  direct_invitee_count: number
+  restorable_invitee_count: number
+}
+
+export type AffiliateRiskPreview = {
+  user: AffiliateAdminUserInfo
+  balance: AffiliateBalance
+  active_risk?: AffiliateRiskUser
+  direct_invitee_count: number
+  restorable_invitee_count: number
+  clearable_quota: number
+}
+
+export type AffiliateRiskApplyRequest = {
+  freeze_assets: boolean
+  block_invite_code: boolean
+  detach_invitees: boolean
+  clear_assets: boolean
+  reason: string
+}
+
+export type AffiliateRiskRemoveRequest = {
+  restore_detached_invitees: boolean
+  remark: string
+}
+
+export type AffiliateRiskApplyResult = {
+  risk_user: AffiliateRiskUser
+  frozen_quota: number
+  detached_count: number
+  cleared_quota: number
+  rejected_withdrawals: number
+}
+
+export type AffiliateRiskRemoveResult = {
+  restored_invitees: number
+  unfrozen_quota: number
 }
 
 export type AdminBindAffiliateInviterRequest = {

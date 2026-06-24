@@ -22,8 +22,9 @@ const (
 )
 
 const (
-	AffiliateRecordStatusPending   = "pending"
-	AffiliateRecordStatusAvailable = "available"
+	AffiliateRecordStatusPending     = "pending"
+	AffiliateRecordStatusAvailable   = "available"
+	AffiliateRecordStatusConfiscated = "confiscated"
 )
 
 const (
@@ -40,20 +41,21 @@ const (
 )
 
 type AffiliateRecord struct {
-	Id            int    `json:"id"`
-	UserId        int    `json:"user_id" gorm:"index;uniqueIndex:idx_affiliate_record_source,priority:3"`
-	InviteeId     int    `json:"invitee_id" gorm:"index"`
-	Level         int    `json:"level" gorm:"index;uniqueIndex:idx_affiliate_record_source,priority:4"`
-	SourceType    string `json:"source_type" gorm:"type:varchar(32);index;uniqueIndex:idx_affiliate_record_source,priority:1"`
-	SourceId      string `json:"source_id" gorm:"type:varchar(255);index;uniqueIndex:idx_affiliate_record_source,priority:2"`
-	SourceQuota   int    `json:"source_quota"`
-	RewardQuota   int    `json:"reward_quota"`
-	Ratio         int    `json:"ratio"`
-	Status        string `json:"status" gorm:"type:varchar(32);index"`
-	AvailableTime int64  `json:"available_time" gorm:"index"`
-	SettledTime   int64  `json:"settled_time"`
-	CreatedAt     int64  `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt     int64  `json:"updated_at" gorm:"autoUpdateTime"`
+	Id                int    `json:"id"`
+	UserId            int    `json:"user_id" gorm:"index;uniqueIndex:idx_affiliate_record_source,priority:3"`
+	InviteeId         int    `json:"invitee_id" gorm:"index"`
+	Level             int    `json:"level" gorm:"index;uniqueIndex:idx_affiliate_record_source,priority:4"`
+	SourceType        string `json:"source_type" gorm:"type:varchar(32);index;uniqueIndex:idx_affiliate_record_source,priority:1"`
+	SourceId          string `json:"source_id" gorm:"type:varchar(255);index;uniqueIndex:idx_affiliate_record_source,priority:2"`
+	SourceQuota       int    `json:"source_quota"`
+	RewardQuota       int    `json:"reward_quota"`
+	Ratio             int    `json:"ratio"`
+	Status            string `json:"status" gorm:"type:varchar(32);index"`
+	BalanceAfterQuota int    `json:"balance_after_quota"`
+	AvailableTime     int64  `json:"available_time" gorm:"index"`
+	SettledTime       int64  `json:"settled_time"`
+	CreatedAt         int64  `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt         int64  `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 type AffiliateBalance struct {
@@ -62,6 +64,8 @@ type AffiliateBalance struct {
 	PendingQuota     int   `json:"pending_quota"`
 	AvailableQuota   int   `json:"available_quota"`
 	FrozenQuota      int   `json:"frozen_quota"`
+	RiskFrozenQuota  int   `json:"risk_frozen_quota"`
+	ConfiscatedQuota int   `json:"confiscated_quota"`
 	WithdrawnQuota   int   `json:"withdrawn_quota"`
 	TransferredQuota int   `json:"transferred_quota"`
 	TotalQuota       int   `json:"total_quota"`
@@ -402,7 +406,11 @@ func createAffiliateRewardRecordTx(tx *gorm.DB, userId int, inviteeId int, level
 	}
 	balance.PendingQuota += rewardQuota
 	balance.TotalQuota += rewardQuota
-	return tx.Save(balance).Error
+	record.BalanceAfterQuota = affiliateBalanceSnapshotQuota(balance)
+	if err := tx.Save(balance).Error; err != nil {
+		return err
+	}
+	return tx.Model(record).Update("balance_after_quota", record.BalanceAfterQuota).Error
 }
 
 func rewardRatioInvalid(ratio int) bool {
@@ -480,7 +488,11 @@ func settleMatureAffiliateRecordsTx(tx *gorm.DB, userId int) error {
 		if balance.PendingQuota < 0 {
 			balance.PendingQuota = 0
 		}
-		balance.AvailableQuota += quota
+		if IsAffiliateUserAssetsFrozenTx(tx, uid) {
+			balance.RiskFrozenQuota += quota
+		} else {
+			balance.AvailableQuota += quota
+		}
 		if err := tx.Save(balance).Error; err != nil {
 			return err
 		}
@@ -773,7 +785,7 @@ func getAffiliateCommissionQuotaByInviteeIds(inviteeIds []int, userId int) (map[
 	return commissionByInvitee, nil
 }
 
-func GetAdminAffiliateRecordsWithDetails(sourceType string, status string, pageInfo *common.PageInfo) ([]*AffiliateAdminRecordWithDetail, int64, error) {
+func GetAdminAffiliateRecordsWithDetails(sourceType string, status string, keyword string, pageInfo *common.PageInfo) ([]*AffiliateAdminRecordWithDetail, int64, error) {
 	if err := SettleMatureAffiliateRecords(0); err != nil {
 		return nil, 0, err
 	}
@@ -784,6 +796,16 @@ func GetAdminAffiliateRecordsWithDetails(sourceType string, status string, pageI
 	}
 	if status = strings.TrimSpace(status); status != "" {
 		query = query.Where("status = ?", status)
+	}
+	if keyword = strings.TrimSpace(keyword); keyword != "" {
+		userIds, err := findAffiliateAdminMatchedUserIds(keyword)
+		if err != nil {
+			return nil, 0, err
+		}
+		if len(userIds) == 0 {
+			return []*AffiliateAdminRecordWithDetail{}, 0, nil
+		}
+		query = query.Where("user_id IN ? OR invitee_id IN ?", userIds, userIds)
 	}
 
 	var total int64
@@ -1223,6 +1245,9 @@ func findAffiliateInviterByAffCodeTx(tx *gorm.DB, affCode string) (*User, error)
 	if len(users) > 1 {
 		return nil, errors.New("邀请代码存在冲突，请先检查用户的邀请码配置")
 	}
+	if isAffiliateUserInviteCodeBlockedWithDB(tx, users[0].Id) {
+		return nil, errors.New("该邀请人的邀请码已被风控废除")
+	}
 	return &users[0], nil
 }
 
@@ -1448,6 +1473,9 @@ func CreateAffiliateWithdrawal(userId int, method string, quota int) (*Affiliate
 	if quota <= 0 {
 		return nil, errors.New("提现额度必须大于 0")
 	}
+	if IsAffiliateUserAssetsFrozenTx(DB, userId) {
+		return nil, errors.New("返佣资产已被冻结，暂不能提现")
+	}
 	if minAmount := setting.GetAffiliateSetting().MinWithdrawalAmount; minAmount > 0 {
 		minQuota := affiliateDisplayAmountToQuota(minAmount)
 		if minQuota > 0 && quota < minQuota {
@@ -1628,6 +1656,9 @@ func TransferAffiliateQuotaToBalance(userId int, quota int) error {
 	}
 	if err := SettleMatureAffiliateRecords(userId); err != nil {
 		return err
+	}
+	if IsAffiliateUserAssetsFrozenTx(DB, userId) {
+		return errors.New("返佣资产已被冻结，暂不能转入余额")
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
 		balance, err := getAffiliateBalanceForUpdateTx(tx, userId)

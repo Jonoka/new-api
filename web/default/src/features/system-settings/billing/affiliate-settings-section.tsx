@@ -60,9 +60,13 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   bindAdminAffiliateInviter,
   unbindAdminAffiliateInviter,
+  applyAdminAffiliateRisk,
   getAdminAffiliateInvitations,
   getAdminAffiliateRecords,
+  getAdminAffiliateRiskPreview,
+  getAdminAffiliateRiskUsers,
   getAdminAffiliateWithdrawals,
+  removeAdminAffiliateRisk,
   updateAdminAffiliateWithdrawal,
   getAdminAffiliateApplications,
   updateAdminAffiliateApplication,
@@ -77,6 +81,8 @@ import type {
   AdminUnbindAffiliateInviterResult,
   AffiliateAdminInvitation,
   AffiliateAdminRecord,
+  AffiliateRiskPreview,
+  AffiliateRiskUserWithDetail,
   AffiliateWithdrawal,
 } from '@/features/affiliate/types'
 import { searchUsers } from '@/features/users/api'
@@ -118,6 +124,9 @@ type Props = {
   defaultValues: AffiliateFormValues
 }
 
+type RiskTargetUser = Pick<User, 'id'> &
+  Partial<Pick<User, 'username' | 'display_name' | 'email' | 'aff_code'>>
+
 type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline'
 
 const SETTLEMENT_DELAY_KEY = 'affiliate_setting.settlement_delay_seconds'
@@ -127,6 +136,18 @@ const PAYOUT_METHOD_OPTIONS = [
   ['alipay', 'Alipay'],
   ['wechat', 'WeChat'],
 ] as const
+type AffiliateRiskActionState = {
+  freeze_assets: boolean
+  block_invite_code: boolean
+  detach_invitees: boolean
+  clear_assets: boolean
+}
+const AFFILIATE_RISK_DEFAULT_ACTIONS: AffiliateRiskActionState = {
+  freeze_assets: false,
+  block_invite_code: false,
+  detach_invitees: false,
+  clear_assets: false,
+}
 const ADMIN_PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 const DEFAULT_ADMIN_PAGE_SIZE = 50
 
@@ -149,8 +170,14 @@ function minutesToSeconds(value: number | string | boolean) {
 
 function withdrawalStatusVariant(status: string): BadgeVariant {
   if (status === 'paid') return 'default'
-  if (status === 'rejected') return 'destructive'
+  if (status === 'rejected' || status === 'confiscated') return 'destructive'
   if (status === 'approved') return 'secondary'
+  return 'outline'
+}
+
+function riskStatusVariant(status: string): BadgeVariant {
+  if (status === 'active') return 'destructive'
+  if (status === 'removed') return 'secondary'
   return 'outline'
 }
 
@@ -345,10 +372,39 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
   const [records, setRecords] = useState<AffiliateAdminRecord[]>([])
   const [recordSourceType, setRecordSourceType] = useState('topup')
   const [recordStatus, setRecordStatus] = useState('')
+  const [recordKeyword, setRecordKeyword] = useState('')
+  const [recordSearch, setRecordSearch] = useState('')
   const [recordsLoading, setRecordsLoading] = useState(false)
   const [recordPage, setRecordPage] = useState(1)
   const [recordPageSize, setRecordPageSize] = useState(DEFAULT_ADMIN_PAGE_SIZE)
   const [recordTotal, setRecordTotal] = useState(0)
+  const [riskUsers, setRiskUsers] = useState<AffiliateRiskUserWithDetail[]>([])
+  const [riskKeyword, setRiskKeyword] = useState('')
+  const [riskSearch, setRiskSearch] = useState('')
+  const [riskStatus, setRiskStatus] = useState('active')
+  const [riskLoading, setRiskLoading] = useState(false)
+  const [riskPage, setRiskPage] = useState(1)
+  const [riskPageSize, setRiskPageSize] = useState(DEFAULT_ADMIN_PAGE_SIZE)
+  const [riskTotal, setRiskTotal] = useState(0)
+  const [riskUserKeyword, setRiskUserKeyword] = useState('')
+  const [riskUserCandidates, setRiskUserCandidates] = useState<User[]>([])
+  const [selectedRiskUser, setSelectedRiskUser] =
+    useState<RiskTargetUser | null>(null)
+  const [riskPreview, setRiskPreview] = useState<AffiliateRiskPreview | null>(
+    null
+  )
+  const [riskUserSearching, setRiskUserSearching] = useState(false)
+  const [riskPreviewLoading, setRiskPreviewLoading] = useState(false)
+  const [riskActions, setRiskActions] = useState({
+    ...AFFILIATE_RISK_DEFAULT_ACTIONS,
+  })
+  const [riskReason, setRiskReason] = useState('')
+  const [riskApplying, setRiskApplying] = useState(false)
+  const [riskRestoreDetached, setRiskRestoreDetached] = useState(false)
+  const [riskRemoveRemark, setRiskRemoveRemark] = useState('')
+  const [riskRemovingUserId, setRiskRemovingUserId] = useState<number | null>(
+    null
+  )
   const [withdrawals, setWithdrawals] = useState<AffiliateWithdrawal[]>([])
   const [withdrawalStatus, setWithdrawalStatus] = useState('')
   const [withdrawalsLoading, setWithdrawalsLoading] = useState(false)
@@ -484,6 +540,7 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
       const res = await getAdminAffiliateRecords(
         recordSourceType,
         recordStatus,
+        recordSearch,
         recordPage,
         recordPageSize
       )
@@ -494,7 +551,44 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
     } finally {
       setRecordsLoading(false)
     }
-  }, [recordPage, recordPageSize, recordSourceType, recordStatus])
+  }, [recordPage, recordPageSize, recordSearch, recordSourceType, recordStatus])
+
+  const loadRiskUsers = useCallback(async () => {
+    try {
+      setRiskLoading(true)
+      const res = await getAdminAffiliateRiskUsers(
+        riskSearch,
+        riskStatus,
+        riskPage,
+        riskPageSize
+      )
+      if (res.success) {
+        setRiskUsers(res.data.items || [])
+        setRiskTotal(res.data.total || 0)
+      }
+    } finally {
+      setRiskLoading(false)
+    }
+  }, [riskPage, riskPageSize, riskSearch, riskStatus])
+
+  const loadRiskPreview = useCallback(
+    async (userId: number) => {
+      try {
+        setRiskPreviewLoading(true)
+        const res = await getAdminAffiliateRiskPreview(userId)
+        if (res.success) {
+          setRiskPreview(res.data)
+        } else {
+          toast.error(res.message || t('Operation failed'))
+        }
+      } catch {
+        toast.error(t('Operation failed'))
+      } finally {
+        setRiskPreviewLoading(false)
+      }
+    },
+    [t]
+  )
 
   const loadWithdrawals = useCallback(async () => {
     try {
@@ -524,6 +618,10 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
   useEffect(() => {
     loadWithdrawals()
   }, [loadWithdrawals])
+
+  useEffect(() => {
+    loadRiskUsers()
+  }, [loadRiskUsers])
 
   // Applications data loading
   const loadApplications = useCallback(async () => {
@@ -722,6 +820,154 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
     }
   }
 
+  const applyRecordSearch = () => {
+    setRecordSearch(recordKeyword.trim())
+    setRecordPage(1)
+  }
+
+  const searchRiskUsers = async () => {
+    const keyword = riskUserKeyword.trim()
+    if (!keyword) {
+      toast.error(t('Enter a user keyword first'))
+      return
+    }
+    try {
+      setRiskUserSearching(true)
+      setSelectedRiskUser(null)
+      setRiskPreview(null)
+      const res = await searchUsers({ keyword, p: 1, page_size: 10 })
+      if (res.success) {
+        setRiskUserCandidates(res.data?.items || [])
+      }
+    } finally {
+      setRiskUserSearching(false)
+    }
+  }
+
+  const selectRiskUser = async (user: User) => {
+    setSelectedRiskUser(user)
+    setRiskRestoreDetached(false)
+    await loadRiskPreview(user.id)
+  }
+
+  const setRiskPreset = (
+    preset: Partial<typeof AFFILIATE_RISK_DEFAULT_ACTIONS>
+  ) => {
+    setRiskActions({ ...AFFILIATE_RISK_DEFAULT_ACTIONS, ...preset })
+  }
+
+  const updateRiskAction = (
+    key: keyof typeof AFFILIATE_RISK_DEFAULT_ACTIONS,
+    checked: boolean
+  ) => {
+    setRiskActions((current) => ({ ...current, [key]: checked }))
+  }
+
+  const applyRiskSearch = () => {
+    setRiskSearch(riskKeyword.trim())
+    setRiskPage(1)
+  }
+
+  const applyRiskAction = async () => {
+    if (!selectedRiskUser) {
+      toast.error(t('Search and select target user first'))
+      return
+    }
+    if (!Object.values(riskActions).some(Boolean)) {
+      toast.error(t('Select at least one risk action'))
+      return
+    }
+    if (riskActions.clear_assets && !riskReason.trim()) {
+      toast.error(t('Clearing assets requires a reason'))
+      return
+    }
+    if (
+      riskActions.detach_invitees &&
+      !window.confirm(
+        t(
+          'Detach {{count}} direct invitees from this user? This can be restored only for invitees who still have no inviter.',
+          { count: riskPreview?.direct_invitee_count || 0 }
+        )
+      )
+    ) {
+      return
+    }
+    if (
+      riskActions.clear_assets &&
+      !window.confirm(
+        t(
+          'Clear {{quota}} affiliate assets and reject unpaid withdrawals for this user?',
+          { quota: formatQuota(riskPreview?.clearable_quota || 0) }
+        )
+      )
+    ) {
+      return
+    }
+    try {
+      setRiskApplying(true)
+      const res = await applyAdminAffiliateRisk(selectedRiskUser.id, {
+        ...riskActions,
+        reason: riskReason.trim(),
+      })
+      if (res.success) {
+        toast.success(t('Risk action applied'))
+        setRiskActions({ ...AFFILIATE_RISK_DEFAULT_ACTIONS })
+        await Promise.all([
+          loadRiskUsers(),
+          loadRiskPreview(selectedRiskUser.id),
+        ])
+      } else {
+        toast.error(res.message || t('Operation failed'))
+      }
+    } catch {
+      toast.error(t('Operation failed'))
+    } finally {
+      setRiskApplying(false)
+    }
+  }
+
+  const removeRiskAction = async (userId: number) => {
+    if (
+      riskRestoreDetached &&
+      !window.confirm(
+        t(
+          'Restore detached invitees that still have no inviter? Existing new inviter relationships will not be overwritten.'
+        )
+      )
+    ) {
+      return
+    }
+    if (!window.confirm(t('Remove this user from affiliate risk control?'))) {
+      return
+    }
+    try {
+      setRiskRemovingUserId(userId)
+      const res = await removeAdminAffiliateRisk(userId, {
+        restore_detached_invitees: riskRestoreDetached,
+        remark: riskRemoveRemark.trim(),
+      })
+      if (res.success) {
+        toast.success(
+          t('Risk control removed, {{count}} invitees restored', {
+            count: res.data?.restored_invitees || 0,
+          })
+        )
+        setRiskRestoreDetached(false)
+        setRiskRemoveRemark('')
+        await loadRiskUsers()
+        if (selectedRiskUser?.id === userId) {
+          await loadRiskPreview(userId)
+        }
+      } else {
+        toast.error(res.message || t('Operation failed'))
+      }
+    } catch {
+      toast.error(t('Operation failed'))
+    } finally {
+      setRiskRemovingUserId(null)
+    }
+  }
+
   const updateWithdrawal = async (
     id: number,
     action: 'approve' | 'reject' | 'paid'
@@ -841,6 +1087,9 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
           <TabsTrigger value='manual-bind'>{t('Manual referral')}</TabsTrigger>
           <TabsTrigger value='invitations'>{t('User Invitations')}</TabsTrigger>
           <TabsTrigger value='records'>{t('Commission Records')}</TabsTrigger>
+          <TabsTrigger value='risk-users'>
+            {t('Affiliate Risk Control')}
+          </TabsTrigger>
           <TabsTrigger value='withdrawals'>{t('Withdrawals')}</TabsTrigger>
           <TabsTrigger value='anti-fraud'>{t('Anti-Fraud')}</TabsTrigger>
           <TabsTrigger value='applications'>{t('Applications')}</TabsTrigger>
@@ -1379,6 +1628,18 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
               </p>
             </div>
             <div className='flex flex-col gap-2 sm:flex-row'>
+              <Input
+                value={recordKeyword}
+                onChange={(event) => setRecordKeyword(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    applyRecordSearch()
+                  }
+                }}
+                placeholder={t('Search inviter or invitee')}
+                className='sm:w-64'
+              />
               <NativeSelect
                 value={recordSourceType}
                 onChange={(event) => {
@@ -1417,7 +1678,19 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
                 <NativeSelectOption value='available'>
                   {t('available')}
                 </NativeSelectOption>
+                <NativeSelectOption value='confiscated'>
+                  {t('confiscated')}
+                </NativeSelectOption>
               </NativeSelect>
+              <Button
+                type='button'
+                variant='outline'
+                onClick={applyRecordSearch}
+                disabled={recordsLoading}
+              >
+                <Search className='size-4' />
+                {recordsLoading ? t('Searching...') : t('Search')}
+              </Button>
               <Button variant='outline' onClick={loadRecords}>
                 {recordsLoading ? t('Refreshing...') : t('Refresh')}
               </Button>
@@ -1436,6 +1709,7 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
                   <TableHead>{t('Level')}</TableHead>
                   <TableHead>{t('Ratio')}</TableHead>
                   <TableHead>{t('Commission')}</TableHead>
+                  <TableHead>{t('Balance after')}</TableHead>
                   <TableHead>{t('Status')}</TableHead>
                   <TableHead>{t('Created At')}</TableHead>
                 </TableRow>
@@ -1443,7 +1717,7 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
               <TableBody>
                 {records.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} className='h-24 text-center'>
+                    <TableCell colSpan={11} className='h-24 text-center'>
                       {recordsLoading
                         ? t('Loading...')
                         : t('No commission records')}
@@ -1479,6 +1753,9 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
                       <TableCell>{record.ratio}%</TableCell>
                       <TableCell>{formatQuota(record.reward_quota)}</TableCell>
                       <TableCell>
+                        {formatQuota(record.balance_after_quota || 0)}
+                      </TableCell>
+                      <TableCell>
                         <Badge variant={withdrawalStatusVariant(record.status)}>
                           {t(record.status)}
                         </Badge>
@@ -1503,6 +1780,581 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
               setRecordPage(1)
             }}
           />
+        </TabsContent>
+
+        <TabsContent value='risk-users' className='space-y-4'>
+          <div className='space-y-1'>
+            <h3 className='text-base font-semibold'>
+              {t('Affiliate Risk Control')}
+            </h3>
+            <p className='text-muted-foreground text-sm'>
+              {t(
+                'Search a user and apply selected affiliate risk controls for cheating or abnormal referral activity.'
+              )}
+            </p>
+          </div>
+
+          <div className='grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(380px,520px)]'>
+            <div className='space-y-4'>
+              <div className='grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]'>
+                <div className='space-y-2'>
+                  <FormLabel>{t('Target user')}</FormLabel>
+                  <Input
+                    value={riskUserKeyword}
+                    onChange={(event) => {
+                      setRiskUserKeyword(event.target.value)
+                      setSelectedRiskUser(null)
+                      setRiskPreview(null)
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        searchRiskUsers()
+                      }
+                    }}
+                    placeholder={t('User ID, username, email, or display name')}
+                  />
+                </div>
+                <div className='flex items-end'>
+                  <Button
+                    type='button'
+                    variant='outline'
+                    onClick={searchRiskUsers}
+                    disabled={riskUserSearching}
+                    className='w-full md:w-auto'
+                  >
+                    <Search className='size-4' />
+                    {riskUserSearching ? t('Searching...') : t('Search users')}
+                  </Button>
+                </div>
+              </div>
+
+              <div className='overflow-x-auto rounded-lg border'>
+                <Table className='min-w-[720px]'>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>ID</TableHead>
+                      <TableHead>{t('Username')}</TableHead>
+                      <TableHead>{t('Display name')}</TableHead>
+                      <TableHead>{t('Email')}</TableHead>
+                      <TableHead>{t('Affiliate code')}</TableHead>
+                      <TableHead className='text-right'>
+                        {t('Actions')}
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {riskUserCandidates.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className='h-20 text-center'>
+                          {t('No matched users')}
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      riskUserCandidates.map((user) => {
+                        const selected = selectedRiskUser?.id === user.id
+                        return (
+                          <TableRow key={user.id}>
+                            <TableCell>#{user.id}</TableCell>
+                            <TableCell>{user.username || '-'}</TableCell>
+                            <TableCell>{user.display_name || '-'}</TableCell>
+                            <TableCell>{user.email || '-'}</TableCell>
+                            <TableCell className='font-mono text-xs'>
+                              {user.aff_code || '-'}
+                            </TableCell>
+                            <TableCell className='text-right'>
+                              <Button
+                                type='button'
+                                size='sm'
+                                variant={selected ? 'default' : 'outline'}
+                                onClick={() => selectRiskUser(user)}
+                              >
+                                {selected ? t('Selected') : t('Select')}
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {riskPreview && (
+                <div className='space-y-4 rounded-lg border p-4'>
+                  <div className='flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between'>
+                    <div>
+                      <div className='font-medium'>
+                        #{riskPreview.user.id}{' '}
+                        {riskPreview.user.display_name ||
+                          riskPreview.user.username ||
+                          '-'}
+                      </div>
+                      <div className='text-muted-foreground text-sm'>
+                        {riskPreview.user.email || riskPreview.user.username}
+                      </div>
+                    </div>
+                    {riskPreview.active_risk ? (
+                      <Badge variant='destructive'>{t('active')}</Badge>
+                    ) : (
+                      <Badge variant='outline'>{t('No active risk')}</Badge>
+                    )}
+                  </div>
+
+                  <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4'>
+                    <div className='bg-muted/40 rounded-lg border p-3'>
+                      <div className='text-muted-foreground text-xs'>
+                        {t('Available')}
+                      </div>
+                      <div className='font-medium'>
+                        {formatQuota(riskPreview.balance.available_quota)}
+                      </div>
+                    </div>
+                    <div className='bg-muted/40 rounded-lg border p-3'>
+                      <div className='text-muted-foreground text-xs'>
+                        {t('Pending')}
+                      </div>
+                      <div className='font-medium'>
+                        {formatQuota(riskPreview.balance.pending_quota)}
+                      </div>
+                    </div>
+                    <div className='bg-muted/40 rounded-lg border p-3'>
+                      <div className='text-muted-foreground text-xs'>
+                        {t('Withdrawal frozen')}
+                      </div>
+                      <div className='font-medium'>
+                        {formatQuota(riskPreview.balance.frozen_quota)}
+                      </div>
+                    </div>
+                    <div className='bg-muted/40 rounded-lg border p-3'>
+                      <div className='text-muted-foreground text-xs'>
+                        {t('Risk frozen')}
+                      </div>
+                      <div className='font-medium'>
+                        {formatQuota(riskPreview.balance.risk_frozen_quota)}
+                      </div>
+                    </div>
+                    <div className='bg-muted/40 rounded-lg border p-3'>
+                      <div className='text-muted-foreground text-xs'>
+                        {t('Confiscated')}
+                      </div>
+                      <div className='font-medium'>
+                        {formatQuota(riskPreview.balance.confiscated_quota)}
+                      </div>
+                    </div>
+                    <div className='bg-muted/40 rounded-lg border p-3'>
+                      <div className='text-muted-foreground text-xs'>
+                        {t('Direct invitees')}
+                      </div>
+                      <div className='font-medium'>
+                        {riskPreview.direct_invitee_count}
+                      </div>
+                    </div>
+                    <div className='bg-muted/40 rounded-lg border p-3'>
+                      <div className='text-muted-foreground text-xs'>
+                        {t('Restorable invitees')}
+                      </div>
+                      <div className='font-medium'>
+                        {riskPreview.restorable_invitee_count}
+                      </div>
+                    </div>
+                    <div className='bg-muted/40 rounded-lg border p-3'>
+                      <div className='text-muted-foreground text-xs'>
+                        {t('Clearable assets')}
+                      </div>
+                      <div className='font-medium'>
+                        {formatQuota(riskPreview.clearable_quota)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className='space-y-4 rounded-lg border p-4'>
+              <div>
+                <h4 className='font-medium'>{t('Risk actions')}</h4>
+                <p className='text-muted-foreground text-sm'>
+                  {t(
+                    'Choose one or more actions to apply to the selected user.'
+                  )}
+                </p>
+              </div>
+
+              <div className='flex flex-wrap gap-2'>
+                <Button
+                  type='button'
+                  size='sm'
+                  variant='outline'
+                  onClick={() => setRiskPreset({ freeze_assets: true })}
+                >
+                  {t('Temporary freeze')}
+                </Button>
+                <Button
+                  type='button'
+                  size='sm'
+                  variant='outline'
+                  onClick={() => setRiskPreset({ block_invite_code: true })}
+                >
+                  {t('Disable invite code')}
+                </Button>
+                <Button
+                  type='button'
+                  size='sm'
+                  variant='outline'
+                  onClick={() =>
+                    setRiskPreset({
+                      freeze_assets: true,
+                      block_invite_code: true,
+                      detach_invitees: true,
+                      clear_assets: true,
+                    })
+                  }
+                >
+                  {t('Severe cheating')}
+                </Button>
+              </div>
+
+              <div className='space-y-3'>
+                <label className='flex items-start gap-3 rounded-lg border p-3 text-sm'>
+                  <Checkbox
+                    checked={riskActions.freeze_assets}
+                    onCheckedChange={(checked) =>
+                      updateRiskAction('freeze_assets', Boolean(checked))
+                    }
+                  />
+                  <span>
+                    <span className='block font-medium'>
+                      {t('Freeze affiliate assets')}
+                    </span>
+                    <span className='text-muted-foreground block'>
+                      {t(
+                        'Move available commission into risk-frozen balance and block withdrawal or transfer.'
+                      )}
+                    </span>
+                  </span>
+                </label>
+                <label className='flex items-start gap-3 rounded-lg border p-3 text-sm'>
+                  <Checkbox
+                    checked={riskActions.block_invite_code}
+                    onCheckedChange={(checked) =>
+                      updateRiskAction('block_invite_code', Boolean(checked))
+                    }
+                  />
+                  <span>
+                    <span className='block font-medium'>
+                      {t('Block invite code')}
+                    </span>
+                    <span className='text-muted-foreground block'>
+                      {t('Prevent new users from binding through this code.')}
+                    </span>
+                  </span>
+                </label>
+                <label className='flex items-start gap-3 rounded-lg border p-3 text-sm'>
+                  <Checkbox
+                    checked={riskActions.detach_invitees}
+                    onCheckedChange={(checked) =>
+                      updateRiskAction('detach_invitees', Boolean(checked))
+                    }
+                  />
+                  <span>
+                    <span className='block font-medium'>
+                      {t('Detach direct invitees')}
+                    </span>
+                    <span className='text-muted-foreground block'>
+                      {t(
+                        'Remove existing direct invitee relationships and keep snapshots for optional restore.'
+                      )}
+                    </span>
+                  </span>
+                </label>
+                <label className='flex items-start gap-3 rounded-lg border p-3 text-sm'>
+                  <Checkbox
+                    checked={riskActions.clear_assets}
+                    onCheckedChange={(checked) =>
+                      updateRiskAction('clear_assets', Boolean(checked))
+                    }
+                  />
+                  <span>
+                    <span className='block font-medium'>
+                      {t('Clear affiliate assets')}
+                    </span>
+                    <span className='text-muted-foreground block'>
+                      {t(
+                        'Clear pending, available, withdrawal-frozen, and risk-frozen affiliate assets.'
+                      )}
+                    </span>
+                  </span>
+                </label>
+              </div>
+
+              <div className='space-y-2'>
+                <FormLabel>{t('Reason')}</FormLabel>
+                <Textarea
+                  value={riskReason}
+                  onChange={(event) => setRiskReason(event.target.value)}
+                  placeholder={t('Required when clearing assets')}
+                  rows={3}
+                />
+              </div>
+
+              <Button
+                type='button'
+                onClick={applyRiskAction}
+                disabled={
+                  riskApplying || riskPreviewLoading || !selectedRiskUser
+                }
+                className='w-full'
+              >
+                {riskApplying ? t('Applying...') : t('Apply risk actions')}
+              </Button>
+
+              {riskPreview?.active_risk && (
+                <div className='space-y-3 border-t pt-4'>
+                  <div>
+                    <h4 className='font-medium'>{t('Remove risk control')}</h4>
+                    <p className='text-muted-foreground text-sm'>
+                      {t(
+                        'Removing risk control restores frozen commission to available balance.'
+                      )}
+                    </p>
+                  </div>
+                  <label className='flex items-start gap-3 rounded-lg border p-3 text-sm'>
+                    <Checkbox
+                      checked={riskRestoreDetached}
+                      onCheckedChange={(checked) =>
+                        setRiskRestoreDetached(Boolean(checked))
+                      }
+                    />
+                    <span>
+                      <span className='block font-medium'>
+                        {t('Restore detached invitees')}
+                      </span>
+                      <span className='text-muted-foreground block'>
+                        {t(
+                          'Only invitees who still have no inviter will be restored.'
+                        )}
+                      </span>
+                    </span>
+                  </label>
+                  <Textarea
+                    value={riskRemoveRemark}
+                    onChange={(event) =>
+                      setRiskRemoveRemark(event.target.value)
+                    }
+                    placeholder={t('Removal remark')}
+                    rows={2}
+                  />
+                  <Button
+                    type='button'
+                    variant='outline'
+                    onClick={() => removeRiskAction(riskPreview.user.id)}
+                    disabled={riskRemovingUserId === riskPreview.user.id}
+                    className='w-full'
+                  >
+                    {riskRemovingUserId === riskPreview.user.id
+                      ? t('Removing...')
+                      : t('Remove risk control')}
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className='space-y-3'>
+            <div className='flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between'>
+              <div>
+                <h4 className='font-medium'>{t('Risk user list')}</h4>
+                <p className='text-muted-foreground text-sm'>
+                  {t('Review active and removed affiliate risk controls.')}
+                </p>
+              </div>
+              <div className='flex flex-col gap-2 sm:flex-row'>
+                <Input
+                  value={riskKeyword}
+                  onChange={(event) => setRiskKeyword(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      applyRiskSearch()
+                    }
+                  }}
+                  placeholder={t('Search risk user')}
+                  className='sm:w-64'
+                />
+                <NativeSelect
+                  value={riskStatus}
+                  onChange={(event) => {
+                    setRiskPage(1)
+                    setRiskStatus(event.target.value)
+                  }}
+                  className='sm:w-36'
+                >
+                  <NativeSelectOption value='active'>
+                    {t('active')}
+                  </NativeSelectOption>
+                  <NativeSelectOption value='removed'>
+                    {t('removed')}
+                  </NativeSelectOption>
+                  <NativeSelectOption value=''>
+                    {t('All statuses')}
+                  </NativeSelectOption>
+                </NativeSelect>
+                <Button
+                  type='button'
+                  variant='outline'
+                  onClick={applyRiskSearch}
+                  disabled={riskLoading}
+                >
+                  <Search className='size-4' />
+                  {riskLoading ? t('Searching...') : t('Search')}
+                </Button>
+                <Button variant='outline' onClick={loadRiskUsers}>
+                  {riskLoading ? t('Refreshing...') : t('Refresh')}
+                </Button>
+              </div>
+            </div>
+
+            <div className='overflow-x-auto rounded-lg border'>
+              <Table className='min-w-[1180px]'>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t('User')}</TableHead>
+                    <TableHead>{t('Status')}</TableHead>
+                    <TableHead>{t('Risk actions')}</TableHead>
+                    <TableHead>{t('Available')}</TableHead>
+                    <TableHead>{t('Pending')}</TableHead>
+                    <TableHead>{t('Risk frozen')}</TableHead>
+                    <TableHead>{t('Confiscated')}</TableHead>
+                    <TableHead>{t('Direct invitees')}</TableHead>
+                    <TableHead>{t('Restorable invitees')}</TableHead>
+                    <TableHead>{t('Reason')}</TableHead>
+                    <TableHead>{t('Created At')}</TableHead>
+                    <TableHead className='text-right'>{t('Actions')}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {riskUsers.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={12} className='h-24 text-center'>
+                        {riskLoading ? t('Loading...') : t('No risk users')}
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    riskUsers.map((item) => (
+                      <TableRow key={item.id}>
+                        <TableCell className='max-w-[190px]'>
+                          {adminUserLine(
+                            item.user.id,
+                            item.user.username,
+                            item.user.display_name,
+                            item.user.email
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={riskStatusVariant(item.status)}>
+                            {t(item.status)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className='flex flex-wrap gap-1'>
+                            {item.freeze_assets && (
+                              <Badge variant='outline'>
+                                {t('Freeze assets')}
+                              </Badge>
+                            )}
+                            {item.block_invite_code && (
+                              <Badge variant='outline'>
+                                {t('Invite code blocked')}
+                              </Badge>
+                            )}
+                            {item.detached_invitees && (
+                              <Badge variant='outline'>
+                                {t('Invitees detached')}
+                              </Badge>
+                            )}
+                            {item.cleared_quota > 0 && (
+                              <Badge variant='destructive'>
+                                {t('Assets cleared')}
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {formatQuota(item.balance.available_quota)}
+                        </TableCell>
+                        <TableCell>
+                          {formatQuota(item.balance.pending_quota)}
+                        </TableCell>
+                        <TableCell>
+                          {formatQuota(item.balance.risk_frozen_quota)}
+                        </TableCell>
+                        <TableCell>
+                          {formatQuota(item.balance.confiscated_quota)}
+                        </TableCell>
+                        <TableCell>{item.direct_invitee_count}</TableCell>
+                        <TableCell>{item.restorable_invitee_count}</TableCell>
+                        <TableCell className='max-w-[220px] truncate'>
+                          {item.reason || '-'}
+                        </TableCell>
+                        <TableCell>
+                          {formatTimestampToDate(item.created_at)}
+                        </TableCell>
+                        <TableCell className='text-right'>
+                          <div className='flex justify-end gap-2'>
+                            <Button
+                              type='button'
+                              size='sm'
+                              variant='outline'
+                              onClick={() => {
+                                setRiskUserKeyword(`#${item.user.id}`)
+                                setSelectedRiskUser({
+                                  id: item.user.id,
+                                  username: item.user.username,
+                                  display_name: item.user.display_name,
+                                  email: item.user.email,
+                                  aff_code: item.user.aff_code,
+                                })
+                                setRiskUserCandidates([])
+                                loadRiskPreview(item.user.id)
+                              }}
+                            >
+                              {t('Preview')}
+                            </Button>
+                            {item.status === 'active' && (
+                              <Button
+                                type='button'
+                                size='sm'
+                                variant='outline'
+                                disabled={riskRemovingUserId === item.user.id}
+                                onClick={() => removeRiskAction(item.user.id)}
+                              >
+                                {riskRemovingUserId === item.user.id
+                                  ? t('Removing...')
+                                  : t('Remove')}
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            <AdminTablePagination
+              page={riskPage}
+              pageSize={riskPageSize}
+              total={riskTotal}
+              loading={riskLoading}
+              onPageChange={setRiskPage}
+              onPageSizeChange={(pageSize) => {
+                setRiskPageSize(pageSize)
+                setRiskPage(1)
+              }}
+            />
+          </div>
         </TabsContent>
 
         <TabsContent value='withdrawals' className='space-y-3'>

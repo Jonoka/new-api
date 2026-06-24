@@ -69,6 +69,19 @@ type affiliateAdminUnbindInviterRequest struct {
 	UserIdentifier string `json:"user_identifier"`
 }
 
+type affiliateRiskApplyRequest struct {
+	FreezeAssets    bool   `json:"freeze_assets"`
+	BlockInviteCode bool   `json:"block_invite_code"`
+	DetachInvitees  bool   `json:"detach_invitees"`
+	ClearAssets     bool   `json:"clear_assets"`
+	Reason          string `json:"reason"`
+}
+
+type affiliateRiskRemoveRequest struct {
+	RestoreDetachedInvitees bool   `json:"restore_detached_invitees"`
+	Remark                  string `json:"remark"`
+}
+
 func affiliateSettingPayload() affiliateSettingResponse {
 	affiliateSetting := setting.GetAffiliateSetting()
 	return affiliateSettingResponse{
@@ -427,7 +440,7 @@ func AdminListAffiliateInvitations(c *gin.Context) {
 
 func AdminListAffiliateRecords(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
-	items, total, err := model.GetAdminAffiliateRecordsWithDetails(c.Query("source_type"), c.Query("status"), pageInfo)
+	items, total, err := model.GetAdminAffiliateRecordsWithDetails(c.Query("source_type"), c.Query("status"), c.Query("keyword"), pageInfo)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -444,6 +457,79 @@ func AdminBindAffiliateInviter(c *gin.Context) {
 		return
 	}
 	result, err := model.BindUserInviterByAffCode(req.UserId, req.UserIdentifier, req.AffCode, req.Force)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, result)
+}
+
+func AdminListAffiliateRiskUsers(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	items, total, err := model.ListAffiliateRiskUsers(c.Query("keyword"), c.Query("status"), pageInfo)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(items)
+	common.ApiSuccess(c, pageInfo)
+}
+
+func AdminGetAffiliateRiskPreview(c *gin.Context) {
+	userId, err := strconv.Atoi(c.Param("user_id"))
+	if err != nil || userId <= 0 {
+		common.ApiErrorMsg(c, "无效的用户 ID")
+		return
+	}
+	preview, err := model.GetAffiliateRiskPreview(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, preview)
+}
+
+func AdminApplyAffiliateRisk(c *gin.Context) {
+	userId, err := strconv.Atoi(c.Param("user_id"))
+	if err != nil || userId <= 0 {
+		common.ApiErrorMsg(c, "无效的用户 ID")
+		return
+	}
+	req := affiliateRiskApplyRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	result, err := model.ApplyAffiliateRiskAction(userId, c.GetInt("id"), model.AffiliateRiskApplyRequest{
+		FreezeAssets:    req.FreezeAssets,
+		BlockInviteCode: req.BlockInviteCode,
+		DetachInvitees:  req.DetachInvitees,
+		ClearAssets:     req.ClearAssets,
+		Reason:          req.Reason,
+	})
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, result)
+}
+
+func AdminRemoveAffiliateRisk(c *gin.Context) {
+	userId, err := strconv.Atoi(c.Param("user_id"))
+	if err != nil || userId <= 0 {
+		common.ApiErrorMsg(c, "无效的用户 ID")
+		return
+	}
+	req := affiliateRiskRemoveRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	result, err := model.RemoveAffiliateRiskAction(userId, c.GetInt("id"), model.AffiliateRiskRemoveRequest{
+		RestoreDetachedInvitees: req.RestoreDetachedInvitees,
+		Remark:                  req.Remark,
+	})
 	if err != nil {
 		common.ApiError(c, err)
 		return

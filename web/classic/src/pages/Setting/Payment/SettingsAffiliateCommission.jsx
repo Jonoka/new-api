@@ -79,6 +79,12 @@ const PAYOUT_METHOD_OPTIONS = [
   ['alipay', '支付宝'],
   ['wechat', '微信'],
 ];
+const RISK_DEFAULT_ACTIONS = {
+  freeze_assets: false,
+  block_invite_code: false,
+  detach_invitees: false,
+  clear_assets: false,
+};
 
 const COMPACT_INPUT_STYLE = { width: '100%' };
 const WIDE_INPUT_STYLE = { width: '100%' };
@@ -119,15 +125,30 @@ function statusText(t, status) {
     paid: t('已打款'),
     rejected: t('已驳回'),
     available: t('已结算'),
+    confiscated: t('已没收'),
   };
   return map[status] || status;
 }
 
 function statusColor(status) {
   if (status === 'paid' || status === 'available') return 'green';
-  if (status === 'rejected') return 'red';
+  if (status === 'rejected' || status === 'confiscated') return 'red';
   if (status === 'approved') return 'blue';
   return 'orange';
+}
+
+function riskStatusText(t, status) {
+  const map = {
+    active: t('生效中'),
+    removed: t('已移除'),
+  };
+  return map[status] || status;
+}
+
+function riskStatusColor(status) {
+  if (status === 'active') return 'red';
+  if (status === 'removed') return 'green';
+  return 'grey';
 }
 
 function sourceTypeText(t, sourceType) {
@@ -446,6 +467,630 @@ function ApplicationsPanel() {
           empty={<Empty description={t('暂无申请记录')} />}
           size='small'
           scroll={{ x: 830 }}
+          className='w-full'
+        />
+      </Space>
+    </Card>
+  );
+}
+
+function RiskControlPanel() {
+  const { t } = useTranslation();
+  const [riskUsers, setRiskUsers] = useState([]);
+  const [riskKeyword, setRiskKeyword] = useState('');
+  const [riskSearch, setRiskSearch] = useState('');
+  const [riskStatus, setRiskStatus] = useState('active');
+  const [riskLoading, setRiskLoading] = useState(false);
+  const [riskPage, setRiskPage] = useState(1);
+  const [riskPageSize, setRiskPageSize] = useState(ITEMS_PER_PAGE);
+  const [riskTotal, setRiskTotal] = useState(0);
+  const [userKeyword, setUserKeyword] = useState('');
+  const [userCandidates, setUserCandidates] = useState([]);
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [userSearching, setUserSearching] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [actions, setActions] = useState({ ...RISK_DEFAULT_ACTIONS });
+  const [reason, setReason] = useState('');
+  const [applying, setApplying] = useState(false);
+  const [removingUserId, setRemovingUserId] = useState(null);
+
+  const loadRiskUsers = async () => {
+    setRiskLoading(true);
+    try {
+      const res = await API.get('/api/affiliate/admin/risk-users', {
+        params: {
+          p: riskPage,
+          page_size: riskPageSize,
+          keyword: riskSearch || undefined,
+          status: riskStatus || undefined,
+        },
+      });
+      if (res.data.success) {
+        const pageData = res.data.data || {};
+        setRiskUsers(pageData.items || []);
+        setRiskTotal(getPageTotal(pageData));
+      } else {
+        showError(res.data.message);
+      }
+    } catch {
+      showError(t('获取风控名单失败'));
+    } finally {
+      setRiskLoading(false);
+    }
+  };
+
+  const loadPreview = async (userId) => {
+    setPreviewLoading(true);
+    try {
+      const res = await API.get(
+        `/api/affiliate/admin/risk-users/${userId}/preview`,
+      );
+      if (res.data.success) {
+        setPreview(res.data.data);
+      } else {
+        showError(res.data.message);
+      }
+    } catch {
+      showError(t('获取风控预览失败'));
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadRiskUsers();
+  }, [riskPage, riskPageSize, riskSearch, riskStatus]);
+
+  const searchUsers = async () => {
+    const keyword = userKeyword.trim();
+    if (!keyword) {
+      showWarning(t('请先输入用户关键词'));
+      return;
+    }
+    setUserSearching(true);
+    setSelectedUser(null);
+    setPreview(null);
+    try {
+      const res = await API.get('/api/user/search', {
+        params: { keyword, p: 1, page_size: 10 },
+      });
+      if (res.data.success) {
+        setUserCandidates(res.data.data?.items || []);
+      } else {
+        showError(res.data.message);
+      }
+    } catch {
+      showError(t('搜索用户失败'));
+    } finally {
+      setUserSearching(false);
+    }
+  };
+
+  const selectUser = async (user) => {
+    setSelectedUser(user);
+    await loadPreview(user.id);
+  };
+
+  const updateAction = (key, checked) => {
+    setActions((current) => ({ ...current, [key]: checked }));
+  };
+
+  const setPreset = (preset) => {
+    setActions({ ...RISK_DEFAULT_ACTIONS, ...preset });
+  };
+
+  const applyActions = async () => {
+    if (!selectedUser) {
+      showWarning(t('请先搜索并选择用户'));
+      return;
+    }
+    if (!Object.values(actions).some(Boolean)) {
+      showWarning(t('请至少选择一个处置项'));
+      return;
+    }
+    if (actions.clear_assets && !reason.trim()) {
+      showWarning(t('清空资产必须填写原因'));
+      return;
+    }
+    if (actions.detach_invitees) {
+      const ok = window.confirm(
+        t('确认解除该用户的直属邀请关系？') +
+          ` ${t('影响人数')}：${preview?.direct_invitee_count || 0}`,
+      );
+      if (!ok) return;
+    }
+    if (actions.clear_assets) {
+      const ok = window.confirm(
+        t('确认清空该用户返佣资产？') +
+          ` ${t('清空额度')}：${renderQuota(preview?.clearable_quota || 0)}`,
+      );
+      if (!ok) return;
+    }
+    setApplying(true);
+    try {
+      const res = await API.post(
+        `/api/affiliate/admin/risk-users/${selectedUser.id}/apply`,
+        { ...actions, reason: reason.trim() },
+      );
+      if (res.data.success) {
+        showSuccess(t('风控处置已执行'));
+        setActions({ ...RISK_DEFAULT_ACTIONS });
+        await loadRiskUsers();
+        await loadPreview(selectedUser.id);
+      } else {
+        showError(res.data.message);
+      }
+    } catch {
+      showError(t('风控处置失败'));
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const removeRisk = (userId) => {
+    let restoreDetached = false;
+    let removeRemark = '';
+    Modal.confirm({
+      title: t('移除风控'),
+      content: (
+        <Space vertical align='start' style={{ width: '100%' }}>
+          <Text>{t('移除后风控冻结额度会恢复为可提现返佣余额。')}</Text>
+          <Checkbox
+            onChange={(event) => {
+              restoreDetached = event.target.checked;
+            }}
+          >
+            {t('恢复仍无邀请人的已解绑直属下级')}
+          </Checkbox>
+          <Input
+            placeholder={t('移除备注（可选）')}
+            onChange={(value) => {
+              removeRemark = value;
+            }}
+          />
+        </Space>
+      ),
+      onOk: async () => {
+        setRemovingUserId(userId);
+        try {
+          const res = await API.post(
+            `/api/affiliate/admin/risk-users/${userId}/remove`,
+            {
+              restore_detached_invitees: restoreDetached,
+              remark: removeRemark.trim(),
+            },
+          );
+          if (res.data.success) {
+            showSuccess(t('已移除风控'));
+            await loadRiskUsers();
+            if (selectedUser?.id === userId) {
+              await loadPreview(userId);
+            }
+          } else {
+            showError(res.data.message);
+          }
+        } catch {
+          showError(t('移除风控失败'));
+        } finally {
+          setRemovingUserId(null);
+        }
+      },
+    });
+  };
+
+  const userColumns = [
+    { title: 'ID', dataIndex: 'id', width: 80, render: (value) => `#${value}` },
+    { title: t('用户名'), dataIndex: 'username', width: 140 },
+    {
+      title: t('显示名'),
+      dataIndex: 'display_name',
+      width: 160,
+      render: (value) => value || '-',
+    },
+    {
+      title: t('邮箱'),
+      dataIndex: 'email',
+      width: 220,
+      render: (value) => value || '-',
+    },
+    {
+      title: t('邀请码'),
+      dataIndex: 'aff_code',
+      width: 140,
+      render: (value) => value || '-',
+    },
+    {
+      title: t('操作'),
+      key: 'action',
+      width: 100,
+      render: (_, record) => {
+        const selected = selectedUser?.id === record.id;
+        return (
+          <Button
+            size='small'
+            type={selected ? 'primary' : 'tertiary'}
+            theme={selected ? 'solid' : 'outline'}
+            onClick={() => selectUser(record)}
+          >
+            {selected ? t('已选择') : t('选择')}
+          </Button>
+        );
+      },
+    },
+  ];
+
+  const riskColumns = [
+    {
+      title: t('用户'),
+      dataIndex: 'user_id',
+      width: 220,
+      render: (_, record) =>
+        renderAdminUser(
+          record.user?.id,
+          record.user?.username,
+          record.user?.display_name,
+          record.user?.email,
+        ),
+    },
+    {
+      title: t('状态'),
+      dataIndex: 'status',
+      width: 100,
+      render: (value) => (
+        <Tag color={riskStatusColor(value)}>{riskStatusText(t, value)}</Tag>
+      ),
+    },
+    {
+      title: t('处置项'),
+      dataIndex: 'actions',
+      width: 260,
+      render: (_, record) => (
+        <Space wrap>
+          {record.freeze_assets && <Tag>{t('冻结资产')}</Tag>}
+          {record.block_invite_code && <Tag>{t('废除邀请码')}</Tag>}
+          {record.detached_invitees && <Tag>{t('已解除关系')}</Tag>}
+          {record.cleared_quota > 0 && <Tag color='red'>{t('已清空资产')}</Tag>}
+        </Space>
+      ),
+    },
+    {
+      title: t('可提现'),
+      dataIndex: 'available_quota',
+      width: 120,
+      render: (_, record) => renderQuota(record.balance?.available_quota || 0),
+    },
+    {
+      title: t('待结算'),
+      dataIndex: 'pending_quota',
+      width: 120,
+      render: (_, record) => renderQuota(record.balance?.pending_quota || 0),
+    },
+    {
+      title: t('风控冻结'),
+      dataIndex: 'risk_frozen_quota',
+      width: 120,
+      render: (_, record) =>
+        renderQuota(record.balance?.risk_frozen_quota || 0),
+    },
+    {
+      title: t('已清空'),
+      dataIndex: 'confiscated_quota',
+      width: 120,
+      render: (_, record) =>
+        renderQuota(record.balance?.confiscated_quota || 0),
+    },
+    { title: t('直属下级'), dataIndex: 'direct_invitee_count', width: 100 },
+    {
+      title: t('可恢复下级'),
+      dataIndex: 'restorable_invitee_count',
+      width: 110,
+    },
+    {
+      title: t('原因'),
+      dataIndex: 'reason',
+      width: 220,
+      render: (value) => (
+        <Text ellipsis={{ showTooltip: true }} style={{ maxWidth: 200 }}>
+          {value || '-'}
+        </Text>
+      ),
+    },
+    {
+      title: t('创建时间'),
+      dataIndex: 'created_at',
+      width: 170,
+      render: (value) => (value ? timestamp2string(value) : '-'),
+    },
+    {
+      title: t('操作'),
+      key: 'action',
+      width: 190,
+      fixed: 'right',
+      render: (_, record) => (
+        <Space>
+          <Button
+            size='small'
+            theme='outline'
+            onClick={() => {
+              const user = {
+                id: record.user?.id || record.user_id,
+                username: record.user?.username,
+                display_name: record.user?.display_name,
+                email: record.user?.email,
+                aff_code: record.user?.aff_code,
+              };
+              setSelectedUser(user);
+              setUserKeyword(`#${user.id}`);
+              setUserCandidates([]);
+              loadPreview(user.id);
+            }}
+          >
+            {t('预览')}
+          </Button>
+          {record.status === 'active' && (
+            <Button
+              size='small'
+              type='danger'
+              theme='outline'
+              loading={removingUserId === record.user_id}
+              onClick={() => removeRisk(record.user_id)}
+            >
+              {t('移除')}
+            </Button>
+          )}
+        </Space>
+      ),
+    },
+  ];
+
+  const actionCheckbox = (key, title, description) => (
+    <div style={SOFT_PANEL_STYLE}>
+      <Checkbox
+        checked={actions[key]}
+        onChange={(event) => updateAction(key, event.target.checked)}
+      >
+        <Text strong>{title}</Text>
+      </Checkbox>
+      <div className='mt-1'>
+        <Text type='secondary'>{description}</Text>
+      </div>
+    </div>
+  );
+
+  return (
+    <Card>
+      <Space vertical align='start' style={{ width: '100%' }}>
+        <SectionHeader
+          title={t('返佣黑名单 / 风控处置')}
+          description={t(
+            '搜索用户后按需勾选冻结、废除邀请码、解除关系或清空资产。',
+          )}
+        />
+
+        <div className='grid grid-cols-1 gap-4 xl:grid-cols-2 w-full'>
+          <Space vertical align='start' style={PANEL_STYLE}>
+            <Text strong>{t('搜索待处置用户')}</Text>
+            <Space style={{ width: '100%' }}>
+              <Input
+                value={userKeyword}
+                placeholder={t('用户 ID、用户名、邮箱或显示名')}
+                onChange={(value) => {
+                  setUserKeyword(value);
+                  setSelectedUser(null);
+                  setPreview(null);
+                }}
+                onEnterPress={searchUsers}
+              />
+              <Button
+                theme='outline'
+                loading={userSearching}
+                onClick={searchUsers}
+              >
+                {t('搜索用户')}
+              </Button>
+            </Space>
+            <Table
+              rowKey='id'
+              size='small'
+              columns={userColumns}
+              dataSource={userCandidates}
+              pagination={false}
+              empty={<Empty description={t('暂无匹配用户')} />}
+              scroll={{ x: 820 }}
+              className='w-full'
+            />
+            {preview && (
+              <div style={SOFT_PANEL_STYLE} className='w-full'>
+                <Space vertical align='start' style={{ width: '100%' }}>
+                  <Space>
+                    <Text strong>
+                      #{preview.user?.id}{' '}
+                      {preview.user?.display_name ||
+                        preview.user?.username ||
+                        '-'}
+                    </Text>
+                    {preview.active_risk ? (
+                      <Tag color='red'>{t('生效中')}</Tag>
+                    ) : (
+                      <Tag>{t('未处置')}</Tag>
+                    )}
+                  </Space>
+                  <div className='grid grid-cols-2 gap-3 md:grid-cols-4 w-full'>
+                    <Text>
+                      {t('可提现')}：
+                      {renderQuota(preview.balance?.available_quota || 0)}
+                    </Text>
+                    <Text>
+                      {t('待结算')}：
+                      {renderQuota(preview.balance?.pending_quota || 0)}
+                    </Text>
+                    <Text>
+                      {t('提现冻结')}：
+                      {renderQuota(preview.balance?.frozen_quota || 0)}
+                    </Text>
+                    <Text>
+                      {t('风控冻结')}：
+                      {renderQuota(preview.balance?.risk_frozen_quota || 0)}
+                    </Text>
+                    <Text>
+                      {t('已清空')}：
+                      {renderQuota(preview.balance?.confiscated_quota || 0)}
+                    </Text>
+                    <Text>
+                      {t('直属下级')}：{preview.direct_invitee_count || 0}
+                    </Text>
+                    <Text>
+                      {t('可恢复下级')}：{preview.restorable_invitee_count || 0}
+                    </Text>
+                    <Text>
+                      {t('可清空')}：{renderQuota(preview.clearable_quota || 0)}
+                    </Text>
+                  </div>
+                </Space>
+              </div>
+            )}
+          </Space>
+
+          <Space vertical align='start' style={PANEL_STYLE}>
+            <Text strong>{t('多选处置')}</Text>
+            <Space wrap>
+              <Button
+                size='small'
+                theme='outline'
+                onClick={() => setPreset({ freeze_assets: true })}
+              >
+                {t('临时冻结')}
+              </Button>
+              <Button
+                size='small'
+                theme='outline'
+                onClick={() => setPreset({ block_invite_code: true })}
+              >
+                {t('禁用邀请码')}
+              </Button>
+              <Button
+                size='small'
+                theme='outline'
+                onClick={() =>
+                  setPreset({
+                    freeze_assets: true,
+                    block_invite_code: true,
+                    detach_invitees: true,
+                    clear_assets: true,
+                  })
+                }
+              >
+                {t('严重作弊处理')}
+              </Button>
+            </Space>
+            {actionCheckbox(
+              'freeze_assets',
+              t('冻结返佣资产'),
+              t('把可提现返佣转入风控冻结，并禁止提现或转余额。'),
+            )}
+            {actionCheckbox(
+              'block_invite_code',
+              t('废除邀请码'),
+              t('邀请码保留但失效，后续不能绑定新用户。'),
+            )}
+            {actionCheckbox(
+              'detach_invitees',
+              t('解除直属邀请关系'),
+              t('解绑该用户的直属下级，并记录快照用于误判恢复。'),
+            )}
+            {actionCheckbox(
+              'clear_assets',
+              t('清空返佣资产'),
+              t('清空待结算、可提现、提现冻结和风控冻结的返佣资产。'),
+            )}
+            <Input
+              value={reason}
+              placeholder={t('处置原因，清空资产时必填')}
+              onChange={setReason}
+            />
+            <Button
+              type='primary'
+              loading={applying || previewLoading}
+              disabled={!selectedUser}
+              onClick={applyActions}
+            >
+              {t('执行处置')}
+            </Button>
+            {preview?.active_risk && (
+              <Button
+                theme='outline'
+                type='danger'
+                loading={removingUserId === preview.user?.id}
+                onClick={() => removeRisk(preview.user?.id)}
+              >
+                {t('移除风控')}
+              </Button>
+            )}
+          </Space>
+        </div>
+
+        <SectionHeader
+          title={t('风控名单')}
+          description={t('查看生效中和已移除的返佣风控处置记录')}
+        />
+        <Space wrap>
+          <Input
+            value={riskKeyword}
+            placeholder={t('搜索风控用户')}
+            style={{ width: 260 }}
+            onChange={setRiskKeyword}
+            onEnterPress={() => {
+              setRiskPage(1);
+              setRiskSearch(riskKeyword.trim());
+            }}
+          />
+          <Select
+            value={riskStatus}
+            onChange={(value) => {
+              setRiskPage(1);
+              setRiskStatus(value);
+            }}
+            style={{ width: 140 }}
+          >
+            <Select.Option value='active'>{t('生效中')}</Select.Option>
+            <Select.Option value='removed'>{t('已移除')}</Select.Option>
+            <Select.Option value=''>{t('全部状态')}</Select.Option>
+          </Select>
+          <Button
+            theme='outline'
+            loading={riskLoading}
+            onClick={() => {
+              setRiskPage(1);
+              setRiskSearch(riskKeyword.trim());
+            }}
+          >
+            {t('搜索')}
+          </Button>
+          <Button theme='outline' onClick={loadRiskUsers}>
+            {t('刷新')}
+          </Button>
+        </Space>
+        <Table
+          rowKey='id'
+          loading={riskLoading}
+          columns={riskColumns}
+          dataSource={riskUsers}
+          pagination={{
+            currentPage: riskPage,
+            pageSize: riskPageSize,
+            total: riskTotal,
+            pageSizeOpts: [10, 20, 50, 100],
+            showSizeChanger: true,
+            onPageChange: setRiskPage,
+            onPageSizeChange: (size) => {
+              setRiskPageSize(size);
+              setRiskPage(1);
+            },
+          }}
+          empty={<Empty description={t('暂无风控用户')} />}
+          size='small'
+          scroll={{ x: 1580 }}
           className='w-full'
         />
       </Space>
@@ -967,6 +1612,8 @@ export default function SettingsAffiliateCommission(props) {
   const [records, setRecords] = useState([]);
   const [recordSourceType, setRecordSourceType] = useState('topup');
   const [recordStatus, setRecordStatus] = useState('');
+  const [recordKeyword, setRecordKeyword] = useState('');
+  const [recordSearch, setRecordSearch] = useState('');
   const [recordsLoading, setRecordsLoading] = useState(false);
   const [recordPage, setRecordPage] = useState(1);
   const [recordPageSize, setRecordPageSize] = useState(ITEMS_PER_PAGE);
@@ -1061,6 +1708,7 @@ export default function SettingsAffiliateCommission(props) {
           page_size: recordPageSize,
           source_type: recordSourceType || undefined,
           status: recordStatus || undefined,
+          keyword: recordSearch || undefined,
         },
       });
       if (res.data.success) {
@@ -1111,7 +1759,13 @@ export default function SettingsAffiliateCommission(props) {
 
   useEffect(() => {
     loadRecords();
-  }, [recordPage, recordPageSize, recordSourceType, recordStatus]);
+  }, [
+    recordPage,
+    recordPageSize,
+    recordSourceType,
+    recordStatus,
+    recordSearch,
+  ]);
 
   useEffect(() => {
     loadWithdrawals();
@@ -1430,6 +2084,12 @@ export default function SettingsAffiliateCommission(props) {
     {
       title: t('返佣额度'),
       dataIndex: 'reward_quota',
+      width: 140,
+      render: (value) => renderQuota(value || 0),
+    },
+    {
+      title: t('生成后余额'),
+      dataIndex: 'balance_after_quota',
       width: 140,
       render: (value) => renderQuota(value || 0),
     },
@@ -1952,6 +2612,16 @@ export default function SettingsAffiliateCommission(props) {
                 description={t('核查产生返佣的下级订单')}
               />
               <Space wrap>
+                <Input
+                  placeholder={t('搜索邀请人或下级用户')}
+                  value={recordKeyword}
+                  style={{ width: 260 }}
+                  onChange={setRecordKeyword}
+                  onEnterPress={() => {
+                    setRecordPage(1);
+                    setRecordSearch(recordKeyword.trim());
+                  }}
+                />
                 <Select
                   value={recordSourceType}
                   onChange={(value) => {
@@ -1980,7 +2650,20 @@ export default function SettingsAffiliateCommission(props) {
                   <Select.Option value=''>{t('全部状态')}</Select.Option>
                   <Select.Option value='pending'>{t('待结算')}</Select.Option>
                   <Select.Option value='available'>{t('已结算')}</Select.Option>
+                  <Select.Option value='confiscated'>
+                    {t('已没收')}
+                  </Select.Option>
                 </Select>
+                <Button
+                  theme='outline'
+                  loading={recordsLoading}
+                  onClick={() => {
+                    setRecordPage(1);
+                    setRecordSearch(recordKeyword.trim());
+                  }}
+                >
+                  {t('搜索')}
+                </Button>
                 <Button theme='outline' onClick={loadRecords}>
                   {t('刷新')}
                 </Button>
@@ -2004,11 +2687,15 @@ export default function SettingsAffiliateCommission(props) {
                 }}
                 empty={<Empty description={t('暂无返佣记录')} />}
                 size='small'
-                scroll={{ x: 1390 }}
+                scroll={{ x: 1530 }}
                 className='w-full'
               />
             </Space>
           </Card>
+        </Tabs.TabPane>
+
+        <Tabs.TabPane tab={t('返佣黑名单 / 风控处置')} itemKey='risk'>
+          <RiskControlPanel />
         </Tabs.TabPane>
 
         <Tabs.TabPane tab={t('提现审核')} itemKey='withdrawals'>

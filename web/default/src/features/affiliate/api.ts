@@ -30,6 +30,12 @@ import type {
   AffiliatePayoutAccount,
   AffiliateLeaderboardItem,
   AffiliateRecord,
+  AffiliateRiskApplyRequest,
+  AffiliateRiskApplyResult,
+  AffiliateRiskPreview,
+  AffiliateRiskRemoveRequest,
+  AffiliateRiskRemoveResult,
+  AffiliateRiskUserWithDetail,
   AffiliateSummary,
   AffiliateWithdrawal,
 } from './types'
@@ -150,14 +156,64 @@ export async function getAdminAffiliateInvitations(
 export async function getAdminAffiliateRecords(
   sourceType = '',
   status = '',
+  keyword = '',
   page = 1,
   pageSize = 50
 ) {
   const res = await api.get<ApiResponse<PageResponse<AffiliateAdminRecord>>>(
     '/api/affiliate/admin/records',
     {
-      params: { source_type: sourceType, status, p: page, page_size: pageSize },
+      params: {
+        source_type: sourceType,
+        status,
+        keyword,
+        p: page,
+        page_size: pageSize,
+      },
     }
+  )
+  return res.data
+}
+
+export async function getAdminAffiliateRiskUsers(
+  keyword = '',
+  status = 'active',
+  page = 1,
+  pageSize = 50
+) {
+  const res = await api.get<
+    ApiResponse<PageResponse<AffiliateRiskUserWithDetail>>
+  >('/api/affiliate/admin/risk-users', {
+    params: { keyword, status, p: page, page_size: pageSize },
+  })
+  return res.data
+}
+
+export async function getAdminAffiliateRiskPreview(userId: number) {
+  const res = await api.get<ApiResponse<AffiliateRiskPreview>>(
+    `/api/affiliate/admin/risk-users/${userId}/preview`
+  )
+  return res.data
+}
+
+export async function applyAdminAffiliateRisk(
+  userId: number,
+  payload: AffiliateRiskApplyRequest
+) {
+  const res = await api.post<ApiResponse<AffiliateRiskApplyResult>>(
+    `/api/affiliate/admin/risk-users/${userId}/apply`,
+    payload
+  )
+  return res.data
+}
+
+export async function removeAdminAffiliateRisk(
+  userId: number,
+  payload: AffiliateRiskRemoveRequest
+) {
+  const res = await api.post<ApiResponse<AffiliateRiskRemoveResult>>(
+    `/api/affiliate/admin/risk-users/${userId}/remove`,
+    payload
   )
   return res.data
 }

@@ -661,7 +661,7 @@ func TestGetAdminAffiliateRecordsWithDetailsIncludesUsersAndSourceFilter(t *test
 		CreatedAt:   now - 4,
 	}).Error)
 
-	items, total, err := GetAdminAffiliateRecordsWithDetails(AffiliateSourceTopUp, "", &common.PageInfo{Page: 1, PageSize: 10})
+	items, total, err := GetAdminAffiliateRecordsWithDetails(AffiliateSourceTopUp, "", "", &common.PageInfo{Page: 1, PageSize: 10})
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, total)
 	require.Len(t, items, 1)
@@ -1216,4 +1216,163 @@ func TestSetAffiliatePayoutQrPathReplacesAndClearsQrPath(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "", account.AlipayQrPath)
 	assert.Equal(t, "/upload/affiliate_qr/wechat-old.png", account.WechatQrPath)
+}
+
+func TestAffiliateRiskFreezeBlocksWithdrawTransferAndSettlesToRiskFrozen(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	insertAffiliateUser(t, 300, 0, 0)
+	insertAffiliateUser(t, 301, 300, 0)
+	require.NoError(t, DB.Create(&AffiliateBalance{UserId: 300, AvailableQuota: 2000, TotalQuota: 2000}).Error)
+
+	result, err := ApplyAffiliateRiskAction(300, 1, AffiliateRiskApplyRequest{
+		FreezeAssets: true,
+		Reason:       "suspicious",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 2000, result.FrozenQuota)
+
+	balance := getAffiliateBalanceForTest(t, 300)
+	assert.Equal(t, 0, balance.AvailableQuota)
+	assert.Equal(t, 2000, balance.RiskFrozenQuota)
+
+	_, err = CreateAffiliateWithdrawal(300, AffiliatePayoutMethodAlipay, 1000)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "被冻结")
+	err = TransferAffiliateQuotaToBalance(300, 1000)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "被冻结")
+
+	require.NoError(t, CreateAffiliateRewardsForPayment(301, AffiliateSourceTopUp, "risk-freeze-order", 10000))
+	require.NoError(t, DB.Model(&AffiliateRecord{}).Where("user_id = ?", 300).Update("available_time", common.GetTimestamp()-1).Error)
+	require.NoError(t, SettleMatureAffiliateRecords(300))
+
+	balance = getAffiliateBalanceForTest(t, 300)
+	assert.Equal(t, 0, balance.PendingQuota)
+	assert.Equal(t, 0, balance.AvailableQuota)
+	assert.Equal(t, 3000, balance.RiskFrozenQuota)
+
+	remove, err := RemoveAffiliateRiskAction(300, 1, AffiliateRiskRemoveRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, 3000, remove.UnfrozenQuota)
+	balance = getAffiliateBalanceForTest(t, 300)
+	assert.Equal(t, 3000, balance.AvailableQuota)
+	assert.Equal(t, 0, balance.RiskFrozenQuota)
+}
+
+func TestAffiliateRiskBlockInviteCodeRejectsRegistrationAndManualBind(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	insertAffiliateUser(t, 310, 0, 0)
+	insertAffiliateUser(t, 311, 0, 0)
+	affCode := getAffiliateUserAffCodeForTest(t, 310)
+
+	_, err := ApplyAffiliateRiskAction(310, 1, AffiliateRiskApplyRequest{
+		BlockInviteCode: true,
+		Reason:          "abuse",
+	})
+	require.NoError(t, err)
+
+	_, err = GetUserIdByAffCode(affCode)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "失效")
+
+	_, err = BindUserInviterByAffCode(311, "", affCode, false)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "废除")
+}
+
+func TestAffiliateRiskDetachInviteesCanBeAppliedAloneAndRestored(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	require.NoError(t, DB.Create(&User{Id: 320, Username: "risk-parent", AffCode: "risk320", Status: common.UserStatusEnabled, AffCount: 2}).Error)
+	require.NoError(t, DB.Create(&User{Id: 321, Username: "risk-child-a", AffCode: "risk321", Status: common.UserStatusEnabled, InviterId: 320}).Error)
+	require.NoError(t, DB.Create(&User{Id: 322, Username: "risk-child-b", AffCode: "risk322", Status: common.UserStatusEnabled, InviterId: 320}).Error)
+
+	result, err := ApplyAffiliateRiskAction(320, 1, AffiliateRiskApplyRequest{
+		DetachInvitees: true,
+		Reason:         "manual detach",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 2, result.DetachedCount)
+
+	var inviter User
+	require.NoError(t, DB.Select("aff_count").Where("id = ?", 320).First(&inviter).Error)
+	assert.Equal(t, 0, inviter.AffCount)
+	var children []User
+	require.NoError(t, DB.Select("id", "inviter_id").Where("id IN ?", []int{321, 322}).Order("id").Find(&children).Error)
+	require.Len(t, children, 2)
+	assert.Equal(t, 0, children[0].InviterId)
+	assert.Equal(t, 0, children[1].InviterId)
+
+	remove, err := RemoveAffiliateRiskAction(320, 1, AffiliateRiskRemoveRequest{RestoreDetachedInvitees: true})
+	require.NoError(t, err)
+	assert.Equal(t, 2, remove.RestoredInvitees)
+	require.NoError(t, DB.Select("aff_count").Where("id = ?", 320).First(&inviter).Error)
+	assert.Equal(t, 2, inviter.AffCount)
+}
+
+func TestAffiliateRiskClearAssetsConfiscatesBalancesWithdrawalsAndPendingRecords(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	require.NoError(t, DB.Create(&User{Id: 330, Username: "risk-clear", AffCode: "risk330", Status: common.UserStatusEnabled}).Error)
+	require.NoError(t, DB.Create(&AffiliateBalance{
+		UserId:          330,
+		PendingQuota:    1000,
+		AvailableQuota:  2000,
+		FrozenQuota:     3000,
+		RiskFrozenQuota: 4000,
+		TotalQuota:      10000,
+	}).Error)
+	require.NoError(t, DB.Create(&AffiliateWithdrawal{UserId: 330, Quota: 3000, Method: AffiliatePayoutMethodAlipay, Status: AffiliateWithdrawalStatusPending}).Error)
+	require.NoError(t, DB.Create(&AffiliateRecord{UserId: 330, InviteeId: 331, Level: 1, SourceType: AffiliateSourceTopUp, SourceId: "risk-clear-order", RewardQuota: 1000, Status: AffiliateRecordStatusPending}).Error)
+
+	result, err := ApplyAffiliateRiskAction(330, 1, AffiliateRiskApplyRequest{
+		ClearAssets: true,
+		Reason:      "confirmed abuse",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 10000, result.ClearedQuota)
+	assert.Equal(t, 1, result.RejectedWithdrawals)
+
+	balance := getAffiliateBalanceForTest(t, 330)
+	assert.Equal(t, 0, balance.PendingQuota)
+	assert.Equal(t, 0, balance.AvailableQuota)
+	assert.Equal(t, 0, balance.FrozenQuota)
+	assert.Equal(t, 0, balance.RiskFrozenQuota)
+	assert.Equal(t, 10000, balance.ConfiscatedQuota)
+	assert.Equal(t, 0, balance.TotalQuota)
+
+	var withdrawal AffiliateWithdrawal
+	require.NoError(t, DB.Where("user_id = ?", 330).First(&withdrawal).Error)
+	assert.Equal(t, AffiliateWithdrawalStatusRejected, withdrawal.Status)
+
+	var record AffiliateRecord
+	require.NoError(t, DB.Where("user_id = ?", 330).First(&record).Error)
+	assert.Equal(t, AffiliateRecordStatusConfiscated, record.Status)
+}
+
+func TestAdminAffiliateRecordsSearchByUserKeywordAndBalanceSnapshot(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	require.NoError(t, DB.Create(&User{Id: 340, Username: "search-inviter", Email: "inviter@example.com", AffCode: "risk340", Status: common.UserStatusEnabled}).Error)
+	require.NoError(t, DB.Create(&User{Id: 341, Username: "search-invitee", Email: "invitee@example.com", AffCode: "risk341", Status: common.UserStatusEnabled, InviterId: 340}).Error)
+	require.NoError(t, CreateAffiliateRewardsForPayment(341, AffiliateSourceTopUp, "risk-search-order", 10000))
+
+	items, total, err := GetAdminAffiliateRecordsWithDetails("", "", "invitee@example.com", &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, total)
+	require.Len(t, items, 1)
+	assert.Equal(t, 340, items[0].UserId)
+	assert.Equal(t, 1000, items[0].BalanceAfterQuota)
+
+	items, total, err = GetAdminAffiliateRecordsWithDetails("", "", "not-found-user", &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, total)
+	assert.Len(t, items, 0)
 }
