@@ -304,13 +304,16 @@ export function Affiliate() {
     condition: AffiliateEligibilityCondition,
     value: number
   ) => {
-    if (condition.unit === 'quota') return formatQuota(value || 0)
-    return `${value || 0} ${t('days')}`
+    const v = value || 0
+    if (condition.unit === 'quota') return formatQuota(v)
+    if (condition.unit === 'currency') return formatCurrencyUSD(v)
+    return `${v} ${t('days')}`
   }
 
   const eligibilityLabel = (type: string) => {
     if (type === 'account_age_days') return t('Account age')
-    if (type === 'recharge_quota') return t('Total successful recharge')
+    if (type === 'recharge_amount' || type === 'recharge_quota')
+      return t('Total successful recharge')
     return t('Requirement')
   }
 

@@ -150,12 +150,11 @@ func checkInviterEligibility(userId int, s *setting.AffiliateSetting) error {
 	}
 
 	if s.InviterMinRechargeAmount > 0 {
-		var totalRecharge int64
-		DB.Model(&TopUp{}).
-			Where("user_id = ? AND status = ?", userId, common.TopUpStatusSuccess).
-			Select("COALESCE(SUM(quota), 0)").
-			Scan(&totalRecharge)
-		if totalRecharge < int64(s.InviterMinRechargeAmount) {
+		totalRecharge, err := GetUserTotalRechargeAmount(userId)
+		if err != nil {
+			return fmt.Errorf("failed to load recharge history: %w", err)
+		}
+		if totalRecharge < float64(s.InviterMinRechargeAmount) {
 			return fmt.Errorf("total recharge must be at least %d", s.InviterMinRechargeAmount)
 		}
 	}

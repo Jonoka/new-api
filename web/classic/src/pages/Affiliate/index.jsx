@@ -81,13 +81,15 @@ function AffiliateApplicationGate({
     const label =
       condition.type === 'account_age_days'
         ? t('账号注册天数')
-        : condition.type === 'recharge_quota'
+        : condition.type === 'recharge_amount' || condition.type === 'recharge_quota'
           ? t('累计成功充值')
           : t('申请条件');
-    const formatValue = (value) =>
-      condition.unit === 'quota'
-        ? renderQuota(Number(value) || 0)
-        : `${Number(value) || 0} ${t('天')}`;
+    const formatValue = (value) => {
+      const num = Number(value) || 0;
+      if (condition.unit === 'quota') return renderQuota(num);
+      if (condition.unit === 'currency') return renderQuotaWithAmount(num);
+      return `${num} ${t('天')}`;
+    };
     return (
       <div key={condition.type} style={{ lineHeight: 1.8 }}>
         <Text strong>{label}</Text>

@@ -74,11 +74,11 @@ type eligibilityResult struct {
 }
 
 type eligibilityCondition struct {
-	Type     string `json:"type"`
-	Required int64  `json:"required"`
-	Current  int64  `json:"current"`
-	Unit     string `json:"unit"`
-	Met      bool   `json:"met"`
+	Type     string  `json:"type"`
+	Required float64 `json:"required"`
+	Current  float64 `json:"current"`
+	Unit     string  `json:"unit"`
+	Met      bool    `json:"met"`
 }
 
 func checkUserEligibility(userId int, s *setting.AffiliateSetting) eligibilityResult {
@@ -99,8 +99,8 @@ func checkUserEligibility(userId int, s *setting.AffiliateSetting) eligibilityRe
 		}
 		condition := eligibilityCondition{
 			Type:     "account_age_days",
-			Required: int64(s.InviterMinAccountAgeDays),
-			Current:  currentAgeDays,
+			Required: float64(s.InviterMinAccountAgeDays),
+			Current:  float64(currentAgeDays),
 			Unit:     "days",
 			Met:      currentAgeDays >= int64(s.InviterMinAccountAgeDays),
 		}
@@ -112,17 +112,16 @@ func checkUserEligibility(userId int, s *setting.AffiliateSetting) eligibilityRe
 	}
 
 	if s.InviterMinRechargeAmount > 0 {
-		var totalRecharge int64
-		model.DB.Model(&model.TopUp{}).
-			Where("user_id = ? AND status = ?", userId, common.TopUpStatusSuccess).
-			Select("COALESCE(SUM(quota), 0)").
-			Scan(&totalRecharge)
+		totalRecharge, err := model.GetUserTotalRechargeAmount(userId)
+		if err != nil {
+			return eligibilityResult{Eligible: false, Reason: "failed to load recharge history"}
+		}
 		condition := eligibilityCondition{
-			Type:     "recharge_quota",
-			Required: int64(s.InviterMinRechargeAmount),
+			Type:     "recharge_amount",
+			Required: float64(s.InviterMinRechargeAmount),
 			Current:  totalRecharge,
-			Unit:     "quota",
-			Met:      totalRecharge >= int64(s.InviterMinRechargeAmount),
+			Unit:     "currency",
+			Met:      totalRecharge >= float64(s.InviterMinRechargeAmount),
 		}
 		result.Conditions = append(result.Conditions, condition)
 		if !condition.Met {

@@ -935,3 +935,20 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 
 	return nil
 }
+
+// GetUserTotalRechargeAmount 返回用户成功充值的累计支付金额（货币，与 TopUp.Money 同单位）。
+// 优先累加实付金额 actual_money，旧数据回退到 money；TopUp 表无统一 quota 列，故以支付金额作为邀请资格门槛。
+func GetUserTotalRechargeAmount(userId int) (float64, error) {
+	if userId <= 0 {
+		return 0, nil
+	}
+	var amount float64
+	err := DB.Model(&TopUp{}).
+		Where("user_id = ? AND status = ?", userId, common.TopUpStatusSuccess).
+		Select("COALESCE(SUM(COALESCE(NULLIF(actual_money, 0), money)), 0)").
+		Scan(&amount).Error
+	if err != nil {
+		return 0, err
+	}
+	return amount, nil
+}

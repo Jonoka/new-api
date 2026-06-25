@@ -430,12 +430,11 @@ func checkInviteeEligibility(inviteeId int, inviteeCreatedAt int64, s *setting.A
 	}
 
 	if s.InviteeMinRechargeAmount > 0 {
-		var totalRecharge int64
-		DB.Model(&TopUp{}).
-			Where("user_id = ? AND status = ?", inviteeId, common.TopUpStatusSuccess).
-			Select("COALESCE(SUM(quota), 0)").
-			Scan(&totalRecharge)
-		if totalRecharge < int64(s.InviteeMinRechargeAmount) {
+		totalRecharge, err := GetUserTotalRechargeAmount(inviteeId)
+		if err != nil {
+			return false
+		}
+		if totalRecharge < float64(s.InviteeMinRechargeAmount) {
 			return false
 		}
 	}
