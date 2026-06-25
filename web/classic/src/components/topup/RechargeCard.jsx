@@ -346,6 +346,26 @@ const RechargeCard = ({
                                     <SiWechat size={18} color='#07C160' />
                                   ) : payMethod.type === 'stripe' ? (
                                     <SiStripe size={18} color='#635BFF' />
+                                  ) : payMethod.type === 'bepusdt' ? (
+                                    <img
+                                      src='/pay-usdt.svg'
+                                      alt='USDT'
+                                      style={{
+                                        width: 18,
+                                        height: 18,
+                                        objectFit: 'contain',
+                                      }}
+                                    />
+                                  ) : payMethod.type === 'okpay' ? (
+                                    <img
+                                      src='/pay-okpay.svg'
+                                      alt='OKPay'
+                                      style={{
+                                        width: 18,
+                                        height: 18,
+                                        objectFit: 'contain',
+                                      }}
+                                    />
                                   ) : payMethod.icon ? (
                                     <img
                                       src={payMethod.icon}

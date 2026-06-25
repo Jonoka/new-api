@@ -19,7 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 import {
   Activity,
   Box,
+  Brush,
   CreditCard,
+  ExternalLink,
+  Gamepad2,
   FileText,
   FlaskConical,
   Key,
@@ -30,10 +33,18 @@ import {
   Settings,
   Ticket,
   User,
+  HandCoins,
   Users,
   Wallet,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import {
+  getCustomNavIcon,
+  getSidebarCustomModuleKey,
+  parseCustomNavItems,
+} from '@/lib/custom-nav'
+import { parseSidebarModulesFromStatus } from '@/lib/nav-modules'
+import { useStatus } from '@/hooks/use-status'
 import { type SidebarData } from '@/components/layout/types'
 
 /**
@@ -44,8 +55,13 @@ import { type SidebarData } from '@/components/layout/types'
  */
 export function useSidebarData(): SidebarData {
   const { t } = useTranslation()
+  const { status } = useStatus()
+  const sidebarModules = parseSidebarModulesFromStatus(
+    status as Record<string, unknown> | null
+  )
+  const customItems = parseCustomNavItems(sidebarModules.customItems)
 
-  return {
+  const sidebarData: SidebarData = {
     navGroups: [
       {
         id: 'chat',
@@ -55,6 +71,11 @@ export function useSidebarData(): SidebarData {
             title: t('Playground'),
             url: '/playground',
             icon: FlaskConical,
+          },
+          {
+            title: t('Infinite Canvas'),
+            url: '/canvas',
+            icon: Brush,
           },
           {
             title: t('Chat'),
@@ -94,6 +115,12 @@ export function useSidebarData(): SidebarData {
             configUrls: ['/usage-logs/drawing', '/usage-logs/task'],
             icon: ListTodo,
           },
+          {
+            title: t('Game Center'),
+            url: '/game-center',
+            activeUrls: ['/game-center'],
+            icon: Gamepad2,
+          },
         ],
       },
       {
@@ -104,6 +131,11 @@ export function useSidebarData(): SidebarData {
             title: t('Wallet'),
             url: '/wallet',
             icon: Wallet,
+          },
+          {
+            title: t('Affiliate Commission'),
+            url: '/affiliate',
+            icon: HandCoins,
           },
           {
             title: t('Profile'),
@@ -132,7 +164,7 @@ export function useSidebarData(): SidebarData {
             icon: Users,
           },
           {
-            title: t('Redemption Codes'),
+            title: t('Marketing Benefits'),
             url: '/redemption-codes',
             icon: Ticket,
           },
@@ -140,6 +172,16 @@ export function useSidebarData(): SidebarData {
             title: t('Subscription Management'),
             url: '/subscriptions',
             icon: CreditCard,
+          },
+          {
+            title: t('Affiliate Commission'),
+            url: '/system-settings/billing/affiliate',
+            icon: HandCoins,
+          },
+          {
+            title: t('Game Management'),
+            url: '/game-management',
+            icon: Gamepad2,
           },
           {
             title: t('System Settings'),
@@ -151,4 +193,21 @@ export function useSidebarData(): SidebarData {
       },
     ],
   }
+
+  customItems.forEach((item) => {
+    const group = sidebarData.navGroups.find(
+      (navGroup) => navGroup.id === item.section
+    )
+    if (!group) return
+
+    group.items.push({
+      title: item.title,
+      url: item.url,
+      icon: getCustomNavIcon(item.icon) ?? ExternalLink,
+      external: item.external,
+      configUrls: [getSidebarCustomModuleKey(item.id)],
+    })
+  })
+
+  return sidebarData
 }

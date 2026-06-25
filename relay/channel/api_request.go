@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	common2 "github.com/QuantumNous/new-api/common"
+	rootconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
@@ -237,6 +239,9 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 			if shouldSkipPassthroughHeader(name) {
 				continue
 			}
+			if common.IsClaudeCodeFingerprintEnabled(info) && common.IsClaudeCodeProtectedHeader(name) {
+				continue
+			}
 			if !passAll {
 				matched := false
 				for _, re := range passthroughRegex {
@@ -304,6 +309,15 @@ func applyHeaderOverrideToRequest(req *http.Request, headerOverride map[string]s
 	}
 }
 
+func enforceFinalStreamHeaders(req *http.Request, info *common.RelayInfo) {
+	if req == nil || info == nil || !info.IsStream {
+		return
+	}
+	if info.ApiType == rootconstant.APITypeCodex && info.RelayMode == constant.RelayModeResponses {
+		req.Header.Set("Accept", "text/event-stream")
+	}
+}
+
 func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
 	fullRequestURL, err := a.GetRequestURL(info)
 	if err != nil {
@@ -327,6 +341,15 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		return nil, err
 	}
 	applyHeaderOverrideToRequest(req, headerOverride)
+	enforceFinalStreamHeaders(req, info)
+	// [CC-DEBUG] 临时调试：记录发往上游的关键指纹 headers（用 Warn 级别，不需要开 debug 模式）
+	if info != nil && info.ChannelMeta != nil &&
+		(info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled || info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled) {
+		common2.SysLog(fmt.Sprintf("[CC-DEBUG] outbound UA=%s | X-App=%s | beta=%s | version=%s | url=%s",
+			req.Header.Get("User-Agent"), req.Header.Get("X-App"),
+			req.Header.Get("anthropic-beta"), req.Header.Get("anthropic-version"),
+			fullRequestURL))
+	}
 	resp, err := doRequest(c, req, info)
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)
@@ -484,16 +507,32 @@ func sendPingData(c *gin.Context, mutex *sync.Mutex) error {
 func DoRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	return doRequest(c, req, info)
 }
-func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
-	var client *http.Client
-	var err error
-	if info.ChannelSetting.Proxy != "" {
-		client, err = service.NewProxyHttpClient(info.ChannelSetting.Proxy)
+
+func shouldUseClaudeCodeTransportFingerprint(info *common.RelayInfo) bool {
+	return info != nil &&
+		info.ChannelMeta != nil &&
+		info.ApiType == rootconstant.APITypeAnthropic &&
+		info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled
+}
+
+func selectRelayHTTPClient(info *common.RelayInfo) (*http.Client, error) {
+	if shouldUseClaudeCodeTransportFingerprint(info) {
+		return service.NewClaudeCodeTransportHttpClient(info.ChannelSetting.Proxy)
+	}
+	if info != nil && info.ChannelSetting.Proxy != "" {
+		client, err := service.NewProxyHttpClient(info.ChannelSetting.Proxy)
 		if err != nil {
 			return nil, fmt.Errorf("new proxy http client failed: %w", err)
 		}
-	} else {
-		client = service.GetHttpClient()
+		return client, nil
+	}
+	return service.GetHttpClient(), nil
+}
+
+func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
+	client, err := selectRelayHTTPClient(info)
+	if err != nil {
+		return nil, err
 	}
 
 	var stopPinger context.CancelFunc
@@ -514,6 +553,25 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		}
 	}
 
+	if info != nil {
+		requestStart := time.Now()
+		info.ResetFirstResponseTiming(requestStart)
+		if rootconstant.UpstreamTimingDiagnosticsEnabled {
+			info.EnableTimingDiagnostics(requestStart)
+			trace := &httptrace.ClientTrace{
+				GotConn: func(httptrace.GotConnInfo) {
+					info.MarkTimingGotConn()
+				},
+				WroteRequest: func(httptrace.WroteRequestInfo) {
+					info.MarkTimingWroteRequest()
+				},
+				GotFirstResponseByte: func() {
+					info.MarkTimingGotFirstResponseByte()
+				},
+			}
+			req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
+		}
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		logger.LogError(c, "do request failed: "+err.Error())
@@ -521,6 +579,12 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	}
 	if resp == nil {
 		return nil, errors.New("resp is nil")
+	}
+	if info != nil {
+		info.MarkTimingClientDoReturn()
+	}
+	if info != nil && !info.IsStream {
+		info.SetFirstResponseTime()
 	}
 
 	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {

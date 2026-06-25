@@ -108,3 +108,29 @@ func isEpayWebhookConfigured() bool {
 func isEpayWebhookEnabled() bool {
 	return isEpayTopUpEnabled()
 }
+
+func isBepusdtTopUpEnabled() bool {
+	if !isPaymentComplianceConfirmed() {
+		return false
+	}
+	return strings.TrimSpace(setting.BepusdtApiUrl) != "" &&
+		strings.TrimSpace(setting.BepusdtAuthToken) != "" &&
+		len(setting.GetBepusdtChains()) > 0
+}
+
+func isBepusdtWebhookEnabled() bool {
+	return isBepusdtTopUpEnabled()
+}
+
+func isOkpayTopUpEnabled() bool {
+	if !isPaymentComplianceConfirmed() {
+		return false
+	}
+	return strings.TrimSpace(setting.OkpayGatewayUrl) != "" &&
+		strings.TrimSpace(setting.OkpayMerchantId) != "" &&
+		strings.TrimSpace(setting.OkpayMerchantToken) != ""
+}
+
+func isOkpayWebhookEnabled() bool {
+	return isOkpayTopUpEnabled()
+}

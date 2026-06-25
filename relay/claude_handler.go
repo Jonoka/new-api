@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/relay/channel/claude"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
@@ -20,6 +21,49 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+func claudeRequestHasCacheControl(request *dto.ClaudeRequest) bool {
+	if request == nil {
+		return false
+	}
+	if len(request.CacheControl) > 0 {
+		return true
+	}
+	for _, system := range request.ParseSystem() {
+		if len(system.CacheControl) > 0 {
+			return true
+		}
+	}
+	for _, message := range request.Messages {
+		contents, _ := message.ParseContent()
+		for _, content := range contents {
+			if len(content.CacheControl) > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func shouldClaudeUseOpenAIResponses(info *relaycommon.RelayInfo, request *dto.ClaudeRequest) bool {
+	if info == nil {
+		return false
+	}
+	if service.ShouldChatCompletionsUseResponsesGlobal(info.ChannelId, info.ChannelType, info.OriginModelName) {
+		return true
+	}
+	if !claudeRequestHasCacheControl(request) {
+		return false
+	}
+	switch info.ChannelType {
+	case constant.ChannelTypeCodex:
+		return true
+	case constant.ChannelTypeOpenAI, constant.ChannelTypeAzure, constant.ChannelTypeXai:
+		return true
+	default:
+		return common.IsOpenAIResponseOnlyModel(info.OriginModelName)
+	}
+}
 
 func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 
@@ -53,34 +97,30 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	}
 
 	if baseModel, effortLevel, ok := reasoning.TrimEffortSuffix(request.Model); ok && effortLevel != "" &&
-		(strings.HasPrefix(request.Model, "claude-opus-4-6") || strings.HasPrefix(request.Model, "claude-opus-4-7")) {
+		(strings.HasPrefix(request.Model, "claude-opus-4-6") || strings.HasPrefix(request.Model, "claude-opus-4-7") || strings.HasPrefix(request.Model, "claude-opus-4-8")) {
 		request.Model = baseModel
 		request.Thinking = &dto.Thinking{
 			Type: "adaptive",
 		}
 		request.OutputConfig = json.RawMessage(fmt.Sprintf(`{"effort":"%s"}`, effortLevel))
-		if strings.HasPrefix(request.Model, "claude-opus-4-7") {
-			// Opus 4.7 rejects non-default temperature/top_p/top_k with 400
+		if strings.HasPrefix(request.Model, "claude-opus-4-7") || strings.HasPrefix(request.Model, "claude-opus-4-8") {
+			// Opus 4.7+ rejects non-default temperature/top_p/top_k with 400
 			// and defaults display to "omitted"; restore the 4.6 visible summary.
 			request.Thinking.Display = "summarized"
+		} else {
 			request.Temperature = nil
 			request.TopP = nil
 			request.TopK = nil
-		} else {
-			request.Temperature = common.GetPointer[float64](1.0)
 		}
 		info.UpstreamModelName = request.Model
 	} else if model_setting.GetClaudeSettings().ThinkingAdapterEnabled &&
 		strings.HasSuffix(request.Model, "-thinking") {
 		if request.Thinking == nil {
 			baseModel := strings.TrimSuffix(request.Model, "-thinking")
-			if strings.HasPrefix(baseModel, "claude-opus-4-7") {
-				// Opus 4.7 rejects thinking.type="enabled"; use adaptive at high effort.
+			if strings.HasPrefix(baseModel, "claude-opus-4-7") || strings.HasPrefix(baseModel, "claude-opus-4-8") {
+				// Opus 4.7+ rejects thinking.type="enabled"; use adaptive at high effort.
 				request.Thinking = &dto.Thinking{Type: "adaptive", Display: "summarized"}
 				request.OutputConfig = json.RawMessage(`{"effort":"high"}`)
-				request.Temperature = nil
-				request.TopP = nil
-				request.TopK = nil
 			} else {
 				// 因为BudgetTokens 必须大于1024
 				if request.MaxTokens == nil || *request.MaxTokens < 1280 {
@@ -102,6 +142,8 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		}
 		info.UpstreamModelName = request.Model
 	}
+
+	claude.NormalizeClaudeSamplingParameters(request)
 
 	if info.ChannelSetting.SystemPrompt != "" {
 		if request.System == nil {
@@ -128,9 +170,10 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		}
 	}
 
-	if !model_setting.GetGlobalSettings().PassThroughRequestEnabled &&
-		!info.ChannelSetting.PassThroughBodyEnabled &&
-		service.ShouldChatCompletionsUseResponsesGlobal(info.ChannelId, info.ChannelType, info.OriginModelName) {
+	passThroughRequestBody := shouldPassThroughRequestBody(info)
+	if !passThroughRequestBody &&
+		!shouldUseClaudeCodeRequestFingerprint(info) &&
+		shouldClaudeUseOpenAIResponses(info, request) {
 		openAIRequest, convErr := service.ClaudeToOpenAIRequest(*request, info)
 		if convErr != nil {
 			return types.NewError(convErr, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
@@ -146,7 +189,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	}
 
 	var requestBody io.Reader
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
+	if passThroughRequestBody {
 		storage, err := common.GetBodyStorage(c)
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
@@ -163,6 +206,14 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
 
+		// [CC-DEBUG] 临时：记录发出的 body 中 system 和 metadata 是否存在
+		if shouldUseClaudeCodeRequestFingerprint(info) {
+			hasSystem := strings.Contains(string(jsonData), `"system"`)
+			hasMetadata := strings.Contains(string(jsonData), `"metadata"`)
+			hasUserID := strings.Contains(string(jsonData), `"user_id"`)
+			common.SysLog(fmt.Sprintf("[CC-DEBUG-BODY] hasSystem=%v hasMetadata=%v hasUserID=%v bodyLen=%d", hasSystem, hasMetadata, hasUserID, len(jsonData)))
+		}
+
 		// remove disabled fields for Claude API
 		jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled)
 		if err != nil {
@@ -175,6 +226,12 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			if err != nil {
 				return newAPIErrorFromParamOverride(err)
 			}
+		}
+		relaycommon.MergeOpenAISessionBridgeOverride(info, jsonData)
+
+		// Sign billing header CCH placeholder after all body modifications
+		if shouldUseClaudeCodeRequestFingerprint(info) {
+			jsonData = claude.SignBillingHeaderCCH(jsonData)
 		}
 
 		logger.LogDebug(c, "requestBody: %s", jsonData)
@@ -197,7 +254,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 
 	if resp != nil {
 		httpResp = resp.(*http.Response)
-		info.IsStream = info.IsStream || strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
+		markActualStreamFromResponse(c, info, httpResp)
 		if httpResp.StatusCode != http.StatusOK {
 			newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
 			// reset status code 重置状态码

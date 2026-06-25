@@ -198,8 +198,7 @@ export function useApiKeysColumns(): ColumnDef<ApiKey>[] {
       ),
       cell: ({ row }) => {
         const apiKey = row.original
-        const group = row.getValue('group') as string
-        const ratio = group && group !== 'auto' ? groupRatios[group] : undefined
+        const group = (row.getValue('group') as string) || ''
 
         if (group === 'auto') {
           return (
@@ -228,6 +227,41 @@ export function useApiKeysColumns(): ColumnDef<ApiKey>[] {
             </Tooltip>
           )
         }
+
+        // Multi-group: show first group + count badge
+        if (group && group.includes(',')) {
+          const groups = group.split(',').map((g) => g.trim()).filter(Boolean)
+          const firstRatio = groups[0] ? groupRatios[groups[0]] : undefined
+          return (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span className='inline-flex items-center gap-1.5 text-xs' />
+                }
+              >
+                <GroupBadge group={groups[0]} ratio={firstRatio} />
+                {groups.length > 1 && (
+                  <StatusBadge
+                    label={`+${groups.length - 1}`}
+                    variant='info'
+                    copyable={false}
+                  />
+                )}
+              </TooltipTrigger>
+              <TooltipContent>
+                <div className='flex flex-col gap-0.5 text-xs'>
+                  {groups.map((g, i) => (
+                    <span key={g}>
+                      {i + 1}. {g}
+                    </span>
+                  ))}
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          )
+        }
+
+        const ratio = group ? groupRatios[group] : undefined
         return <GroupBadge group={group} ratio={ratio} />
       },
       meta: { label: t('Group'), mobileHidden: true },

@@ -48,6 +48,7 @@ func InitOptionMap() {
 	common.OptionMap["AutomaticDisableChannelEnabled"] = strconv.FormatBool(common.AutomaticDisableChannelEnabled)
 	common.OptionMap["AutomaticEnableChannelEnabled"] = strconv.FormatBool(common.AutomaticEnableChannelEnabled)
 	common.OptionMap["LogConsumeEnabled"] = strconv.FormatBool(common.LogConsumeEnabled)
+	common.OptionMap["ForceRecordLogIpEnabled"] = strconv.FormatBool(common.ForceRecordLogIpEnabled)
 	common.OptionMap["DisplayInCurrencyEnabled"] = strconv.FormatBool(common.DisplayInCurrencyEnabled)
 	common.OptionMap["DisplayTokenStatEnabled"] = strconv.FormatBool(common.DisplayTokenStatEnabled)
 	common.OptionMap["DrawingEnabled"] = strconv.FormatBool(common.DrawingEnabled)
@@ -91,6 +92,21 @@ func InitOptionMap() {
 	common.OptionMap["CreemProducts"] = setting.CreemProducts
 	common.OptionMap["CreemTestMode"] = strconv.FormatBool(setting.CreemTestMode)
 	common.OptionMap["CreemWebhookSecret"] = setting.CreemWebhookSecret
+	common.OptionMap["BepusdtApiUrl"] = setting.BepusdtApiUrl
+	common.OptionMap["BepusdtAuthToken"] = setting.BepusdtAuthToken
+	common.OptionMap["BepusdtUnitPrice"] = strconv.FormatFloat(setting.BepusdtUnitPrice, 'f', -1, 64)
+	common.OptionMap["BepusdtMinTopUp"] = strconv.Itoa(setting.BepusdtMinTopUp)
+	common.OptionMap["BepusdtTimeout"] = strconv.Itoa(setting.BepusdtTimeout)
+	common.OptionMap["BepusdtChains"] = setting.BepusdtChains
+	common.OptionMap["OkpayGatewayUrl"] = setting.OkpayGatewayUrl
+	common.OptionMap["OkpayMerchantId"] = setting.OkpayMerchantId
+	common.OptionMap["OkpayMerchantToken"] = setting.OkpayMerchantToken
+	common.OptionMap["OkpayExchangeRate"] = strconv.FormatFloat(setting.OkpayExchangeRate, 'f', -1, 64)
+	common.OptionMap["OkpayAutoExchangeEnabled"] = strconv.FormatBool(setting.OkpayAutoExchangeEnabled)
+	common.OptionMap["OkpayUsdtCnyRate"] = strconv.FormatFloat(setting.OkpayUsdtCnyRate, 'f', -1, 64)
+	common.OptionMap["OkpayRateApiUrl"] = setting.OkpayRateApiUrl
+	common.OptionMap["OkpayMinTopUp"] = strconv.Itoa(setting.OkpayMinTopUp)
+	common.OptionMap["OkpayCoin"] = setting.OkpayCoin
 	common.OptionMap["WaffoEnabled"] = strconv.FormatBool(setting.WaffoEnabled)
 	common.OptionMap["WaffoApiKey"] = setting.WaffoApiKey
 	common.OptionMap["WaffoPrivateKey"] = setting.WaffoPrivateKey
@@ -137,6 +153,7 @@ func InitOptionMap() {
 	common.OptionMap["ModelRequestRateLimitDurationMinutes"] = strconv.Itoa(setting.ModelRequestRateLimitDurationMinutes)
 	common.OptionMap["ModelRequestRateLimitSuccessCount"] = strconv.Itoa(setting.ModelRequestRateLimitSuccessCount)
 	common.OptionMap["ModelRequestRateLimitGroup"] = setting.ModelRequestRateLimitGroup2JSONString()
+	common.OptionMap["ModelRequestRateLimitUserGroup"] = setting.ModelRequestRateLimitUserGroup2JSONString()
 	common.OptionMap["ModelRatio"] = ratio_setting.ModelRatio2JSONString()
 	common.OptionMap["ModelPrice"] = ratio_setting.ModelPrice2JSONString()
 	common.OptionMap["CacheRatio"] = ratio_setting.CacheRatio2JSONString()
@@ -168,6 +185,8 @@ func InitOptionMap() {
 	common.OptionMap["CheckSensitiveOnPromptEnabled"] = strconv.FormatBool(setting.CheckSensitiveOnPromptEnabled)
 	common.OptionMap["StopOnSensitiveEnabled"] = strconv.FormatBool(setting.StopOnSensitiveEnabled)
 	common.OptionMap["SensitiveWords"] = setting.SensitiveWordsToString()
+	common.OptionMap["SensitiveRules"] = setting.SensitiveRulesToJSONString()
+	common.OptionMap["SensitiveRuleChannelIds"] = setting.SensitiveRuleChannelIdsToJSONString()
 	common.OptionMap["StreamCacheQueueLength"] = strconv.Itoa(setting.StreamCacheQueueLength)
 	common.OptionMap["AutomaticDisableKeywords"] = operation_setting.AutomaticDisableKeywordsToString()
 	common.OptionMap["AutomaticDisableStatusCodes"] = operation_setting.AutomaticDisableStatusCodesToString()
@@ -187,6 +206,16 @@ func InitOptionMap() {
 func loadOptionsFromDatabase() {
 	options, _ := AllOption()
 	for _, option := range options {
+		if option.Key == "AutomaticRetryStatusCodes" {
+			if normalized, migrated := operation_setting.NormalizeAutomaticRetryStatusCodesOption(option.Value); migrated {
+				if err := DB.Model(&Option{}).
+					Where("key = ? AND value = ?", option.Key, option.Value).
+					Update("value", normalized).Error; err != nil {
+					common.SysLog("failed to migrate legacy automatic retry status codes: " + err.Error())
+				}
+				option.Value = normalized
+			}
+		}
 		err := updateOptionMap(option.Key, option.Value)
 		if err != nil {
 			common.SysLog("failed to update option map: " + err.Error())
@@ -306,6 +335,8 @@ func updateOptionMap(key string, value string) (err error) {
 			common.AutomaticEnableChannelEnabled = boolValue
 		case "LogConsumeEnabled":
 			common.LogConsumeEnabled = boolValue
+		case "ForceRecordLogIpEnabled":
+			common.ForceRecordLogIpEnabled = boolValue
 		case "DisplayInCurrencyEnabled":
 			// 兼容旧字段：同步到新配置 general_setting.quota_display_type（运行时生效）
 			// true -> USD, false -> TOKENS
@@ -418,6 +449,36 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.CreemTestMode = value == "true"
 	case "CreemWebhookSecret":
 		setting.CreemWebhookSecret = value
+	case "BepusdtApiUrl":
+		setting.BepusdtApiUrl = value
+	case "BepusdtAuthToken":
+		setting.BepusdtAuthToken = value
+	case "BepusdtUnitPrice":
+		setting.BepusdtUnitPrice, _ = strconv.ParseFloat(value, 64)
+	case "BepusdtMinTopUp":
+		setting.BepusdtMinTopUp, _ = strconv.Atoi(value)
+	case "BepusdtTimeout":
+		setting.BepusdtTimeout, _ = strconv.Atoi(value)
+	case "BepusdtChains":
+		setting.BepusdtChains = value
+	case "OkpayGatewayUrl":
+		setting.OkpayGatewayUrl = value
+	case "OkpayMerchantId":
+		setting.OkpayMerchantId = value
+	case "OkpayMerchantToken":
+		setting.OkpayMerchantToken = value
+	case "OkpayExchangeRate":
+		setting.OkpayExchangeRate, _ = strconv.ParseFloat(value, 64)
+	case "OkpayAutoExchangeEnabled":
+		setting.OkpayAutoExchangeEnabled = value == "true"
+	case "OkpayUsdtCnyRate":
+		setting.OkpayUsdtCnyRate, _ = strconv.ParseFloat(value, 64)
+	case "OkpayRateApiUrl":
+		setting.OkpayRateApiUrl = value
+	case "OkpayMinTopUp":
+		setting.OkpayMinTopUp, _ = strconv.Atoi(value)
+	case "OkpayCoin":
+		setting.OkpayCoin = value
 	case "WaffoEnabled":
 		setting.WaffoEnabled = value == "true"
 	case "WaffoApiKey":
@@ -512,6 +573,8 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.ModelRequestRateLimitSuccessCount, _ = strconv.Atoi(value)
 	case "ModelRequestRateLimitGroup":
 		err = setting.UpdateModelRequestRateLimitGroupByJSONString(value)
+	case "ModelRequestRateLimitUserGroup":
+		err = setting.UpdateModelRequestRateLimitUserGroupByJSONString(value)
 	case "RetryTimes":
 		common.RetryTimes, _ = strconv.Atoi(value)
 	case "DataExportInterval":
@@ -552,6 +615,10 @@ func updateOptionMap(key string, value string) (err error) {
 		common.QuotaPerUnit, _ = strconv.ParseFloat(value, 64)
 	case "SensitiveWords":
 		setting.SensitiveWordsFromString(value)
+	case "SensitiveRules":
+		err = setting.UpdateSensitiveRulesByJSONString(value)
+	case "SensitiveRuleChannelIds":
+		err = setting.UpdateSensitiveRuleChannelIdsByJSONString(value)
 	case "AutomaticDisableKeywords":
 		operation_setting.AutomaticDisableKeywordsFromString(value)
 	case "AutomaticDisableStatusCodes":

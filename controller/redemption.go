@@ -83,6 +83,13 @@ func AddRedemption(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgRedemptionCountMax)
 		return
 	}
+	if redemption.MaxRedeemCount <= 0 {
+		redemption.MaxRedeemCount = 1
+	}
+	if redemption.MaxRedeemCount > 100000 {
+		common.ApiErrorMsg(c, "兑换次数不能超过 100000")
+		return
+	}
 	if valid, msg := validateExpiredTime(c, redemption.ExpiredTime); !valid {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 		return
@@ -91,12 +98,13 @@ func AddRedemption(c *gin.Context) {
 	for i := 0; i < redemption.Count; i++ {
 		key := common.GetUUID()
 		cleanRedemption := model.Redemption{
-			UserId:      c.GetInt("id"),
-			Name:        redemption.Name,
-			Key:         key,
-			CreatedTime: common.GetTimestamp(),
-			Quota:       redemption.Quota,
-			ExpiredTime: redemption.ExpiredTime,
+			UserId:         c.GetInt("id"),
+			Name:           redemption.Name,
+			Key:            key,
+			CreatedTime:    common.GetTimestamp(),
+			Quota:          redemption.Quota,
+			ExpiredTime:    redemption.ExpiredTime,
+			MaxRedeemCount: redemption.MaxRedeemCount,
 		}
 		err = cleanRedemption.Insert()
 		if err != nil {
@@ -154,6 +162,21 @@ func UpdateRedemption(c *gin.Context) {
 		cleanRedemption.Name = redemption.Name
 		cleanRedemption.Quota = redemption.Quota
 		cleanRedemption.ExpiredTime = redemption.ExpiredTime
+		if redemption.MaxRedeemCount <= 0 {
+			redemption.MaxRedeemCount = 1
+		}
+		if redemption.MaxRedeemCount > 100000 {
+			common.ApiErrorMsg(c, "兑换次数不能超过 100000")
+			return
+		}
+		if redemption.MaxRedeemCount < cleanRedemption.RedeemedCount {
+			common.ApiErrorMsg(c, "兑换次数不能小于已兑换次数")
+			return
+		}
+		cleanRedemption.MaxRedeemCount = redemption.MaxRedeemCount
+		if cleanRedemption.Status == common.RedemptionCodeStatusUsed && cleanRedemption.RedeemedCount < cleanRedemption.MaxRedeemCount {
+			cleanRedemption.Status = common.RedemptionCodeStatusEnabled
+		}
 	}
 	if statusOnly != "" {
 		cleanRedemption.Status = redemption.Status

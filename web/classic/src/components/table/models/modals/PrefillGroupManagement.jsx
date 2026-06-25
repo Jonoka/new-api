@@ -64,6 +64,7 @@ const PrefillGroupManagement = ({ visible, onClose }) => {
     { label: t('模型组'), value: 'model' },
     { label: t('标签组'), value: 'tag' },
     { label: t('端点组'), value: 'endpoint' },
+    { label: t('屏蔽词组'), value: 'sensitive_word' },
   ];
 
   // 加载组列表

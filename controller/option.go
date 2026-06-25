@@ -277,6 +277,33 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "ModelRequestRateLimitUserGroup":
+		err = setting.CheckModelRequestRateLimitUserGroup(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+	case "SensitiveRules":
+		err = setting.CheckSensitiveRulesJSONString(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "敏感词规则设置失败: " + err.Error(),
+			})
+			return
+		}
+	case "SensitiveRuleChannelIds":
+		err = setting.CheckSensitiveRuleChannelIdsJSONString(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "敏感词渠道设置失败: " + err.Error(),
+			})
+			return
+		}
 	case "AutomaticDisableStatusCodes":
 		_, err = operation_setting.ParseHTTPStatusCodeRanges(option.Value.(string))
 		if err != nil {

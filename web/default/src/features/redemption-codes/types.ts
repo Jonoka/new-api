@@ -33,6 +33,8 @@ export const redemptionSchema = z.object({
   redeemed_time: z.number(),
   expired_time: z.number(), // 0 for never expires
   used_user_id: z.number(),
+  max_redeem_count: z.number().optional(),
+  redeemed_count: z.number().optional(),
 })
 
 export type Redemption = z.infer<typeof redemptionSchema>
@@ -74,8 +76,59 @@ export interface RedemptionFormData {
   name: string
   quota: number
   expired_time: number
+  max_redeem_count?: number
   count?: number // Only for create
   status?: number // Only for status update
+}
+
+export const promoCodeSchema = z.object({
+  id: z.number(),
+  user_id: z.number(),
+  name: z.string(),
+  code: z.string(),
+  status: z.number(),
+  discount_type: z.enum(['percent', 'fixed']),
+  discount_value: z.number(),
+  applies_to_topup: z.boolean(),
+  applies_to_all_subscription: z.boolean(),
+  subscription_plan_ids: z.string(),
+  max_redeem_count: z.number(),
+  redeemed_count: z.number(),
+  created_time: z.number(),
+  updated_time: z.number(),
+  expired_time: z.number(),
+})
+
+export type PromoCode = z.infer<typeof promoCodeSchema>
+
+export interface PromoCodeFormData {
+  id?: number
+  name: string
+  code: string
+  status?: number
+  discount_type: 'percent' | 'fixed'
+  discount_value: number
+  applies_to_topup: boolean
+  applies_to_all_subscription: boolean
+  subscription_plan_ids: string
+  max_redeem_count: number
+  expired_time: number
+}
+
+export interface GetPromoCodesParams {
+  p?: number
+  page_size?: number
+}
+
+export interface GetPromoCodesResponse {
+  success: boolean
+  message?: string
+  data?: {
+    items: PromoCode[]
+    total: number
+    page: number
+    page_size: number
+  }
 }
 
 // ============================================================================

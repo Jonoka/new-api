@@ -27,6 +27,7 @@ import {
   Select,
   Divider,
   Tooltip,
+  Input,
 } from '@douyinfe/semi-ui';
 import { Crown, CalendarClock, Package } from 'lucide-react';
 import { SiStripe } from 'react-icons/si';
@@ -53,6 +54,11 @@ const SubscriptionPurchaseModal = ({
   enableStripeTopUp = false,
   enableCreemTopUp = false,
   purchaseLimitInfo = null,
+  promoCode,
+  setPromoCode,
+  promoDiscount,
+  amountLoading = false,
+  onPromoCodeBlur,
   onPayStripe,
   onPayCreem,
   onPayEpay,
@@ -61,9 +67,22 @@ const SubscriptionPurchaseModal = ({
   const totalAmount = Number(plan?.total_amount || 0);
   const { symbol, rate } = getCurrencyConfig();
   const price = plan ? Number(plan.price_amount || 0) : 0;
-  const convertedPrice = price * rate;
+  const hasPromoDiscount =
+    promoDiscount && Number(promoDiscount.discount_amount || 0) > 0;
+  const paidPrice = hasPromoDiscount
+    ? Number(promoDiscount.paid_amount || 0)
+    : price;
+  const convertedPrice = paidPrice * rate;
   const displayPrice = convertedPrice.toFixed(
     Number.isInteger(convertedPrice) ? 0 : 2,
+  );
+  const originalPrice = Number(promoDiscount?.original_amount || price);
+  const discountAmount = Number(promoDiscount?.discount_amount || 0);
+  const displayOriginalPrice = (originalPrice * rate).toFixed(
+    Number.isInteger(originalPrice * rate) ? 0 : 2,
+  );
+  const displayDiscountAmount = (discountAmount * rate).toFixed(
+    Number.isInteger(discountAmount * rate) ? 0 : 2,
   );
   // 只有当管理员开启支付网关 AND 套餐配置了对应的支付ID时才显示
   const hasStripe = enableStripeTopUp && !!plan?.stripe_price_id;
@@ -161,10 +180,56 @@ const SubscriptionPurchaseModal = ({
                 <Text strong className='text-slate-700 dark:text-slate-200'>
                   {t('应付金额')}：
                 </Text>
-                <Text strong className='text-xl text-purple-600'>
-                  {symbol}
-                  {displayPrice}
+                {amountLoading ? (
+                  <Text type='tertiary'>{t('计算中')}</Text>
+                ) : (
+                  <div className='flex items-baseline space-x-2'>
+                    <Text strong className='text-xl text-purple-600'>
+                      {symbol}
+                      {displayPrice}
+                    </Text>
+                    {hasPromoDiscount && (
+                      <Text size='small' className='text-rose-500'>
+                        {t('已优惠')}
+                      </Text>
+                    )}
+                  </div>
+                )}
+              </div>
+              {hasPromoDiscount && !amountLoading && (
+                <>
+                  <div className='flex justify-between items-center'>
+                    <Text className='text-slate-500 dark:text-slate-400'>
+                      {t('原价')}：
+                    </Text>
+                    <Text delete className='text-slate-500 dark:text-slate-400'>
+                      {symbol}
+                      {displayOriginalPrice}
+                    </Text>
+                  </div>
+                  <div className='flex justify-between items-center'>
+                    <Text className='text-slate-500 dark:text-slate-400'>
+                      {t('优惠')}：
+                    </Text>
+                    <Text className='text-emerald-600 dark:text-emerald-400'>
+                      - {symbol}
+                      {displayDiscountAmount}
+                    </Text>
+                  </div>
+                </>
+              )}
+              <div className='flex justify-between items-center gap-3'>
+                <Text strong className='text-slate-700 dark:text-slate-200'>
+                  {t('优惠码')}：
                 </Text>
+                <Input
+                  value={promoCode}
+                  onChange={setPromoCode}
+                  onBlur={onPromoCodeBlur}
+                  placeholder={t('可选')}
+                  size='small'
+                  style={{ width: 180 }}
+                />
               </div>
             </div>
           </Card>

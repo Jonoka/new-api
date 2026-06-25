@@ -26,6 +26,13 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
+	if isResponsesSSEBody(responseBody) {
+		converted, convErr := convertResponsesSSEToJSON(responseBody)
+		if convErr != nil {
+			return nil, types.NewOpenAIError(convErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+		}
+		responseBody = converted
+	}
 	err = common.Unmarshal(responseBody, &responsesResponse)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
@@ -33,6 +40,7 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	if oaiError := responsesResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
+	service.BindOpenAIResponsesContinuationResponseIDFromInfo(info, responsesResponse.ID)
 
 	if responsesResponse.HasImageGenerationCall() {
 		c.Set("image_generation_call", true)
@@ -45,14 +53,7 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 
 	// compute usage
 	usage := dto.Usage{}
-	if responsesResponse.Usage != nil {
-		usage.PromptTokens = responsesResponse.Usage.InputTokens
-		usage.CompletionTokens = responsesResponse.Usage.OutputTokens
-		usage.TotalTokens = responsesResponse.Usage.TotalTokens
-		if responsesResponse.Usage.InputTokensDetails != nil {
-			usage.PromptTokensDetails.CachedTokens = responsesResponse.Usage.InputTokensDetails.CachedTokens
-		}
-	}
+	applyResponsesUsageToOpenAIUsage(&usage, &responsesResponse)
 	if info == nil || info.ResponsesUsageInfo == nil || info.ResponsesUsageInfo.BuiltInTools == nil {
 		return &usage, nil
 	}
@@ -80,32 +81,33 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	var responseTextBuilder strings.Builder
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+		if c.GetBool("sensitive_response_stream_blocked") {
+			sr.Stop(service.ErrSensitiveResponseBlocked)
+			return
+		}
 
 		// 检查当前数据是否包含 completed 状态和 usage 信息
-		var streamResponse dto.ResponsesStreamResponse
-		if err := common.UnmarshalJsonStr(data, &streamResponse); err != nil {
+		streamResponse, normalizedData, ok, err := parseResponsesStreamEventData(data)
+		if !ok {
+			return
+		}
+		if err != nil {
 			logger.LogError(c, "failed to unmarshal stream response: "+err.Error())
 			sr.Error(err)
 			return
 		}
-		sendResponsesStreamData(c, streamResponse, data)
+		sendResponsesStreamData(c, streamResponse, normalizedData)
+		if c.GetBool("sensitive_response_stream_blocked") {
+			sr.Stop(service.ErrSensitiveResponseBlocked)
+			return
+		}
 		switch streamResponse.Type {
-		case "response.completed":
+		case "response.completed", "response.done", "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
 			if streamResponse.Response != nil {
-				if streamResponse.Response.Usage != nil {
-					if streamResponse.Response.Usage.InputTokens != 0 {
-						usage.PromptTokens = streamResponse.Response.Usage.InputTokens
-					}
-					if streamResponse.Response.Usage.OutputTokens != 0 {
-						usage.CompletionTokens = streamResponse.Response.Usage.OutputTokens
-					}
-					if streamResponse.Response.Usage.TotalTokens != 0 {
-						usage.TotalTokens = streamResponse.Response.Usage.TotalTokens
-					}
-					if streamResponse.Response.Usage.InputTokensDetails != nil {
-						usage.PromptTokensDetails.CachedTokens = streamResponse.Response.Usage.InputTokensDetails.CachedTokens
-					}
+				if streamResponse.Type == "response.completed" || streamResponse.Type == "response.done" {
+					service.BindOpenAIResponsesContinuationResponseIDFromInfo(info, streamResponse.Response.ID)
 				}
+				applyResponsesUsageToOpenAIUsage(usage, streamResponse.Response)
 				if streamResponse.Response.HasImageGenerationCall() {
 					c.Set("image_generation_call", true)
 					c.Set("image_generation_call_quality", streamResponse.Response.GetQuality())
@@ -144,7 +146,9 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		usage.PromptTokens = info.GetEstimatePromptTokens()
 	}
 
-	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	if usage.TotalTokens == 0 {
+		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	}
 
 	return usage, nil
 }

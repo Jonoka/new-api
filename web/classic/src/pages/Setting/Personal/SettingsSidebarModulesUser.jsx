@@ -73,6 +73,7 @@ export default function SettingsSidebarModulesUser() {
       defaultConfig.chat = {
         enabled: true,
         playground: isSidebarModuleAllowed('chat', 'playground'),
+        canvas: isSidebarModuleAllowed('chat', 'canvas'),
         chat: isSidebarModuleAllowed('chat', 'chat'),
       };
     }
@@ -86,6 +87,7 @@ export default function SettingsSidebarModulesUser() {
         log: isSidebarModuleAllowed('console', 'log'),
         midjourney: isSidebarModuleAllowed('console', 'midjourney'),
         task: isSidebarModuleAllowed('console', 'task'),
+        game_center: isSidebarModuleAllowed('console', 'game_center'),
       };
     }
 
@@ -94,6 +96,7 @@ export default function SettingsSidebarModulesUser() {
       defaultConfig.personal = {
         enabled: true,
         topup: isSidebarModuleAllowed('personal', 'topup'),
+        affiliate: isSidebarModuleAllowed('personal', 'affiliate'),
         personal: isSidebarModuleAllowed('personal', 'personal'),
       };
     }
@@ -106,7 +109,9 @@ export default function SettingsSidebarModulesUser() {
         models: isSidebarModuleAllowed('admin', 'models'),
         deployment: isSidebarModuleAllowed('admin', 'deployment'),
         redemption: isSidebarModuleAllowed('admin', 'redemption'),
+        game_management: isSidebarModuleAllowed('admin', 'game_management'),
         user: isSidebarModuleAllowed('admin', 'user'),
+        affiliate_admin: isSidebarModuleAllowed('admin', 'affiliate_admin'),
         setting: isSidebarModuleAllowed('admin', 'setting'),
       };
     }
@@ -300,6 +305,11 @@ export default function SettingsSidebarModulesUser() {
           title: t('操练场'),
           description: t('AI模型测试环境'),
         },
+        {
+          key: 'canvas',
+          title: t('无限画布'),
+          description: t('选择分组后打开无限画布'),
+        },
         { key: 'chat', title: t('聊天'), description: t('聊天会话管理') },
       ],
     },
@@ -317,6 +327,11 @@ export default function SettingsSidebarModulesUser() {
           description: t('绘图任务记录'),
         },
         { key: 'task', title: t('任务日志'), description: t('系统任务记录') },
+        {
+          key: 'game_center',
+          title: t('游戏中心'),
+          description: t('游戏钱包、预测局和参与入口'),
+        },
       ],
     },
     {
@@ -325,6 +340,11 @@ export default function SettingsSidebarModulesUser() {
       description: t('用户个人功能'),
       modules: [
         { key: 'topup', title: t('钱包管理'), description: t('余额充值管理') },
+        {
+          key: 'affiliate',
+          title: t('返佣分成'),
+          description: t('邀请返佣与提现管理'),
+        },
         {
           key: 'personal',
           title: t('个人设置'),
@@ -346,10 +366,20 @@ export default function SettingsSidebarModulesUser() {
         },
         {
           key: 'redemption',
-          title: t('兑换码管理'),
-          description: t('兑换码生成管理'),
+          title: t('营销福利'),
+          description: t('兑换码和优惠码管理'),
+        },
+        {
+          key: 'game_management',
+          title: t('游戏管理'),
+          description: t('预测局创建与结算'),
         },
         { key: 'user', title: t('用户管理'), description: t('用户账户管理') },
+        {
+          key: 'affiliate_admin',
+          title: t('返佣分成设置'),
+          description: t('返佣配置与提现审核'),
+        },
         {
           key: 'setting',
           title: t('系统设置'),

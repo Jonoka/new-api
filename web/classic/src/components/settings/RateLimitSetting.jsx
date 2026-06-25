@@ -32,6 +32,7 @@ const RateLimitSetting = () => {
     ModelRequestRateLimitSuccessCount: 1000,
     ModelRequestRateLimitDurationMinutes: 1,
     ModelRequestRateLimitGroup: '',
+    ModelRequestRateLimitUserGroup: '',
   });
 
   let [loading, setLoading] = useState(false);
@@ -42,8 +43,13 @@ const RateLimitSetting = () => {
     if (success) {
       let newInputs = {};
       data.forEach((item) => {
-        if (item.key === 'ModelRequestRateLimitGroup') {
-          item.value = JSON.stringify(JSON.parse(item.value), null, 2);
+        if (
+          item.key === 'ModelRequestRateLimitGroup' ||
+          item.key === 'ModelRequestRateLimitUserGroup'
+        ) {
+          item.value = item.value
+            ? JSON.stringify(JSON.parse(item.value), null, 2)
+            : '';
         }
 
         if (item.key.endsWith('Enabled')) {

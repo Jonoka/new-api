@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -41,10 +42,24 @@ func TestMain(m *testing.M) {
 		&Log{},
 		&Channel{},
 		&Ability{},
+		&Redemption{},
+		&RedemptionUsage{},
+		&PromoCode{},
+		&PromoCodeUsage{},
 		&TopUp{},
 		&SubscriptionPlan{},
 		&SubscriptionOrder{},
 		&UserSubscription{},
+		&UserIPRecord{},
+		&AffiliateRecord{},
+		&AffiliateBalance{},
+		&AffiliatePayoutAccount{},
+		&AffiliateWithdrawal{},
+		&AffiliateApplication{},
+		&AffiliateFraudAlert{},
+		&AffiliateRiskUser{},
+		&AffiliateRiskEvent{},
+		&AffiliateRiskDetachedInvitee{},
 		&PerfMetric{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
@@ -62,10 +77,24 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM logs")
 		DB.Exec("DELETE FROM channels")
 		DB.Exec("DELETE FROM abilities")
+		DB.Exec("DELETE FROM redemptions")
+		DB.Exec("DELETE FROM redemption_usages")
+		DB.Exec("DELETE FROM promo_codes")
+		DB.Exec("DELETE FROM promo_code_usages")
 		DB.Exec("DELETE FROM top_ups")
 		DB.Exec("DELETE FROM subscription_orders")
 		DB.Exec("DELETE FROM subscription_plans")
 		DB.Exec("DELETE FROM user_subscriptions")
+		DB.Exec("DELETE FROM user_ip_records")
+		DB.Exec("DELETE FROM affiliate_records")
+		DB.Exec("DELETE FROM affiliate_balances")
+		DB.Exec("DELETE FROM affiliate_payout_accounts")
+		DB.Exec("DELETE FROM affiliate_withdrawals")
+		DB.Exec("DELETE FROM affiliate_applications")
+		DB.Exec("DELETE FROM affiliate_fraud_alerts")
+		DB.Exec("DELETE FROM affiliate_risk_detached_invitees")
+		DB.Exec("DELETE FROM affiliate_risk_events")
+		DB.Exec("DELETE FROM affiliate_risk_users")
 		DB.Exec("DELETE FROM perf_metrics")
 	})
 }
@@ -233,4 +262,28 @@ func TestUpdateWithStatus_ConcurrentWinner(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 1, winCount, "exactly one goroutine should win the CAS")
+}
+
+func TestGetAllUnFinishSyncTasksSkipsCanvasImageWrapperTasks(t *testing.T) {
+	truncateTables(t)
+
+	insertTask(t, &Task{
+		TaskID:    "task_canvas_wrapper",
+		Platform:  constant.TaskPlatformCanvasImage,
+		Status:    TaskStatusInProgress,
+		Progress:  "10%",
+		ChannelId: 0,
+	})
+	insertTask(t, &Task{
+		TaskID:    "task_upstream",
+		Platform:  constant.TaskPlatform("1"),
+		Status:    TaskStatusInProgress,
+		Progress:  "10%",
+		ChannelId: 12,
+	})
+
+	tasks := GetAllUnFinishSyncTasks(100)
+
+	require.Len(t, tasks, 1)
+	assert.Equal(t, "task_upstream", tasks[0].TaskID)
 }

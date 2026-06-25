@@ -79,7 +79,13 @@ func ResetProxyClientCache() {
 			transport.CloseIdleConnections()
 		}
 	}
+	for _, client := range claudeCodeTransportClients {
+		if transport, ok := client.Transport.(*http.Transport); ok && transport != nil {
+			transport.CloseIdleConnections()
+		}
+	}
 	proxyClients = make(map[string]*http.Client)
+	claudeCodeTransportClients = make(map[string]*http.Client)
 }
 
 // NewProxyHttpClient 创建支持代理的 HTTP 客户端

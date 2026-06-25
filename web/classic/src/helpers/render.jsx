@@ -66,12 +66,14 @@ import {
 import {
   LayoutDashboard,
   TerminalSquare,
+  Brush,
   MessageSquare,
   Key,
   BarChart3,
   Image as ImageIcon,
   CheckSquare,
   CreditCard,
+  HandCoins,
   Layers,
   Gift,
   User,
@@ -80,6 +82,7 @@ import {
   Package,
   Server,
   CalendarClock,
+  Trophy,
 } from 'lucide-react';
 import {
   SiAtlassian,
@@ -125,6 +128,8 @@ export function getLucideIcon(key, selected = false) {
       return <LayoutDashboard {...commonProps} color={iconColor} />;
     case 'playground':
       return <TerminalSquare {...commonProps} color={iconColor} />;
+    case 'canvas':
+      return <Brush {...commonProps} color={iconColor} />;
     case 'chat':
       return <MessageSquare {...commonProps} color={iconColor} />;
     case 'token':
@@ -135,8 +140,14 @@ export function getLucideIcon(key, selected = false) {
       return <ImageIcon {...commonProps} color={iconColor} />;
     case 'task':
       return <CheckSquare {...commonProps} color={iconColor} />;
+    case 'game_center':
+    case 'game_management':
+      return <Trophy {...commonProps} color={iconColor} />;
     case 'topup':
       return <CreditCard {...commonProps} color={iconColor} />;
+    case 'affiliate':
+    case 'affiliate_admin':
+      return <HandCoins {...commonProps} color={iconColor} />;
     case 'channel':
       return <Layers {...commonProps} color={iconColor} />;
     case 'redemption':

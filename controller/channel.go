@@ -79,12 +79,15 @@ func applyChannelStatusFilter(query *gorm.DB, statusFilter int) *gorm.DB {
 	return query
 }
 
-func buildChannelListQuery(group string, statusFilter int, typeFilter int) *gorm.DB {
+func buildChannelListQuery(group string, statusFilter int, typeFilter int, vendorFilter int) *gorm.DB {
 	query := model.DB.Model(&model.Channel{})
 	query = model.ApplyChannelGroupFilter(query, group)
 	query = applyChannelStatusFilter(query, statusFilter)
 	if typeFilter >= 0 {
 		query = query.Where("type = ?", typeFilter)
+	}
+	if vendorFilter > 0 {
+		query = query.Where("vendor_id = ?", vendorFilter)
 	}
 	return query
 }
@@ -107,17 +110,24 @@ func GetAllChannels(c *gin.Context) {
 			typeFilter = t
 		}
 	}
+	vendorStr := c.Query("vendor")
+	vendorFilter := -1
+	if vendorStr != "" {
+		if v, err := strconv.Atoi(vendorStr); err == nil {
+			vendorFilter = v
+		}
+	}
 
 	var total int64
 
 	if enableTagMode {
-		tags, err := model.GetPaginatedChannelTags(buildChannelListQuery(groupFilter, statusFilter, typeFilter), pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+		tags, err := model.GetPaginatedChannelTags(buildChannelListQuery(groupFilter, statusFilter, typeFilter, vendorFilter), pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 		if err != nil {
 			common.SysError("failed to get paginated tags: " + err.Error())
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取标签失败，请稍后重试"})
 			return
 		}
-		total, err = model.CountChannelTags(buildChannelListQuery(groupFilter, statusFilter, typeFilter))
+		total, err = model.CountChannelTags(buildChannelListQuery(groupFilter, statusFilter, typeFilter, vendorFilter))
 		if err != nil {
 			common.SysError("failed to count tags: " + err.Error())
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取标签数量失败，请稍后重试"})
@@ -128,7 +138,7 @@ func GetAllChannels(c *gin.Context) {
 				continue
 			}
 			var tagChannels []*model.Channel
-			err := sortOptions.Apply(buildChannelListQuery(groupFilter, statusFilter, typeFilter).Where("tag = ?", *tag)).
+			err := sortOptions.Apply(buildChannelListQuery(groupFilter, statusFilter, typeFilter, vendorFilter).Where("tag = ?", *tag)).
 				Omit("key").
 				Find(&tagChannels).Error
 			if err != nil {
@@ -139,13 +149,13 @@ func GetAllChannels(c *gin.Context) {
 			channelData = append(channelData, tagChannels...)
 		}
 	} else {
-		if err := buildChannelListQuery(groupFilter, statusFilter, typeFilter).Count(&total).Error; err != nil {
+		if err := buildChannelListQuery(groupFilter, statusFilter, typeFilter, vendorFilter).Count(&total).Error; err != nil {
 			common.SysError("failed to count channels: " + err.Error())
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取渠道数量失败，请稍后重试"})
 			return
 		}
 
-		err := sortOptions.Apply(buildChannelListQuery(groupFilter, statusFilter, typeFilter)).
+		err := sortOptions.Apply(buildChannelListQuery(groupFilter, statusFilter, typeFilter, vendorFilter)).
 			Limit(pageInfo.GetPageSize()).
 			Offset(pageInfo.GetStartIdx()).
 			Omit("key").
@@ -161,7 +171,7 @@ func GetAllChannels(c *gin.Context) {
 		clearChannelInfo(datum)
 	}
 
-	countQuery := buildChannelListQuery(groupFilter, statusFilter, -1)
+	countQuery := buildChannelListQuery(groupFilter, statusFilter, -1, vendorFilter)
 	var results []struct {
 		Type  int64
 		Count int64
@@ -175,12 +185,30 @@ func GetAllChannels(c *gin.Context) {
 	for _, r := range results {
 		typeCounts[r.Type] = r.Count
 	}
+	vendorCountQuery := buildChannelListQuery(groupFilter, statusFilter, typeFilter, -1)
+	var vendorResults []struct {
+		VendorID *int
+		Count    int64
+	}
+	if err := vendorCountQuery.Select("vendor_id, count(*) as count").Group("vendor_id").Find(&vendorResults).Error; err != nil {
+		common.SysError("failed to count channel vendors: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取渠道供应商统计失败，请稍后重试"})
+		return
+	}
+	vendorCounts := make(map[string]int64)
+	for _, r := range vendorResults {
+		if r.VendorID == nil || *r.VendorID <= 0 {
+			continue
+		}
+		vendorCounts[strconv.Itoa(*r.VendorID)] = r.Count
+	}
 	common.ApiSuccess(c, gin.H{
-		"items":       channelData,
-		"total":       total,
-		"page":        pageInfo.GetPage(),
-		"page_size":   pageInfo.GetPageSize(),
-		"type_counts": typeCounts,
+		"items":         channelData,
+		"total":         total,
+		"page":          pageInfo.GetPage(),
+		"page_size":     pageInfo.GetPageSize(),
+		"type_counts":   typeCounts,
+		"vendor_counts": vendorCounts,
 	})
 	return
 }
@@ -263,6 +291,13 @@ func SearchChannels(c *gin.Context) {
 	modelKeyword := c.Query("model")
 	statusParam := c.Query("status")
 	statusFilter := parseStatusFilter(statusParam)
+	vendorParam := c.Query("vendor")
+	vendorFilter := -1
+	if vendorParam != "" {
+		if v, err := strconv.Atoi(vendorParam); err == nil {
+			vendorFilter = v
+		}
+	}
 	idSort, _ := strconv.ParseBool(c.Query("id_sort"))
 	sortOptions := model.NewChannelSortOptions(c.Query("sort_by"), c.Query("sort_order"), idSort)
 	enableTagMode, _ := strconv.ParseBool(c.Query("tag_mode"))
@@ -279,7 +314,7 @@ func SearchChannels(c *gin.Context) {
 		for _, tag := range tags {
 			if tag != nil && *tag != "" {
 				var tagChannels []*model.Channel
-				err := sortOptions.Apply(buildChannelListQuery(group, -1, -1).Where("tag = ?", *tag)).
+				err := sortOptions.Apply(buildChannelListQuery(group, -1, -1, -1).Where("tag = ?", *tag)).
 					Omit("key").
 					Find(&tagChannels).Error
 				if err != nil {
@@ -342,6 +377,24 @@ func SearchChannels(c *gin.Context) {
 		channelData = filtered
 	}
 
+	vendorCounts := make(map[string]int64)
+	for _, channel := range channelData {
+		if channel.VendorID == nil || *channel.VendorID <= 0 {
+			continue
+		}
+		vendorCounts[strconv.Itoa(*channel.VendorID)]++
+	}
+
+	if vendorFilter > 0 {
+		filtered := make([]*model.Channel, 0, len(channelData))
+		for _, ch := range channelData {
+			if ch.VendorID != nil && *ch.VendorID == vendorFilter {
+				filtered = append(filtered, ch)
+			}
+		}
+		channelData = filtered
+	}
+
 	page, _ := strconv.Atoi(c.DefaultQuery("p", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	if page < 1 {
@@ -371,9 +424,10 @@ func SearchChannels(c *gin.Context) {
 		"success": true,
 		"message": "",
 		"data": gin.H{
-			"items":       pagedData,
-			"total":       total,
-			"type_counts": typeCounts,
+			"items":         pagedData,
+			"total":         total,
+			"type_counts":   typeCounts,
+			"vendor_counts": vendorCounts,
 		},
 	})
 	return
@@ -455,6 +509,9 @@ func validateTwoFactorAuth(twoFA *model.TwoFA, code string) bool {
 
 // validateChannel 通用的渠道校验函数
 func validateChannel(channel *model.Channel, isAdd bool) error {
+	if channel != nil && channel.ConcurrencyLimit != nil && *channel.ConcurrencyLimit < 0 {
+		return fmt.Errorf("并发上限不能小于 0")
+	}
 	// 校验 channel settings
 	if err := channel.ValidateSettings(); err != nil {
 		return fmt.Errorf("渠道额外设置[channel setting] 格式错误：%s", err.Error())
@@ -716,15 +773,16 @@ func DeleteDisabledChannel(c *gin.Context) {
 }
 
 type ChannelTag struct {
-	Tag            string  `json:"tag"`
-	NewTag         *string `json:"new_tag"`
-	Priority       *int64  `json:"priority"`
-	Weight         *uint   `json:"weight"`
-	ModelMapping   *string `json:"model_mapping"`
-	Models         *string `json:"models"`
-	Groups         *string `json:"groups"`
-	ParamOverride  *string `json:"param_override"`
-	HeaderOverride *string `json:"header_override"`
+	Tag              string  `json:"tag"`
+	NewTag           *string `json:"new_tag"`
+	Priority         *int64  `json:"priority"`
+	Weight           *uint   `json:"weight"`
+	ConcurrencyLimit *int    `json:"concurrency_limit"`
+	ModelMapping     *string `json:"model_mapping"`
+	Models           *string `json:"models"`
+	Groups           *string `json:"groups"`
+	ParamOverride    *string `json:"param_override"`
+	HeaderOverride   *string `json:"header_override"`
 }
 
 func DisableTagChannels(c *gin.Context) {
@@ -812,7 +870,14 @@ func EditTagChannels(c *gin.Context) {
 		}
 		channelTag.HeaderOverride = common.GetPointer[string](trimmed)
 	}
-	err = model.EditChannelByTag(channelTag.Tag, channelTag.NewTag, channelTag.ModelMapping, channelTag.Models, channelTag.Groups, channelTag.Priority, channelTag.Weight, channelTag.ParamOverride, channelTag.HeaderOverride)
+	if channelTag.ConcurrencyLimit != nil && *channelTag.ConcurrencyLimit < 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "并发上限不能小于 0",
+		})
+		return
+	}
+	err = model.EditChannelByTag(channelTag.Tag, channelTag.NewTag, channelTag.ModelMapping, channelTag.Models, channelTag.Groups, channelTag.Priority, channelTag.Weight, channelTag.ConcurrencyLimit, channelTag.ParamOverride, channelTag.HeaderOverride)
 	if err != nil {
 		common.ApiError(c, err)
 		return

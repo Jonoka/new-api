@@ -34,6 +34,17 @@ import {
 } from '@douyinfe/semi-illustrations';
 import ScrollableContainer from '../common/ui/ScrollableContainer';
 
+const getTimeWindowLabel = (group) =>
+  group.timeWindowLabel || `${group.timeWindowHours || 24}H`;
+
+const getActiveTimeWindowLabel = (uptimeData, activeUptimeTab) => {
+  const activeGroup =
+    uptimeData.find((group) => group.categoryName === activeUptimeTab) ||
+    uptimeData[0];
+
+  return activeGroup ? getTimeWindowLabel(activeGroup) : '';
+};
+
 const UptimePanel = ({
   uptimeData,
   uptimeLoading,
@@ -46,6 +57,11 @@ const UptimePanel = ({
   ILLUSTRATION_SIZE,
   t,
 }) => {
+  const activeTimeWindowLabel = getActiveTimeWindowLabel(
+    uptimeData,
+    activeUptimeTab,
+  );
+
   return (
     <Card
       {...CARD_PROPS}
@@ -55,6 +71,11 @@ const UptimePanel = ({
           <div className='flex items-center gap-2'>
             <Gauge size={16} />
             {t('服务可用性')}
+            {activeTimeWindowLabel && (
+              <Tag color='blue' size='small' shape='circle'>
+                {t('最近{{window}}', { window: activeTimeWindowLabel })}
+              </Tag>
+            )}
           </div>
           <Button
             icon={<RefreshCw size={14} />}

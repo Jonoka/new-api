@@ -54,6 +54,7 @@ import {
   getChannelModels,
   copy,
   getChannelIcon,
+  getLobeHubIcon,
   getModelCategories,
   selectFilter,
 } from '../../../../helpers';
@@ -172,6 +173,7 @@ const EditChannelModal = (props) => {
   const originInputs = {
     name: '',
     type: 1,
+    vendor_id: 0,
     key: '',
     openai_organization: '',
     max_input_tokens: 0,
@@ -186,6 +188,7 @@ const EditChannelModal = (props) => {
     groups: ['default'],
     priority: 0,
     weight: 0,
+    concurrency_limit: 0,
     tag: '',
     multi_key_mode: 'random',
     // 渠道额外设置的默认值
@@ -210,11 +213,21 @@ const EditChannelModal = (props) => {
     allow_inference_geo: false,
     allow_speed: false,
     claude_beta_query: false,
+    claude_code_fingerprint_enabled: false,
+    claude_code_transport_fingerprint_enabled: false,
+    claude_code_version: '',
     upstream_model_update_check_enabled: false,
     upstream_model_update_auto_sync_enabled: false,
     upstream_model_update_last_check_time: 0,
     upstream_model_update_last_detected_models: [],
     upstream_model_update_ignored_models: '',
+    monitor_enabled: 'inherit',
+    monitor_test_interval_minutes: '',
+    monitor_response_time_threshold_seconds: '',
+    monitor_auto_disable_enabled: 'inherit',
+    monitor_auto_enable_enabled: 'inherit',
+    monitor_disable_threshold: '',
+    monitor_enable_threshold: '',
   };
   const [batch, setBatch] = useState(false);
   const [multiToSingle, setMultiToSingle] = useState(false);
@@ -566,6 +579,13 @@ const EditChannelModal = (props) => {
     handleInputChange('settings', settingsJson);
   };
 
+  const handleChannelMonitorSettingChange = (key, value) => {
+    setInputs((prev) => ({ ...prev, [key]: value }));
+    if (formApiRef.current) {
+      formApiRef.current.setValue(key, value);
+    }
+  };
+
   const applyClipboardConfig = (config) => {
     if (!config) return;
     setInputs((prev) => ({
@@ -911,6 +931,14 @@ const EditChannelModal = (props) => {
             parsedSettings.allow_inference_geo || false;
           data.allow_speed = parsedSettings.allow_speed || false;
           data.claude_beta_query = parsedSettings.claude_beta_query || false;
+          data.claude_code_fingerprint_enabled =
+            parsedSettings.claude_code_fingerprint_enabled === true;
+          data.claude_code_transport_fingerprint_enabled =
+            parsedSettings.claude_code_transport_fingerprint_enabled === true;
+          data.claude_code_version =
+            typeof parsedSettings.claude_code_version === 'string'
+              ? parsedSettings.claude_code_version
+              : '';
           data.upstream_model_update_check_enabled =
             parsedSettings.upstream_model_update_check_enabled === true;
           data.upstream_model_update_auto_sync_enabled =
@@ -927,6 +955,40 @@ const EditChannelModal = (props) => {
           )
             ? parsedSettings.upstream_model_update_ignored_models.join(',')
             : '';
+          data.monitor_enabled =
+            parsedSettings.monitor_enabled === true
+              ? 'enabled'
+              : parsedSettings.monitor_enabled === false
+                ? 'disabled'
+                : 'inherit';
+          data.monitor_test_interval_minutes =
+            typeof parsedSettings.monitor_test_interval_minutes === 'number'
+              ? String(parsedSettings.monitor_test_interval_minutes)
+              : '';
+          data.monitor_response_time_threshold_seconds =
+            typeof parsedSettings.monitor_response_time_threshold_seconds === 'number'
+              ? String(parsedSettings.monitor_response_time_threshold_seconds)
+              : '';
+          data.monitor_auto_disable_enabled =
+            parsedSettings.monitor_auto_disable_enabled === true
+              ? 'enabled'
+              : parsedSettings.monitor_auto_disable_enabled === false
+                ? 'disabled'
+                : 'inherit';
+          data.monitor_auto_enable_enabled =
+            parsedSettings.monitor_auto_enable_enabled === true
+              ? 'enabled'
+              : parsedSettings.monitor_auto_enable_enabled === false
+                ? 'disabled'
+                : 'inherit';
+          data.monitor_disable_threshold =
+            typeof parsedSettings.monitor_disable_threshold === 'number'
+              ? String(parsedSettings.monitor_disable_threshold)
+              : '';
+          data.monitor_enable_threshold =
+            typeof parsedSettings.monitor_enable_threshold === 'number'
+              ? String(parsedSettings.monitor_enable_threshold)
+              : '';
         } catch (error) {
           console.error('解析其他设置失败:', error);
           data.azure_responses_version = '';
@@ -941,11 +1003,21 @@ const EditChannelModal = (props) => {
           data.allow_inference_geo = false;
           data.allow_speed = false;
           data.claude_beta_query = false;
+          data.claude_code_fingerprint_enabled = false;
+          data.claude_code_transport_fingerprint_enabled = false;
+          data.claude_code_version = '';
           data.upstream_model_update_check_enabled = false;
           data.upstream_model_update_auto_sync_enabled = false;
           data.upstream_model_update_last_check_time = 0;
           data.upstream_model_update_last_detected_models = [];
           data.upstream_model_update_ignored_models = '';
+          data.monitor_enabled = 'inherit';
+          data.monitor_test_interval_minutes = '';
+          data.monitor_response_time_threshold_seconds = '';
+          data.monitor_auto_disable_enabled = 'inherit';
+          data.monitor_auto_enable_enabled = 'inherit';
+          data.monitor_disable_threshold = '';
+          data.monitor_enable_threshold = '';
         }
       } else {
         // 兼容历史数据：老渠道没有 settings 时，默认按 json 展示
@@ -959,11 +1031,21 @@ const EditChannelModal = (props) => {
         data.allow_inference_geo = false;
         data.allow_speed = false;
         data.claude_beta_query = false;
+        data.claude_code_fingerprint_enabled = false;
+        data.claude_code_transport_fingerprint_enabled = false;
+        data.claude_code_version = '';
         data.upstream_model_update_check_enabled = false;
         data.upstream_model_update_auto_sync_enabled = false;
         data.upstream_model_update_last_check_time = 0;
         data.upstream_model_update_last_detected_models = [];
         data.upstream_model_update_ignored_models = '';
+        data.monitor_enabled = 'inherit';
+        data.monitor_test_interval_minutes = '';
+        data.monitor_response_time_threshold_seconds = '';
+        data.monitor_auto_disable_enabled = 'inherit';
+        data.monitor_auto_enable_enabled = 'inherit';
+        data.monitor_disable_threshold = '';
+        data.monitor_enable_threshold = '';
       }
 
       if (
@@ -1031,13 +1113,25 @@ const EditChannelModal = (props) => {
         (data.remark && data.remark.trim()) ||
         (data.priority && data.priority !== 0) ||
         (data.weight && data.weight !== 0) ||
+        (data.concurrency_limit !== undefined &&
+          data.concurrency_limit !== null &&
+          data.concurrency_limit !== 0) ||
         (data.proxy && data.proxy.trim()) ||
         (data.system_prompt && data.system_prompt.trim()) ||
         data.thinking_to_content ||
         data.pass_through_body_enabled ||
         data.force_format ||
         data.claude_beta_query ||
-        data.system_prompt_override;
+        data.claude_code_fingerprint_enabled ||
+        data.claude_code_transport_fingerprint_enabled ||
+        data.system_prompt_override ||
+        data.monitor_enabled !== 'inherit' ||
+        (data.monitor_test_interval_minutes && data.monitor_test_interval_minutes.trim()) ||
+        (data.monitor_response_time_threshold_seconds && data.monitor_response_time_threshold_seconds.trim()) ||
+        data.monitor_auto_disable_enabled !== 'inherit' ||
+        data.monitor_auto_enable_enabled !== 'inherit' ||
+        (data.monitor_disable_threshold && data.monitor_disable_threshold.trim()) ||
+        (data.monitor_enable_threshold && data.monitor_enable_threshold.trim());
       if (hasAdvancedValues) {
         setAdvancedSettingsOpen(true);
       }
@@ -1795,12 +1889,41 @@ const EditChannelModal = (props) => {
           localInputs.allow_safety_identifier === true;
         settings.allow_include_obfuscation =
           localInputs.allow_include_obfuscation === true;
+        delete settings.allow_inference_geo;
+        delete settings.allow_speed;
+        delete settings.claude_beta_query;
+        delete settings.claude_code_fingerprint_enabled;
+        delete settings.claude_code_transport_fingerprint_enabled;
+        delete settings.claude_code_version;
       }
       if (localInputs.type === 14) {
+        delete settings.disable_store;
+        delete settings.allow_safety_identifier;
+        delete settings.allow_include_obfuscation;
         settings.allow_inference_geo = localInputs.allow_inference_geo === true;
         settings.allow_speed = localInputs.allow_speed === true;
         settings.claude_beta_query = localInputs.claude_beta_query === true;
+        settings.claude_code_fingerprint_enabled =
+          localInputs.claude_code_fingerprint_enabled === true;
+        settings.claude_code_transport_fingerprint_enabled =
+          localInputs.claude_code_transport_fingerprint_enabled === true;
+        if (localInputs.claude_code_version?.trim()) {
+          settings.claude_code_version = localInputs.claude_code_version.trim();
+        } else {
+          delete settings.claude_code_version;
+        }
       }
+    } else {
+      delete settings.allow_service_tier;
+      delete settings.disable_store;
+      delete settings.allow_safety_identifier;
+      delete settings.allow_include_obfuscation;
+      delete settings.allow_inference_geo;
+      delete settings.allow_speed;
+      delete settings.claude_beta_query;
+      delete settings.claude_code_fingerprint_enabled;
+      delete settings.claude_code_transport_fingerprint_enabled;
+      delete settings.claude_code_version;
     }
 
     settings.upstream_model_update_check_enabled =
@@ -1826,6 +1949,56 @@ const EditChannelModal = (props) => {
       settings.upstream_model_update_last_check_time = 0;
     }
 
+    const applyBooleanOverride = (key, value) => {
+      if (value === 'enabled') {
+        settings[key] = true;
+      } else if (value === 'disabled') {
+        settings[key] = false;
+      } else {
+        delete settings[key];
+      }
+    };
+    const applyNumberOverride = (key, value, integer = false) => {
+      const trimmed = String(value || '').trim();
+      if (!trimmed) {
+        delete settings[key];
+        return;
+      }
+      const parsed = integer ? parseInt(trimmed, 10) : Number(trimmed);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        settings[key] = parsed;
+      } else {
+        delete settings[key];
+      }
+    };
+    applyBooleanOverride('monitor_enabled', localInputs.monitor_enabled);
+    applyNumberOverride(
+      'monitor_test_interval_minutes',
+      localInputs.monitor_test_interval_minutes,
+    );
+    applyNumberOverride(
+      'monitor_response_time_threshold_seconds',
+      localInputs.monitor_response_time_threshold_seconds,
+    );
+    applyBooleanOverride(
+      'monitor_auto_disable_enabled',
+      localInputs.monitor_auto_disable_enabled,
+    );
+    applyBooleanOverride(
+      'monitor_auto_enable_enabled',
+      localInputs.monitor_auto_enable_enabled,
+    );
+    applyNumberOverride(
+      'monitor_disable_threshold',
+      localInputs.monitor_disable_threshold,
+      true,
+    );
+    applyNumberOverride(
+      'monitor_enable_threshold',
+      localInputs.monitor_enable_threshold,
+      true,
+    );
+
     localInputs.settings = JSON.stringify(settings);
 
     // 清理不需要发送到后端的字段
@@ -1848,11 +2021,21 @@ const EditChannelModal = (props) => {
     delete localInputs.allow_inference_geo;
     delete localInputs.allow_speed;
     delete localInputs.claude_beta_query;
+    delete localInputs.claude_code_fingerprint_enabled;
+    delete localInputs.claude_code_transport_fingerprint_enabled;
+    delete localInputs.claude_code_version;
     delete localInputs.upstream_model_update_check_enabled;
     delete localInputs.upstream_model_update_auto_sync_enabled;
     delete localInputs.upstream_model_update_last_check_time;
     delete localInputs.upstream_model_update_last_detected_models;
     delete localInputs.upstream_model_update_ignored_models;
+    delete localInputs.monitor_enabled;
+    delete localInputs.monitor_test_interval_minutes;
+    delete localInputs.monitor_response_time_threshold_seconds;
+    delete localInputs.monitor_auto_disable_enabled;
+    delete localInputs.monitor_auto_enable_enabled;
+    delete localInputs.monitor_disable_threshold;
+    delete localInputs.monitor_enable_threshold;
 
     let res;
     localInputs.auto_ban = localInputs.auto_ban ? 1 : 0;
@@ -2086,6 +2269,18 @@ const EditChannelModal = (props) => {
     [],
   );
 
+  const vendorOptionList = useMemo(
+    () => [
+      { label: t('无供应商'), value: 0, icon: null },
+      ...(props.vendors || []).map((vendor) => ({
+        label: vendor.name,
+        value: vendor.id,
+        icon: vendor.icon,
+      })),
+    ],
+    [props.vendors, t],
+  );
+
   const renderChannelOption = (renderProps) => {
     const {
       disabled,
@@ -2132,6 +2327,64 @@ const EditChannelModal = (props) => {
               searchWords={searchWords}
               className='text-sm font-medium truncate'
             />
+          </div>
+          {selected && (
+            <div className='flex-shrink-0 text-blue-600'>
+              <svg
+                width='16'
+                height='16'
+                viewBox='0 0 16 16'
+                fill='currentColor'
+              >
+                <path d='M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z' />
+              </svg>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderVendorOption = (renderProps) => {
+    const {
+      disabled,
+      selected,
+      label,
+      value,
+      focused,
+      className,
+      style,
+      onMouseEnter,
+      onClick,
+      icon,
+      ...rest
+    } = renderProps;
+
+    const optionClassName = [
+      'flex items-center gap-3 px-3 py-2 transition-all duration-200 rounded-lg mx-2 my-1',
+      focused && 'bg-blue-50 shadow-sm',
+      selected &&
+        'bg-blue-100 text-blue-700 shadow-lg ring-2 ring-blue-200 ring-opacity-50',
+      disabled && 'opacity-50 cursor-not-allowed',
+      !disabled && 'hover:bg-gray-50 hover:shadow-md cursor-pointer',
+      className,
+    ]
+      .filter(Boolean)
+      .join(' ');
+
+    return (
+      <div
+        style={style}
+        className={optionClassName}
+        onClick={() => !disabled && onClick()}
+        onMouseEnter={(e) => onMouseEnter()}
+      >
+        <div className='flex items-center gap-3 w-full'>
+          <div className='flex-shrink-0 w-5 h-5 flex items-center justify-center'>
+            {value === 0 ? null : getLobeHubIcon(icon || 'Layers', 16)}
+          </div>
+          <div className='flex-1 min-w-0'>
+            <span className='text-sm font-medium truncate'>{label}</span>
           </div>
           {selected && (
             <div className='flex-shrink-0 text-blue-600'>
@@ -2463,7 +2716,7 @@ const EditChannelModal = (props) => {
                   />
 
                   <Row gutter={12}>
-                    <Col span={12}>
+                    <Col span={8}>
                       <Form.InputNumber
                         field='priority'
                         label={t('渠道优先级')}
@@ -2473,7 +2726,7 @@ const EditChannelModal = (props) => {
                         style={{ width: '100%' }}
                       />
                     </Col>
-                    <Col span={12}>
+                    <Col span={8}>
                       <Form.InputNumber
                         field='weight'
                         label={t('渠道权重')}
@@ -2481,6 +2734,155 @@ const EditChannelModal = (props) => {
                         min={0}
                         onNumberChange={(value) => handleInputChange('weight', value)}
                         style={{ width: '100%' }}
+                      />
+                    </Col>
+                    <Col span={8}>
+                      <Form.InputNumber
+                        field='concurrency_limit'
+                        label={t('并发上限')}
+                        placeholder={t('0 表示不限制')}
+                        min={0}
+                        onNumberChange={(value) =>
+                          handleInputChange('concurrency_limit', value ?? 0)
+                        }
+                        style={{ width: '100%' }}
+                        extraText={t('限制该渠道同时处理的请求数，0 表示不限制')}
+                      />
+                    </Col>
+                  </Row>
+
+                  <div className='mt-4 mb-2 text-sm font-medium text-gray-700'>
+                    {t('单渠道监控设置')}
+                  </div>
+                  <Row gutter={12}>
+                    <Col span={12}>
+                      <Form.Select
+                        field='monitor_enabled'
+                        label={t('监控开关')}
+                        optionList={[
+                          { label: t('继承全局'), value: 'inherit' },
+                          { label: t('监控启用'), value: 'enabled' },
+                          { label: t('监控关闭'), value: 'disabled' },
+                        ]}
+                        style={{ width: '100%' }}
+                        value={inputs.monitor_enabled || 'inherit'}
+                        onChange={(value) =>
+                          handleChannelMonitorSettingChange(
+                            'monitor_enabled',
+                            value,
+                          )
+                        }
+                        extraText={t('控制定时监控测试是否包含此渠道')}
+                      />
+                    </Col>
+                    <Col span={12}>
+                      <Form.Input
+                        field='monitor_test_interval_minutes'
+                        label={t('监控间隔覆盖')}
+                        placeholder={t('留空继承全局')}
+                        suffix={t('分钟')}
+                        showClear
+                        onChange={(value) =>
+                          handleChannelMonitorSettingChange(
+                            'monitor_test_interval_minutes',
+                            value,
+                          )
+                        }
+                        extraText={t('留空则跟随全局定时测试间隔')}
+                      />
+                    </Col>
+                  </Row>
+                  <Row gutter={12}>
+                    <Col span={12}>
+                      <Form.Input
+                        field='monitor_response_time_threshold_seconds'
+                        label={t('最长响应时间覆盖')}
+                        placeholder={t('留空继承全局')}
+                        suffix={t('秒')}
+                        showClear
+                        onChange={(value) =>
+                          handleChannelMonitorSettingChange(
+                            'monitor_response_time_threshold_seconds',
+                            value,
+                          )
+                        }
+                        extraText={t('留空则使用全局最长响应时间')}
+                      />
+                    </Col>
+                    <Col span={12}>
+                      <Form.Select
+                        field='monitor_auto_disable_enabled'
+                        label={t('失败时自动禁用')}
+                        optionList={[
+                          { label: t('继承全局'), value: 'inherit' },
+                          { label: t('监控启用'), value: 'enabled' },
+                          { label: t('监控关闭'), value: 'disabled' },
+                        ]}
+                        style={{ width: '100%' }}
+                        value={inputs.monitor_auto_disable_enabled || 'inherit'}
+                        onChange={(value) =>
+                          handleChannelMonitorSettingChange(
+                            'monitor_auto_disable_enabled',
+                            value,
+                          )
+                        }
+                        extraText={t('控制此渠道监控失败后的自动禁用行为')}
+                      />
+                    </Col>
+                  </Row>
+                  <Row gutter={12}>
+                    <Col span={12}>
+                      <Form.Input
+                        field='monitor_disable_threshold'
+                        label={t('连续失败阈值')}
+                        placeholder={t('留空继承全局')}
+                        suffix={t('次')}
+                        showClear
+                        onChange={(value) =>
+                          handleChannelMonitorSettingChange(
+                            'monitor_disable_threshold',
+                            value,
+                          )
+                        }
+                        extraText={t('连续失败达到该次数后才禁用')}
+                      />
+                    </Col>
+                    <Col span={12}>
+                      <Form.Select
+                        field='monitor_auto_enable_enabled'
+                        label={t('成功时自动启用')}
+                        optionList={[
+                          { label: t('继承全局'), value: 'inherit' },
+                          { label: t('监控启用'), value: 'enabled' },
+                          { label: t('监控关闭'), value: 'disabled' },
+                        ]}
+                        style={{ width: '100%' }}
+                        value={inputs.monitor_auto_enable_enabled || 'inherit'}
+                        onChange={(value) =>
+                          handleChannelMonitorSettingChange(
+                            'monitor_auto_enable_enabled',
+                            value,
+                          )
+                        }
+                        extraText={t('控制此渠道监控成功后的自动启用行为')}
+                      />
+                    </Col>
+                  </Row>
+                  <Row gutter={12}>
+                    <Col span={12}>
+                      <Form.Input
+                        field='monitor_enable_threshold'
+                        label={t('连续成功阈值')}
+                        placeholder={t('留空继承全局')}
+                        suffix={t('次')}
+                        showClear
+                        onChange={(value) =>
+                          handleChannelMonitorSettingChange(
+                            'monitor_enable_threshold',
+                            value,
+                          )
+                        }
+                        extraText={t('连续成功达到该次数后才启用')}
                       />
                     </Col>
                   </Row>
@@ -2516,7 +2918,12 @@ const EditChannelModal = (props) => {
                   </Text>
 
                   {inputs.type === 14 && (
-                    <Form.Switch field='claude_beta_query' label={t('Claude 强制 beta=true')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelOtherSettingsChange('claude_beta_query', value)} extraText={t('开启后，该渠道请求 Claude 时将强制追加 ?beta=true（无需客户端手动传参）')} />
+                    <>
+                      <Form.Switch field='claude_beta_query' label={t('Claude 强制 beta=true')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelOtherSettingsChange('claude_beta_query', value)} extraText={t('开启后，该渠道请求 Claude 时将强制追加 ?beta=true（无需客户端手动传参）')} />
+                      <Form.Switch field='claude_code_fingerprint_enabled' label={t('Claude Code 指纹访问')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelOtherSettingsChange('claude_code_fingerprint_enabled', value)} extraText={t('开启后，该渠道请求 Claude 时会注入 Claude Code 请求头、系统标识和 metadata；Header Override 仍可覆盖默认指纹头')} />
+                      <Form.Switch field='claude_code_transport_fingerprint_enabled' label={t('Claude Code Transport 指纹')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelOtherSettingsChange('claude_code_transport_fingerprint_enabled', value)} extraText={t('开启后，该渠道请求 Claude 时会使用内置 uTLS Claude Code Node24 Transport 指纹；不改变 Header Override 优先级')} />
+                      <Form.Input field='claude_code_version' label={t('Claude Code 版本号')} placeholder='2.1.156' onChange={(value) => handleChannelOtherSettingsChange('claude_code_version', value)} extraText={t('自定义 User-Agent 中的 Claude Code 版本号，留空使用默认值')} />
+                    </>
                   )}
 
                   {inputs.type === 1 && (
@@ -2614,9 +3021,9 @@ const EditChannelModal = (props) => {
 
                     <Form.Select
                       field='type'
-                      label={t('类型')}
-                      placeholder={t('请选择渠道类型')}
-                      rules={[{ required: true, message: t('请选择渠道类型') }]}
+                      label={t('协议类型')}
+                      placeholder={t('请选择协议类型')}
+                      rules={[{ required: true, message: t('请选择协议类型') }]}
                       optionList={channelOptionList}
                       style={{ width: '100%' }}
                       filter={selectFilter}
@@ -2626,6 +3033,31 @@ const EditChannelModal = (props) => {
                       renderOptionItem={renderChannelOption}
                       onChange={(value) => handleInputChange('type', value)}
                       disabled={isIonetLocked}
+                    />
+
+                    <Form.Select
+                      field='vendor_id'
+                      label={t('供应商')}
+                      placeholder={t('请选择供应商')}
+                      optionList={vendorOptionList}
+                      style={{ width: '100%' }}
+                      showClear
+                      renderOptionItem={renderVendorOption}
+                      renderSelectedItem={(optionNode) => {
+                        const vendorItem = vendorOptionList.find(
+                          (v) => v.value === optionNode?.value,
+                        );
+                        return (
+                          <span className='flex items-center gap-2'>
+                            {vendorItem?.icon
+                              ? getLobeHubIcon(vendorItem.icon, 14)
+                              : null}
+                            <span>{optionNode?.label}</span>
+                          </span>
+                        );
+                      }}
+                      onChange={(value) => handleInputChange('vendor_id', value || 0)}
+                      extraText={t('仅用于管理和展示分组，不影响协议适配')}
                     />
 
                     {inputs.type === 57 && (

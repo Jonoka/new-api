@@ -21,6 +21,7 @@ import { Crown, CalendarClock, Package } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { DEFAULT_CURRENCY_CONFIG } from '@/stores/system-config-store'
+import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { formatQuota } from '@/lib/format'
 import { useSystemConfig } from '@/hooks/use-system-config'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -31,6 +32,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -47,9 +49,10 @@ import {
   paySubscriptionEpay,
   paySubscriptionWaffoPancake,
   paySubscriptionBalance,
+  previewSubscriptionAmount,
 } from '../../api'
 import { formatDuration, formatResetPeriod } from '../../lib'
-import type { PlanRecord } from '../../types'
+import type { PlanRecord, SubscriptionAmountPreview } from '../../types'
 
 interface PaymentMethod {
   type: string
@@ -75,13 +78,20 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const { t } = useTranslation()
   const { currency } = useSystemConfig()
   const [paying, setPaying] = useState(false)
+  const [amountLoading, setAmountLoading] = useState(false)
   const [selectedEpayMethod, setSelectedEpayMethod] = useState('')
+  const [promoCode, setPromoCode] = useState('')
+  const [promoDiscount, setPromoDiscount] =
+    useState<SubscriptionAmountPreview | null>(null)
 
   useEffect(() => {
     if (props.open && props.epayMethods && props.epayMethods.length > 0) {
       setSelectedEpayMethod(props.epayMethods[0].type)
     } else if (!props.open) {
       setSelectedEpayMethod('')
+      setPromoCode('')
+      setPromoDiscount(null)
+      setAmountLoading(false)
     }
   }, [props.open, props.epayMethods])
 
@@ -101,14 +111,20 @@ export function SubscriptionPurchaseDialog(props: Props) {
     selectedEpayMethod ||
     t('Select payment method')
   const totalAmount = Number(plan.total_amount || 0)
-  const price = Number(plan.price_amount || 0).toFixed(2)
+  const price = Number(plan.price_amount || 0)
+  const hasPromoDiscount = Number(promoDiscount?.discount_amount || 0) > 0
+  const paidPrice = hasPromoDiscount
+    ? Number(promoDiscount?.paid_amount || 0)
+    : price
+  const originalPrice = Number(promoDiscount?.original_amount || price)
+  const discountAmount = Number(promoDiscount?.discount_amount || 0)
   const quotaPerUnit =
     currency?.quotaPerUnit && currency.quotaPerUnit > 0
       ? currency.quotaPerUnit
       : DEFAULT_CURRENCY_CONFIG.quotaPerUnit
   const balanceCost = Math.max(
     0,
-    Math.ceil(Number(plan.price_amount || 0) * quotaPerUnit)
+    Math.ceil(paidPrice * quotaPerUnit)
   )
   const userQuota = Math.max(0, Number(props.userQuota || 0))
   const insufficientBalance = userQuota < balanceCost
@@ -116,11 +132,49 @@ export function SubscriptionPurchaseDialog(props: Props) {
     (props.purchaseLimit || 0) > 0 &&
     (props.purchaseCount || 0) >= (props.purchaseLimit || 0)
 
+  const handleCompletedPurchase = () => {
+    toast.success(t('Subscription purchased successfully'))
+    void props.onPurchaseSuccess?.()
+    props.onOpenChange(false)
+  }
+
+  const handlePromoCodeBlur = async () => {
+    const code = promoCode.trim()
+    if (!code) {
+      setPromoDiscount(null)
+      return
+    }
+
+    setAmountLoading(true)
+    try {
+      const res = await previewSubscriptionAmount({
+        plan_id: plan.id,
+        promo_code: code,
+      })
+      if (res.message === 'success') {
+        setPromoDiscount(res.discount || null)
+      } else {
+        setPromoDiscount(null)
+        toast.error(res.data || res.message || t('Payment request failed'))
+      }
+    } catch {
+      setPromoDiscount(null)
+      toast.error(t('Payment request failed'))
+    } finally {
+      setAmountLoading(false)
+    }
+  }
+
   const handlePayStripe = async () => {
     setPaying(true)
     try {
-      const res = await paySubscriptionStripe({ plan_id: plan.id })
-      if (res.message === 'success' && res.data?.pay_link) {
+      const res = await paySubscriptionStripe({
+        plan_id: plan.id,
+        promo_code: promoCode,
+      })
+      if (res.message === 'success' && res.data?.completed) {
+        handleCompletedPurchase()
+      } else if (res.message === 'success' && res.data?.pay_link) {
         window.open(res.data.pay_link, '_blank')
         toast.success(t('Payment page opened'))
         props.onOpenChange(false)
@@ -139,9 +193,16 @@ export function SubscriptionPurchaseDialog(props: Props) {
   }
 
   const handlePayCreem = async () => {
+    if (promoCode.trim()) {
+      toast.error(t('Creem does not support promo codes yet'))
+      return
+    }
     setPaying(true)
     try {
-      const res = await paySubscriptionCreem({ plan_id: plan.id })
+      const res = await paySubscriptionCreem({
+        plan_id: plan.id,
+        promo_code: promoCode,
+      })
       if (res.message === 'success' && res.data?.checkout_url) {
         window.open(res.data.checkout_url, '_blank')
         toast.success(t('Payment page opened'))
@@ -165,8 +226,13 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const handlePayWaffoPancake = async () => {
     setPaying(true)
     try {
-      const res = await paySubscriptionWaffoPancake({ plan_id: plan.id })
-      if (res.message === 'success' && res.data?.checkout_url) {
+      const res = await paySubscriptionWaffoPancake({
+        plan_id: plan.id,
+        promo_code: promoCode,
+      })
+      if (res.message === 'success' && res.data?.completed) {
+        handleCompletedPurchase()
+      } else if (res.message === 'success' && res.data?.checkout_url) {
         toast.success(t('Redirecting to payment page...'))
         window.location.href = res.data.checkout_url
       } else {
@@ -197,8 +263,11 @@ export function SubscriptionPurchaseDialog(props: Props) {
       const res = await paySubscriptionEpay({
         plan_id: plan.id,
         payment_method: selectedEpayMethod,
+        promo_code: promoCode,
       })
-      if (res.message === 'success' && res.url) {
+      if (res.message === 'success' && res.data?.completed) {
+        handleCompletedPurchase()
+      } else if (res.message === 'success' && res.url) {
         const form = document.createElement('form')
         form.action = res.url
         form.method = 'POST'
@@ -234,7 +303,10 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const handlePayBalance = async () => {
     setPaying(true)
     try {
-      const res = await paySubscriptionBalance({ plan_id: plan.id })
+      const res = await paySubscriptionBalance({
+        plan_id: plan.id,
+        promo_code: promoCode,
+      })
       if (res.success) {
         toast.success(t('Subscription purchased successfully'))
         void props.onPurchaseSuccess?.()
@@ -310,8 +382,29 @@ export function SubscriptionPurchaseDialog(props: Props) {
             <Separator />
             <div className='flex items-center justify-between'>
               <span className='text-sm font-medium'>{t('Amount Due')}</span>
-              <span className='text-primary text-lg font-bold'>${price}</span>
+              <div className='flex items-baseline gap-2'>
+                <span className='text-primary text-lg font-bold'>
+                  {amountLoading
+                    ? '...'
+                    : formatBillingCurrencyFromUSD(paidPrice)}
+                </span>
+                {hasPromoDiscount && !amountLoading && (
+                  <span className='text-xs text-green-600'>
+                    {t('Discount')}
+                  </span>
+                )}
+              </div>
             </div>
+            {hasPromoDiscount && !amountLoading && (
+              <div className='flex justify-between text-xs'>
+                <span className='text-muted-foreground'>
+                  {formatBillingCurrencyFromUSD(originalPrice)}
+                </span>
+                <span className='text-green-600'>
+                  -{formatBillingCurrencyFromUSD(discountAmount)}
+                </span>
+              </div>
+            )}
           </div>
 
           {limitReached && (
@@ -344,6 +437,18 @@ export function SubscriptionPurchaseDialog(props: Props) {
             >
               {t('Pay with Balance')}
             </Button>
+          </div>
+
+          <div className='space-y-2'>
+            <Input
+              value={promoCode}
+              onChange={(event) => {
+                setPromoCode(event.target.value)
+                setPromoDiscount(null)
+              }}
+              onBlur={handlePromoCodeBlur}
+              placeholder={t('Enter promo code')}
+            />
           </div>
 
           {hasAnyPayment && (

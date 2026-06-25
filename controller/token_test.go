@@ -14,6 +14,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"gorm.io/driver/mysql"
@@ -48,21 +49,21 @@ type sqliteColumnInfo struct {
 }
 
 type legacyToken struct {
-	Id                 int            `gorm:"primaryKey"`
-	UserId             int            `gorm:"index"`
-	Key                string         `gorm:"column:key;type:char(48);uniqueIndex"`
-	Status             int            `gorm:"default:1"`
-	Name               string         `gorm:"index"`
-	CreatedTime        int64          `gorm:"bigint"`
-	AccessedTime       int64          `gorm:"bigint"`
-	ExpiredTime        int64          `gorm:"bigint;default:-1"`
-	RemainQuota        int            `gorm:"default:0"`
+	Id                 int    `gorm:"primaryKey"`
+	UserId             int    `gorm:"index"`
+	Key                string `gorm:"column:key;type:char(48);uniqueIndex"`
+	Status             int    `gorm:"default:1"`
+	Name               string `gorm:"index"`
+	CreatedTime        int64  `gorm:"bigint"`
+	AccessedTime       int64  `gorm:"bigint"`
+	ExpiredTime        int64  `gorm:"bigint;default:-1"`
+	RemainQuota        int    `gorm:"default:0"`
 	UnlimitedQuota     bool
 	ModelLimitsEnabled bool
-	ModelLimits        string         `gorm:"type:text"`
-	AllowIps           *string        `gorm:"default:''"`
-	UsedQuota          int            `gorm:"default:0"`
-	Group              string         `gorm:"column:group;default:''"`
+	ModelLimits        string  `gorm:"type:text"`
+	AllowIps           *string `gorm:"default:''"`
+	UsedQuota          int     `gorm:"default:0"`
+	Group              string  `gorm:"column:group;default:''"`
 	CrossGroupRetry    bool
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
 }
@@ -203,6 +204,7 @@ func newAuthenticatedContext(t *testing.T, method string, target string, body an
 		ctx.Request.Header.Set("Content-Type", "application/json")
 	}
 	ctx.Set("id", userID)
+	ctx.Set("group", "vip")
 	return ctx, recorder
 }
 
@@ -503,6 +505,111 @@ func TestUpdateTokenMasksKeyInResponse(t *testing.T) {
 	}
 	if strings.Contains(recorder.Body.String(), token.Key) {
 		t.Fatalf("update response leaked raw token key: %s", recorder.Body.String())
+	}
+}
+
+func TestAddTokenUsesAutoGroupWhenDefaultAutoGroupEnabled(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	t.Cleanup(func() {
+		setting.DefaultUseAutoGroup = false
+	})
+	setting.DefaultUseAutoGroup = true
+
+	body := map[string]any{
+		"name":                 "auto-default-token",
+		"expired_time":         -1,
+		"remain_quota":         0,
+		"unlimited_quota":      true,
+		"model_limits_enabled": false,
+		"model_limits":         "",
+		"group":                "",
+		"cross_group_retry":    true,
+	}
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/token/", body, 1)
+	AddToken(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	if !response.Success {
+		t.Fatalf("expected add token to succeed, got message: %s", response.Message)
+	}
+
+	var created model.Token
+	if err := db.First(&created, "name = ?", "auto-default-token").Error; err != nil {
+		t.Fatalf("failed to load created token: %v", err)
+	}
+	if created.Group != "auto" {
+		t.Fatalf("expected token group %q, got %q", "auto", created.Group)
+	}
+}
+
+func TestAddTokenPreservesExplicitRequestGroup(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	t.Cleanup(func() {
+		setting.DefaultUseAutoGroup = false
+	})
+	setting.DefaultUseAutoGroup = true
+
+	body := map[string]any{
+		"name":                 "explicit-group-token",
+		"expired_time":         -1,
+		"remain_quota":         0,
+		"unlimited_quota":      true,
+		"model_limits_enabled": false,
+		"model_limits":         "",
+		"group":                "premium",
+		"cross_group_retry":    false,
+	}
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/token/", body, 1)
+	AddToken(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	if !response.Success {
+		t.Fatalf("expected add token to succeed, got message: %s", response.Message)
+	}
+
+	var created model.Token
+	if err := db.First(&created, "name = ?", "explicit-group-token").Error; err != nil {
+		t.Fatalf("failed to load created token: %v", err)
+	}
+	if created.Group != "premium" {
+		t.Fatalf("expected explicit token group %q, got %q", "premium", created.Group)
+	}
+}
+
+func TestAddTokenFallsBackToUserGroupWhenDefaultAutoGroupDisabled(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	t.Cleanup(func() {
+		setting.DefaultUseAutoGroup = false
+	})
+	setting.DefaultUseAutoGroup = false
+
+	body := map[string]any{
+		"name":                 "user-group-token",
+		"expired_time":         -1,
+		"remain_quota":         0,
+		"unlimited_quota":      true,
+		"model_limits_enabled": false,
+		"model_limits":         "",
+		"group":                "",
+		"cross_group_retry":    false,
+	}
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/token/", body, 1)
+	AddToken(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	if !response.Success {
+		t.Fatalf("expected add token to succeed, got message: %s", response.Message)
+	}
+
+	var created model.Token
+	if err := db.First(&created, "name = ?", "user-group-token").Error; err != nil {
+		t.Fatalf("failed to load created token: %v", err)
+	}
+	if created.Group != "vip" {
+		t.Fatalf("expected user group fallback %q, got %q", "vip", created.Group)
 	}
 }
 

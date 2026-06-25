@@ -3,7 +3,6 @@ package service
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -131,7 +130,7 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 	model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, feeQuota)
 	model.UpdateChannelUsedQuota(relayInfo.ChannelId, feeQuota)
 
-	useTimeSeconds := time.Now().Unix() - relayInfo.StartTime.Unix()
+	useTimeMs := relayInfo.ElapsedMilliseconds()
 	tokenName := ctx.GetString("token_name")
 	oai := apiErr.ToOpenAIError()
 
@@ -145,6 +144,7 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		"upstream_error_type":  oai.Type,
 		"upstream_error_code":  fmt.Sprintf("%v", oai.Code),
 		"violation_fee_marker": CSAMViolationMarker,
+		"use_time_ms":          float64(useTimeMs),
 	}
 
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
@@ -154,7 +154,7 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		Quota:          feeQuota,
 		Content:        "Violation fee charged",
 		TokenId:        relayInfo.TokenId,
-		UseTimeSeconds: int(useTimeSeconds),
+		UseTimeSeconds: int(useTimeMs / 1000),
 		IsStream:       relayInfo.IsStream,
 		Group:          relayInfo.UsingGroup,
 		Other:          other,

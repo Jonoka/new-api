@@ -68,3 +68,40 @@ export async function getUptimeStatus() {
   )
   return res.data
 }
+
+// ----------------------------------------------------------------------------
+// Revenue Statistics (Admin)
+// ----------------------------------------------------------------------------
+
+export interface RevenueDataPoint {
+  timestamp: number
+  online_money: number
+  redemption_quota: number
+  online_count: number
+  redemption_count: number
+}
+
+export interface RevenueSummary {
+  total_online_money: number
+  total_redemption_quota: number
+  total_online_count: number
+  total_redemption_count: number
+}
+
+export interface RevenueStatsResponse {
+  summary: RevenueSummary
+  data_points: RevenueDataPoint[]
+}
+
+export async function getRevenueStats(params: {
+  start_timestamp: number
+  end_timestamp: number
+  granularity: string
+  timezone_offset: number
+}) {
+  const res = await api.get<{ success: boolean; data: RevenueStatsResponse }>(
+    '/api/data/revenue',
+    { params }
+  )
+  return res.data
+}

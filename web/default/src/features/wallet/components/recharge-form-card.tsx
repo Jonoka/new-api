@@ -58,7 +58,10 @@ interface RechargeFormCardProps {
   topupAmount: number
   onTopupAmountChange: (amount: number) => void
   paymentAmount: number
+  paymentAmountText?: string
   calculating: boolean
+  promoCode: string
+  onPromoCodeChange: (code: string) => void
   onPaymentMethodSelect: (method: PaymentMethod) => void
   paymentLoading: string | null
   redemptionCode: string
@@ -88,7 +91,10 @@ export function RechargeFormCard({
   topupAmount,
   onTopupAmountChange,
   paymentAmount,
+  paymentAmountText,
   calculating,
+  promoCode,
+  onPromoCodeChange,
   onPaymentMethodSelect,
   paymentLoading,
   redemptionCode,
@@ -127,6 +133,8 @@ export function RechargeFormCard({
   const hasConfigurableTopup =
     topupInfo?.enable_online_topup ||
     topupInfo?.enable_stripe_topup ||
+    topupInfo?.enable_bepusdt_topup ||
+    topupInfo?.enable_okpay_topup ||
     enableWaffoTopup ||
     enableWaffoPancakeTopup
   const hasAnyTopup = hasConfigurableTopup || enableCreemTopup
@@ -296,11 +304,27 @@ export function RechargeFormCard({
                       <Skeleton className='h-5 w-16' />
                     ) : (
                       <span className='text-sm font-semibold'>
-                        {formatCurrency(paymentAmount)}
+                        {paymentAmountText || formatCurrency(paymentAmount)}
                       </span>
                     )}
                   </div>
                 </div>
+              </div>
+
+              <div className='space-y-2.5 sm:space-y-3'>
+                <Label
+                  htmlFor='promo-code'
+                  className='text-muted-foreground text-xs font-medium tracking-wider uppercase'
+                >
+                  {t('Promo Code')}
+                </Label>
+                <Input
+                  id='promo-code'
+                  value={promoCode}
+                  onChange={(e) => onPromoCodeChange(e.target.value)}
+                  placeholder={t('Enter promo code')}
+                  className='h-9'
+                />
               </div>
 
               <div className='space-y-2.5 sm:space-y-3'>

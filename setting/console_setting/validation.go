@@ -1,13 +1,16 @@
 package console_setting
 
 import (
-	"encoding/json"
 	"fmt"
+	"math"
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/QuantumNous/new-api/common"
 )
 
 var (
@@ -22,9 +25,14 @@ var (
 	slugRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 )
 
+const (
+	minUptimeKumaTimeWindowHours = 1
+	maxUptimeKumaTimeWindowHours = 720
+)
+
 func parseJSONArray(jsonStr string, typeName string) ([]map[string]interface{}, error) {
 	var list []map[string]interface{}
-	if err := json.Unmarshal([]byte(jsonStr), &list); err != nil {
+	if err := common.UnmarshalJsonStr(jsonStr, &list); err != nil {
 		return nil, fmt.Errorf("%s格式错误：%s", typeName, err.Error())
 	}
 	return list, nil
@@ -55,7 +63,7 @@ func getJSONList(jsonStr string) []map[string]interface{} {
 		return []map[string]interface{}{}
 	}
 	var list []map[string]interface{}
-	json.Unmarshal([]byte(jsonStr), &list)
+	common.UnmarshalJsonStr(jsonStr, &list)
 	return list
 }
 
@@ -255,25 +263,41 @@ func validateUptimeKumaGroups(groupsStr string) error {
 			return fmt.Errorf("第%d个分组的分类名称与其他分组重复", i+1)
 		}
 		nameSet[categoryName] = true
-		urlStr, ok := group["url"].(string)
-		if !ok || urlStr == "" {
-			return fmt.Errorf("第%d个分组缺少URL字段", i+1)
+		urlStr, _ := group["url"].(string)
+		slug, _ := group["slug"].(string)
+		embedUrl, _ := group["embedUrl"].(string)
+		if value, exists := group["timeWindowHours"]; exists && value != nil {
+			hours, err := parseUptimeKumaTimeWindowHours(value)
+			if err != nil || hours < minUptimeKumaTimeWindowHours || hours > maxUptimeKumaTimeWindowHours {
+				return fmt.Errorf("第%d个分组的可用性统计窗口必须在%d到%d小时之间", i+1, minUptimeKumaTimeWindowHours, maxUptimeKumaTimeWindowHours)
+			}
 		}
-		slug, ok := group["slug"].(string)
-		if !ok || slug == "" {
-			return fmt.Errorf("第%d个分组缺少Slug字段", i+1)
+		if embedUrl == "" {
+			if urlStr == "" {
+				return fmt.Errorf("第%d个分组缺少URL字段", i+1)
+			}
+			if slug == "" {
+				return fmt.Errorf("第%d个分组缺少Slug字段", i+1)
+			}
 		}
 		description, ok := group["description"].(string)
 		if !ok {
 			description = ""
 		}
 
-		if err := validateURL(urlStr, i+1, "分组"); err != nil {
-			return err
+		if urlStr != "" {
+			if err := validateURL(urlStr, i+1, "分组"); err != nil {
+				return err
+			}
+		}
+		if embedUrl != "" {
+			if err := validateURL(embedUrl, i+1, "嵌入地址"); err != nil {
+				return err
+			}
 		}
 
-		if len(categoryName) > 50 {
-			return fmt.Errorf("第%d个分组的分类名称长度不能超过50字符", i+1)
+		if len(embedUrl) > 1000 {
+			return fmt.Errorf("第%d个分组的嵌入地址长度不能超过1000字符", i+1)
 		}
 		if len(urlStr) > 500 {
 			return fmt.Errorf("第%d个分组的URL长度不能超过500字符", i+1)
@@ -281,12 +305,18 @@ func validateUptimeKumaGroups(groupsStr string) error {
 		if len(slug) > 100 {
 			return fmt.Errorf("第%d个分组的Slug长度不能超过100字符", i+1)
 		}
-		if len(description) > 200 {
-			return fmt.Errorf("第%d个分组的描述长度不能超过200字符", i+1)
+		if slug != "" && !slugRegex.MatchString(slug) {
+			return fmt.Errorf("第%d个分组的Slug只能包含字母、数字、下划线和连字符", i+1)
+		}
+		if err := checkDangerousContent(embedUrl, i+1, "嵌入地址"); err != nil {
+			return err
 		}
 
-		if !slugRegex.MatchString(slug) {
-			return fmt.Errorf("第%d个分组的Slug只能包含字母、数字、下划线和连字符", i+1)
+		if len(categoryName) > 50 {
+			return fmt.Errorf("第%d个分组的分类名称长度不能超过50字符", i+1)
+		}
+		if len(description) > 200 {
+			return fmt.Errorf("第%d个分组的描述长度不能超过200字符", i+1)
 		}
 
 		if err := checkDangerousContent(description, i+1, "分组"); err != nil {
@@ -297,6 +327,45 @@ func validateUptimeKumaGroups(groupsStr string) error {
 		}
 	}
 	return nil
+}
+
+func parseUptimeKumaTimeWindowHours(value interface{}) (int, error) {
+	switch v := value.(type) {
+	case int:
+		return v, nil
+	case int8:
+		return int(v), nil
+	case int16:
+		return int(v), nil
+	case int32:
+		return int(v), nil
+	case int64:
+		return int(v), nil
+	case uint:
+		return int(v), nil
+	case uint8:
+		return int(v), nil
+	case uint16:
+		return int(v), nil
+	case uint32:
+		return int(v), nil
+	case uint64:
+		return int(v), nil
+	case float32:
+		if math.Trunc(float64(v)) != float64(v) {
+			return 0, fmt.Errorf("time window must be an integer")
+		}
+		return int(v), nil
+	case float64:
+		if math.Trunc(v) != v {
+			return 0, fmt.Errorf("time window must be an integer")
+		}
+		return int(v), nil
+	case string:
+		return strconv.Atoi(strings.TrimSpace(v))
+	default:
+		return 0, fmt.Errorf("unsupported time window type")
+	}
 }
 
 func GetUptimeKumaGroups() []map[string]interface{} {

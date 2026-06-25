@@ -16,12 +16,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { LayoutDashboard } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
 import { api } from '@/lib/api'
+import {
+  getSidebarCustomModuleKey,
+  parseCustomNavItems,
+} from '@/lib/custom-nav'
+import { parseSidebarModulesFromStatus } from '@/lib/nav-modules'
+import { useStatus } from '@/hooks/use-status'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -46,81 +52,137 @@ type SectionDef = {
   modules: { key: string; title: string; description: string }[]
 }
 
+const createDefaultConfig = (sectionDefs: SectionDef[]): SidebarModulesConfig =>
+  sectionDefs.reduce<SidebarModulesConfig>((defaults, section) => {
+    defaults[section.key] = { enabled: true }
+    section.modules.forEach((module) => {
+      defaults[section.key][module.key] = true
+    })
+    return defaults
+  }, {})
+
 export function SidebarModulesCard() {
   const { t } = useTranslation()
   const [loading, setLoading] = useState(false)
   const [config, setConfig] = useState<SidebarModulesConfig>({})
   const currentUser = useAuthStore((s) => s.auth.user)
   const setUser = useAuthStore((s) => s.auth.setUser)
+  const { status } = useStatus()
+  const customSidebarItems = useMemo(
+    () =>
+      parseCustomNavItems(
+        parseSidebarModulesFromStatus(status as Record<string, unknown> | null)
+          .customItems
+      ),
+    [status]
+  )
 
-  const sectionDefs: SectionDef[] = [
-    {
-      key: 'chat',
-      title: t('Chat Area'),
-      description: t('Playground and chat functions'),
-      modules: [
-        {
-          key: 'playground',
-          title: t('Playground'),
-          description: t('AI model testing environment'),
-        },
-        {
-          key: 'chat',
-          title: t('Chat'),
-          description: t('Chat session management'),
-        },
-      ],
-    },
-    {
-      key: 'console',
-      title: t('Console Area'),
-      description: t('Data management and log viewing'),
-      modules: [
-        {
-          key: 'detail',
-          title: t('Dashboard'),
-          description: t('System data statistics'),
-        },
-        {
-          key: 'token',
-          title: t('Token Management'),
-          description: t('API token management'),
-        },
-        {
-          key: 'log',
-          title: t('Usage Logs'),
-          description: t('API usage records'),
-        },
-        {
-          key: 'midjourney',
-          title: t('Drawing Logs'),
-          description: t('Drawing task records'),
-        },
-        {
-          key: 'task',
-          title: t('Task Logs'),
-          description: t('System task records'),
-        },
-      ],
-    },
-    {
-      key: 'personal',
-      title: t('Personal Center Area'),
-      description: t('User personal functions'),
-      modules: [
-        {
-          key: 'topup',
-          title: t('Wallet Management'),
-          description: t('Balance and top-up management'),
-        },
-        {
-          key: 'personal',
-          title: t('Personal Settings'),
-          description: t('Personal info settings'),
-        },
-      ],
-    },
-  ]
+  const sectionDefs = useMemo<SectionDef[]>(
+    () => [
+      {
+        key: 'chat',
+        title: t('Chat Area'),
+        description: t('Playground and chat functions'),
+        modules: [
+          {
+            key: 'playground',
+            title: t('Playground'),
+            description: t('AI model testing environment'),
+          },
+          {
+            key: 'canvas',
+            title: t('Infinite Canvas'),
+            description: t('Open Infinite Canvas with selected group'),
+          },
+          {
+            key: 'chat',
+            title: t('Chat'),
+            description: t('Chat session management'),
+          },
+        ],
+      },
+      {
+        key: 'console',
+        title: t('Console Area'),
+        description: t('Data management and log viewing'),
+        modules: [
+          {
+            key: 'detail',
+            title: t('Dashboard'),
+            description: t('System data statistics'),
+          },
+          {
+            key: 'token',
+            title: t('Token Management'),
+            description: t('API token management'),
+          },
+          {
+            key: 'log',
+            title: t('Usage Logs'),
+            description: t('API usage records'),
+          },
+          {
+            key: 'midjourney',
+            title: t('Drawing Logs'),
+            description: t('Drawing task records'),
+          },
+          {
+            key: 'task',
+            title: t('Task Logs'),
+            description: t('System task records'),
+          },
+        ],
+      },
+      {
+        key: 'personal',
+        title: t('Personal Center Area'),
+        description: t('User personal functions'),
+        modules: [
+          {
+            key: 'topup',
+            title: t('Wallet Management'),
+            description: t('Balance and top-up management'),
+          },
+          {
+            key: 'affiliate',
+            title: t('Affiliate Commission'),
+            description: t('Referral commission and payout management'),
+          },
+          {
+            key: 'personal',
+            title: t('Personal Settings'),
+            description: t('Personal info settings'),
+          },
+        ],
+      },
+    ],
+    [t]
+  )
+
+  const effectiveSectionDefs = useMemo<SectionDef[]>(
+    () =>
+      customSidebarItems.length === 0
+        ? sectionDefs
+        : [
+            ...sectionDefs,
+            {
+              key: 'custom',
+              title: t('Custom menu items'),
+              description: t('Managed links added by the administrator.'),
+              modules: customSidebarItems.map((item) => ({
+                key: getSidebarCustomModuleKey(item.id),
+                title: item.title,
+                description: item.url,
+              })),
+            },
+          ],
+    [customSidebarItems, sectionDefs, t]
+  )
+
+  const defaultConfig = useMemo(
+    () => createDefaultConfig(effectiveSectionDefs),
+    [effectiveSectionDefs]
+  )
 
   const loadConfig = useCallback(async () => {
     try {
@@ -130,18 +192,12 @@ export function SidebarModulesCard() {
         const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
         setConfig(parsed)
       } else {
-        const defaults: SidebarModulesConfig = {}
-        for (const sec of sectionDefs) {
-          defaults[sec.key] = { enabled: true }
-          for (const mod of sec.modules) defaults[sec.key][mod.key] = true
-        }
-        setConfig(defaults)
+        setConfig(defaultConfig)
       }
     } catch {
       /* ignore */
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [defaultConfig])
 
   useEffect(() => {
     loadConfig()
@@ -190,12 +246,7 @@ export function SidebarModulesCard() {
   }
 
   const handleReset = () => {
-    const defaults: SidebarModulesConfig = {}
-    for (const sec of sectionDefs) {
-      defaults[sec.key] = { enabled: true }
-      for (const mod of sec.modules) defaults[sec.key][mod.key] = true
-    }
-    setConfig(defaults)
+    setConfig(defaultConfig)
     toast.success(t('Reset to default configuration'))
   }
 
@@ -217,7 +268,7 @@ export function SidebarModulesCard() {
         </div>
       </CardHeader>
       <CardContent className='space-y-4 p-3 sm:space-y-5 sm:p-5'>
-        {sectionDefs.map((section) => {
+        {effectiveSectionDefs.map((section) => {
           const sectionEnabled = config[section.key]?.enabled !== false
           return (
             <div

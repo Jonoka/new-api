@@ -59,6 +59,10 @@ const OPERATIONS_SECTIONS = [
             settings['monitor_setting.auto_test_channel_enabled'],
           'monitor_setting.auto_test_channel_minutes':
             settings['monitor_setting.auto_test_channel_minutes'],
+          'monitor_setting.auto_disable_threshold':
+            settings['monitor_setting.auto_disable_threshold'],
+          'monitor_setting.auto_enable_threshold':
+            settings['monitor_setting.auto_enable_threshold'],
         }}
       />
     ),
@@ -100,6 +104,9 @@ const OPERATIONS_SECTIONS = [
     build: (settings: OperationsSettings) => (
       <LogSettingsSection
         defaultEnabled={Boolean(settings.LogConsumeEnabled)}
+        defaultForceRecordIpEnabled={Boolean(
+          settings.ForceRecordLogIpEnabled
+        )}
       />
     ),
   },

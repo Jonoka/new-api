@@ -311,6 +311,32 @@ export function RedemptionsMutateDrawer({
                   )}
                 />
               )}
+
+              <FormField
+                control={form.control}
+                name='max_redeem_count'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Redeem Limit')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        type='number'
+                        min='1'
+                        max='100000'
+                        placeholder={t('Times each code can be redeemed')}
+                        onChange={(e) =>
+                          field.onChange(parseInt(e.target.value, 10) || 1)
+                        }
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t('Allow multiple users to redeem the same code')}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
             </SideDrawerSection>
           </form>
         </Form>

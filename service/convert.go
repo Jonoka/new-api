@@ -14,6 +14,65 @@ import (
 	"github.com/samber/lo"
 )
 
+func extractClaudeSessionID(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(raw, "{") {
+		var obj struct {
+			SessionID string `json:"session_id"`
+		}
+		if err := common.UnmarshalJsonStr(raw, &obj); err == nil {
+			return strings.TrimSpace(obj.SessionID)
+		}
+		return ""
+	}
+	const sessionPrefix = "_session_"
+	if idx := strings.LastIndex(raw, sessionPrefix); idx >= 0 {
+		return strings.TrimSpace(raw[idx+len(sessionPrefix):])
+	}
+	return ""
+}
+
+func resolveClaudePromptCacheKey(claudeRequest dto.ClaudeRequest, info *relaycommon.RelayInfo) string {
+	if len(claudeRequest.Metadata) > 0 {
+		var metadata dto.ClaudeMetadata
+		if err := common.Unmarshal(claudeRequest.Metadata, &metadata); err == nil {
+			if userID := strings.TrimSpace(metadata.UserId); userID != "" {
+				if sessionID := extractClaudeSessionID(userID); sessionID != "" {
+					return sessionID
+				}
+				return userID
+			}
+		}
+	}
+	if info == nil {
+		return ""
+	}
+	for _, key := range []string{
+		"X-Claude-Code-Session-Id", "x-claude-code-session-id",
+		"Session_id", "session_id",
+		"X-Client-Request-Id", "x-client-request-id",
+	} {
+		if value := strings.TrimSpace(info.RequestHeaders[key]); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func mapClaudeEffortToOpenAIReasoningEffort(effort string) string {
+	switch strings.TrimSpace(strings.ToLower(effort)) {
+	case "low", "medium", "high", "minimal", "none", "xhigh":
+		return strings.TrimSpace(strings.ToLower(effort))
+	case "max":
+		return "xhigh"
+	default:
+		return ""
+	}
+}
+
 func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.RelayInfo) (*dto.GeneralOpenAIRequest, error) {
 	openAIRequest := dto.GeneralOpenAIRequest{
 		Model:       claudeRequest.Model,
@@ -31,8 +90,14 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 	if claudeRequest.Stream != nil {
 		openAIRequest.Stream = lo.ToPtr(lo.FromPtr(claudeRequest.Stream))
 	}
+	if promptCacheKey := resolveClaudePromptCacheKey(claudeRequest, info); promptCacheKey != "" {
+		openAIRequest.PromptCacheKey = promptCacheKey
+	}
 
 	isOpenRouter := info.ChannelType == constant.ChannelTypeOpenRouter
+	if effort := mapClaudeEffortToOpenAIReasoningEffort(claudeRequest.GetEfforts()); effort != "" {
+		openAIRequest.ReasoningEffort = effort
+	}
 
 	if isOpenRouter {
 		if effort := claudeRequest.GetEfforts(); effort != "" {
@@ -106,7 +171,14 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 					Role: "system",
 				}
 				isOpenRouterClaude := isOpenRouter && strings.HasPrefix(info.UpstreamModelName, "anthropic/claude")
-				if isOpenRouterClaude {
+				hasSystemCacheControl := false
+				for _, system := range systems {
+					if len(system.CacheControl) > 0 {
+						hasSystemCacheControl = true
+						break
+					}
+				}
+				if isOpenRouterClaude || hasSystemCacheControl {
 					systemMediaMessages := make([]dto.MediaContent, 0, len(systems))
 					for _, system := range systems {
 						message := dto.MediaContent{
@@ -232,8 +304,12 @@ func buildClaudeUsageFromOpenAIUsage(oaiUsage *dto.Usage) *dto.ClaudeUsage {
 		oaiUsage.ClaudeCacheCreation5mTokens,
 		oaiUsage.ClaudeCacheCreation1hTokens,
 	)
+	inputTokens := lo.Max([]int{
+		oaiUsage.PromptTokens - oaiUsage.PromptTokensDetails.CachedTokens - oaiUsage.PromptTokensDetails.CachedCreationTokens,
+		0,
+	})
 	usage := &dto.ClaudeUsage{
-		InputTokens:              oaiUsage.PromptTokens,
+		InputTokens:              inputTokens,
 		OutputTokens:             oaiUsage.CompletionTokens,
 		CacheCreationInputTokens: oaiUsage.PromptTokensDetails.CachedCreationTokens,
 		CacheReadInputTokens:     oaiUsage.PromptTokensDetails.CachedTokens,

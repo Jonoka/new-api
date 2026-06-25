@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,6 +39,151 @@ func stringDeltaFromPrefix(prev string, next string) string {
 	return next
 }
 
+func isResponsesSSEBody(body []byte) bool {
+	trimmed := bytes.TrimSpace(body)
+	return bytes.HasPrefix(trimmed, []byte("data:")) ||
+		bytes.HasPrefix(trimmed, []byte("event:")) ||
+		bytes.HasPrefix(trimmed, []byte("id:")) ||
+		bytes.HasPrefix(trimmed, []byte("retry:")) ||
+		bytes.HasPrefix(trimmed, []byte(":"))
+}
+
+func normalizeResponsesStreamJSONData(data string) (string, bool) {
+	data = strings.TrimSpace(data)
+	for {
+		switch {
+		case data == "" || data == "[DONE]":
+			return "", false
+		case strings.HasPrefix(data, "data:"):
+			data = strings.TrimSpace(strings.TrimPrefix(data, "data:"))
+			continue
+		case strings.HasPrefix(data, "event:"),
+			strings.HasPrefix(data, "id:"),
+			strings.HasPrefix(data, "retry:"),
+			strings.HasPrefix(data, ":"):
+			return "", false
+		}
+		break
+	}
+	if !strings.HasPrefix(data, "{") {
+		return "", false
+	}
+	return data, true
+}
+
+func parseResponsesStreamEventData(data string) (dto.ResponsesStreamResponse, string, bool, error) {
+	var streamResp dto.ResponsesStreamResponse
+	jsonData, ok := normalizeResponsesStreamJSONData(data)
+	if !ok {
+		return streamResp, "", false, nil
+	}
+	if err := common.UnmarshalJsonStr(jsonData, &streamResp); err != nil {
+		return streamResp, jsonData, true, err
+	}
+	return streamResp, jsonData, true, nil
+}
+
+func convertResponsesSSEToJSON(sseBody []byte) ([]byte, error) {
+	lines := bytes.Split(sseBody, []byte("\n"))
+
+	var (
+		completedResp *dto.OpenAIResponsesResponse
+		responseID    string
+		model         string
+		createdAt     int
+		outputText    strings.Builder
+		usage         *dto.Usage
+	)
+
+	for _, line := range lines {
+		line = bytes.TrimSpace(line)
+		if !bytes.HasPrefix(line, []byte("data:")) {
+			continue
+		}
+		data := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
+		if len(data) == 0 || bytes.Equal(data, []byte("[DONE]")) {
+			continue
+		}
+
+		streamResp, _, ok, err := parseResponsesStreamEventData(string(data))
+		if !ok {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal responses SSE event: %w", err)
+		}
+
+		if streamResp.Response != nil {
+			if streamResp.Response.ID != "" {
+				responseID = streamResp.Response.ID
+			}
+			if streamResp.Response.Model != "" {
+				model = streamResp.Response.Model
+			}
+			if streamResp.Response.CreatedAt != 0 {
+				createdAt = streamResp.Response.CreatedAt
+			}
+			if streamResp.Response.Usage != nil {
+				usage = streamResp.Response.Usage
+			}
+		}
+
+		switch streamResp.Type {
+		case "response.output_text.delta":
+			outputText.WriteString(streamResp.Delta)
+		case "response.completed", "response.done", "response.incomplete", "response.cancelled", "response.canceled":
+			if streamResp.Response != nil {
+				completedResp = streamResp.Response
+			}
+		case "response.error", "response.failed":
+			if streamResp.Response != nil {
+				completedResp = streamResp.Response
+			}
+		}
+	}
+
+	if completedResp == nil {
+		completedResp = &dto.OpenAIResponsesResponse{
+			ID:        responseID,
+			Object:    "response",
+			CreatedAt: createdAt,
+			Model:     model,
+			Usage:     usage,
+		}
+	}
+	if completedResp.ID == "" {
+		completedResp.ID = responseID
+	}
+	if completedResp.Object == "" {
+		completedResp.Object = "response"
+	}
+	if completedResp.CreatedAt == 0 {
+		completedResp.CreatedAt = createdAt
+	}
+	if completedResp.Model == "" {
+		completedResp.Model = model
+	}
+	if completedResp.Usage == nil {
+		completedResp.Usage = usage
+	}
+	if len(completedResp.Output) == 0 && outputText.Len() > 0 {
+		completedResp.Output = []dto.ResponsesOutput{
+			{
+				Type: "message",
+				Role: "assistant",
+				Content: []dto.ResponsesOutputContent{
+					{
+						Type: "output_text",
+						Text: outputText.String(),
+					},
+				},
+			},
+		}
+	}
+
+	return common.Marshal(completedResp)
+}
+
 func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	if resp == nil || resp.Body == nil {
 		return nil, types.NewOpenAIError(fmt.Errorf("invalid response"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
@@ -51,6 +197,14 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
 
+	if isResponsesSSEBody(body) {
+		converted, convErr := convertResponsesSSEToJSON(body)
+		if convErr != nil {
+			return nil, types.NewOpenAIError(convErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+		}
+		body = converted
+	}
+
 	if err := common.Unmarshal(body, &responsesResp); err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
@@ -58,6 +212,7 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	if oaiError := responsesResp.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
+	service.BindOpenAIResponsesContinuationResponseIDFromInfo(info, responsesResp.ID)
 
 	chatId := helper.GetResponseID(c)
 	chatResp, usage, err := service.ResponsesResponseToChatCompletionsResponse(&responsesResp, chatId)
@@ -302,11 +457,26 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			return
 		}
 
-		var streamResp dto.ResponsesStreamResponse
-		if err := common.UnmarshalJsonStr(data, &streamResp); err != nil {
+		streamResp, _, ok, err := parseResponsesStreamEventData(data)
+		if !ok {
+			return
+		}
+		if err != nil {
 			logger.LogError(c, "failed to unmarshal responses stream event: "+err.Error())
 			sr.Error(err)
 			return
+		}
+		if isResponsesTerminalUsageEvent(streamResp.Type) && streamResp.Response != nil {
+			if streamResp.Response.Model != "" {
+				model = streamResp.Response.Model
+			}
+			if streamResp.Response.CreatedAt != 0 {
+				createAt = int64(streamResp.Response.CreatedAt)
+			}
+			if streamResp.Type == "response.completed" || streamResp.Type == "response.done" {
+				service.BindOpenAIResponsesContinuationResponseIDFromInfo(info, streamResp.Response.ID)
+			}
+			applyResponsesUsageToOpenAIUsage(usage, streamResp.Response)
 		}
 
 		switch streamResp.Type {
@@ -442,39 +612,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 
 		case "response.function_call_arguments.done":
 
-		case "response.completed":
-			if streamResp.Response != nil {
-				if streamResp.Response.Model != "" {
-					model = streamResp.Response.Model
-				}
-				if streamResp.Response.CreatedAt != 0 {
-					createAt = int64(streamResp.Response.CreatedAt)
-				}
-				if streamResp.Response.Usage != nil {
-					if streamResp.Response.Usage.InputTokens != 0 {
-						usage.PromptTokens = streamResp.Response.Usage.InputTokens
-						usage.InputTokens = streamResp.Response.Usage.InputTokens
-					}
-					if streamResp.Response.Usage.OutputTokens != 0 {
-						usage.CompletionTokens = streamResp.Response.Usage.OutputTokens
-						usage.OutputTokens = streamResp.Response.Usage.OutputTokens
-					}
-					if streamResp.Response.Usage.TotalTokens != 0 {
-						usage.TotalTokens = streamResp.Response.Usage.TotalTokens
-					} else {
-						usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
-					}
-					if streamResp.Response.Usage.InputTokensDetails != nil {
-						usage.PromptTokensDetails.CachedTokens = streamResp.Response.Usage.InputTokensDetails.CachedTokens
-						usage.PromptTokensDetails.ImageTokens = streamResp.Response.Usage.InputTokensDetails.ImageTokens
-						usage.PromptTokensDetails.AudioTokens = streamResp.Response.Usage.InputTokensDetails.AudioTokens
-					}
-					if streamResp.Response.Usage.CompletionTokenDetails.ReasoningTokens != 0 {
-						usage.CompletionTokenDetails.ReasoningTokens = streamResp.Response.Usage.CompletionTokenDetails.ReasoningTokens
-					}
-				}
-			}
-
+		case "response.completed", "response.done", "response.incomplete", "response.cancelled", "response.canceled":
 			if !sendStartIfNeeded() {
 				sr.Stop(streamErr)
 				return

@@ -118,6 +118,17 @@ export const getRedemptionsColumns = ({
       },
     },
     {
+      title: t('兑换次数'),
+      dataIndex: 'redeemed_count',
+      render: (_, record) => {
+        return (
+          <Tag color='blue' shape='circle'>
+            {record.redeemed_count || 0}/{record.max_redeem_count || 1}
+          </Tag>
+        );
+      },
+    },
+    {
       title: t('创建时间'),
       dataIndex: 'created_time',
       render: (text) => {

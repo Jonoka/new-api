@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -17,7 +18,8 @@ import (
 )
 
 type SubscriptionCreemPayRequest struct {
-	PlanId int `json:"plan_id"`
+	PlanId    int    `json:"plan_id"`
+	PromoCode string `json:"promo_code"`
 }
 
 func SubscriptionRequestCreemPay(c *gin.Context) {
@@ -38,6 +40,10 @@ func SubscriptionRequestCreemPay(c *gin.Context) {
 
 	if err := c.ShouldBindJSON(&req); err != nil || req.PlanId <= 0 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "参数错误"})
+		return
+	}
+	if strings.TrimSpace(req.PromoCode) != "" {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "Creem 固定产品暂不支持优惠码，请选择其他支付方式"})
 		return
 	}
 
@@ -84,12 +90,17 @@ func SubscriptionRequestCreemPay(c *gin.Context) {
 
 	reference := "sub-creem-ref-" + randstr.String(6)
 	referenceId := "sub_ref_" + common.Sha1([]byte(reference+time.Now().String()+user.Username))
+	payMoney := plan.PriceAmount
+	if payMoney < 0.01 {
+		common.ApiErrorMsg(c, "套餐金额过低")
+		return
+	}
 
 	// create pending order first
 	order := &model.SubscriptionOrder{
 		UserId:          userId,
 		PlanId:          plan.Id,
-		Money:           plan.PriceAmount,
+		Money:           payMoney,
 		TradeNo:         referenceId,
 		PaymentMethod:   model.PaymentMethodCreem,
 		PaymentProvider: model.PaymentProviderCreem,

@@ -37,12 +37,14 @@ export type ChannelInfo = z.infer<typeof channelInfoSchema>
 export const channelSchema = z.object({
   id: z.number(),
   type: z.number(),
+  vendor_id: z.number().nullish(),
   key: z.string(),
   openai_organization: z.string().nullish(),
   test_model: z.string().nullish(),
   status: z.number(), // 1: enabled, 0: manual disabled, 2: auto disabled
   name: z.string(),
   weight: z.number().nullish(),
+  concurrency_limit: z.number().nullish(),
   created_time: z.number(),
   test_time: z.number(),
   response_time: z.number(), // in milliseconds
@@ -100,11 +102,24 @@ export interface ChannelOtherSettings {
   allow_inference_geo?: boolean
   allow_speed?: boolean
   claude_beta_query?: boolean
+  claude_code_fingerprint_enabled?: boolean
+  claude_code_transport_fingerprint_enabled?: boolean
+  claude_code_version?: string
   upstream_model_update_check_enabled?: boolean
   upstream_model_update_auto_sync_enabled?: boolean
   upstream_model_update_ignored_models?: string[]
   upstream_model_update_last_check_time?: number
   upstream_model_update_last_detected_models?: string[]
+  monitor_enabled?: boolean
+  monitor_test_interval_minutes?: number
+  monitor_response_time_threshold_seconds?: number
+  monitor_auto_disable_enabled?: boolean
+  monitor_auto_enable_enabled?: boolean
+  monitor_disable_threshold?: number
+  monitor_enable_threshold?: number
+  monitor_last_test_time?: number
+  monitor_consecutive_failures?: number
+  monitor_consecutive_successes?: number
 }
 
 // ============================================================================
@@ -120,6 +135,7 @@ export interface GetChannelsResponse {
     page: number
     page_size: number
     type_counts?: Record<string, number>
+    vendor_counts?: Record<string, number>
   }
 }
 
@@ -130,6 +146,7 @@ export interface SearchChannelsResponse {
     items: Channel[]
     total: number
     type_counts?: Record<string, number>
+    vendor_counts?: Record<string, number>
   }
 }
 
@@ -227,6 +244,7 @@ export interface GetChannelsParams {
   page_size?: number
   status?: string // 'enabled', 'disabled', or empty for all
   type?: number
+  vendor?: number
   group?: string
   id_sort?: boolean
   tag_mode?: boolean
@@ -240,6 +258,7 @@ export interface SearchChannelsParams {
   model?: string
   status?: string
   type?: number
+  vendor?: number
   id_sort?: boolean
   tag_mode?: boolean
   sort_by?: ChannelSortBy
@@ -287,6 +306,7 @@ export interface TagOperationParams {
   new_tag?: string
   priority?: number
   weight?: number
+  concurrency_limit?: number | null
   model_mapping?: string
   models?: string
   groups?: string
@@ -307,6 +327,7 @@ export interface ChannelFormData {
   model_mapping?: string
   priority?: number
   weight?: number
+  concurrency_limit?: number | null
   test_model?: string
   auto_ban?: number
   status: number

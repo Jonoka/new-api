@@ -18,6 +18,10 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useMemo } from 'react'
 import { useAuthStore } from '@/stores/auth-store'
+import {
+  getSidebarCustomModuleKey,
+  parseCustomNavItems,
+} from '@/lib/custom-nav'
 import { useStatus } from '@/hooks/use-status'
 import type { NavGroup, NavItem } from '@/components/layout/types'
 
@@ -31,6 +35,7 @@ type SidebarModulesAdminConfig = Record<string, SidebarSectionConfig>
 // User-layer config is shape-identical to admin, but may be null
 // to signal "no narrowing" (empty/invalid/legacy users).
 type SidebarModulesUserConfig = SidebarModulesAdminConfig | null
+type SidebarModulesPermissionConfig = Record<string, unknown> | undefined
 
 /**
  * Default sidebar modules configuration
@@ -39,6 +44,7 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
   chat: {
     enabled: true,
     playground: true,
+    canvas: true,
     chat: true,
   },
   console: {
@@ -48,10 +54,12 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     log: true,
     midjourney: true,
     task: true,
+    game: true,
   },
   personal: {
     enabled: true,
     topup: true,
+    affiliate: true,
     personal: true,
   },
   admin: {
@@ -60,8 +68,10 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     models: true,
     redemption: true,
     user: true,
+    affiliate_admin: true,
     setting: true,
     subscription: true,
+    game: true,
   },
 }
 
@@ -95,6 +105,7 @@ const mergeWithDefaultSidebarModules = (
  */
 const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/playground': { section: 'chat', module: 'playground' },
+  '/canvas': { section: 'chat', module: 'canvas' },
   '/dashboard': { section: 'console', module: 'detail' },
   '/dashboard/overview': { section: 'console', module: 'detail' },
   '/dashboard/models': { section: 'console', module: 'detail' },
@@ -104,7 +115,9 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/usage-logs/common': { section: 'console', module: 'log' },
   '/usage-logs/drawing': { section: 'console', module: 'midjourney' },
   '/usage-logs/task': { section: 'console', module: 'task' },
+  '/game-center': { section: 'console', module: 'game' },
   '/wallet': { section: 'personal', module: 'topup' },
+  '/affiliate': { section: 'personal', module: 'affiliate' },
   '/profile': { section: 'personal', module: 'personal' },
   '/channels': { section: 'admin', module: 'channel' },
   '/models': { section: 'admin', module: 'models' },
@@ -113,9 +126,17 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/users': { section: 'admin', module: 'user' },
   '/redemption-codes': { section: 'admin', module: 'redemption' },
   '/subscriptions': { section: 'admin', module: 'subscription' },
+  '/system-settings/billing/affiliate': {
+    section: 'admin',
+    module: 'affiliate_admin',
+  },
+  '/game-management': { section: 'admin', module: 'game' },
   '/system-settings': { section: 'admin', module: 'setting' },
   '/system-settings/site': { section: 'admin', module: 'setting' },
+  '/system-settings/games': { section: 'admin', module: 'setting' },
 }
+
+const CUSTOM_MODULE_PREFIX = 'custom:'
 
 /**
  * Parse backend SidebarModulesAdmin configuration
@@ -129,8 +150,18 @@ function parseSidebarConfig(
   }
 
   try {
-    const parsed = JSON.parse(value) as SidebarModulesAdminConfig
-    return mergeWithDefaultSidebarModules(parsed)
+    const parsed = JSON.parse(value) as SidebarModulesAdminConfig & {
+      customItems?: unknown
+    }
+    const merged = mergeWithDefaultSidebarModules(parsed)
+    const customItems = parseCustomNavItems(parsed.customItems)
+    if (customItems.length > 0) {
+      merged.custom = { enabled: true }
+      customItems.forEach((item) => {
+        merged.custom[getSidebarCustomModuleKey(item.id)] = true
+      })
+    }
+    return merged
   } catch {
     // eslint-disable-next-line no-console
     console.error('Failed to parse sidebar modules configuration')
@@ -167,9 +198,30 @@ function parseUserSidebarConfig(
 function isModuleEnabled(
   url: string,
   adminConfig: SidebarModulesAdminConfig,
-  userConfig: SidebarModulesUserConfig
+  userConfig: SidebarModulesUserConfig,
+  permissionConfig: SidebarModulesPermissionConfig
 ): boolean {
-  const mapping = URL_TO_CONFIG_MAP[url]
+  if (url.startsWith(CUSTOM_MODULE_PREFIX)) {
+    const adminCustom = adminConfig.custom
+    const adminAllowed = Boolean(
+      !adminCustom ||
+        (adminCustom.enabled !== false && adminCustom[url] !== false)
+    )
+    if (!adminAllowed) return false
+
+    const userCustom = userConfig?.custom
+    if (!userCustom) return true
+    if (userCustom.enabled === false) return false
+    return userCustom[url] !== false
+  }
+
+  const normalizedUrl =
+    url.endsWith('/') && url !== '/' ? url.slice(0, -1) : url
+  const mapping =
+    URL_TO_CONFIG_MAP[normalizedUrl] ??
+    Object.entries(URL_TO_CONFIG_MAP)
+      .sort(([a], [b]) => b.length - a.length)
+      .find(([prefix]) => normalizedUrl.startsWith(`${prefix}/`))?.[1]
   if (!mapping) {
     // No mapping config, default to visible (e.g. system settings and new features)
     return true
@@ -181,6 +233,16 @@ function isModuleEnabled(
     adminSection && adminSection.enabled && adminSection[module] === true
   )
   if (!adminAllowed) return false
+
+  const permissionSection = permissionConfig?.[section]
+  if (permissionSection === false) return false
+  if (
+    permissionSection &&
+    typeof permissionSection === 'object' &&
+    (permissionSection as Record<string, unknown>)[module] === false
+  ) {
+    return false
+  }
 
   if (!userConfig) return true
 
@@ -196,7 +258,8 @@ function isModuleEnabled(
 function isNavItemVisible(
   item: NavItem,
   adminConfig: SidebarModulesAdminConfig,
-  userConfig: SidebarModulesUserConfig
+  userConfig: SidebarModulesUserConfig,
+  permissionConfig: SidebarModulesPermissionConfig
 ): boolean {
   // Handle dynamic chat presets type — also runs the admin × user AND gate
   if ('type' in item && item.type === 'chat-presets') {
@@ -214,7 +277,7 @@ function isNavItemVisible(
   if ('url' in item && item.url) {
     const configUrls = item.configUrls ?? [item.url]
     return configUrls.some((url) =>
-      isModuleEnabled(url as string, adminConfig, userConfig)
+      isModuleEnabled(url as string, adminConfig, userConfig, permissionConfig)
     )
   }
 
@@ -222,7 +285,12 @@ function isNavItemVisible(
   if ('items' in item && item.items) {
     // If has sub-items, show this collapsible item if at least one sub-item is visible
     return item.items.some((subItem) =>
-      isModuleEnabled(subItem.url as string, adminConfig, userConfig)
+      isModuleEnabled(
+        subItem.url as string,
+        adminConfig,
+        userConfig,
+        permissionConfig
+      )
     )
   }
 
@@ -235,14 +303,20 @@ function isNavItemVisible(
 function filterNavItems(
   items: NavItem[],
   adminConfig: SidebarModulesAdminConfig,
-  userConfig: SidebarModulesUserConfig
+  userConfig: SidebarModulesUserConfig,
+  permissionConfig: SidebarModulesPermissionConfig
 ): NavItem[] {
   return items
     .map((item) => {
       // If collapsible item, also filter its sub-items
       if ('items' in item && item.items) {
         const filteredSubItems = item.items.filter((subItem) =>
-          isModuleEnabled(subItem.url as string, adminConfig, userConfig)
+          isModuleEnabled(
+            subItem.url as string,
+            adminConfig,
+            userConfig,
+            permissionConfig
+          )
         )
 
         return {
@@ -252,7 +326,28 @@ function filterNavItems(
       }
       return item
     })
-    .filter((item) => isNavItemVisible(item, adminConfig, userConfig))
+    .filter((item) =>
+      isNavItemVisible(item, adminConfig, userConfig, permissionConfig)
+    )
+}
+
+export function filterSidebarNavGroups(
+  navGroups: NavGroup[],
+  adminConfig: SidebarModulesAdminConfig,
+  userConfig: SidebarModulesUserConfig,
+  permissionConfig: SidebarModulesPermissionConfig
+): NavGroup[] {
+  return navGroups
+    .map((group) => ({
+      ...group,
+      items: filterNavItems(
+        group.items,
+        adminConfig,
+        userConfig,
+        permissionConfig
+      ),
+    }))
+    .filter((group) => group.items.length > 0)
 }
 
 /**
@@ -295,15 +390,17 @@ export function useSidebarConfig(navGroups: NavGroup[]): NavGroup[] {
     return parseUserSidebarConfig(auth?.user?.sidebar_modules)
   }, [auth?.user?.permissions?.sidebar_settings, auth?.user?.sidebar_modules])
 
+  const permissionConfig = auth?.user?.permissions?.sidebar_modules
+
   const filteredNavGroups = useMemo(
     () =>
-      navGroups
-        .map((group) => ({
-          ...group,
-          items: filterNavItems(group.items, adminConfig, userConfig),
-        }))
-        .filter((group) => group.items.length > 0), // Only show navigation groups with visible items
-    [navGroups, adminConfig, userConfig]
+      filterSidebarNavGroups(
+        navGroups,
+        adminConfig,
+        userConfig,
+        permissionConfig
+      ),
+    [navGroups, adminConfig, userConfig, permissionConfig]
   )
 
   return filteredNavGroups

@@ -68,3 +68,21 @@ func (l *InMemoryRateLimiter) Request(key string, maxRequestNum int, duration in
 	}
 	return true
 }
+
+// Allow 只检查当前时间窗口是否还有余量，不记录新事件。
+// 用于只应在受保护操作成功后才写入的计数器。
+func (l *InMemoryRateLimiter) Allow(key string, maxRequestNum int, duration int64) bool {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+
+	queue, ok := l.store[key]
+	if !ok {
+		return true
+	}
+	if len(*queue) < maxRequestNum {
+		return true
+	}
+
+	now := time.Now().Unix()
+	return now-(*queue)[0] >= duration
+}

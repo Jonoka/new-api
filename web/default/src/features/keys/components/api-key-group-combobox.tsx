@@ -51,7 +51,7 @@ type ApiKeyGroupComboboxProps = {
   disabled?: boolean
 }
 
-function formatGroupRatio(
+export function formatGroupRatio(
   ratio: ApiKeyGroupOption['ratio'],
   ratioLabel: string
 ) {
@@ -59,7 +59,7 @@ function formatGroupRatio(
   return `${ratio}x ${ratioLabel}`
 }
 
-function getRatioBadgeClassName(ratio: ApiKeyGroupOption['ratio']) {
+export function getRatioBadgeClassName(ratio: ApiKeyGroupOption['ratio']) {
   if (typeof ratio !== 'number') {
     return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300'
   }
@@ -76,7 +76,7 @@ function getRatioBadgeClassName(ratio: ApiKeyGroupOption['ratio']) {
   return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300'
 }
 
-function GroupRatioBadge({ ratio }: { ratio: ApiKeyGroupOption['ratio'] }) {
+export function GroupRatioBadge({ ratio }: { ratio: ApiKeyGroupOption['ratio'] }) {
   const { t } = useTranslation()
   const label = formatGroupRatio(ratio, t('Ratio'))
 

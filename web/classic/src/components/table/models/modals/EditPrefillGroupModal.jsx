@@ -39,6 +39,20 @@ import { useIsMobile } from '../../../../hooks/common/useIsMobile';
 
 const { Text, Title } = Typography;
 
+function parseStringItems(items) {
+  if (Array.isArray(items)) return items;
+  if (typeof items !== 'string') return [];
+  try {
+    const parsed = JSON.parse(items);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return items
+      .split(/[\n,]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+}
+
 // Example endpoint template for quick fill
 const ENDPOINT_TEMPLATE = {
   openai: { path: '/v1/chat/completions', method: 'POST' },
@@ -73,6 +87,7 @@ const EditPrefillGroupModal = ({
     { label: t('模型组'), value: 'model' },
     { label: t('标签组'), value: 'tag' },
     { label: t('端点组'), value: 'endpoint' },
+    { label: t('屏蔽词组'), value: 'sensitive_word' },
   ];
 
   // 提交表单
@@ -176,9 +191,7 @@ const EditPrefillGroupModal = ({
                     ? editingGroup.items
                     : JSON.stringify(editingGroup.items || {}, null, 2);
                 }
-                return Array.isArray(editingGroup?.items)
-                  ? editingGroup.items
-                  : [];
+                return parseStringItems(editingGroup?.items);
               } catch {
                 return editingGroup?.type === 'endpoint' ? '' : [];
               }

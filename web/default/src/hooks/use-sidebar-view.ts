@@ -37,10 +37,8 @@ const ROOT_VIEW_KEY = '__root'
  * - Otherwise returns the root navigation, narrowed by:
  *     · admin-only group visibility (role-based);
  *     · `useSidebarConfig` (admin × user `sidebar_modules` overlay).
- *
- * Nested views are intentionally NOT passed through `useSidebarConfig`
- * — those filters target known dashboard URLs only, and gating is
- * already enforced at the route level (`beforeLoad` redirects).
+ * - Nested views are also passed through `useSidebarConfig` so hidden
+ *   modules do not keep contextual drill-in entries visible.
  */
 export function useSidebarView(): ResolvedSidebarView {
   const { t } = useTranslation()
@@ -48,6 +46,12 @@ export function useSidebarView(): ResolvedSidebarView {
   const userRole = useAuthStore((s) => s.auth.user?.role)
   const rootSidebarData = useSidebarData()
   const configFilteredRoot = useSidebarConfig(rootSidebarData.navGroups)
+  const view = resolveSidebarView(pathname)
+  const nestedRawNavGroups = useMemo<NavGroup[]>(
+    () => (view ? view.getNavGroups(t) : []),
+    [t, view]
+  )
+  const configFilteredNested = useSidebarConfig(nestedRawNavGroups)
 
   const rootNavGroups = useMemo<NavGroup[]>(() => {
     const isAdmin = userRole !== undefined && userRole >= ROLE.ADMIN
@@ -56,13 +60,11 @@ export function useSidebarView(): ResolvedSidebarView {
     )
   }, [configFilteredRoot, userRole])
 
-  const view = resolveSidebarView(pathname)
-
   if (view) {
     return {
       key: view.id,
       view,
-      navGroups: view.getNavGroups(t),
+      navGroups: configFilteredNested,
     }
   }
 

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -194,6 +195,7 @@ func InitDB() (err error) {
 		sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
 		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
 		sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
+		configureSQLiteConnectionPool(DB, sqlDB)
 
 		if !common.IsMasterNode {
 			return nil
@@ -234,6 +236,7 @@ func InitLogDB() (err error) {
 		sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
 		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
 		sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
+		configureSQLiteConnectionPool(LOG_DB, sqlDB)
 
 		if !common.IsMasterNode {
 			return nil
@@ -245,6 +248,21 @@ func InitLogDB() (err error) {
 		common.FatalLog(err)
 	}
 	return err
+}
+
+func configureSQLiteConnectionPool(db *gorm.DB, sqlDB *sql.DB) {
+	if !common.UsingSQLite || db == nil || sqlDB == nil {
+		return
+	}
+	maxOpenConns := common.GetEnvOrDefault("SQLITE_MAX_OPEN_CONNS", 1)
+	if maxOpenConns <= 0 {
+		maxOpenConns = 1
+	}
+	sqlDB.SetMaxOpenConns(maxOpenConns)
+	sqlDB.SetMaxIdleConns(maxOpenConns)
+	sqlDB.SetConnMaxLifetime(0)
+	_ = db.Exec("PRAGMA journal_mode=WAL").Error
+	_ = db.Exec("PRAGMA busy_timeout=30000").Error
 }
 
 func migrateDB() error {
@@ -262,6 +280,9 @@ func migrateDB() error {
 		&PasskeyCredential{},
 		&Option{},
 		&Redemption{},
+		&RedemptionUsage{},
+		&PromoCode{},
+		&PromoCodeUsage{},
 		&Ability{},
 		&Log{},
 		&Midjourney{},
@@ -278,9 +299,24 @@ func migrateDB() error {
 		&SubscriptionOrder{},
 		&UserSubscription{},
 		&SubscriptionPreConsumeRecord{},
+		&AffiliateRecord{},
+		&AffiliateBalance{},
+		&AffiliatePayoutAccount{},
+		&AffiliateWithdrawal{},
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
 		&PerfMetric{},
+		&GameWallet{},
+		&GameWalletTransaction{},
+		&GamePrediction{},
+		&GamePredictionOption{},
+		&GamePredictionBet{},
+		&UserIPRecord{},
+		&AffiliateApplication{},
+		&AffiliateFraudAlert{},
+		&AffiliateRiskUser{},
+		&AffiliateRiskEvent{},
+		&AffiliateRiskDetachedInvitee{},
 	)
 	if err != nil {
 		return err
@@ -311,6 +347,9 @@ func migrateDBFast() error {
 		{&PasskeyCredential{}, "PasskeyCredential"},
 		{&Option{}, "Option"},
 		{&Redemption{}, "Redemption"},
+		{&RedemptionUsage{}, "RedemptionUsage"},
+		{&PromoCode{}, "PromoCode"},
+		{&PromoCodeUsage{}, "PromoCodeUsage"},
 		{&Ability{}, "Ability"},
 		{&Log{}, "Log"},
 		{&Midjourney{}, "Midjourney"},
@@ -327,9 +366,24 @@ func migrateDBFast() error {
 		{&SubscriptionOrder{}, "SubscriptionOrder"},
 		{&UserSubscription{}, "UserSubscription"},
 		{&SubscriptionPreConsumeRecord{}, "SubscriptionPreConsumeRecord"},
+		{&AffiliateRecord{}, "AffiliateRecord"},
+		{&AffiliateBalance{}, "AffiliateBalance"},
+		{&AffiliatePayoutAccount{}, "AffiliatePayoutAccount"},
+		{&AffiliateWithdrawal{}, "AffiliateWithdrawal"},
 		{&CustomOAuthProvider{}, "CustomOAuthProvider"},
 		{&UserOAuthBinding{}, "UserOAuthBinding"},
 		{&PerfMetric{}, "PerfMetric"},
+		{&GameWallet{}, "GameWallet"},
+		{&GameWalletTransaction{}, "GameWalletTransaction"},
+		{&GamePrediction{}, "GamePrediction"},
+		{&GamePredictionOption{}, "GamePredictionOption"},
+		{&GamePredictionBet{}, "GamePredictionBet"},
+		{&UserIPRecord{}, "UserIPRecord"},
+		{&AffiliateApplication{}, "AffiliateApplication"},
+		{&AffiliateFraudAlert{}, "AffiliateFraudAlert"},
+		{&AffiliateRiskUser{}, "AffiliateRiskUser"},
+		{&AffiliateRiskEvent{}, "AffiliateRiskEvent"},
+		{&AffiliateRiskDetachedInvitee{}, "AffiliateRiskDetachedInvitee"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))

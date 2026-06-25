@@ -97,6 +97,7 @@ type WaffoPayRequest struct {
 	PayMethodIndex *int   `json:"pay_method_index"` // 服务端支付方式列表的索引，nil 表示由 Waffo 自动选择
 	PayMethodType  string `json:"pay_method_type"`  // Deprecated: 兼容旧前端，优先使用 pay_method_index
 	PayMethodName  string `json:"pay_method_name"`  // Deprecated: 兼容旧前端，优先使用 pay_method_index
+	PromoCode      string `json:"promo_code"`
 }
 
 func RequestWaffoAmount(c *gin.Context) {
@@ -120,12 +121,24 @@ func RequestWaffoAmount(c *gin.Context) {
 	}
 
 	payMoney := getWaffoPayMoney(float64(req.Amount), group)
-	if payMoney <= 0.01 {
+	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetTopUp, 0, payMoney)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+		return
+	}
+	if discount != nil {
+		payMoney = discount.PaidAmount
+	}
+	if payMoney < 0 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "success", "data": strconv.FormatFloat(payMoney, 'f', 2, 64)})
+	response := gin.H{"message": "success", "data": strconv.FormatFloat(payMoney, 'f', 2, 64)}
+	if discount != nil {
+		response["discount"] = discount
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 // RequestWaffoPay 创建 Waffo 支付订单
@@ -187,7 +200,15 @@ func RequestWaffoPay(c *gin.Context) {
 
 	group, _ := model.GetUserGroup(id, true)
 	payMoney := getWaffoPayMoney(float64(req.Amount), group)
-	if payMoney < 0.01 {
+	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetTopUp, 0, payMoney)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+		return
+	}
+	if discount != nil {
+		payMoney = discount.PaidAmount
+	}
+	if payMoney < 0 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
 	}
@@ -216,9 +237,23 @@ func RequestWaffoPay(c *gin.Context) {
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}
+	model.ApplyPromoCodeResultToTopUp(topUp, discount)
 	if err := topUp.Insert(); err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Waffo 创建充值订单失败 user_id=%d trade_no=%s amount=%d error=%q", id, merchantOrderId, req.Amount, err.Error()))
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "创建订单失败"})
+		return
+	}
+	if payMoney < 0.01 {
+		completedTopUp, quotaToAdd, completedNow, err := model.CompleteFreeTopUp(merchantOrderId, model.PaymentProviderWaffo)
+		if err != nil {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("Waffo 0元优惠充值完成失败 user_id=%d trade_no=%s amount=%d error=%q", id, merchantOrderId, req.Amount, err.Error()))
+			c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+			return
+		}
+		if completedNow {
+			model.RecordTopupLog(completedTopUp.UserId, fmt.Sprintf("使用优惠码充值成功，充值金额: %v，支付金额：0.00", logger.LogQuota(quotaToAdd)), c.ClientIP(), completedTopUp.PaymentMethod, "promo")
+		}
+		c.JSON(http.StatusOK, freeTopUpResponse(completedTopUp, quotaToAdd, discount))
 		return
 	}
 

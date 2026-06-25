@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { formatUseTime } from '@/lib/format'
 import type { StatusBadgeProps } from '@/components/status-badge'
 import {
   BILLING_PRICING_VARS,
@@ -147,6 +148,38 @@ export function getResponseTimeColor(
 ): 'success' | 'warning' | 'danger' {
   if (completionTokens < 100 || seconds <= 0) return getTimeColor(seconds)
   return getThroughputColor(completionTokens / seconds)
+}
+
+export function getLogUseTimeSeconds(
+  useTime: number,
+  other: LogOtherData | null | undefined
+): number {
+  const useTimeMs = other?.use_time_ms
+  if (
+    typeof useTimeMs === 'number' &&
+    Number.isFinite(useTimeMs) &&
+    useTimeMs > 0
+  ) {
+    return useTimeMs / 1000
+  }
+  return Number.isFinite(useTime) ? useTime : 0
+}
+
+export function formatLogUseTime(
+  useTime: number,
+  other: LogOtherData | null | undefined
+): string {
+  const useTimeMs = other?.use_time_ms
+  if (
+    typeof useTimeMs === 'number' &&
+    Number.isFinite(useTimeMs) &&
+    useTimeMs > 0
+  ) {
+    return formatUseTime(useTimeMs / 1000)
+  }
+  if (!Number.isFinite(useTime)) return '-'
+  if (useTime <= 0) return '<1s'
+  return formatUseTime(useTime)
 }
 
 /**

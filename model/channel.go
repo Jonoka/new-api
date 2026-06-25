@@ -23,12 +23,14 @@ import (
 type Channel struct {
 	Id                 int     `json:"id"`
 	Type               int     `json:"type" gorm:"default:0"`
+	VendorID           *int    `json:"vendor_id" gorm:"column:vendor_id;index"`
 	Key                string  `json:"key" gorm:"not null"`
 	OpenAIOrganization *string `json:"openai_organization"`
 	TestModel          *string `json:"test_model"`
 	Status             int     `json:"status" gorm:"default:1"`
 	Name               string  `json:"name" gorm:"index"`
 	Weight             *uint   `json:"weight" gorm:"default:0"`
+	ConcurrencyLimit   *int    `json:"concurrency_limit" gorm:"default:0;not null"`
 	CreatedTime        int64   `json:"created_time" gorm:"bigint"`
 	TestTime           int64   `json:"test_time" gorm:"bigint"`
 	ResponseTime       int     `json:"response_time"` // in milliseconds
@@ -282,6 +284,28 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 	}
 }
 
+func (channel *Channel) GetKeyByIndex(index int) (string, int, *types.NewAPIError) {
+	if !channel.ChannelInfo.IsMultiKey {
+		return channel.Key, 0, nil
+	}
+
+	keys := channel.GetKeys()
+	if len(keys) == 0 {
+		return "", 0, types.NewError(errors.New("no keys available"), types.ErrorCodeChannelNoAvailableKey)
+	}
+	if index < 0 || index >= len(keys) {
+		return "", 0, types.NewError(errors.New("multi key index out of range"), types.ErrorCodeChannelNoAvailableKey)
+	}
+
+	statusList := channel.ChannelInfo.MultiKeyStatusList
+	if statusList != nil {
+		if status, ok := statusList[index]; ok && status != common.ChannelStatusEnabled {
+			return "", 0, types.NewError(errors.New("selected multi key is disabled"), types.ErrorCodeChannelNoAvailableKey)
+		}
+	}
+	return keys[index], index, nil
+}
+
 func (channel *Channel) SaveChannelInfo() error {
 	return DB.Model(channel).Update("channel_info", channel.ChannelInfo).Error
 }
@@ -486,6 +510,13 @@ func (channel *Channel) GetWeight() int {
 		return 0
 	}
 	return int(*channel.Weight)
+}
+
+func (channel *Channel) GetConcurrencyLimit() int {
+	if channel.ConcurrencyLimit == nil {
+		return 0
+	}
+	return *channel.ConcurrencyLimit
 }
 
 func (channel *Channel) GetBaseURL() string {
@@ -796,7 +827,7 @@ func DisableChannelByTag(tag string) error {
 	return err
 }
 
-func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *string, group *string, priority *int64, weight *uint, paramOverride *string, headerOverride *string) error {
+func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *string, group *string, priority *int64, weight *uint, concurrencyLimit *int, paramOverride *string, headerOverride *string) error {
 	updateData := Channel{}
 	shouldReCreateAbilities := false
 	updatedTag := tag
@@ -821,6 +852,9 @@ func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *
 	}
 	if weight != nil {
 		updateData.Weight = weight
+	}
+	if concurrencyLimit != nil {
+		updateData.ConcurrencyLimit = concurrencyLimit
 	}
 	if paramOverride != nil {
 		updateData.ParamOverride = paramOverride

@@ -5,6 +5,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -44,6 +45,7 @@ func CreatePrefillGroup(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	service.InvalidateSensitiveWordPrefillGroupCache()
 	common.ApiSuccess(c, &g)
 }
 
@@ -71,6 +73,7 @@ func UpdatePrefillGroup(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	service.InvalidateSensitiveWordPrefillGroupCache()
 	common.ApiSuccess(c, &g)
 }
 
@@ -86,5 +89,6 @@ func DeletePrefillGroup(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	service.InvalidateSensitiveWordPrefillGroupCache()
 	common.ApiSuccess(c, nil)
 }

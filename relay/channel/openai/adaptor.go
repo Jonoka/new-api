@@ -255,7 +255,10 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 				}
 				request.Reasoning = marshal
 			}
-			// 清空多余的ReasoningEffort
+			// 保存推理力度到日志，再清空请求字段
+			if info.ReasoningEffort == "" && request.ReasoningEffort != "" {
+				info.ReasoningEffort = request.ReasoningEffort
+			}
 			request.ReasoningEffort = ""
 		} else {
 			if len(request.Reasoning) == 0 {
@@ -273,6 +276,9 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 						request.Reasoning = marshal
 					}
 				}
+			}
+			if info.ReasoningEffort == "" && request.ReasoningEffort != "" {
+				info.ReasoningEffort = request.ReasoningEffort
 			}
 			request.ReasoningEffort = ""
 		}
@@ -307,6 +313,16 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 
 			// 清空 THINKING
 			request.THINKING = nil
+
+			if info.ReasoningEffort == "" {
+				if thinking.Type == "enabled" || thinking.Type == "adaptive" {
+					if budget := thinking.GetBudgetTokens(); budget > 0 {
+						info.ReasoningEffort = fmt.Sprintf("thinking:%d", budget)
+					} else {
+						info.ReasoningEffort = "thinking"
+					}
+				}
+			}
 		}
 
 	}

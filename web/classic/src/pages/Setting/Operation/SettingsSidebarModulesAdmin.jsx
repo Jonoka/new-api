@@ -30,6 +30,7 @@ import {
 } from '@douyinfe/semi-ui';
 import { API, showSuccess, showError } from '../../../helpers';
 import { StatusContext } from '../../../context/Status';
+import { mergeAdminConfig } from '../../../hooks/common/useSidebar';
 
 const { Text } = Typography;
 
@@ -43,6 +44,7 @@ export default function SettingsSidebarModulesAdmin(props) {
     chat: {
       enabled: true,
       playground: true,
+      canvas: true,
       chat: true,
     },
     console: {
@@ -52,10 +54,12 @@ export default function SettingsSidebarModulesAdmin(props) {
       log: true,
       midjourney: true,
       task: true,
+      game_center: true,
     },
     personal: {
       enabled: true,
       topup: true,
+      affiliate: true,
       personal: true,
     },
     admin: {
@@ -66,6 +70,8 @@ export default function SettingsSidebarModulesAdmin(props) {
       redemption: true,
       user: true,
       subscription: true,
+      game_management: true,
+      affiliate_admin: true,
       setting: true,
     },
   });
@@ -104,6 +110,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       chat: {
         enabled: true,
         playground: true,
+        canvas: true,
         chat: true,
       },
       console: {
@@ -113,10 +120,12 @@ export default function SettingsSidebarModulesAdmin(props) {
         log: true,
         midjourney: true,
         task: true,
+        game_center: true,
       },
       personal: {
         enabled: true,
         topup: true,
+        affiliate: true,
         personal: true,
       },
       admin: {
@@ -127,6 +136,8 @@ export default function SettingsSidebarModulesAdmin(props) {
         redemption: true,
         user: true,
         subscription: true,
+        game_management: true,
+        affiliate_admin: true,
         setting: true,
       },
     };
@@ -174,11 +185,11 @@ export default function SettingsSidebarModulesAdmin(props) {
     if (props.options && props.options.SidebarModulesAdmin) {
       try {
         const modules = JSON.parse(props.options.SidebarModulesAdmin);
-        setSidebarModulesAdmin(modules);
+        setSidebarModulesAdmin(mergeAdminConfig(modules));
       } catch (error) {
         // 使用默认配置
         const defaultModules = {
-          chat: { enabled: true, playground: true, chat: true },
+          chat: { enabled: true, playground: true, canvas: true, chat: true },
           console: {
             enabled: true,
             detail: true,
@@ -186,8 +197,14 @@ export default function SettingsSidebarModulesAdmin(props) {
             log: true,
             midjourney: true,
             task: true,
+            game_center: true,
           },
-          personal: { enabled: true, topup: true, personal: true },
+          personal: {
+            enabled: true,
+            topup: true,
+            affiliate: true,
+            personal: true,
+          },
           admin: {
             enabled: true,
             channel: true,
@@ -196,6 +213,8 @@ export default function SettingsSidebarModulesAdmin(props) {
             redemption: true,
             user: true,
             subscription: true,
+            game_management: true,
+            affiliate_admin: true,
             setting: true,
           },
         };
@@ -216,6 +235,11 @@ export default function SettingsSidebarModulesAdmin(props) {
           title: t('操练场'),
           description: t('AI模型测试环境'),
         },
+        {
+          key: 'canvas',
+          title: t('无限画布'),
+          description: t('选择分组后打开无限画布'),
+        },
         { key: 'chat', title: t('聊天'), description: t('聊天会话管理') },
       ],
     },
@@ -233,6 +257,11 @@ export default function SettingsSidebarModulesAdmin(props) {
           description: t('绘图任务记录'),
         },
         { key: 'task', title: t('任务日志'), description: t('系统任务记录') },
+        {
+          key: 'game_center',
+          title: t('游戏中心'),
+          description: t('游戏钱包、预测局和参与入口'),
+        },
       ],
     },
     {
@@ -241,6 +270,11 @@ export default function SettingsSidebarModulesAdmin(props) {
       description: t('用户个人功能'),
       modules: [
         { key: 'topup', title: t('钱包管理'), description: t('余额充值管理') },
+        {
+          key: 'affiliate',
+          title: t('返佣分成'),
+          description: t('邀请返佣与提现管理'),
+        },
         {
           key: 'personal',
           title: t('个人设置'),
@@ -267,10 +301,20 @@ export default function SettingsSidebarModulesAdmin(props) {
         },
         {
           key: 'redemption',
-          title: t('兑换码管理'),
-          description: t('兑换码生成管理'),
+          title: t('营销福利'),
+          description: t('兑换码和优惠码管理'),
+        },
+        {
+          key: 'game_management',
+          title: t('游戏管理'),
+          description: t('预测局创建与结算'),
         },
         { key: 'user', title: t('用户管理'), description: t('用户账户管理') },
+        {
+          key: 'affiliate_admin',
+          title: t('返佣分成设置'),
+          description: t('返佣配置与提现审核'),
+        },
         {
           key: 'setting',
           title: t('系统设置'),

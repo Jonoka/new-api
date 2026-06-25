@@ -144,10 +144,7 @@ function renderType(type, t) {
 
 function buildStreamStatusTooltip(ss, t) {
   if (!ss) return null;
-  const lines = [
-    t('流状态') + '：' + t('异常'),
-    (ss.end_reason || 'unknown'),
-  ];
+  const lines = [t('流状态') + '：' + t('异常'), ss.end_reason || 'unknown'];
   if (ss.error_count > 0) {
     lines.push(`${t('软错误')}: ${ss.error_count}`);
   }
@@ -185,11 +182,7 @@ function renderIsStream(bool, t, streamStatus) {
                 userSelect: 'none',
               }}
             >
-              <CircleAlert
-                size={14}
-                strokeWidth={2.5}
-                color='currentColor'
-              />
+              <CircleAlert size={14} strokeWidth={2.5} color='currentColor' />
             </span>
           </Tooltip>
         )}
@@ -204,27 +197,53 @@ function renderIsStream(bool, t, streamStatus) {
   }
 }
 
-function renderUseTime(type, t) {
-  const time = parseInt(type);
+function getDisplayUseTimeSeconds(useTime, useTimeMs) {
+  const ms = Number(useTimeMs);
+  if (Number.isFinite(ms) && ms > 0) {
+    return ms / 1000.0;
+  }
+  const seconds = Number(useTime);
+  return Number.isFinite(seconds) ? seconds : 0;
+}
+
+function formatUseTimeLabel(useTime, useTimeMs) {
+  const ms = Number(useTimeMs);
+  if (Number.isFinite(ms) && ms > 0) {
+    const seconds = ms / 1000.0;
+    const label =
+      seconds < 10 ? seconds.toFixed(1) : Math.round(seconds).toString();
+    return `${label} s`;
+  }
+  const seconds = Number(useTime);
+  if (!Number.isFinite(seconds)) return '-';
+  if (seconds <= 0) return '<1 s';
+  const label =
+    seconds < 10 ? seconds.toFixed(1) : Math.round(seconds).toString();
+  return `${label} s`;
+}
+
+function renderUseTime(type, t, useTimeMs) {
+  const time = getDisplayUseTimeSeconds(type, useTimeMs);
+  const label = formatUseTimeLabel(type, useTimeMs);
   if (time < 101) {
     return (
       <Tag color='green' shape='circle'>
         {' '}
-        {time} s{' '}
+        {label}{' '}
       </Tag>
     );
   } else if (time < 300) {
     return (
       <Tag color='orange' shape='circle'>
         {' '}
-        {time} s{' '}
+        {label}{' '}
       </Tag>
     );
   } else {
     return (
       <Tag color='red' shape='circle'>
         {' '}
-        {time} s{' '}
+        {label}{' '}
       </Tag>
     );
   }
@@ -461,7 +480,11 @@ function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
     };
   }
 
-  const summaryOpts = { ...other, displayMode: billingDisplayMode, outputMode: 'segments' };
+  const summaryOpts = {
+    ...other,
+    displayMode: billingDisplayMode,
+    outputMode: 'segments',
+  };
 
   if (other?.billing_mode === 'tiered_expr') {
     return { segments: renderTieredModelPriceSimple(summaryOpts) };
@@ -707,17 +730,18 @@ export const getLogsColumns = ({
           return (
             <>
               <Space>
-                {renderUseTime(text, t)}
+                {renderUseTime(text, t, other?.use_time_ms)}
                 {renderFirstUseTime(other?.frt, t)}
                 {renderIsStream(record.is_stream, t, other?.stream_status)}
               </Space>
             </>
           );
         } else {
+          let other = getLogOther(record.other);
           return (
             <>
               <Space>
-                {renderUseTime(text, t)}
+                {renderUseTime(text, t, other?.use_time_ms)}
                 {renderIsStream(record.is_stream, t)}
               </Space>
             </>
@@ -846,9 +870,8 @@ export const getLogsColumns = ({
       dataIndex: 'ip',
       render: (text, record, index) => {
         const showIp =
-          (record.type === 2 ||
-            record.type === 5 ||
-            (isAdminUser && record.type === 1)) &&
+          isAdminUser &&
+          (record.type === 2 || record.type === 5 || record.type === 1) &&
           text;
         return showIp ? (
           <Tooltip content={text}>

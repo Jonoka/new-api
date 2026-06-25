@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -60,6 +61,17 @@ type ResponsesUsageInfo struct {
 	BuiltInTools map[string]*BuildInToolInfo
 }
 
+type UpstreamTimingDiagnostics struct {
+	mu                   sync.Mutex
+	start                time.Time
+	gotConn              time.Time
+	wroteRequest         time.Time
+	gotFirstResponseByte time.Time
+	clientDoReturn       time.Time
+	firstSSEData         time.Time
+	firstDownstreamWrite time.Time
+}
+
 type ChannelMeta struct {
 	ChannelType          int
 	ChannelId            int
@@ -86,20 +98,25 @@ type TokenCountMeta struct {
 }
 
 type RelayInfo struct {
-	TokenId           int
-	TokenKey          string
-	TokenGroup        string
-	UserId            int
-	UsingGroup        string // 使用的分组，当auto跨分组重试时，会变动
-	UserGroup         string // 用户所在分组
-	TokenUnlimited    bool
-	StartTime         time.Time
-	FirstResponseTime time.Time
-	isFirstResponse   bool
+	TokenId        int
+	TokenKey       string
+	TokenGroup     string
+	UserId         int
+	UsingGroup     string // 使用的分组，当auto跨分组重试时，会变动
+	UserGroup      string // 用户所在分组
+	TokenUnlimited bool
+	StartTime      time.Time
+	// FirstResponseStartTime 是首字耗时的计时起点，默认等于 StartTime。
+	// 发起每次上游请求前会重置为当前时间，避免把本地预处理和失败重试算入首字。
+	FirstResponseStartTime time.Time
+	FirstResponseTime      time.Time
+	isFirstResponse        bool
+	TimingDiagnostics      *UpstreamTimingDiagnostics
 	//SendLastReasoningResponse bool
 	IsStream               bool
 	IsGeminiBatchEmbedding bool
 	IsPlayground           bool
+	SkipTokenQuota         bool
 	UsePrice               bool
 	RelayMode              int
 	OriginModelName        string
@@ -267,9 +284,9 @@ func (info *RelayInfo) ToString() string {
 	fmt.Fprintf(b, "Token{ Id: %d, Unlimited: %t, Key: ***masked*** }, ", info.TokenId, info.TokenUnlimited)
 
 	// Time info
-	latencyMs := info.FirstResponseTime.Sub(info.StartTime).Milliseconds()
-	fmt.Fprintf(b, "Timing{ Start: %s, FirstResponse: %s, LatencyMs: %d }, ",
-		info.StartTime.Format(time.RFC3339Nano), info.FirstResponseTime.Format(time.RFC3339Nano), latencyMs)
+	latencyMs := info.FirstResponseLatencyMilliseconds()
+	fmt.Fprintf(b, "Timing{ Start: %s, FirstResponseStart: %s, FirstResponse: %s, LatencyMs: %d }, ",
+		info.StartTime.Format(time.RFC3339Nano), info.FirstResponseStartTime.Format(time.RFC3339Nano), info.FirstResponseTime.Format(time.RFC3339Nano), latencyMs)
 
 	// Audio / realtime
 	if info.InputAudioFormat != "" || info.OutputAudioFormat != "" || len(info.RealtimeTools) > 0 || info.AudioUsage {
@@ -483,8 +500,9 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		RequestHeaders:  cloneRequestHeaders(c),
 		IsStream:        isStream,
 
-		StartTime:         startTime,
-		FirstResponseTime: startTime.Add(-time.Second),
+		StartTime:              startTime,
+		FirstResponseStartTime: startTime,
+		FirstResponseTime:      startTime.Add(-time.Second),
 		ThinkingContentInfo: ThinkingContentInfo{
 			IsFirstThinkingContent:  true,
 			SendLastThinkingContent: false,
@@ -503,6 +521,9 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		info.IsPlayground = true
 		info.RequestURLPath = strings.TrimPrefix(info.RequestURLPath, "/pg")
 		info.RequestURLPath = "/v1" + info.RequestURLPath
+	} else if strings.HasPrefix(c.Request.URL.Path, "/canvas") {
+		info.SkipTokenQuota = true
+		info.RequestURLPath = strings.TrimPrefix(info.RequestURLPath, "/canvas")
 	}
 
 	userSetting, ok := common.GetContextKeyType[dto.UserSetting](c, constant.ContextKeyUserSetting)
@@ -662,8 +683,156 @@ func (info *RelayInfo) SetFirstResponseTime() {
 	}
 }
 
+func (info *RelayInfo) ResetFirstResponseTiming(start time.Time) {
+	if info == nil {
+		return
+	}
+	if start.IsZero() {
+		start = time.Now()
+	}
+	info.FirstResponseStartTime = start
+	info.FirstResponseTime = start.Add(-time.Second)
+	info.isFirstResponse = true
+}
+
+func (info *RelayInfo) EnableTimingDiagnostics(start time.Time) {
+	if info == nil {
+		return
+	}
+	if start.IsZero() {
+		start = time.Now()
+	}
+	info.TimingDiagnostics = &UpstreamTimingDiagnostics{start: start}
+}
+
+func (info *RelayInfo) MarkTimingGotConn() {
+	info.markTimingPoint(func(d *UpstreamTimingDiagnostics, now time.Time) {
+		if d.gotConn.IsZero() {
+			d.gotConn = now
+		}
+	})
+}
+
+func (info *RelayInfo) MarkTimingWroteRequest() {
+	info.markTimingPoint(func(d *UpstreamTimingDiagnostics, now time.Time) {
+		if d.wroteRequest.IsZero() {
+			d.wroteRequest = now
+		}
+	})
+}
+
+func (info *RelayInfo) MarkTimingGotFirstResponseByte() {
+	info.markTimingPoint(func(d *UpstreamTimingDiagnostics, now time.Time) {
+		if d.gotFirstResponseByte.IsZero() {
+			d.gotFirstResponseByte = now
+		}
+	})
+}
+
+func (info *RelayInfo) MarkTimingClientDoReturn() {
+	info.markTimingPoint(func(d *UpstreamTimingDiagnostics, now time.Time) {
+		if d.clientDoReturn.IsZero() {
+			d.clientDoReturn = now
+		}
+	})
+}
+
+func (info *RelayInfo) MarkTimingFirstSSEData() {
+	info.markTimingPoint(func(d *UpstreamTimingDiagnostics, now time.Time) {
+		if d.firstSSEData.IsZero() {
+			d.firstSSEData = now
+		}
+	})
+}
+
+func (info *RelayInfo) MarkTimingFirstDownstreamWrite() {
+	info.markTimingPoint(func(d *UpstreamTimingDiagnostics, now time.Time) {
+		if d.firstDownstreamWrite.IsZero() {
+			d.firstDownstreamWrite = now
+		}
+	})
+}
+
+func (info *RelayInfo) markTimingPoint(mark func(*UpstreamTimingDiagnostics, time.Time)) {
+	if info == nil || info.TimingDiagnostics == nil || mark == nil {
+		return
+	}
+	info.TimingDiagnostics.mu.Lock()
+	defer info.TimingDiagnostics.mu.Unlock()
+	mark(info.TimingDiagnostics, time.Now())
+}
+
+func (info *RelayInfo) TimingDiagnosticsMilliseconds() map[string]interface{} {
+	if info == nil || info.TimingDiagnostics == nil {
+		return nil
+	}
+	info.TimingDiagnostics.mu.Lock()
+	defer info.TimingDiagnostics.mu.Unlock()
+
+	d := info.TimingDiagnostics
+	if d.start.IsZero() {
+		return nil
+	}
+
+	result := make(map[string]interface{})
+	var beforeDoRequestMs int64
+	if !info.StartTime.IsZero() {
+		beforeDoRequestMs = d.start.Sub(info.StartTime).Milliseconds()
+	}
+	result["before_do_request_ms"] = float64(beforeDoRequestMs)
+	if !d.gotConn.IsZero() {
+		result["got_conn_ms"] = float64(d.gotConn.Sub(d.start).Milliseconds())
+	}
+	if !d.wroteRequest.IsZero() {
+		result["wrote_request_ms"] = float64(d.wroteRequest.Sub(d.start).Milliseconds())
+	}
+	if !d.gotFirstResponseByte.IsZero() {
+		result["got_first_response_byte_ms"] = float64(d.gotFirstResponseByte.Sub(d.start).Milliseconds())
+	}
+	if !d.clientDoReturn.IsZero() {
+		result["client_do_return_ms"] = float64(d.clientDoReturn.Sub(d.start).Milliseconds())
+	}
+	if !d.firstSSEData.IsZero() {
+		result["first_sse_data_ms"] = float64(d.firstSSEData.Sub(d.start).Milliseconds())
+	}
+	if !d.firstDownstreamWrite.IsZero() {
+		result["first_downstream_write_ms"] = float64(d.firstDownstreamWrite.Sub(d.start).Milliseconds())
+	}
+	result["total_ms"] = float64(info.ElapsedMilliseconds())
+	return result
+}
+
+func (info *RelayInfo) FirstResponseLatencyMilliseconds() int64 {
+	if info == nil {
+		return 0
+	}
+	start := info.FirstResponseStartTime
+	if start.IsZero() {
+		start = info.StartTime
+	}
+	if start.IsZero() || !info.FirstResponseTime.After(start) {
+		return 0
+	}
+	return info.FirstResponseTime.Sub(start).Milliseconds()
+}
+
+func (info *RelayInfo) ElapsedMilliseconds() int64 {
+	if info == nil || info.StartTime.IsZero() {
+		return 0
+	}
+	elapsed := time.Since(info.StartTime)
+	if elapsed <= 0 {
+		return 0
+	}
+	return elapsed.Milliseconds()
+}
+
 func (info *RelayInfo) HasSendResponse() bool {
-	return info.FirstResponseTime.After(info.StartTime)
+	start := info.FirstResponseStartTime
+	if start.IsZero() {
+		start = info.StartTime
+	}
+	return info.FirstResponseTime.After(start)
 }
 
 type TaskRelayInfo struct {

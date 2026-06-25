@@ -21,6 +21,8 @@ import { X, User, Wallet, LogOut } from 'lucide-react'
 import { AnimatePresence, motion, type Variants } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import type { AuthUser } from '@/stores/auth-store'
+import { getCustomNavIcon } from '@/lib/custom-nav'
+import { cn } from '@/lib/utils'
 import useDialogState from '@/hooks/use-dialog'
 import { useUserDisplay } from '@/hooks/use-user-display'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -259,21 +261,52 @@ export function MobileDrawer({
                   </div>
                 ) : (
                   <AnimatePresence>
-                    {mobileLinksList.map((link, index) => (
-                      <motion.div
-                        key={`${link.href}-${index}`}
-                        className='border-border border-b p-2.5 last:border-b-0'
-                        variants={MOBILE_DRAWER_ANIMATION.menuItem as Variants}
-                      >
-                        <Link
-                          to={link.href}
-                          className='text-primary/60 hover:text-primary/80 transition-colors'
-                          onClick={onClose}
+                    {mobileLinksList.map((link, index) => {
+                      const Icon = getCustomNavIcon(link.icon)
+                      const linkClassName = cn(
+                        'text-primary/60 hover:text-primary/80 inline-flex items-center gap-2 transition-colors',
+                        link.disabled && 'pointer-events-none opacity-50'
+                      )
+                      const content = (
+                        <>
+                          {Icon ? <Icon className='size-4 shrink-0' /> : null}
+                          <span>{link.title}</span>
+                        </>
+                      )
+
+                      return (
+                        <motion.div
+                          key={`${link.href}-${index}`}
+                          className='border-border border-b p-2.5 last:border-b-0'
+                          variants={
+                            MOBILE_DRAWER_ANIMATION.menuItem as Variants
+                          }
                         >
-                          {link.title}
-                        </Link>
-                      </motion.div>
-                    ))}
+                          {link.external ? (
+                            <a
+                              href={link.href}
+                              target='_blank'
+                              rel='noopener noreferrer'
+                              className={linkClassName}
+                              aria-disabled={link.disabled}
+                              tabIndex={link.disabled ? -1 : undefined}
+                              onClick={onClose}
+                            >
+                              {content}
+                            </a>
+                          ) : (
+                            <Link
+                              to={link.href}
+                              disabled={link.disabled}
+                              className={linkClassName}
+                              onClick={onClose}
+                            >
+                              {content}
+                            </Link>
+                          )}
+                        </motion.div>
+                      )
+                    })}
                   </AnimatePresence>
                 )}
               </motion.div>

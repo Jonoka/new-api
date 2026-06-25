@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,7 +22,6 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -106,6 +106,17 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 	}()
 
+	filterResult, err := service.ApplySensitiveFilterToRequestBody(c, relayFormat)
+	if err != nil {
+		newAPIError = types.NewError(err, types.ErrorCodeInvalidRequest)
+		return
+	}
+	if filterResult.Blocked {
+		logger.LogWarn(c, fmt.Sprintf("user sensitive request blocked: %s", service.FormatSensitiveFilterMatches(filterResult.Matches)))
+		newAPIError = types.NewError(errors.New("sensitive words detected"), types.ErrorCodeSensitiveWordsDetected)
+		return
+	}
+
 	request, err := helper.GetAndValidateRequest(c, relayFormat)
 	if err != nil {
 		// Map "request body too large" to 413 so clients can handle it correctly
@@ -123,23 +134,12 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 
-	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
 	needCountToken := constant.CountToken
-	// Avoid building huge CombineText (strings.Join) when token counting and sensitive check are both disabled.
 	var meta *types.TokenCountMeta
-	if needSensitiveCheck || needCountToken {
+	if needCountToken {
 		meta = request.GetTokenCountMeta()
 	} else {
 		meta = fastTokenCountMetaForPricing(request)
-	}
-
-	if needSensitiveCheck && meta != nil {
-		contains, words := service.CheckSensitiveText(meta.CombineText)
-		if contains {
-			logger.LogWarn(c, fmt.Sprintf("user sensitive words detected: %s", strings.Join(words, ", ")))
-			newAPIError = types.NewError(err, types.ErrorCodeSensitiveWordsDetected)
-			return
-		}
 	}
 
 	tokens, err := service.EstimateRequestToken(c, meta, relayInfo)
@@ -228,9 +228,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
 
-		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+		processChannelError(c, relayInfo, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 
-		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
+		retryDecision := shouldRetryWithReason(c, newAPIError, common.RetryTimes-retryParam.GetRetry())
+		if !retryDecision.Retry {
+			logger.LogInfo(c, fmt.Sprintf("不重试：%s", retryDecision.Reason))
 			break
 		}
 	}
@@ -258,6 +260,28 @@ func addUsedChannel(c *gin.Context, channelId int) {
 	useChannel := c.GetStringSlice("use_channel")
 	useChannel = append(useChannel, fmt.Sprintf("%d", channelId))
 	c.Set("use_channel", useChannel)
+}
+
+func usedChannelIDSet(c *gin.Context) map[int]struct{} {
+	if c == nil {
+		return nil
+	}
+	useChannel := c.GetStringSlice("use_channel")
+	if len(useChannel) == 0 {
+		return nil
+	}
+	used := make(map[int]struct{}, len(useChannel))
+	for _, raw := range useChannel {
+		id, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil || id <= 0 {
+			continue
+		}
+		used[id] = struct{}{}
+	}
+	if len(used) == 0 {
+		return nil
+	}
+	return used
 }
 
 func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
@@ -303,6 +327,11 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 			AutoBan: &autoBanInt,
 		}, nil
 	}
+	if retryParam.GetRetry() > 0 {
+		retryParam.ExcludedChannelIDs = usedChannelIDSet(c)
+	} else {
+		retryParam.ExcludedChannelIDs = nil
+	}
 	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
 
 	info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
@@ -314,6 +343,12 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 		return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的可用渠道不存在（retry）", selectGroup, info.OriginModelName), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
 
+	if retryParam.GetRetry() > 0 {
+		if rateLimitErr := middleware.CheckModelRequestRateLimitForGroup(c, selectGroup); rateLimitErr != nil {
+			return nil, rateLimitErr
+		}
+	}
+
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
 	if newAPIError != nil {
 		return nil, newAPIError
@@ -321,39 +356,82 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 	return channel, nil
 }
 
+type retryDecision struct {
+	Retry  bool
+	Reason string
+}
+
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
+	return shouldRetryWithReason(c, openaiErr, retryTimes).Retry
+}
+
+func shouldRetryWithReason(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) retryDecision {
 	if openaiErr == nil {
-		return false
+		return retryDecision{Reason: "nil_error"}
+	}
+	if relayInfo, ok := c.Get("relay_info"); ok {
+		if info, ok := relayInfo.(*relaycommon.RelayInfo); ok && info != nil {
+			if info.HasSendResponse() || info.ReceivedResponseCount > 0 {
+				return retryDecision{Reason: "no_retry_after_stream_started"}
+			}
+		}
 	}
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
-		return false
+		return retryDecision{Reason: "channel_affinity_skip"}
 	}
 	if types.IsChannelError(openaiErr) {
-		return true
+		return retryDecision{Retry: true, Reason: "channel_error"}
 	}
 	if types.IsSkipRetryError(openaiErr) {
-		return false
+		return retryDecision{Reason: "skip_retry_error"}
 	}
 	if retryTimes <= 0 {
-		return false
+		return retryDecision{Reason: "retry_exhausted"}
 	}
 	if _, ok := c.Get("specific_channel_id"); ok {
-		return false
+		return retryDecision{Reason: "specific_channel"}
 	}
 	code := openaiErr.StatusCode
 	if code >= 200 && code < 300 {
-		return false
+		return retryDecision{Reason: "success_status_code"}
 	}
 	if code < 100 || code > 599 {
-		return true
+		return retryDecision{Retry: true, Reason: "invalid_status_code_retry"}
 	}
 	if operation_setting.IsAlwaysSkipRetryCode(openaiErr.GetErrorCode()) {
-		return false
+		return retryDecision{Reason: "always_skip_error_code"}
 	}
-	return operation_setting.ShouldRetryByStatusCode(code)
+	if operation_setting.ShouldRetryByStatusCode(code) {
+		return retryDecision{Retry: true, Reason: "status_code_retry"}
+	}
+	return retryDecision{Reason: "status_code_not_configured"}
 }
 
-func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
+func appendErrorLogRequestConversion(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+	if relayInfo == nil || other == nil || len(relayInfo.RequestConversionChain) == 0 {
+		return
+	}
+	chain := make([]string, 0, len(relayInfo.RequestConversionChain))
+	for _, f := range relayInfo.RequestConversionChain {
+		switch f {
+		case types.RelayFormatOpenAI:
+			chain = append(chain, "OpenAI Compatible")
+		case types.RelayFormatClaude:
+			chain = append(chain, "Claude Messages")
+		case types.RelayFormatGemini:
+			chain = append(chain, "Google Gemini")
+		case types.RelayFormatOpenAIResponses:
+			chain = append(chain, "OpenAI Responses")
+		default:
+			chain = append(chain, string(f))
+		}
+	}
+	if len(chain) > 0 {
+		other["request_conversion"] = chain
+	}
+}
+
+func processChannelError(c *gin.Context, relayInfo *relaycommon.RelayInfo, channelError types.ChannelError, err *types.NewAPIError) {
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
@@ -381,6 +459,7 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		other["channel_id"] = channelId
 		other["channel_name"] = c.GetString("channel_name")
 		other["channel_type"] = c.GetInt("channel_type")
+		appendErrorLogRequestConversion(relayInfo, other)
 		adminInfo := make(map[string]interface{})
 		adminInfo["use_channel"] = c.GetStringSlice("use_channel")
 		isMultiKey := common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey)
@@ -394,7 +473,12 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		if startTime.IsZero() {
 			startTime = time.Now()
 		}
-		useTimeSeconds := int(time.Since(startTime).Seconds())
+		elapsed := time.Since(startTime)
+		if elapsed < 0 {
+			elapsed = 0
+		}
+		other["use_time_ms"] = float64(elapsed.Milliseconds())
+		useTimeSeconds := int(elapsed.Seconds())
 		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, err.MaskSensitiveErrorWithStatusCode(), tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
 	}
 
@@ -553,6 +637,7 @@ func RelayTask(c *gin.Context) {
 
 		if !taskErr.LocalError {
 			processChannelError(c,
+				relayInfo,
 				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
 					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
 				types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode))

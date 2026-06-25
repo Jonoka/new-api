@@ -22,6 +22,7 @@ import { PricingSection } from '../general/pricing-section'
 import { QuotaSettingsSection } from '../general/quota-settings-section'
 import { PaymentSettingsSection } from '../integrations/payment-settings-section'
 import { RatioSettingsCard } from '../models/ratio-settings-card'
+import { AffiliateSettingsSection } from './affiliate-settings-section'
 import type { BillingSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
 
@@ -151,6 +152,24 @@ const BILLING_SECTIONS = [
           CreemWebhookSecret: settings.CreemWebhookSecret,
           CreemTestMode: settings.CreemTestMode,
           CreemProducts: settings.CreemProducts,
+          BepusdtApiUrl: settings.BepusdtApiUrl ?? '',
+          BepusdtAuthToken: settings.BepusdtAuthToken ?? '',
+          BepusdtUnitPrice: settings.BepusdtUnitPrice ?? 7.2,
+          BepusdtMinTopUp: settings.BepusdtMinTopUp ?? 1,
+          BepusdtTimeout: settings.BepusdtTimeout ?? 1200,
+          BepusdtChains: settings.BepusdtChains ?? '[]',
+          OkpayGatewayUrl: settings.OkpayGatewayUrl ?? 'https://api.okaypay.me/shop',
+          OkpayMerchantId: settings.OkpayMerchantId ?? '',
+          OkpayMerchantToken: settings.OkpayMerchantToken ?? '',
+          OkpayExchangeRate: settings.OkpayExchangeRate ?? 7.2,
+          OkpayAutoExchangeEnabled:
+            settings.OkpayAutoExchangeEnabled ?? true,
+          OkpayUsdtCnyRate: settings.OkpayUsdtCnyRate ?? 7.2,
+          OkpayRateApiUrl:
+            settings.OkpayRateApiUrl ??
+            'https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=cny&include_last_updated_at=true',
+          OkpayMinTopUp: settings.OkpayMinTopUp ?? 1,
+          OkpayCoin: settings.OkpayCoin ?? 'USDT',
         }}
         waffoDefaultValues={{
           WaffoEnabled: settings.WaffoEnabled ?? false,
@@ -182,6 +201,56 @@ const BILLING_SECTIONS = [
             settings['payment_setting.compliance_terms_version'] ?? '',
           confirmedAt: settings['payment_setting.compliance_confirmed_at'] ?? 0,
           confirmedBy: settings['payment_setting.compliance_confirmed_by'] ?? 0,
+        }}
+      />
+    ),
+  },
+  {
+    id: 'affiliate',
+    titleKey: 'Affiliate Commission',
+    descriptionKey: 'Configure paid-referral commission and payouts',
+    build: (settings: BillingSettings) => (
+      <AffiliateSettingsSection
+        defaultValues={{
+          affiliate_setting: {
+            first_level_enabled:
+              settings['affiliate_setting.first_level_enabled'],
+            first_level_ratio: settings['affiliate_setting.first_level_ratio'],
+            second_level_enabled:
+              settings['affiliate_setting.second_level_enabled'],
+            second_level_ratio:
+              settings['affiliate_setting.second_level_ratio'],
+            settlement_delay_seconds:
+              settings['affiliate_setting.settlement_delay_seconds'],
+            min_withdrawal_amount:
+              settings['affiliate_setting.min_withdrawal_amount'],
+            trigger_topup_enabled:
+              settings['affiliate_setting.trigger_topup_enabled'],
+            trigger_subscription_enabled:
+              settings['affiliate_setting.trigger_subscription_enabled'],
+            filter_redemption_topup_enabled:
+              settings['affiliate_setting.filter_redemption_topup_enabled'],
+            payout_methods: settings['affiliate_setting.payout_methods'],
+            usdt_chain: settings['affiliate_setting.usdt_chain'],
+            promotion_template:
+              settings['affiliate_setting.promotion_template'],
+            review_enabled:
+              settings['affiliate_setting.review_enabled'],
+            auto_approve_after_days:
+              settings['affiliate_setting.auto_approve_after_days'],
+            agreement_enabled:
+              settings['affiliate_setting.agreement_enabled'],
+            agreement_text:
+              settings['affiliate_setting.agreement_text'],
+            inviter_min_account_age_days:
+              settings['affiliate_setting.inviter_min_account_age_days'],
+            inviter_min_recharge_amount:
+              settings['affiliate_setting.inviter_min_recharge_amount'],
+            invitee_min_account_age_days:
+              settings['affiliate_setting.invitee_min_account_age_days'],
+            invitee_min_recharge_amount:
+              settings['affiliate_setting.invitee_min_recharge_amount'],
+          },
         }}
       />
     ),

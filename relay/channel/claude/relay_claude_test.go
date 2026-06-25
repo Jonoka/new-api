@@ -380,3 +380,75 @@ func TestRequestOpenAI2ClaudeMessage_ConvertsTextFileContentToText(t *testing.T)
 	require.NotNil(t, content[0].Text)
 	require.Equal(t, "alpha\nbeta", *content[0].Text)
 }
+
+func TestRequestOpenAI2ClaudeMessage_DropsDeprecatedSamplingForClaudeSonnet46(t *testing.T) {
+	temperature := 0.7
+	topP := 1.0
+	topK := 40
+	request := dto.GeneralOpenAIRequest{
+		Model:       "claude-sonnet-4-6",
+		Temperature: &temperature,
+		TopP:        &topP,
+		TopK:        &topK,
+		Messages: []dto.Message{
+			{
+				Role:    "user",
+				Content: "hi",
+			},
+		},
+	}
+
+	claudeRequest, err := RequestOpenAI2ClaudeMessage(nil, request)
+	require.NoError(t, err)
+	require.Nil(t, claudeRequest.Temperature)
+	require.Nil(t, claudeRequest.TopP)
+	require.Nil(t, claudeRequest.TopK)
+}
+
+func TestNormalizeClaudeSamplingParameters_DropsDeprecatedSamplingForNativeClaudeModels(t *testing.T) {
+	models := []string{
+		"claude-sonnet-4-6",
+		"claude-opus-4-6",
+		"claude-opus-4-6-high",
+		"claude-opus-4-7",
+		"claude-opus-4-7-thinking",
+	}
+
+	for _, model := range models {
+		t.Run(model, func(t *testing.T) {
+			temperature := 0.7
+			topP := 1.0
+			topK := 40
+			request := &dto.ClaudeRequest{
+				Model:       model,
+				Temperature: &temperature,
+				TopP:        &topP,
+				TopK:        &topK,
+			}
+
+			NormalizeClaudeSamplingParameters(request)
+
+			require.Nil(t, request.Temperature)
+			require.Nil(t, request.TopP)
+			require.Nil(t, request.TopK)
+		})
+	}
+}
+
+func TestNormalizeClaudeSamplingParameters_KeepsSamplingForOlderClaudeModels(t *testing.T) {
+	temperature := 0.7
+	topP := 0.9
+	topK := 40
+	request := &dto.ClaudeRequest{
+		Model:       "claude-sonnet-4-5-20250929",
+		Temperature: &temperature,
+		TopP:        &topP,
+		TopK:        &topK,
+	}
+
+	NormalizeClaudeSamplingParameters(request)
+
+	require.Same(t, &temperature, request.Temperature)
+	require.Same(t, &topP, request.TopP)
+	require.Same(t, &topK, request.TopK)
+}

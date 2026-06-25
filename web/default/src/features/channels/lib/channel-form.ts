@@ -108,6 +108,20 @@ function isVertexJsonKey(value: string | undefined): boolean {
   }
 }
 
+function isOptionalPositiveNumber(value: string | undefined): boolean {
+  const trimmed = String(value || '').trim()
+  if (!trimmed) return true
+  const parsed = Number(trimmed)
+  return Number.isFinite(parsed) && parsed > 0
+}
+
+function isOptionalPositiveInteger(value: string | undefined): boolean {
+  const trimmed = String(value || '').trim()
+  if (!trimmed) return true
+  const parsed = Number(trimmed)
+  return Number.isInteger(parsed) && parsed > 0
+}
+
 function addRequiredIssue(
   ctx: z.RefinementCtx,
   path: string,
@@ -124,6 +138,7 @@ export const channelFormSchema = z
   .object({
     name: z.string().min(1, ERROR_MESSAGES.REQUIRED_NAME),
     type: z.number().min(0, ERROR_MESSAGES.REQUIRED_TYPE),
+    vendor_id: z.number().optional(),
     base_url: z.string().optional(),
     key: z.string(),
     openai_organization: z.string().optional(),
@@ -138,6 +153,10 @@ export const channelFormSchema = z
       ),
     priority: z.number().optional(),
     weight: z.number().optional(),
+    concurrency_limit: z
+      .number()
+      .min(0, 'Concurrency limit must be 0 or greater')
+      .optional(),
     test_model: z.string().optional(),
     auto_ban: z.number().optional(),
     status: z.number(),
@@ -195,10 +214,36 @@ export const channelFormSchema = z
     allow_inference_geo: z.boolean().optional(), // OpenAI/Anthropic: inference geography
     allow_speed: z.boolean().optional(), // Anthropic: speed mode control
     claude_beta_query: z.boolean().optional(), // Anthropic: beta query passthrough
+    claude_code_fingerprint_enabled: z.boolean().optional(), // Anthropic: Claude Code fingerprint
+    claude_code_transport_fingerprint_enabled: z.boolean().optional(), // Anthropic：Claude Code Transport 指纹
+    claude_code_version: z.string().optional(), // Anthropic: Custom Claude Code version for User-Agent
     // Upstream model update settings (stored in settings JSON)
     upstream_model_update_check_enabled: z.boolean().optional(),
     upstream_model_update_auto_sync_enabled: z.boolean().optional(),
     upstream_model_update_ignored_models: z.string().optional(),
+    monitor_enabled: z.enum(['inherit', 'enabled', 'disabled']).optional(),
+    monitor_test_interval_minutes: z
+      .string()
+      .optional()
+      .refine(isOptionalPositiveNumber, 'Value must be greater than 0'),
+    monitor_response_time_threshold_seconds: z
+      .string()
+      .optional()
+      .refine(isOptionalPositiveNumber, 'Value must be greater than 0'),
+    monitor_auto_disable_enabled: z
+      .enum(['inherit', 'enabled', 'disabled'])
+      .optional(),
+    monitor_auto_enable_enabled: z
+      .enum(['inherit', 'enabled', 'disabled'])
+      .optional(),
+    monitor_disable_threshold: z
+      .string()
+      .optional()
+      .refine(isOptionalPositiveInteger, 'Value must be a positive integer'),
+    monitor_enable_threshold: z
+      .string()
+      .optional()
+      .refine(isOptionalPositiveInteger, 'Value must be a positive integer'),
   })
   .superRefine((data, ctx) => {
     if ([3, 8, 36, 45].includes(data.type) && !data.base_url?.trim()) {
@@ -270,6 +315,7 @@ export type ChannelFormValues = z.infer<typeof channelFormSchema>
 export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   name: '',
   type: 1,
+  vendor_id: undefined,
   base_url: '',
   key: '',
   openai_organization: '',
@@ -278,6 +324,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   model_mapping: '',
   priority: 0,
   weight: 0,
+  concurrency_limit: 0,
   test_model: '',
   auto_ban: 1,
   status: CHANNEL_STATUS.ENABLED,
@@ -313,9 +360,19 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   allow_inference_geo: false,
   allow_speed: false,
   claude_beta_query: false,
+  claude_code_fingerprint_enabled: false,
+  claude_code_transport_fingerprint_enabled: false,
+  claude_code_version: '',
   upstream_model_update_check_enabled: false,
   upstream_model_update_auto_sync_enabled: false,
   upstream_model_update_ignored_models: '',
+  monitor_enabled: 'inherit',
+  monitor_test_interval_minutes: '',
+  monitor_response_time_threshold_seconds: '',
+  monitor_auto_disable_enabled: 'inherit',
+  monitor_auto_enable_enabled: 'inherit',
+  monitor_disable_threshold: '',
+  monitor_enable_threshold: '',
 }
 
 // ============================================================================
@@ -367,9 +424,19 @@ export function transformChannelToFormDefaults(
   let allowInferenceGeo = false
   let allowSpeed = false
   let claudeBetaQuery = false
+  let claudeCodeFingerprintEnabled = false
+  let claudeCodeTransportFingerprintEnabled = false
+  let claudeCodeVersion = ''
   let upstreamModelUpdateCheckEnabled = false
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
+  let monitorEnabled: 'inherit' | 'enabled' | 'disabled' = 'inherit'
+  let monitorTestIntervalMinutes = ''
+  let monitorResponseTimeThresholdSeconds = ''
+  let monitorAutoDisableEnabled: 'inherit' | 'enabled' | 'disabled' = 'inherit'
+  let monitorAutoEnableEnabled: 'inherit' | 'enabled' | 'disabled' = 'inherit'
+  let monitorDisableThreshold = ''
+  let monitorEnableThreshold = ''
 
   if (channel.settings) {
     try {
@@ -385,6 +452,14 @@ export function transformChannelToFormDefaults(
       allowInferenceGeo = parsed.allow_inference_geo === true
       allowSpeed = parsed.allow_speed === true
       claudeBetaQuery = parsed.claude_beta_query === true
+      claudeCodeFingerprintEnabled =
+        parsed.claude_code_fingerprint_enabled === true
+      claudeCodeTransportFingerprintEnabled =
+        parsed.claude_code_transport_fingerprint_enabled === true
+      claudeCodeVersion =
+        typeof parsed.claude_code_version === 'string'
+          ? parsed.claude_code_version
+          : ''
       upstreamModelUpdateCheckEnabled =
         parsed.upstream_model_update_check_enabled === true
       upstreamModelUpdateAutoSyncEnabled =
@@ -394,6 +469,40 @@ export function transformChannelToFormDefaults(
       )
         ? parsed.upstream_model_update_ignored_models.join(',')
         : ''
+      monitorEnabled =
+        parsed.monitor_enabled === true
+          ? 'enabled'
+          : parsed.monitor_enabled === false
+            ? 'disabled'
+            : 'inherit'
+      monitorTestIntervalMinutes =
+        typeof parsed.monitor_test_interval_minutes === 'number'
+          ? String(parsed.monitor_test_interval_minutes)
+          : ''
+      monitorResponseTimeThresholdSeconds =
+        typeof parsed.monitor_response_time_threshold_seconds === 'number'
+          ? String(parsed.monitor_response_time_threshold_seconds)
+          : ''
+      monitorAutoDisableEnabled =
+        parsed.monitor_auto_disable_enabled === true
+          ? 'enabled'
+          : parsed.monitor_auto_disable_enabled === false
+            ? 'disabled'
+            : 'inherit'
+      monitorAutoEnableEnabled =
+        parsed.monitor_auto_enable_enabled === true
+          ? 'enabled'
+          : parsed.monitor_auto_enable_enabled === false
+            ? 'disabled'
+            : 'inherit'
+      monitorDisableThreshold =
+        typeof parsed.monitor_disable_threshold === 'number'
+          ? String(parsed.monitor_disable_threshold)
+          : ''
+      monitorEnableThreshold =
+        typeof parsed.monitor_enable_threshold === 'number'
+          ? String(parsed.monitor_enable_threshold)
+          : ''
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error('Failed to parse channel settings:', error)
@@ -403,6 +512,7 @@ export function transformChannelToFormDefaults(
   return {
     name: channel.name || '',
     type: channel.type,
+    vendor_id: channel.vendor_id || undefined,
     base_url: channel.base_url || '',
     key: '', // Never populate key from backend for security
     openai_organization: channel.openai_organization || '',
@@ -411,6 +521,7 @@ export function transformChannelToFormDefaults(
     model_mapping: channel.model_mapping || '',
     priority: channel.priority || 0,
     weight: channel.weight || 0,
+    concurrency_limit: channel.concurrency_limit || 0,
     test_model: channel.test_model || '',
     auto_ban: channel.auto_ban ?? 1,
     status: channel.status,
@@ -439,10 +550,21 @@ export function transformChannelToFormDefaults(
     allow_inference_geo: allowInferenceGeo,
     allow_speed: allowSpeed,
     claude_beta_query: claudeBetaQuery,
+    claude_code_fingerprint_enabled: claudeCodeFingerprintEnabled,
+    claude_code_transport_fingerprint_enabled:
+      claudeCodeTransportFingerprintEnabled,
+    claude_code_version: claudeCodeVersion,
     allow_safety_identifier: allowSafetyIdentifier,
     upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
+    monitor_enabled: monitorEnabled,
+    monitor_test_interval_minutes: monitorTestIntervalMinutes,
+    monitor_response_time_threshold_seconds: monitorResponseTimeThresholdSeconds,
+    monitor_auto_disable_enabled: monitorAutoDisableEnabled,
+    monitor_auto_enable_enabled: monitorAutoEnableEnabled,
+    monitor_disable_threshold: monitorDisableThreshold,
+    monitor_enable_threshold: monitorEnableThreshold,
   }
 }
 
@@ -536,9 +658,24 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     settingsObj.allow_inference_geo = formData.allow_inference_geo === true
     settingsObj.allow_speed = formData.allow_speed === true
     settingsObj.claude_beta_query = formData.claude_beta_query === true
+    settingsObj.claude_code_fingerprint_enabled =
+      formData.claude_code_fingerprint_enabled === true
+    settingsObj.claude_code_transport_fingerprint_enabled =
+      formData.claude_code_transport_fingerprint_enabled === true
+    if (formData.claude_code_version?.trim()) {
+      settingsObj.claude_code_version = formData.claude_code_version.trim()
+    } else {
+      delete settingsObj.claude_code_version
+    }
   } else {
     if ('allow_speed' in settingsObj) delete settingsObj.allow_speed
     if ('claude_beta_query' in settingsObj) delete settingsObj.claude_beta_query
+    if ('claude_code_fingerprint_enabled' in settingsObj)
+      delete settingsObj.claude_code_fingerprint_enabled
+    if ('claude_code_transport_fingerprint_enabled' in settingsObj)
+      delete settingsObj.claude_code_transport_fingerprint_enabled
+    if ('claude_code_version' in settingsObj)
+      delete settingsObj.claude_code_version
   }
 
   // Upstream model update settings (for model-fetchable channel types)
@@ -567,7 +704,91 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     }
   }
 
+  setOptionalBooleanOverride(settingsObj, 'monitor_enabled', formData.monitor_enabled)
+  setOptionalNumber(
+    settingsObj,
+    'monitor_test_interval_minutes',
+    formData.monitor_test_interval_minutes
+  )
+  setOptionalNumber(
+    settingsObj,
+    'monitor_response_time_threshold_seconds',
+    formData.monitor_response_time_threshold_seconds
+  )
+  setOptionalBooleanOverride(
+    settingsObj,
+    'monitor_auto_disable_enabled',
+    formData.monitor_auto_disable_enabled
+  )
+  setOptionalBooleanOverride(
+    settingsObj,
+    'monitor_auto_enable_enabled',
+    formData.monitor_auto_enable_enabled
+  )
+  setOptionalInteger(
+    settingsObj,
+    'monitor_disable_threshold',
+    formData.monitor_disable_threshold
+  )
+  setOptionalInteger(
+    settingsObj,
+    'monitor_enable_threshold',
+    formData.monitor_enable_threshold
+  )
+
   return JSON.stringify(settingsObj)
+}
+
+function setOptionalBooleanOverride(
+  settingsObj: Record<string, unknown>,
+  key: string,
+  value: 'inherit' | 'enabled' | 'disabled' | undefined
+): void {
+  if (value === 'enabled') {
+    settingsObj[key] = true
+    return
+  }
+  if (value === 'disabled') {
+    settingsObj[key] = false
+    return
+  }
+  delete settingsObj[key]
+}
+
+function setOptionalNumber(
+  settingsObj: Record<string, unknown>,
+  key: string,
+  value: string | undefined
+): void {
+  const trimmed = String(value || '').trim()
+  if (!trimmed) {
+    delete settingsObj[key]
+    return
+  }
+  const parsed = Number(trimmed)
+  if (Number.isFinite(parsed) && parsed > 0) {
+    settingsObj[key] = parsed
+    return
+  }
+  delete settingsObj[key]
+}
+
+function setOptionalInteger(
+  settingsObj: Record<string, unknown>,
+  key: string,
+  value: string | undefined
+): void {
+  const trimmed = String(value || '').trim()
+  if (!trimmed) {
+    delete settingsObj[key]
+    return
+  }
+  const parsed = Number.parseInt(trimmed, 10)
+  if (Number.isFinite(parsed) && parsed > 0) {
+    settingsObj[key] = parsed
+    return
+  }
+  delete settingsObj[key]
 }
 
 function normalizeBaseUrl(value: string | undefined): string {
@@ -590,6 +811,7 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
   const channel: Partial<Channel> = {
     name: formData.name,
     type: formData.type,
+    vendor_id: formData.vendor_id || null,
     base_url: normalizeBaseUrl(formData.base_url) || null,
     key: formData.key,
     openai_organization: formData.openai_organization || null,
@@ -598,6 +820,7 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
     model_mapping: formData.model_mapping || null,
     priority: formData.priority || null,
     weight: formData.weight || null,
+    concurrency_limit: formData.concurrency_limit ?? 0,
     test_model: formData.test_model || null,
     auto_ban: formData.auto_ban ?? 1,
     status: formData.status,
@@ -639,6 +862,7 @@ export function transformFormDataToUpdatePayload(
     id: channelId,
     name: formData.name,
     type: formData.type,
+    vendor_id: formData.vendor_id || 0,
     base_url: normalizeBaseUrl(formData.base_url) || null,
     openai_organization: formData.openai_organization || null,
     models: formData.models,
@@ -646,6 +870,7 @@ export function transformFormDataToUpdatePayload(
     model_mapping: formData.model_mapping || null,
     priority: formData.priority ?? 0,
     weight: formData.weight ?? 0,
+    concurrency_limit: formData.concurrency_limit ?? 0,
     test_model: formData.test_model || null,
     auto_ban: formData.auto_ban ?? 1,
     status: formData.status,

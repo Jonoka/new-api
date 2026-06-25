@@ -19,6 +19,7 @@ import (
 type SubscriptionEpayPayRequest struct {
 	PlanId        int    `json:"plan_id"`
 	PaymentMethod string `json:"payment_method"`
+	PromoCode     string `json:"promo_code"`
 }
 
 func SubscriptionRequestEpay(c *gin.Context) {
@@ -63,46 +64,88 @@ func SubscriptionRequestEpay(c *gin.Context) {
 		}
 	}
 
-	callBackAddress := service.GetCallbackAddress()
-	returnUrl, err := url.Parse(callBackAddress + "/api/subscription/epay/return")
-	if err != nil {
-		common.ApiErrorMsg(c, "回调地址配置错误")
-		return
-	}
-	notifyUrl, err := url.Parse(callBackAddress + "/api/subscription/epay/notify")
-	if err != nil {
-		common.ApiErrorMsg(c, "回调地址配置错误")
-		return
-	}
-
 	tradeNo := fmt.Sprintf("%s%d", common.GetRandomString(6), time.Now().Unix())
 	tradeNo = fmt.Sprintf("SUBUSR%dNO%s", userId, tradeNo)
 
-	client := GetEpayClient()
-	if client == nil {
-		common.ApiErrorMsg(c, "当前管理员未配置支付信息")
+	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetSubscription, plan.Id, plan.PriceAmount)
+	if err != nil {
+		common.ApiError(c, err)
 		return
+	}
+	basePayMoney := plan.PriceAmount
+	if discount != nil {
+		basePayMoney = discount.PaidAmount
+	}
+	if basePayMoney < 0 {
+		common.ApiErrorMsg(c, "套餐金额过低")
+		return
+	}
+	payMoney := getEpayPayMoneyFromUSD(basePayMoney)
+	epayDiscount := convertSubscriptionDiscountToEpayMoney(discount)
+
+	var returnUrl *url.URL
+	var notifyUrl *url.URL
+	var client *epay.Client
+	if payMoney >= 0.01 {
+		callBackAddress := service.GetCallbackAddress()
+		returnUrl, err = url.Parse(callBackAddress + "/api/subscription/epay/return")
+		if err != nil {
+			common.ApiErrorMsg(c, "回调地址配置错误")
+			return
+		}
+		notifyUrl, err = url.Parse(callBackAddress + "/api/subscription/epay/notify")
+		if err != nil {
+			common.ApiErrorMsg(c, "回调地址配置错误")
+			return
+		}
+
+		client = GetEpayClient()
+		if client == nil {
+			common.ApiErrorMsg(c, "当前管理员未配置支付信息")
+			return
+		}
 	}
 
 	order := &model.SubscriptionOrder{
 		UserId:          userId,
 		PlanId:          plan.Id,
-		Money:           plan.PriceAmount,
+		Money:           payMoney,
 		TradeNo:         tradeNo,
 		PaymentMethod:   req.PaymentMethod,
 		PaymentProvider: model.PaymentProviderEpay,
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}
+	if discount == nil {
+		order.AffiliateSourceQuota = subscriptionPaidQuotaFromUSD(basePayMoney)
+	}
+	model.ApplyPromoCodeResultToSubscriptionOrder(order, epayDiscount)
 	if err := order.Insert(); err != nil {
 		common.ApiErrorMsg(c, "创建订单失败")
 		return
 	}
+	if payMoney < 0.01 {
+		if err := model.CompleteFreeSubscriptionOrder(tradeNo, model.PaymentProviderEpay); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"message":   "success",
+			"completed": true,
+			"data": gin.H{
+				"completed": true,
+				"trade_no":  tradeNo,
+				"discount":  discount,
+			},
+		})
+		return
+	}
+
 	uri, params, err := client.Purchase(&epay.PurchaseArgs{
 		Type:           req.PaymentMethod,
 		ServiceTradeNo: tradeNo,
 		Name:           fmt.Sprintf("SUB:%s", plan.Title),
-		Money:          strconv.FormatFloat(plan.PriceAmount, 'f', 2, 64),
+		Money:          strconv.FormatFloat(payMoney, 'f', 2, 64),
 		Device:         epay.PC,
 		NotifyUrl:      notifyUrl,
 		ReturnUrl:      returnUrl,
@@ -113,6 +156,26 @@ func SubscriptionRequestEpay(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "success", "data": params, "url": uri})
+}
+
+func convertSubscriptionDiscountToEpayMoney(discount *model.PromoCodeDiscountResult) *model.PromoCodeDiscountResult {
+	if discount == nil {
+		return nil
+	}
+	converted := *discount
+	converted.OriginalAmount = getEpayPayMoneyFromUSD(discount.OriginalAmount)
+	converted.PaidAmount = getEpayPayMoneyFromUSD(discount.PaidAmount)
+	converted.DiscountAmount = getEpayPayMoneyFromUSD(discount.DiscountAmount)
+	// 返佣按套餐美元价折后金额计算，订单金额按易支付实收金额记录。
+	converted.ActualPaidQuota = discount.ActualPaidQuota
+	return &converted
+}
+
+func subscriptionPaidQuotaFromUSD(amount float64) int {
+	if amount <= 0 {
+		return 0
+	}
+	return int(amount * common.QuotaPerUnit)
 }
 
 func SubscriptionEpayNotify(c *gin.Context) {

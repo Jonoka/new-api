@@ -190,19 +190,43 @@ func getModelListGroups(c *gin.Context) (modelListGroups, error) {
 		return modelListGroups{
 			userGroup:   userGroup,
 			tokenGroup:  tokenGroup,
-			ownerGroups: service.GetUserAutoGroup(userGroup),
+			ownerGroups: getModelOwnerGroups(userGroup, tokenGroup),
 		}, nil
 	}
 
-	group := userGroup
-	if tokenGroup != "" {
-		group = tokenGroup
-	}
 	return modelListGroups{
 		userGroup:   userGroup,
 		tokenGroup:  tokenGroup,
-		ownerGroups: []string{group},
+		ownerGroups: getModelOwnerGroups(userGroup, tokenGroup),
 	}, nil
+}
+
+func getModelOwnerGroups(userGroup string, tokenGroup string) []string {
+	if tokenGroup == "auto" {
+		if userGroup == "" {
+			return nil
+		}
+		return service.GetUserAutoGroup(userGroup)
+	}
+	if tokenGroup != "" {
+		// 多分组令牌：逗号分隔的分组列表
+		if strings.Contains(tokenGroup, ",") {
+			groups := strings.Split(tokenGroup, ",")
+			result := make([]string, 0, len(groups))
+			for _, g := range groups {
+				g = strings.TrimSpace(g)
+				if g != "" {
+					result = append(result, g)
+				}
+			}
+			return result
+		}
+		return []string{tokenGroup}
+	}
+	if userGroup != "" {
+		return []string{userGroup}
+	}
+	return nil
 }
 
 func ListModels(c *gin.Context, modelType int) {
@@ -218,17 +242,13 @@ func ListModels(c *gin.Context, modelType int) {
 	}
 
 	userModelNames := make([]string, 0)
-	groups, err := getModelListGroups(c)
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": "get user group failed",
-		})
-		return
-	}
-	ownerGroups := groups.ownerGroups
+	ownerGroups := make([]string, 0)
 	modelLimitEnable := common.GetContextKeyBool(c, constant.ContextKeyTokenModelLimitEnabled)
 	if modelLimitEnable {
+		ownerGroups = getModelOwnerGroups(
+			common.GetContextKeyString(c, constant.ContextKeyUserGroup),
+			common.GetContextKeyString(c, constant.ContextKeyTokenGroup),
+		)
 		s, ok := common.GetContextKey(c, constant.ContextKeyTokenModelLimit)
 		var tokenModelLimit map[string]bool
 		if ok {
@@ -245,17 +265,27 @@ func ListModels(c *gin.Context, modelType int) {
 			userModelNames = append(userModelNames, allowModel)
 		}
 	} else {
+		groups, err := getModelListGroups(c)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "get user group failed",
+			})
+			return
+		}
+		ownerGroups = groups.ownerGroups
 		var models []string
-		if groups.tokenGroup == "auto" {
-			for _, autoGroup := range ownerGroups {
-				groupModels := model.GetGroupEnabledModels(autoGroup)
+		if groups.tokenGroup == "auto" || len(ownerGroups) > 1 {
+			// auto 或多分组令牌：聚合所有分组的模型
+			for _, group := range ownerGroups {
+				groupModels := model.GetGroupEnabledModels(group)
 				for _, g := range groupModels {
 					if !common.StringsContains(models, g) {
 						models = append(models, g)
 					}
 				}
 			}
-		} else {
+		} else if len(ownerGroups) == 1 {
 			models = model.GetGroupEnabledModels(ownerGroups[0])
 		}
 		for _, modelName := range models {

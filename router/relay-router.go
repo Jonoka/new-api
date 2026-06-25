@@ -66,15 +66,43 @@ func SetRelayRouter(router *gin.Engine) {
 	{
 		playgroundRouter.POST("/chat/completions", controller.Playground)
 	}
+	canvasRouter := router.Group("/canvas/v1")
+	canvasRouter.Use(middleware.RouteTag("relay"))
+	canvasRouter.Use(middleware.SystemPerformanceCheck())
+	canvasRouter.Use(middleware.UserSessionAuth(), controller.CanvasPrepareRequest)
+	{
+		canvasRouter.GET("/models", controller.CanvasListModels)
+		canvasRouter.GET("/images/tasks/:task_id", controller.CanvasImageTaskFetch)
+		canvasRouter.GET("/images/tasks/:task_id/content/:index", controller.CanvasImageTaskContent)
+		canvasRouter.POST("/images/tasks", controller.CanvasImageTaskSubmit)
+
+		canvasRelayRouter := canvasRouter.Group("")
+		canvasRelayRouter.Use(middleware.Distribute(), middleware.ModelRequestRateLimit())
+		canvasRelayRouter.POST("/chat/completions", func(c *gin.Context) {
+			controller.Relay(c, types.RelayFormatOpenAI)
+		})
+		canvasRelayRouter.POST("/images/generations", func(c *gin.Context) {
+			controller.Relay(c, types.RelayFormatOpenAIImage)
+		})
+		canvasRelayRouter.POST("/images/edits", func(c *gin.Context) {
+			controller.Relay(c, types.RelayFormatOpenAIImage)
+		})
+		canvasRelayRouter.POST("/audio/speech", func(c *gin.Context) {
+			controller.Relay(c, types.RelayFormatOpenAIAudio)
+		})
+		canvasRelayRouter.POST("/videos", controller.RelayTask)
+		canvasRelayRouter.GET("/videos/:task_id", controller.RelayTaskFetch)
+		canvasRelayRouter.GET("/videos/:task_id/content", controller.VideoProxy)
+	}
 	relayV1Router := router.Group("/v1")
 	relayV1Router.Use(middleware.RouteTag("relay"))
 	relayV1Router.Use(middleware.SystemPerformanceCheck())
 	relayV1Router.Use(middleware.TokenAuth())
-	relayV1Router.Use(middleware.ModelRequestRateLimit())
 	{
 		// WebSocket 路由（统一到 Relay）
 		wsRouter := relayV1Router.Group("")
 		wsRouter.Use(middleware.Distribute())
+		wsRouter.Use(middleware.ModelRequestRateLimit())
 		wsRouter.GET("/realtime", func(c *gin.Context) {
 			controller.Relay(c, types.RelayFormatOpenAIRealtime)
 		})
@@ -83,6 +111,7 @@ func SetRelayRouter(router *gin.Engine) {
 		//http router
 		httpRouter := relayV1Router.Group("")
 		httpRouter.Use(middleware.Distribute())
+		httpRouter.Use(middleware.ModelRequestRateLimit())
 
 		// claude related routes
 		httpRouter.POST("/messages", func(c *gin.Context) {
@@ -179,7 +208,7 @@ func SetRelayRouter(router *gin.Engine) {
 	relaySunoRouter := router.Group("/suno")
 	relaySunoRouter.Use(middleware.RouteTag("relay"))
 	relaySunoRouter.Use(middleware.SystemPerformanceCheck())
-	relaySunoRouter.Use(middleware.TokenAuth(), middleware.Distribute())
+	relaySunoRouter.Use(middleware.TokenAuth(), middleware.Distribute(), middleware.ModelRequestRateLimit())
 	{
 		relaySunoRouter.POST("/submit/:action", controller.RelayTask)
 		relaySunoRouter.POST("/fetch", controller.RelayTaskFetch)
@@ -190,8 +219,8 @@ func SetRelayRouter(router *gin.Engine) {
 	relayGeminiRouter.Use(middleware.RouteTag("relay"))
 	relayGeminiRouter.Use(middleware.SystemPerformanceCheck())
 	relayGeminiRouter.Use(middleware.TokenAuth())
-	relayGeminiRouter.Use(middleware.ModelRequestRateLimit())
 	relayGeminiRouter.Use(middleware.Distribute())
+	relayGeminiRouter.Use(middleware.ModelRequestRateLimit())
 	{
 		// Gemini API 路径格式: /v1beta/models/{model_name}:{action}
 		relayGeminiRouter.POST("/models/*path", func(c *gin.Context) {
@@ -202,7 +231,7 @@ func SetRelayRouter(router *gin.Engine) {
 
 func registerMjRouterGroup(relayMjRouter *gin.RouterGroup) {
 	relayMjRouter.GET("/image/:id", relay.RelayMidjourneyImage)
-	relayMjRouter.Use(middleware.TokenAuth(), middleware.Distribute())
+	relayMjRouter.Use(middleware.TokenAuth(), middleware.Distribute(), middleware.ModelRequestRateLimit())
 	{
 		relayMjRouter.POST("/submit/action", controller.RelayMidjourney)
 		relayMjRouter.POST("/submit/shorten", controller.RelayMidjourney)

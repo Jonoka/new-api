@@ -48,16 +48,27 @@ export function useWaffoPayment() {
   const [processing, setProcessing] = useState(false)
 
   const processWaffoPayment = useCallback(
-    async (topupAmount: number, payMethodIndex?: number) => {
+    async (topupAmount: number, payMethodIndex?: number, promoCode?: string) => {
       setProcessing(true)
 
       try {
         const response = await requestWaffoPayment({
           amount: Math.floor(topupAmount),
           pay_method_index: payMethodIndex,
+          promo_code: promoCode,
         })
 
         if (isApiSuccess(response)) {
+          if (
+            response.data &&
+            typeof response.data === 'object' &&
+            'completed' in response.data &&
+            response.data.completed
+          ) {
+            toast.success(i18next.t('Order completed successfully'))
+            return true
+          }
+
           const paymentUrl = getPaymentUrl(response.data)
 
           if (paymentUrl) {

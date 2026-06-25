@@ -21,7 +21,7 @@ import React, { lazy, Suspense, useContext, useMemo } from 'react';
 import { Route, Routes, useLocation, useParams } from 'react-router-dom';
 import Loading from './components/common/ui/Loading';
 import User from './pages/User';
-import { AuthRedirect, PrivateRoute, AdminRoute } from './helpers';
+import { AuthRedirect, PrivateRoute, AdminRoute, RootRoute } from './helpers';
 import RegisterForm from './components/auth/RegisterForm';
 import LoginForm from './components/auth/LoginForm';
 import NotFound from './pages/NotFound';
@@ -35,6 +35,8 @@ import Channel from './pages/Channel';
 import Token from './pages/Token';
 import Redemption from './pages/Redemption';
 import TopUp from './pages/TopUp';
+import Affiliate from './pages/Affiliate';
+import AffiliateAdmin from './pages/AffiliateAdmin';
 import Log from './pages/Log';
 import Chat from './pages/Chat';
 import Chat2Link from './pages/Chat2Link';
@@ -44,7 +46,10 @@ import Task from './pages/Task';
 import ModelPage from './pages/Model';
 import ModelDeploymentPage from './pages/ModelDeployment';
 import Playground from './pages/Playground';
+import Canvas from './pages/Canvas';
 import Subscription from './pages/Subscription';
+import GameCenter from './pages/GameCenter';
+import GameManagement from './pages/GameManagement';
 import OAuth2Callback from './components/auth/OAuth2Callback';
 import PersonalSetting from './components/settings/PersonalSetting';
 import Setup from './pages/Setup';
@@ -132,6 +137,22 @@ function App() {
           }
         />
         <Route
+          path='/console/game-center'
+          element={
+            <PrivateRoute>
+              <GameCenter />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/game-management'
+          element={
+            <AdminRoute>
+              <GameManagement />
+            </AdminRoute>
+          }
+        />
+        <Route
           path='/console/channel'
           element={
             <AdminRoute>
@@ -152,6 +173,14 @@ function App() {
           element={
             <PrivateRoute>
               <Playground />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/canvas'
+          element={
+            <PrivateRoute>
+              <Canvas />
             </PrivateRoute>
           }
         />
@@ -275,6 +304,26 @@ function App() {
                 <TopUp />
               </Suspense>
             </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/affiliate'
+          element={
+            <PrivateRoute>
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <Affiliate />
+              </Suspense>
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/affiliate-admin'
+          element={
+            <RootRoute>
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <AffiliateAdmin />
+              </Suspense>
+            </RootRoute>
           }
         />
         <Route

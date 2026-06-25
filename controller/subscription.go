@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -23,7 +24,13 @@ type BillingPreferenceRequest struct {
 }
 
 type SubscriptionBalancePayRequest struct {
-	PlanId int `json:"plan_id"`
+	PlanId    int    `json:"plan_id"`
+	PromoCode string `json:"promo_code"`
+}
+
+type SubscriptionAmountRequest struct {
+	PlanId    int    `json:"plan_id"`
+	PromoCode string `json:"promo_code"`
 }
 
 // ---- User APIs ----
@@ -108,11 +115,57 @@ func SubscriptionRequestBalancePay(c *gin.Context) {
 		return
 	}
 
-	if err := model.PurchaseSubscriptionWithBalance(userId, req.PlanId); err != nil {
+	if err := model.PurchaseSubscriptionWithBalance(userId, req.PlanId, req.PromoCode); err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	common.ApiSuccess(c, nil)
+}
+
+func SubscriptionRequestAmount(c *gin.Context) {
+	if !requirePaymentCompliance(c) {
+		return
+	}
+
+	var req SubscriptionAmountRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.PlanId <= 0 {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+
+	plan, err := model.GetSubscriptionPlanById(req.PlanId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if !plan.Enabled {
+		common.ApiErrorMsg(c, "套餐未启用")
+		return
+	}
+	if plan.PriceAmount < 0 {
+		common.ApiErrorMsg(c, "套餐价格不能为负数")
+		return
+	}
+
+	payMoney := plan.PriceAmount
+	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetSubscription, plan.Id, payMoney)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if discount != nil {
+		payMoney = discount.PaidAmount
+	}
+	if payMoney < 0 {
+		common.ApiErrorMsg(c, "套餐金额过低")
+		return
+	}
+
+	response := gin.H{"message": "success", "data": strconv.FormatFloat(payMoney, 'f', 2, 64)}
+	if discount != nil {
+		response["discount"] = discount
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 // ---- Admin APIs ----

@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useState, useContext, useRef } from 'react';
+import React, { useEffect, useState, useContext } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   API,
@@ -26,17 +26,13 @@ import {
   showSuccess,
   renderQuota,
   renderQuotaWithAmount,
-  copy,
-  getQuotaPerUnit,
 } from '../../helpers';
-import { Modal, Toast } from '@douyinfe/semi-ui';
+import { Button, Modal, Toast } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
 
 import RechargeCard from './RechargeCard';
-import InvitationCard from './InvitationCard';
-import TransferModal from './modals/TransferModal';
 import PaymentConfirmModal from './modals/PaymentConfirmModal';
 import TopupHistoryModal from './modals/TopupHistoryModal';
 
@@ -92,6 +88,11 @@ const TopUp = () => {
   const [waffoMinTopUp, setWaffoMinTopUp] = useState(1);
   const [enableWaffoPancakeTopUp, setEnableWaffoPancakeTopUp] = useState(false);
   const [waffoPancakeMinTopUp, setWaffoPancakeMinTopUp] = useState(1);
+  const [enableBepusdtTopUp, setEnableBepusdtTopUp] = useState(false);
+  const [bepusdtChains, setBepusdtChains] = useState([]);
+  const [enableOkpayTopUp, setEnableOkpayTopUp] = useState(false);
+  const [bepusdtSelectedChain, setBepusdtSelectedChain] = useState(null);
+  const [bepusdtChainModalVisible, setBepusdtChainModalVisible] = useState(false);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [open, setOpen] = useState(false);
@@ -100,13 +101,9 @@ const TopUp = () => {
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [payMethods, setPayMethods] = useState([]);
-
-  const affFetchedRef = useRef(false);
-
-  // 邀请相关状态
-  const [affLink, setAffLink] = useState('');
-  const [openTransfer, setOpenTransfer] = useState(false);
-  const [transferAmount, setTransferAmount] = useState(0);
+  const [promoCode, setPromoCode] = useState('');
+  const [promoDiscount, setPromoDiscount] = useState(null);
+  const [amountText, setAmountText] = useState('');
 
   // 账单Modal状态
   const [openHistory, setOpenHistory] = useState(false);
@@ -151,6 +148,11 @@ const TopUp = () => {
       : minTopUp;
   };
 
+  const buildPromoPayload = () => {
+    const code = promoCode.trim();
+    return code ? { promo_code: code } : {};
+  };
+
   const requestAmountByPayment = async (payment, value) => {
     if (payment === 'stripe') {
       return getStripeAmount(value);
@@ -161,7 +163,42 @@ const TopUp = () => {
     if (typeof payment === 'string' && payment.startsWith('waffo:')) {
       return getWaffoAmount(value);
     }
+    if (payment === 'bepusdt') {
+      return getBepusdtAmount(value);
+    }
+    if (payment === 'okpay') {
+      return getOkpayAmount(value);
+    }
     return getAmount(value);
+  };
+
+  const updateAmountFromResponse = (response, fallbackError) => {
+    if (response !== undefined) {
+      const { message, data, discount } = response.data;
+      if (message === 'success') {
+        setAmount(parseFloat(data));
+        setAmountText(response.data.amount_text || '');
+        setPromoDiscount(discount || null);
+        return true;
+      }
+      setAmount(0);
+      setAmountText('');
+      setPromoDiscount(null);
+      Toast.error({ content: '错误：' + (data || fallbackError), id: 'getAmount' });
+      return false;
+    }
+    showError(response);
+    return false;
+  };
+
+  const handleCompletedTopUp = async (data) => {
+    showSuccess(t('充值成功'));
+    await getUserQuota();
+    setPromoCode('');
+    setPromoDiscount(null);
+    setOpen(false);
+    setOpenHistory(true);
+    return data;
   };
 
   const topUp = async () => {
@@ -222,6 +259,28 @@ const TopUp = () => {
     } else if (payment.startsWith('waffo:')) {
       if (!enableWaffoTopUp) {
         showError(t('管理员未开启 Waffo 充值！'));
+        return;
+      }
+    } else if (payment === 'bepusdt') {
+      if (!enableBepusdtTopUp) {
+        showError(t('管理员未开启 Bepusdt 充值！'));
+        return;
+      }
+      const chains = bepusdtChains || [];
+      if (chains.length === 0) {
+        showError(t('管理员未配置 USDT 链'));
+        return;
+      }
+      // 多条链时弹出选择
+      if (chains.length > 1) {
+        setBepusdtChainModalVisible(true);
+        return;
+      }
+      // 只有一条链直接设置
+      setBepusdtSelectedChain(chains[0].trade_type);
+    } else if (payment === 'okpay') {
+      if (!enableOkpayTopUp) {
+        showError(t('管理员未开启 OKPay 充值！'));
         return;
       }
     } else {
@@ -297,21 +356,51 @@ const TopUp = () => {
         res = await API.post('/api/user/stripe/pay', {
           amount: parseInt(topUpCount),
           payment_method: 'stripe',
+          ...buildPromoPayload(),
+        });
+      } else if (payWay === 'bepusdt') {
+        // Bepusdt 使用已选链
+        const tradeType = bepusdtSelectedChain || (bepusdtChains[0] && bepusdtChains[0].trade_type);
+        if (!tradeType) {
+          showError(t('请选择支付链'));
+          setConfirmLoading(false);
+          return;
+        }
+        res = await API.post('/api/user/bepusdt/pay', {
+          amount: parseInt(topUpCount),
+          trade_type: tradeType,
+          ...buildPromoPayload(),
+        });
+      } else if (payWay === 'okpay') {
+        // OKPay 支付请求
+        res = await API.post('/api/user/okpay/pay', {
+          amount: parseInt(topUpCount),
+          ...buildPromoPayload(),
         });
       } else {
         // 普通支付请求
         res = await API.post('/api/user/pay', {
           amount: parseInt(topUpCount),
           payment_method: payWay,
+          ...buildPromoPayload(),
         });
       }
 
       if (res !== undefined) {
         const { message, data } = res.data;
         if (message === 'success') {
+          if (res.data.completed || data?.completed) {
+            await handleCompletedTopUp(data);
+            return;
+          }
           if (payWay === 'stripe') {
             // Stripe 支付回调处理
             window.open(data.pay_link, '_blank');
+          } else if (payWay === 'bepusdt' || payWay === 'okpay') {
+            // Bepusdt/OKPay 支付跳转
+            if (data.payment_url) {
+              window.open(data.payment_url, '_blank');
+            }
           } else {
             // 普通支付表单提交
             let params = data;
@@ -406,6 +495,7 @@ const TopUp = () => {
       setPaymentLoading(true);
       const requestBody = {
         amount: parseInt(topUpCount),
+        ...buildPromoPayload(),
       };
       if (payMethodIndex != null) {
         requestBody.pay_method_index = payMethodIndex;
@@ -413,7 +503,9 @@ const TopUp = () => {
       const res = await API.post('/api/user/waffo/pay', requestBody);
       if (res !== undefined) {
         const { message, data } = res.data;
-        if (message === 'success' && data?.payment_url) {
+        if (message === 'success' && (res.data.completed || data?.completed)) {
+          await handleCompletedTopUp(data);
+        } else if (message === 'success' && data?.payment_url) {
           window.open(data.payment_url, '_blank');
         } else {
           showError(data || t('支付请求失败'));
@@ -436,18 +528,9 @@ const TopUp = () => {
     try {
       const res = await API.post('/api/user/waffo/amount', {
         amount: parseInt(value),
+        ...buildPromoPayload(),
       });
-      if (res !== undefined) {
-        const { message, data } = res.data;
-        if (message === 'success') {
-          setAmount(parseFloat(data));
-        } else {
-          setAmount(0);
-          Toast.error({ content: '错误：' + data, id: 'getAmount' });
-        }
-      } else {
-        showError(res);
-      }
+      updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
       // amount fetch failed silently
     } finally {
@@ -466,10 +549,15 @@ const TopUp = () => {
     try {
       const res = await API.post('/api/user/waffo-pancake/pay', {
         amount: parseInt(topUpCount),
+        ...buildPromoPayload(),
       });
       if (res !== undefined) {
         const { message, data } = res.data;
         if (message === 'success') {
+          if (res.data.completed || data?.completed) {
+            await handleCompletedTopUp(data);
+            return;
+          }
           const checkoutUrl = data?.checkout_url || '';
           if (checkoutUrl && isSafeHttpCheckoutUrl(checkoutUrl)) {
             // In-tab redirect (not window.open) — popup blocker fires after
@@ -503,18 +591,9 @@ const TopUp = () => {
     try {
       const res = await API.post('/api/user/waffo-pancake/amount', {
         amount: parseInt(value),
+        ...buildPromoPayload(),
       });
-      if (res !== undefined) {
-        const { message, data } = res.data;
-        if (message === 'success') {
-          setAmount(parseFloat(data));
-        } else {
-          setAmount(0);
-          Toast.error({ content: '错误：' + data, id: 'getAmount' });
-        }
-      } else {
-        showError(res);
-      }
+      updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
       // amount fetch failed silently
     } finally {
@@ -677,6 +756,9 @@ const TopUp = () => {
           setWaffoMinTopUp(data.waffo_min_topup || 1);
           setEnableWaffoPancakeTopUp(enableWaffoPancakeTopUp);
           setWaffoPancakeMinTopUp(data.waffo_pancake_min_topup || 1);
+          setEnableBepusdtTopUp(data.enable_bepusdt_topup || false);
+          setBepusdtChains(data.bepusdt_chains || []);
+          setEnableOkpayTopUp(data.enable_okpay_topup || false);
           setMinTopUp(minTopUpValue);
           setTopUpCount(minTopUpValue);
           setTopUpLink(data.topup_link || '');
@@ -724,43 +806,6 @@ const TopUp = () => {
     }
   };
 
-  // 获取邀请链接
-  const getAffLink = async () => {
-    const res = await API.get('/api/user/aff');
-    const { success, message, data } = res.data;
-    if (success) {
-      let link = `${window.location.origin}/register?aff=${data}`;
-      setAffLink(link);
-    } else {
-      showError(message);
-    }
-  };
-
-  // 划转邀请额度
-  const transfer = async () => {
-    if (transferAmount < getQuotaPerUnit()) {
-      showError(t('划转金额最低为') + ' ' + renderQuota(getQuotaPerUnit()));
-      return;
-    }
-    const res = await API.post(`/api/user/aff_transfer`, {
-      quota: transferAmount,
-    });
-    const { success, message } = res.data;
-    if (success) {
-      showSuccess(message);
-      setOpenTransfer(false);
-      getUserQuota().then();
-    } else {
-      showError(message);
-    }
-  };
-
-  // 复制邀请链接
-  const handleAffLinkClick = async () => {
-    await copy(affLink);
-    showSuccess(t('邀请链接已复制到剪切板'));
-  };
-
   // URL 参数自动打开账单弹窗（支付回跳时触发）
   useEffect(() => {
     if (searchParams.get('show_history') === 'true') {
@@ -773,13 +818,6 @@ const TopUp = () => {
   useEffect(() => {
     // 始终获取最新用户数据，确保余额等统计信息准确
     getUserQuota().then();
-    setTransferAmount(getQuotaPerUnit());
-  }, []);
-
-  useEffect(() => {
-    if (affFetchedRef.current) return;
-    affFetchedRef.current = true;
-    getAffLink().then();
   }, []);
 
   // 在 statusState 可用时获取充值信息
@@ -801,6 +839,9 @@ const TopUp = () => {
   }, [statusState?.status]);
 
   const renderAmount = () => {
+    if (payWay === 'okpay' && amountText) {
+      return amountText;
+    }
     return amount + ' ' + t('元');
   };
 
@@ -812,18 +853,9 @@ const TopUp = () => {
     try {
       const res = await API.post('/api/user/amount', {
         amount: parseFloat(value),
+        ...buildPromoPayload(),
       });
-      if (res !== undefined) {
-        const { message, data } = res.data;
-        if (message === 'success') {
-          setAmount(parseFloat(data));
-        } else {
-          setAmount(0);
-          Toast.error({ content: '错误：' + data, id: 'getAmount' });
-        }
-      } else {
-        showError(res);
-      }
+      updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
       // amount fetch failed silently
     }
@@ -838,18 +870,45 @@ const TopUp = () => {
     try {
       const res = await API.post('/api/user/stripe/amount', {
         amount: parseFloat(value),
+        ...buildPromoPayload(),
       });
-      if (res !== undefined) {
-        const { message, data } = res.data;
-        if (message === 'success') {
-          setAmount(parseFloat(data));
-        } else {
-          setAmount(0);
-          Toast.error({ content: '错误：' + data, id: 'getAmount' });
-        }
-      } else {
-        showError(res);
-      }
+      updateAmountFromResponse(res, t('获取金额失败'));
+    } catch (err) {
+      // amount fetch failed silently
+    } finally {
+      setAmountLoading(false);
+    }
+  };
+
+  const getBepusdtAmount = async (value) => {
+    if (value === undefined) {
+      value = topUpCount;
+    }
+    setAmountLoading(true);
+    try {
+      const res = await API.post('/api/user/bepusdt/amount', {
+        amount: parseFloat(value),
+        ...buildPromoPayload(),
+      });
+      updateAmountFromResponse(res, t('获取金额失败'));
+    } catch (err) {
+      // amount fetch failed silently
+    } finally {
+      setAmountLoading(false);
+    }
+  };
+
+  const getOkpayAmount = async (value) => {
+    if (value === undefined) {
+      value = topUpCount;
+    }
+    setAmountLoading(true);
+    try {
+      const res = await API.post('/api/user/okpay/amount', {
+        amount: parseFloat(value),
+        ...buildPromoPayload(),
+      });
+      updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
       // amount fetch failed silently
     } finally {
@@ -859,6 +918,8 @@ const TopUp = () => {
 
   const handleCancel = () => {
     setOpen(false);
+    setPromoCode('');
+    setPromoDiscount(null);
   };
 
   const handleTransferCancel = () => {
@@ -882,6 +943,7 @@ const TopUp = () => {
   const selectPresetAmount = (preset) => {
     setTopUpCount(preset.value);
     setSelectedPreset(preset.value);
+    setPromoDiscount(null);
 
     // 计算实际支付金额，考虑折扣
     const discount = preset.discount || topupInfo.discount[preset.value] || 1.0;
@@ -904,19 +966,6 @@ const TopUp = () => {
 
   return (
     <div className='w-full max-w-7xl mx-auto relative min-h-screen lg:min-h-0 mt-[60px] px-2'>
-      {/* 划转模态框 */}
-      <TransferModal
-        t={t}
-        openTransfer={openTransfer}
-        transfer={transfer}
-        handleTransferCancel={handleTransferCancel}
-        userState={userState}
-        renderQuota={renderQuota}
-        getQuotaPerUnit={getQuotaPerUnit}
-        transferAmount={transferAmount}
-        setTransferAmount={setTransferAmount}
-      />
-
       {/* 充值确认模态框 */}
       <PaymentConfirmModal
         t={t}
@@ -931,7 +980,11 @@ const TopUp = () => {
         payWay={payWay}
         payMethods={confirmPayMethods}
         amountNumber={amount}
-        discountRate={topupInfo?.discount?.[topUpCount] || 1.0}
+        promoCode={promoCode}
+        setPromoCode={setPromoCode}
+        promoDiscount={promoDiscount}
+        amountText={amountText}
+        onPromoCodeBlur={() => requestAmountByPayment(payWay)}
       />
 
       {/* 充值账单模态框 */}
@@ -969,8 +1022,49 @@ const TopUp = () => {
         )}
       </Modal>
 
+      {/* Bepusdt 链选择模态框 */}
+      <Modal
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <img src='/pay-usdt.svg' alt='USDT' style={{ width: 20, height: 20 }} />
+            {t('选择 USDT 网络')}
+          </div>
+        }
+        visible={bepusdtChainModalVisible}
+        onCancel={() => setBepusdtChainModalVisible(false)}
+        footer={null}
+        maskClosable={true}
+        size='small'
+        centered
+        style={{ maxWidth: 400 }}
+        bodyStyle={{ paddingBottom: 24 }}
+      >
+        <p style={{ marginBottom: 16, color: 'var(--semi-color-text-2)', fontSize: 14 }}>
+          {t('请选择支付使用的区块链网络')}
+        </p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'center' }}>
+          {(bepusdtChains || []).map((chain) => (
+            <Button
+              key={chain.trade_type}
+              theme='light'
+              size='large'
+              style={{ minWidth: 100 }}
+              icon={<img src='/pay-usdt.svg' alt='' style={{ width: 16, height: 16 }} />}
+              onClick={() => {
+                setBepusdtSelectedChain(chain.trade_type);
+                setBepusdtChainModalVisible(false);
+                setPayWay('bepusdt');
+                setOpen(true);
+              }}
+            >
+              {chain.name}
+            </Button>
+          ))}
+        </div>
+      </Modal>
+
       {/* 主布局区域 */}
-      <div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
+      <div className='grid grid-cols-1 gap-6'>
         <RechargeCard
           t={t}
           enableOnlineTopUp={enableOnlineTopUp}
@@ -1016,15 +1110,6 @@ const TopUp = () => {
           allSubscriptions={allSubscriptions}
           reloadSubscriptionSelf={getSubscriptionSelf}
           enableRedemption={topupInfo.enable_redemption !== false}
-        />
-        <InvitationCard
-          t={t}
-          userState={userState}
-          renderQuota={renderQuota}
-          setOpenTransfer={setOpenTransfer}
-          affLink={affLink}
-          handleAffLinkClick={handleAffLinkClick}
-          complianceConfirmed={topupInfo.payment_compliance_confirmed !== false}
         />
       </div>
     </div>

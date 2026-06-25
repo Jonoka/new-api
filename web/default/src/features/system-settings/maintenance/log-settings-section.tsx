@@ -57,12 +57,14 @@ import { useUpdateOption } from '../hooks/use-update-option'
 
 const logSettingsSchema = z.object({
   LogConsumeEnabled: z.boolean(),
+  ForceRecordLogIpEnabled: z.boolean(),
 })
 
 type LogSettingsFormValues = z.infer<typeof logSettingsSchema>
 
 type LogSettingsSectionProps = {
   defaultEnabled: boolean
+  defaultForceRecordIpEnabled: boolean
 }
 
 const HOURS_IN_DAY = 24
@@ -92,6 +94,7 @@ const quickSelectOptions = [
 
 export function LogSettingsSection({
   defaultEnabled,
+  defaultForceRecordIpEnabled,
 }: LogSettingsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
@@ -99,6 +102,7 @@ export function LogSettingsSection({
     resolver: zodResolver(logSettingsSchema),
     defaultValues: {
       LogConsumeEnabled: defaultEnabled,
+      ForceRecordLogIpEnabled: defaultForceRecordIpEnabled,
     },
   })
 
@@ -109,8 +113,11 @@ export function LogSettingsSection({
   const [showConfirmDialog, setShowConfirmDialog] = useState(false)
 
   useEffect(() => {
-    form.reset({ LogConsumeEnabled: defaultEnabled })
-  }, [defaultEnabled, form])
+    form.reset({
+      LogConsumeEnabled: defaultEnabled,
+      ForceRecordLogIpEnabled: defaultForceRecordIpEnabled,
+    })
+  }, [defaultEnabled, defaultForceRecordIpEnabled, form])
 
   const purgeTimestamp = useMemo(() => {
     if (!purgeDate) return null
@@ -123,11 +130,28 @@ export function LogSettingsSection({
   }, [purgeDate])
 
   const onSubmit = async (values: LogSettingsFormValues) => {
-    if (values.LogConsumeEnabled === defaultEnabled) return
-    await updateOption.mutateAsync({
-      key: 'LogConsumeEnabled',
-      value: values.LogConsumeEnabled,
-    })
+    const updates = [
+      {
+        key: 'LogConsumeEnabled',
+        value: values.LogConsumeEnabled,
+        changed: values.LogConsumeEnabled !== defaultEnabled,
+      },
+      {
+        key: 'ForceRecordLogIpEnabled',
+        value: values.ForceRecordLogIpEnabled,
+        changed:
+          values.ForceRecordLogIpEnabled !== defaultForceRecordIpEnabled,
+      },
+    ].filter((item) => item.changed)
+
+    await Promise.all(
+      updates.map((item) =>
+        updateOption.mutateAsync({
+          key: item.key,
+          value: item.value,
+        })
+      )
+    )
   }
 
   const handleRequestCleanLogs = () => {
@@ -185,6 +209,31 @@ export function LogSettingsSection({
                   <FormDescription>
                     {t(
                       'Track per-request consumption to power usage analytics. Keeping this on increases database writes.'
+                    )}
+                  </FormDescription>
+                </SettingsSwitchContent>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </FormControl>
+                <FormMessage />
+              </SettingsSwitchItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name='ForceRecordLogIpEnabled'
+            render={({ field }) => (
+              <SettingsSwitchItem>
+                <SettingsSwitchContent>
+                  <FormLabel>
+                    {t('Force record request and error log IP')}
+                  </FormLabel>
+                  <FormDescription>
+                    {t(
+                      'When enabled, usage and error logs record client IP addresses regardless of each user setting.'
                     )}
                   </FormDescription>
                 </SettingsSwitchContent>

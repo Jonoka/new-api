@@ -478,7 +478,7 @@ export const getChannelsColumns = ({
     },
     {
       key: COLUMN_KEYS.TYPE,
-      title: t('类型'),
+      title: t('协议类型'),
       dataIndex: 'type',
       render: (text, record, index) => {
         if (record.children === undefined) {
@@ -680,6 +680,65 @@ export const getChannelsColumns = ({
             />
           );
         }
+      },
+    },
+    {
+      key: COLUMN_KEYS.CONCURRENCY_LIMIT,
+      title: t('并发上限'),
+      dataIndex: 'concurrency_limit',
+      render: (text, record, index) => {
+        const currentValue = text ?? 0;
+        if (record.children === undefined) {
+          return (
+            <InputNumber
+              style={{ width: 90 }}
+              name='concurrency_limit'
+              keepFocus={true}
+              innerButtons
+              defaultValue={currentValue}
+              min={0}
+              size='small'
+              onBlur={(e) => {
+                manageChannel(
+                  record.id,
+                  'concurrency_limit',
+                  record,
+                  e.target.value,
+                );
+              }}
+            />
+          );
+        }
+
+        return (
+          <InputNumber
+            style={{ width: 90 }}
+            name='concurrency_limit'
+            keepFocus={true}
+            innerButtons
+            defaultValue={currentValue}
+            min={0}
+            size='small'
+            onBlur={(e) => {
+              Modal.warning({
+                title: t('修改子渠道并发上限'),
+                content:
+                  t('确定要修改所有子渠道并发上限为 ') +
+                  e.target.value +
+                  t(' 吗？'),
+                onOk: () => {
+                  if (e.target.value === '') {
+                    return;
+                  }
+                  submitTagEdit('concurrency_limit', {
+                    tag: record.key,
+                    concurrency_limit: e.target.value,
+                  });
+                },
+              });
+            }}
+          />
+        );
       },
     },
     {

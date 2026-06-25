@@ -43,7 +43,8 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	other["cache_ratio"] = cacheRatio
 	other["model_price"] = modelPrice
 	other["user_group_ratio"] = userGroupRatio
-	other["frt"] = float64(relayInfo.FirstResponseTime.UnixMilli() - relayInfo.StartTime.UnixMilli())
+	other["frt"] = float64(relayInfo.FirstResponseLatencyMilliseconds())
+	other["use_time_ms"] = float64(relayInfo.ElapsedMilliseconds())
 	if relayInfo.ReasoningEffort != "" {
 		other["reasoning_effort"] = relayInfo.ReasoningEffort
 	}
@@ -79,7 +80,17 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	appendBillingInfo(relayInfo, other)
 	appendParamOverrideInfo(relayInfo, other)
 	appendStreamStatus(relayInfo, other)
+	appendTimingDiagnostics(relayInfo, other)
 	return other
+}
+
+func appendTimingDiagnostics(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+	if !constant.UpstreamTimingDiagnosticsEnabled || relayInfo == nil || other == nil {
+		return
+	}
+	if diagnostics := relayInfo.TimingDiagnosticsMilliseconds(); len(diagnostics) > 0 {
+		other["timing_diagnostics"] = diagnostics
+	}
 }
 
 func appendParamOverrideInfo(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
@@ -99,8 +110,9 @@ func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other map[string]inter
 		status = "error"
 	}
 	streamInfo := map[string]interface{}{
-		"status":     status,
-		"end_reason": string(ss.EndReason),
+		"status":         status,
+		"end_reason":     string(ss.EndReason),
+		"response_count": relayInfo.ReceivedResponseCount,
 	}
 	if ss.EndError != nil {
 		streamInfo["end_error"] = ss.EndError.Error()
@@ -258,6 +270,7 @@ func GenerateMjOtherInfo(relayInfo *relaycommon.RelayInfo, priceData types.Price
 	other := make(map[string]interface{})
 	other["model_price"] = priceData.ModelPrice
 	other["group_ratio"] = priceData.GroupRatioInfo.GroupRatio
+	other["use_time_ms"] = float64(relayInfo.ElapsedMilliseconds())
 	if priceData.GroupRatioInfo.HasSpecialRatio {
 		other["user_group_ratio"] = priceData.GroupRatioInfo.GroupSpecialRatio
 	}

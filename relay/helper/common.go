@@ -8,11 +8,33 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
+
+const timingDiagnosticsRelayInfoKey = "timing_diagnostics_relay_info"
+
+func SetTimingDiagnosticsRelayInfo(c *gin.Context, info *relaycommon.RelayInfo) {
+	if c == nil || info == nil {
+		return
+	}
+	c.Set(timingDiagnosticsRelayInfoKey, info)
+}
+
+func markFirstDownstreamWrite(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	if info, ok := c.Get(timingDiagnosticsRelayInfoKey); ok {
+		if relayInfo, ok := info.(*relaycommon.RelayInfo); ok && relayInfo != nil {
+			relayInfo.MarkTimingFirstDownstreamWrite()
+		}
+	}
+}
 
 func FlushWriter(c *gin.Context) (err error) {
 	defer func() {
@@ -55,26 +77,38 @@ func SetEventStreamHeaders(c *gin.Context) {
 }
 
 func ClaudeData(c *gin.Context, resp dto.ClaudeResponse) error {
+	if c.GetBool("sensitive_response_stream_blocked") {
+		return nil
+	}
 	jsonData, err := common.Marshal(resp)
 	if err != nil {
 		common.SysError("error marshalling stream response: " + err.Error())
 	} else {
-		c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
-		c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonData)})
+		if blocked, err := writeFilteredEventData(c, fmt.Sprintf("event: %s\n", resp.Type), string(jsonData)); blocked || err != nil {
+			return err
+		}
 	}
 	_ = FlushWriter(c)
 	return nil
 }
 
 func ClaudeChunkData(c *gin.Context, resp dto.ClaudeResponse, data string) {
-	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
-	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s\n", data)})
+	if c.GetBool("sensitive_response_stream_blocked") {
+		return
+	}
+	if blocked, _ := writeFilteredEventData(c, fmt.Sprintf("event: %s\n", resp.Type), data); blocked {
+		return
+	}
 	_ = FlushWriter(c)
 }
 
 func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data string) {
-	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
-	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s", data)})
+	if c.GetBool("sensitive_response_stream_blocked") {
+		return
+	}
+	if blocked, _ := writeFilteredEventData(c, fmt.Sprintf("event: %s\n", resp.Type), data); blocked {
+		return
+	}
 	_ = FlushWriter(c)
 }
 
@@ -82,12 +116,25 @@ func StringData(c *gin.Context, str string) error {
 	if c == nil || c.Writer == nil {
 		return errors.New("context or writer is nil")
 	}
+	if c.GetBool("sensitive_response_stream_blocked") {
+		return nil
+	}
 
 	if c.Request != nil && c.Request.Context().Err() != nil {
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
 
-	c.Render(-1, common.CustomEvent{Data: "data: " + str})
+	result, err := service.ApplySensitiveFilterToStreamDataForSend(c, str)
+	if err != nil {
+		return err
+	}
+	if result.Blocked {
+		logger.LogWarn(c, fmt.Sprintf("upstream stream response blocked by sensitive rules: %s", service.FormatSensitiveFilterMatches(result.Matches)))
+		c.Set("sensitive_response_stream_blocked", true)
+		writeSensitiveStreamErrorEvent(c)
+		return FlushWriter(c)
+	}
+	writeStreamDataItems(c, result.Data)
 	return FlushWriter(c)
 }
 
@@ -117,7 +164,47 @@ func ObjectData(c *gin.Context, object interface{}) error {
 	return StringData(c, string(jsonData))
 }
 
+func writeFilteredEventData(c *gin.Context, eventLine string, data string) (bool, error) {
+	result, err := service.ApplySensitiveFilterToStreamDataForSend(c, data)
+	if err != nil {
+		return false, err
+	}
+	if result.Blocked {
+		logger.LogWarn(c, fmt.Sprintf("upstream stream response blocked by sensitive rules: %s", service.FormatSensitiveFilterMatches(result.Matches)))
+		c.Set("sensitive_response_stream_blocked", true)
+		writeSensitiveStreamErrorEvent(c)
+		_ = FlushWriter(c)
+		return true, nil
+	}
+	writeFilteredEventDataItems(c, eventLine, result.Data)
+	return false, nil
+}
+
+func writeStreamDataItems(c *gin.Context, items []string) {
+	for _, item := range items {
+		markFirstDownstreamWrite(c)
+		c.Render(-1, common.CustomEvent{Data: "data: " + item})
+	}
+}
+
+func writeFilteredEventDataItems(c *gin.Context, eventLine string, items []string) {
+	for _, item := range items {
+		markFirstDownstreamWrite(c)
+		c.Render(-1, common.CustomEvent{Data: eventLine})
+		c.Render(-1, common.CustomEvent{Data: "data: " + item})
+	}
+}
+
+func writeSensitiveStreamErrorEvent(c *gin.Context) {
+	c.Render(-1, common.CustomEvent{Data: "event: error\n"})
+	c.Render(-1, common.CustomEvent{Data: "data: " + string(service.SensitiveFilterOpenAIErrorBody(c))})
+}
+
 func Done(c *gin.Context) {
+	if c.GetBool("sensitive_response_stream_blocked") {
+		return
+	}
+	writeStreamDataItems(c, service.FlushSensitiveStreamDataForSend(c))
 	_ = StringData(c, "[DONE]")
 }
 

@@ -69,6 +69,7 @@ const EditRedemptionModal = (props) => {
     quota: 100000,
     amount: Number(quotaToDisplayAmount(100000).toFixed(6)),
     count: 1,
+    max_redeem_count: 1,
     expired_time: null,
   });
 
@@ -112,9 +113,26 @@ const EditRedemptionModal = (props) => {
     setLoading(true);
     let localInputs = { ...values };
     localInputs.count = parseInt(localInputs.count) || 0;
+    localInputs.max_redeem_count = parseInt(
+      localInputs.max_redeem_count,
+      10,
+    );
     localInputs.quota = displayAmountToQuota(localInputs.amount);
     if (localInputs.quota <= 0) {
       showError(t('请输入金额'));
+      setLoading(false);
+      return;
+    }
+    if (
+      !Number.isFinite(localInputs.max_redeem_count) ||
+      localInputs.max_redeem_count <= 0
+    ) {
+      showError(t('兑换次数必须大于0'));
+      setLoading(false);
+      return;
+    }
+    if (localInputs.max_redeem_count > 100000) {
+      showError(t('兑换次数不能超过100000'));
       setLoading(false);
       return;
     }
@@ -378,6 +396,38 @@ const EditRedemptionModal = (props) => {
                         />
                       </Col>
                     )}
+                    <Col span={isEdit ? 24 : 12}>
+                      <Form.InputNumber
+                        field='max_redeem_count'
+                        label={t('兑换次数上限')}
+                        placeholder={t('输入兑换次数上限')}
+                        min={1}
+                        max={100000}
+                        precision={0}
+                        step={1}
+                        rules={[
+                          { required: true, message: t('输入兑换次数上限') },
+                          {
+                            validator: (rule, v) => {
+                              const num = parseInt(v, 10);
+                              if (!Number.isFinite(num) || num <= 0) {
+                                return Promise.reject(t('兑换次数必须大于0'));
+                              }
+                              if (num > 100000) {
+                                return Promise.reject(
+                                  t('兑换次数不能超过100000'),
+                                );
+                              }
+                              return Promise.resolve();
+                            },
+                          },
+                        ]}
+                        extraText={t(
+                          '每个兑换码总共可兑换次数，同一用户只能兑换一次',
+                        )}
+                        style={{ width: '100%' }}
+                      />
+                    </Col>
                   </Row>
                 </Card>
               </div>

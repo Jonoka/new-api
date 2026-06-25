@@ -22,11 +22,7 @@ import { CircleAlert, Sparkles, KeyRound } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
-import {
-  formatUseTime,
-  formatLogQuota,
-  formatTimestampToDate,
-} from '@/lib/format'
+import { formatLogQuota, formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
@@ -41,6 +37,8 @@ import { LOG_TYPE_ALL_VALUE } from '../../constants'
 import type { UsageLog } from '../../data/schema'
 import {
   formatModelName,
+  formatLogUseTime,
+  getLogUseTimeSeconds,
   getFirstResponseTimeColor,
   getResponseTimeColor,
   getTieredBillingSummary,
@@ -558,12 +556,16 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
 
         const useTime = row.getValue('use_time') as number
         const other = parseLogOther(log.other)
+        const displayUseTime = getLogUseTimeSeconds(useTime, other)
         const frt = other?.frt
         const tokensPerSecond =
-          useTime > 0 && log.completion_tokens > 0
-            ? log.completion_tokens / useTime
+          displayUseTime > 0 && log.completion_tokens > 0
+            ? log.completion_tokens / displayUseTime
             : null
-        const timeVariant = getResponseTimeColor(useTime, log.completion_tokens)
+        const timeVariant = getResponseTimeColor(
+          displayUseTime,
+          log.completion_tokens
+        )
         const frtVariant = frt
           ? getFirstResponseTimeColor(frt / 1000)
           : 'neutral'
@@ -583,7 +585,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
           <div className='flex flex-col gap-1'>
             <div className='flex items-center gap-1.5'>
               <StatusBadge
-                label={formatUseTime(useTime)}
+                label={formatLogUseTime(useTime, other)}
                 variant={timeVariant as StatusBadgeProps['variant']}
                 size='sm'
                 copyable={false}
@@ -592,7 +594,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
               {log.is_stream &&
                 (frt != null && frt > 0 ? (
                   <StatusBadge
-                    label={formatUseTime(frt / 1000)}
+                    label={formatLogUseTime(0, { use_time_ms: frt })}
                     variant={frtVariant as StatusBadgeProps['variant']}
                     size='sm'
                     showDot={false}
@@ -752,7 +754,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
 
         return (
           <div className='flex flex-col gap-0.5'>
-            <span className='border-border/80 bg-muted/60 inline-flex h-6 w-fit items-center rounded-md border px-2 text-sm leading-none [font-family:var(--font-body)] font-semibold tabular-nums'>
+            <span className='border-border/80 bg-muted/60 inline-flex h-6 w-fit items-center rounded-md border px-2 [font-family:var(--font-body)] text-sm leading-none font-semibold tabular-nums'>
               {quotaDisplay.prefix && (
                 <span className='mr-1'>{quotaDisplay.prefix}</span>
               )}

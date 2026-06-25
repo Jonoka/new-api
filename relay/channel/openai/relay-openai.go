@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/channel/openrouter"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 
@@ -121,16 +123,15 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var usage = &dto.Usage{}
 	var lastStreamData string
 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
+	var hasMeaningfulOutput bool
 
 	// 检查是否为音频模型
 	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
-		if lastStreamData != "" {
-			if err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
-				common.SysLog("error handling stream format: " + err.Error())
-				sr.Error(err)
-			}
+		if c.GetBool("sensitive_response_stream_blocked") {
+			sr.Stop(service.ErrSensitiveResponseBlocked)
+			return
 		}
 		if len(data) > 0 {
 			// 对音频模型，保存倒数第二个stream data
@@ -142,6 +143,23 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			if err := processTokenData(info.RelayMode, data, &responseTextBuilder, &toolCount); err != nil {
 				logger.LogError(c, "error processing stream token data: "+err.Error())
 				sr.Error(err)
+			}
+			if !hasMeaningfulOutput && info.RelayMode == relayconstant.RelayModeChatCompletions {
+				var streamResponse dto.ChatCompletionsStreamResponse
+				if err := common.UnmarshalJsonStr(data, &streamResponse); err == nil && HasMeaningfulStreamOutput(streamResponse) {
+					hasMeaningfulOutput = true
+				}
+			}
+			if info.RelayFormat == types.RelayFormatOpenAI && !shouldForwardOpenAIStreamData(data, info) {
+				return
+			}
+			if err := HandleStreamFormat(c, info, data, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
+				common.SysLog("error handling stream format: " + err.Error())
+				sr.Error(err)
+			}
+			if c.GetBool("sensitive_response_stream_blocked") {
+				sr.Stop(service.ErrSensitiveResponseBlocked)
+				return
 			}
 		}
 	})
@@ -165,28 +183,162 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	}
 
 	// 处理最后的响应
-	shouldSendLastResp := true
 	if err := handleLastResponse(lastStreamData, &responseId, &createAt, &systemFingerprint, &model, &usage,
-		&containStreamUsage, info, &shouldSendLastResp); err != nil {
+		&containStreamUsage); err != nil {
 		logger.LogError(c, fmt.Sprintf("error handling last response: %s, lastStreamData: [%s]", err.Error(), lastStreamData))
-	}
-
-	if info.RelayFormat == types.RelayFormatOpenAI {
-		if shouldSendLastResp {
-			_ = sendStreamData(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent)
-		}
 	}
 
 	if !containStreamUsage {
 		usage = service.ResponseText2Usage(c, responseTextBuilder.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
 		usage.CompletionTokens += toolCount * 7
 	}
+	if info.RelayMode == relayconstant.RelayModeChatCompletions && !hasMeaningfulOutput {
+		usage = &dto.Usage{}
+	}
 
 	applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
 
-	HandleFinalResponse(c, info, lastStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
+	if !c.GetBool("sensitive_response_stream_blocked") {
+		HandleFinalResponse(c, info, lastStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
+	}
 
 	return usage, nil
+}
+
+// convertSSEToJSON merges SSE stream chunks into a single non-streaming JSON response.
+// Used when upstream returns text/event-stream for a non-streaming request.
+func convertSSEToJSON(sseBody []byte) ([]byte, error) {
+	lines := bytes.Split(sseBody, []byte("\n"))
+
+	type choiceAcc struct {
+		role             string
+		content          strings.Builder
+		reasoningContent strings.Builder
+		toolCalls        []dto.ToolCallResponse
+		finishReason     string
+	}
+
+	var (
+		responseId string
+		created    int64
+		model      string
+		usage      *dto.Usage
+		choiceMap  = make(map[int]*choiceAcc)
+	)
+
+	for _, line := range lines {
+		line = bytes.TrimSpace(line)
+		if !bytes.HasPrefix(line, []byte("data: ")) {
+			continue
+		}
+		data := bytes.TrimPrefix(line, []byte("data: "))
+		if bytes.Equal(data, []byte("[DONE]")) {
+			continue
+		}
+
+		var chunk dto.ChatCompletionsStreamResponse
+		if err := common.Unmarshal(data, &chunk); err != nil {
+			continue
+		}
+
+		if responseId == "" {
+			responseId = chunk.Id
+		}
+		if created == 0 {
+			created = chunk.Created
+		}
+		if model == "" {
+			model = chunk.Model
+		}
+		if chunk.Usage != nil {
+			usage = chunk.Usage
+		}
+
+		for _, sc := range chunk.Choices {
+			acc, exists := choiceMap[sc.Index]
+			if !exists {
+				acc = &choiceAcc{}
+				choiceMap[sc.Index] = acc
+			}
+			if sc.Delta.Role != "" {
+				acc.role = sc.Delta.Role
+			}
+			if sc.Delta.Content != nil {
+				acc.content.WriteString(*sc.Delta.Content)
+			}
+			if sc.Delta.ReasoningContent != nil {
+				acc.reasoningContent.WriteString(*sc.Delta.ReasoningContent)
+			} else if sc.Delta.Reasoning != nil {
+				acc.reasoningContent.WriteString(*sc.Delta.Reasoning)
+			}
+			for _, tc := range sc.Delta.ToolCalls {
+				idx := 0
+				if tc.Index != nil {
+					idx = *tc.Index
+				}
+				for len(acc.toolCalls) <= idx {
+					acc.toolCalls = append(acc.toolCalls, dto.ToolCallResponse{})
+				}
+				if tc.ID != "" {
+					acc.toolCalls[idx].ID = tc.ID
+				}
+				if tc.Type != nil {
+					acc.toolCalls[idx].Type = tc.Type
+				}
+				acc.toolCalls[idx].Function.Name += tc.Function.Name
+				acc.toolCalls[idx].Function.Arguments += tc.Function.Arguments
+			}
+			if sc.FinishReason != nil && *sc.FinishReason != "" {
+				acc.finishReason = *sc.FinishReason
+			}
+		}
+	}
+
+	var choices []dto.OpenAITextResponseChoice
+	maxIdx := -1
+	for idx := range choiceMap {
+		if idx > maxIdx {
+			maxIdx = idx
+		}
+	}
+	for i := 0; i <= maxIdx; i++ {
+		acc, ok := choiceMap[i]
+		if !ok {
+			continue
+		}
+		msg := dto.Message{
+			Role:    acc.role,
+			Content: acc.content.String(),
+		}
+		if acc.reasoningContent.Len() > 0 {
+			rc := acc.reasoningContent.String()
+			msg.ReasoningContent = &rc
+		}
+		if len(acc.toolCalls) > 0 {
+			tcJSON, _ := common.Marshal(acc.toolCalls)
+			msg.ToolCalls = tcJSON
+		}
+		choices = append(choices, dto.OpenAITextResponseChoice{
+			Index:        i,
+			Message:      msg,
+			FinishReason: acc.finishReason,
+		})
+	}
+
+	if usage == nil {
+		usage = &dto.Usage{}
+	}
+
+	resp := map[string]any{
+		"id":      responseId,
+		"object":  "chat.completion",
+		"created": created,
+		"model":   model,
+		"choices": choices,
+		"usage":   usage,
+	}
+
+	return common.Marshal(resp)
 }
 
 func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
@@ -197,6 +349,18 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
+
+	// If upstream returned SSE for a non-streaming request, convert to JSON
+	if bytes.HasPrefix(bytes.TrimSpace(responseBody), []byte("data: ")) {
+		logger.LogDebug(c, "upstream returned SSE for non-streaming request, converting to JSON")
+		if converted, convErr := convertSSEToJSON(responseBody); convErr == nil {
+			responseBody = converted
+			resp.Header.Set("Content-Type", "application/json")
+		} else {
+			logger.LogError(c, "failed to convert SSE to JSON: "+convErr.Error())
+		}
+	}
+
 	logger.LogDebug(c, "upstream response body: %s", responseBody)
 	// Unmarshal to simpleResponse
 	if info.ChannelType == constant.ChannelTypeOpenRouter && info.ChannelOtherSettings.IsOpenRouterEnterprise() {

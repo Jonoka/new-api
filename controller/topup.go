@@ -95,12 +95,56 @@ func GetTopUpInfo(c *gin.Context) {
 		}
 	}
 
+	// 如果启用了 Bepusdt (USDT) 支付，添加到支付方法列表
+	enableBepusdt := isBepusdtTopUpEnabled()
+	var bepusdtChains []setting.BepusdtChain
+	if enableBepusdt {
+		bepusdtChains = setting.GetBepusdtChains()
+		hasBepusdt := false
+		for _, method := range payMethods {
+			if method["type"] == model.PaymentMethodBepusdt {
+				hasBepusdt = true
+				break
+			}
+		}
+		if !hasBepusdt {
+			payMethods = append(payMethods, map[string]string{
+				"name":      "USDT",
+				"type":      model.PaymentMethodBepusdt,
+				"color":     "#26A17B",
+				"min_topup": strconv.Itoa(setting.BepusdtMinTopUp),
+			})
+		}
+	}
+
+	// 如果启用了 OKPay 支付，添加到支付方法列表
+	enableOkpay := isOkpayTopUpEnabled()
+	if enableOkpay {
+		hasOkpay := false
+		for _, method := range payMethods {
+			if method["type"] == model.PaymentMethodOkpay {
+				hasOkpay = true
+				break
+			}
+		}
+		if !hasOkpay {
+			payMethods = append(payMethods, map[string]string{
+				"name":      "OKPay",
+				"type":      model.PaymentMethodOkpay,
+				"color":     "#4F46E5",
+				"min_topup": strconv.Itoa(setting.OkpayMinTopUp),
+			})
+		}
+	}
+
 	data := gin.H{
 		"enable_online_topup":              isEpayTopUpEnabled(),
 		"enable_stripe_topup":              isStripeTopUpEnabled(),
 		"enable_creem_topup":               isCreemTopUpEnabled(),
 		"enable_waffo_topup":               enableWaffo,
 		"enable_waffo_pancake_topup":       enableWaffoPancake,
+		"enable_bepusdt_topup":             enableBepusdt,
+		"enable_okpay_topup":               enableOkpay,
 		"enable_redemption":                complianceConfirmed,
 		"payment_compliance_confirmed":     complianceConfirmed,
 		"payment_compliance_terms_version": operation_setting.CurrentComplianceTermsVersion,
@@ -111,6 +155,9 @@ func GetTopUpInfo(c *gin.Context) {
 			return nil
 		}(),
 		"creem_products":          setting.CreemProducts,
+		"bepusdt_chains":          bepusdtChains,
+		"bepusdt_min_topup":       setting.BepusdtMinTopUp,
+		"okpay_min_topup":         setting.OkpayMinTopUp,
 		"pay_methods":             payMethods,
 		"min_topup":               operation_setting.MinTopUp,
 		"stripe_min_topup":        setting.StripeMinTopUp,
@@ -126,10 +173,12 @@ func GetTopUpInfo(c *gin.Context) {
 type EpayRequest struct {
 	Amount        int64  `json:"amount"`
 	PaymentMethod string `json:"payment_method"`
+	PromoCode     string `json:"promo_code"`
 }
 
 type AmountRequest struct {
-	Amount int64 `json:"amount"`
+	Amount    int64  `json:"amount"`
+	PromoCode string `json:"promo_code"`
 }
 
 func GetEpayClient() *epay.Client {
@@ -176,6 +225,13 @@ func getPayMoney(amount int64, group string) float64 {
 	return payMoney.InexactFloat64()
 }
 
+func getEpayPayMoneyFromUSD(amount float64) float64 {
+	return decimal.NewFromFloat(amount).
+		Mul(decimal.NewFromFloat(operation_setting.Price)).
+		Round(2).
+		InexactFloat64()
+}
+
 func getMinTopup() int64 {
 	minTopup := operation_setting.MinTopUp
 	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
@@ -184,6 +240,31 @@ func getMinTopup() int64 {
 		minTopup = int(dMinTopup.Mul(dQuotaPerUnit).IntPart())
 	}
 	return int64(minTopup)
+}
+
+func normalizeTopUpAmountForStorage(amount int64) int64 {
+	if operation_setting.GetQuotaDisplayType() != operation_setting.QuotaDisplayTypeTokens {
+		return amount
+	}
+	dAmount := decimal.NewFromInt(amount)
+	dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+	return dAmount.Div(dQuotaPerUnit).IntPart()
+}
+
+func freeTopUpResponse(topUp *model.TopUp, quotaToAdd int, discount *model.PromoCodeDiscountResult) gin.H {
+	data := gin.H{
+		"completed":    true,
+		"trade_no":     topUp.TradeNo,
+		"quota_to_add": quotaToAdd,
+	}
+	if discount != nil {
+		data["discount"] = discount
+	}
+	return gin.H{
+		"message":   "success",
+		"data":      data,
+		"completed": true,
+	}
 }
 
 func RequestEpay(c *gin.Context) {
@@ -205,7 +286,15 @@ func RequestEpay(c *gin.Context) {
 		return
 	}
 	payMoney := getPayMoney(req.Amount, group)
-	if payMoney < 0.01 {
+	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetTopUp, 0, payMoney)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+		return
+	}
+	if discount != nil {
+		payMoney = discount.PaidAmount
+	}
+	if payMoney < 0 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
 	}
@@ -221,30 +310,11 @@ func RequestEpay(c *gin.Context) {
 	tradeNo := fmt.Sprintf("%s%d", common.GetRandomString(6), time.Now().Unix())
 	tradeNo = fmt.Sprintf("USR%dNO%s", id, tradeNo)
 	client := GetEpayClient()
-	if client == nil {
+	if client == nil && payMoney >= 0.01 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "当前管理员未配置支付信息"})
 		return
 	}
-	uri, params, err := client.Purchase(&epay.PurchaseArgs{
-		Type:           req.PaymentMethod,
-		ServiceTradeNo: tradeNo,
-		Name:           fmt.Sprintf("TUC%d", req.Amount),
-		Money:          strconv.FormatFloat(payMoney, 'f', 2, 64),
-		Device:         epay.PC,
-		NotifyUrl:      notifyUrl,
-		ReturnUrl:      returnUrl,
-	})
-	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 拉起支付失败 user_id=%d trade_no=%s payment_method=%s amount=%d error=%q", id, tradeNo, req.PaymentMethod, req.Amount, err.Error()))
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "拉起支付失败"})
-		return
-	}
-	amount := req.Amount
-	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
-		dAmount := decimal.NewFromInt(int64(amount))
-		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-		amount = dAmount.Div(dQuotaPerUnit).IntPart()
-	}
+	amount := normalizeTopUpAmountForStorage(req.Amount)
 	topUp := &model.TopUp{
 		UserId:          id,
 		Amount:          amount,
@@ -255,10 +325,40 @@ func RequestEpay(c *gin.Context) {
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}
+	model.ApplyPromoCodeResultToTopUp(topUp, discount)
 	err = topUp.Insert()
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 创建充值订单失败 user_id=%d trade_no=%s payment_method=%s amount=%d error=%q", id, tradeNo, req.PaymentMethod, req.Amount, err.Error()))
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "创建订单失败"})
+		return
+	}
+	if payMoney < 0.01 {
+		completedTopUp, quotaToAdd, completedNow, err := model.CompleteFreeTopUp(tradeNo, model.PaymentProviderEpay)
+		if err != nil {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 0元优惠充值完成失败 user_id=%d trade_no=%s amount=%d error=%q", id, tradeNo, req.Amount, err.Error()))
+			c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+			return
+		}
+		if completedNow {
+			model.RecordTopupLog(completedTopUp.UserId, fmt.Sprintf("使用优惠码充值成功，充值金额: %v，支付金额：0.00", logger.LogQuota(quotaToAdd)), c.ClientIP(), completedTopUp.PaymentMethod, "promo")
+		}
+		c.JSON(http.StatusOK, freeTopUpResponse(completedTopUp, quotaToAdd, discount))
+		return
+	}
+
+	uri, params, err := client.Purchase(&epay.PurchaseArgs{
+		Type:           req.PaymentMethod,
+		ServiceTradeNo: tradeNo,
+		Name:           fmt.Sprintf("TUC%d", req.Amount),
+		Money:          strconv.FormatFloat(payMoney, 'f', 2, 64),
+		Device:         epay.PC,
+		NotifyUrl:      notifyUrl,
+		ReturnUrl:      returnUrl,
+	})
+	if err != nil {
+		_ = model.UpdatePendingTopUpStatus(tradeNo, model.PaymentProviderEpay, common.TopUpStatusFailed)
+		logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 拉起支付失败 user_id=%d trade_no=%s payment_method=%s amount=%d error=%q", id, tradeNo, req.PaymentMethod, req.Amount, err.Error()))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "拉起支付失败"})
 		return
 	}
 	logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 充值订单创建成功 user_id=%d trade_no=%s payment_method=%s amount=%d money=%.2f uri=%q params=%q", id, tradeNo, req.PaymentMethod, req.Amount, payMoney, uri, common.GetJsonString(params)))
@@ -353,10 +453,6 @@ func EpayNotify(c *gin.Context) {
 	verifyInfo, err := client.Verify(params)
 	if err == nil && verifyInfo.VerifyStatus {
 		logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 webhook 验签成功 trade_no=%s callback_type=%s trade_status=%s client_ip=%s verify_info=%q", verifyInfo.ServiceTradeNo, verifyInfo.Type, verifyInfo.TradeStatus, c.ClientIP(), common.GetJsonString(verifyInfo)))
-		_, err := c.Writer.Write([]byte("success"))
-		if err != nil {
-			logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 webhook 响应写入失败 trade_no=%s client_ip=%s error=%q", verifyInfo.ServiceTradeNo, c.ClientIP(), err.Error()))
-		}
 	} else {
 		_, err := c.Writer.Write([]byte("fail"))
 		if err != nil {
@@ -376,38 +472,33 @@ func EpayNotify(c *gin.Context) {
 		topUp := model.GetTopUpByTradeNo(verifyInfo.ServiceTradeNo)
 		if topUp == nil {
 			logger.LogWarn(c.Request.Context(), fmt.Sprintf("易支付 回调订单不存在 trade_no=%s callback_type=%s client_ip=%s verify_info=%q", verifyInfo.ServiceTradeNo, verifyInfo.Type, c.ClientIP(), common.GetJsonString(verifyInfo)))
+			_, _ = c.Writer.Write([]byte("fail"))
 			return
 		}
 		if topUp.PaymentProvider != model.PaymentProviderEpay {
 			logger.LogWarn(c.Request.Context(), fmt.Sprintf("易支付 订单支付网关不匹配 trade_no=%s order_provider=%s callback_type=%s client_ip=%s", verifyInfo.ServiceTradeNo, topUp.PaymentProvider, verifyInfo.Type, c.ClientIP()))
+			_, _ = c.Writer.Write([]byte("fail"))
 			return
 		}
-		if topUp.Status == common.TopUpStatusPending {
-			if topUp.PaymentMethod != verifyInfo.Type {
-				logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 实际支付方式与订单不同 trade_no=%s order_payment_method=%s actual_type=%s client_ip=%s", verifyInfo.ServiceTradeNo, topUp.PaymentMethod, verifyInfo.Type, c.ClientIP()))
-				topUp.PaymentMethod = verifyInfo.Type
-			}
-			topUp.Status = common.TopUpStatusSuccess
-			err := topUp.Update()
-			if err != nil {
-				logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 更新充值订单失败 trade_no=%s user_id=%d client_ip=%s error=%q topup=%q", topUp.TradeNo, topUp.UserId, c.ClientIP(), err.Error(), common.GetJsonString(topUp)))
-				return
-			}
-			//user, _ := model.GetUserById(topUp.UserId, false)
-			//user.Quota += topUp.Amount * 500000
-			dAmount := decimal.NewFromInt(int64(topUp.Amount))
-			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-			quotaToAdd := int(dAmount.Mul(dQuotaPerUnit).IntPart())
-			err = model.IncreaseUserQuota(topUp.UserId, quotaToAdd, true)
-			if err != nil {
-				logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 更新用户额度失败 trade_no=%s user_id=%d client_ip=%s quota_to_add=%d error=%q topup=%q", topUp.TradeNo, topUp.UserId, c.ClientIP(), quotaToAdd, err.Error(), common.GetJsonString(topUp)))
-				return
-			}
-			logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 充值成功 trade_no=%s user_id=%d client_ip=%s quota_to_add=%d money=%.2f topup=%q", topUp.TradeNo, topUp.UserId, c.ClientIP(), quotaToAdd, topUp.Money, common.GetJsonString(topUp)))
-			model.RecordTopupLog(topUp.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%f", logger.LogQuota(quotaToAdd), topUp.Money), c.ClientIP(), topUp.PaymentMethod, "epay")
+		actualPaymentMethod := ""
+		if topUp.PaymentMethod != verifyInfo.Type {
+			logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 实际支付方式与订单不同 trade_no=%s order_payment_method=%s actual_type=%s client_ip=%s", verifyInfo.ServiceTradeNo, topUp.PaymentMethod, verifyInfo.Type, c.ClientIP()))
+			actualPaymentMethod = verifyInfo.Type
 		}
+		completedTopUp, quotaToAdd, completedNow, err := model.CompleteEpayTopUp(verifyInfo.ServiceTradeNo, actualPaymentMethod)
+		if err != nil {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 充值处理失败 trade_no=%s user_id=%d client_ip=%s error=%q topup=%q", topUp.TradeNo, topUp.UserId, c.ClientIP(), err.Error(), common.GetJsonString(topUp)))
+			_, _ = c.Writer.Write([]byte("fail"))
+			return
+		}
+		if completedNow {
+			logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 充值成功 trade_no=%s user_id=%d client_ip=%s quota_to_add=%d money=%.2f topup=%q", completedTopUp.TradeNo, completedTopUp.UserId, c.ClientIP(), quotaToAdd, completedTopUp.Money, common.GetJsonString(completedTopUp)))
+			model.RecordTopupLog(completedTopUp.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%f", logger.LogQuota(quotaToAdd), completedTopUp.Money), c.ClientIP(), completedTopUp.PaymentMethod, "epay")
+		}
+		_, _ = c.Writer.Write([]byte("success"))
 	} else {
 		logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 webhook 忽略事件 trade_no=%s callback_type=%s trade_status=%s client_ip=%s verify_info=%q", verifyInfo.ServiceTradeNo, verifyInfo.Type, verifyInfo.TradeStatus, c.ClientIP(), common.GetJsonString(verifyInfo)))
+		_, _ = c.Writer.Write([]byte("success"))
 	}
 }
 
@@ -430,11 +521,23 @@ func RequestAmount(c *gin.Context) {
 		return
 	}
 	payMoney := getPayMoney(req.Amount, group)
-	if payMoney <= 0.01 {
+	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetTopUp, 0, payMoney)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+		return
+	}
+	if discount != nil {
+		payMoney = discount.PaidAmount
+	}
+	if payMoney < 0 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "success", "data": strconv.FormatFloat(payMoney, 'f', 2, 64)})
+	response := gin.H{"message": "success", "data": strconv.FormatFloat(payMoney, 'f', 2, 64)}
+	if discount != nil {
+		response["discount"] = discount
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 func GetUserTopUps(c *gin.Context) {

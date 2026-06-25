@@ -38,6 +38,10 @@ import type {
   WaffoPaymentResponse,
   WaffoPancakePaymentRequest,
   WaffoPancakePaymentResponse,
+  BepusdtPaymentRequest,
+  BepusdtPaymentResponse,
+  OkpayPaymentRequest,
+  OkpayPaymentResponse,
 } from './types'
 
 // ============================================================================
@@ -163,6 +167,54 @@ export async function requestWaffoPancakePayment(
   request: WaffoPancakePaymentRequest
 ): Promise<WaffoPancakePaymentResponse> {
   const res = await api.post('/api/user/waffo-pancake/pay', request, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+/**
+ * Calculate payment amount for Bepusdt (USDT) payment
+ */
+export async function calculateBepusdtAmount(
+  request: AmountRequest
+): Promise<AmountResponse> {
+  const res = await api.post('/api/user/bepusdt/amount', request, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+/**
+ * Request Bepusdt (USDT) payment
+ */
+export async function requestBepusdtPayment(
+  request: BepusdtPaymentRequest
+): Promise<BepusdtPaymentResponse> {
+  const res = await api.post('/api/user/bepusdt/pay', request, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+/**
+ * Calculate payment amount for OKPay payment
+ */
+export async function calculateOkpayAmount(
+  request: AmountRequest
+): Promise<AmountResponse> {
+  const res = await api.post('/api/user/okpay/amount', request, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+/**
+ * Request OKPay payment
+ */
+export async function requestOkpayPayment(
+  request: OkpayPaymentRequest
+): Promise<OkpayPaymentResponse> {
+  const res = await api.post('/api/user/okpay/pay', request, {
     skipBusinessError: true,
   } as Record<string, unknown>)
   return res.data

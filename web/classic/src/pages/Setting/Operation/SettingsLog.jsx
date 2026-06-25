@@ -37,6 +37,7 @@ import {
   showSuccess,
   showWarning,
 } from '../../../helpers';
+import { buildLogSettingsInputs } from './settingsLogOptions';
 
 const { Text } = Typography;
 
@@ -46,6 +47,7 @@ export default function SettingsLog(props) {
   const [loadingCleanHistoryLog, setLoadingCleanHistoryLog] = useState(false);
   const [inputs, setInputs] = useState({
     LogConsumeEnabled: false,
+    ForceRecordLogIpEnabled: false,
     historyTimestamp: dayjs().subtract(1, 'month').toDate(),
   });
   const refForm = useRef();
@@ -180,14 +182,9 @@ export default function SettingsLog(props) {
   }
 
   useEffect(() => {
-    const currentInputs = {};
-    for (let key in props.options) {
-      if (Object.keys(inputs).includes(key)) {
-        currentInputs[key] = props.options[key];
-      }
-    }
+    const currentInputs = buildLogSettingsInputs(inputs, props.options);
     currentInputs['historyTimestamp'] = inputs.historyTimestamp;
-    setInputs(Object.assign(inputs, currentInputs));
+    setInputs(currentInputs);
     setInputsRow(structuredClone(currentInputs));
     refForm.current.setValues(currentInputs);
   }, [props.options]);
@@ -212,6 +209,24 @@ export default function SettingsLog(props) {
                     setInputs({
                       ...inputs,
                       LogConsumeEnabled: value,
+                    });
+                  }}
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Switch
+                  field={'ForceRecordLogIpEnabled'}
+                  label={t('强制记录请求与错误日志IP')}
+                  size='default'
+                  checkedText='｜'
+                  uncheckedText='〇'
+                  extraText={t(
+                    '开启后，消费和错误日志将忽略用户个人设置并记录客户端IP地址',
+                  )}
+                  onChange={(value) => {
+                    setInputs({
+                      ...inputs,
+                      ForceRecordLogIpEnabled: value,
                     });
                   }}
                 />

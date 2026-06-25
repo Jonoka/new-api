@@ -119,6 +119,12 @@ func main() {
 	// Subscription quota reset task (daily/weekly/monthly/custom)
 	service.StartSubscriptionQuotaResetTask()
 
+	// Affiliate auto-approve mature applications task (hourly)
+	service.StartAffiliateAutoApproveTask()
+
+	// Game prediction auto judge task skeleton.
+	service.StartGamePredictionJudgeTask()
+
 	// Wire task polling adaptor factory (breaks service -> relay import cycle)
 	service.GetTaskAdaptorFunc = func(platform constant.TaskPlatform) service.TaskPollingAdaptor {
 		a := relay.GetTaskAdaptor(platform)
@@ -177,12 +183,17 @@ func main() {
 	middleware.SetUpLogger(server)
 	// Initialize session store
 	store := cookie.NewStore([]byte(common.SessionSecret))
+	sessionSecure := os.Getenv("SESSION_COOKIE_SECURE") != "false" && os.Getenv("GIN_MODE") != "debug"
+	sessionSameSite := http.SameSiteNoneMode
+	if !sessionSecure {
+		sessionSameSite = http.SameSiteLaxMode
+	}
 	store.Options(sessions.Options{
 		Path:     "/",
 		MaxAge:   2592000, // 30 days
 		HttpOnly: true,
-		Secure:   false,
-		SameSite: http.SameSiteStrictMode,
+		Secure:   sessionSecure,
+		SameSite: sessionSameSite,
 	})
 	server.Use(sessions.Sessions("session", store))
 

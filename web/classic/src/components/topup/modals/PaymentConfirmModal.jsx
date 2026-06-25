@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Modal, Typography, Card, Skeleton } from '@douyinfe/semi-ui';
+import { Modal, Typography, Card, Skeleton, Input } from '@douyinfe/semi-ui';
 import { SiAlipay, SiWechat, SiStripe } from 'react-icons/si';
 import { CreditCard } from 'lucide-react';
 
@@ -36,19 +36,30 @@ const PaymentConfirmModal = ({
   renderAmount,
   payWay,
   payMethods,
-  // 新增：用于显示折扣明细
   amountNumber,
-  discountRate,
+  promoCode,
+  setPromoCode,
+  promoDiscount,
+  amountText,
+  onPromoCodeBlur,
 }) => {
-  const hasDiscount =
-    discountRate && discountRate > 0 && discountRate < 1 && amountNumber > 0;
-  const originalAmount = hasDiscount ? amountNumber / discountRate : 0;
-  const discountAmount = hasDiscount ? originalAmount - amountNumber : 0;
+  const hasPromoDiscount =
+    promoDiscount && Number(promoDiscount.discount_amount || 0) > 0;
+  const originalAmount = Number(promoDiscount?.original_amount || 0);
+  const discountAmount = Number(promoDiscount?.discount_amount || 0);
+  const paidAmount = Number(promoDiscount?.paid_amount ?? amountNumber ?? 0);
+  const paidAmountText = payWay === 'okpay' && amountText ? amountText : `${paidAmount.toFixed(2)} ${t('元')}`;
   return (
     <Modal
       title={
         <div className='flex items-center'>
-          <CreditCard className='mr-2' size={18} />
+          {payWay === 'bepusdt' ? (
+            <img src='/pay-usdt.svg' alt='USDT' className='mr-2' style={{ width: 18, height: 18 }} />
+          ) : payWay === 'okpay' ? (
+            <img src='/pay-okpay.svg' alt='OKPay' className='mr-2' style={{ width: 18, height: 18 }} />
+          ) : (
+            <CreditCard className='mr-2' size={18} />
+          )}
           {t('充值确认')}
         </div>
       }
@@ -82,15 +93,15 @@ const PaymentConfirmModal = ({
                   <Text strong className='font-bold' style={{ color: 'red' }}>
                     {renderAmount()}
                   </Text>
-                  {hasDiscount && (
+                  {hasPromoDiscount && (
                     <Text size='small' className='text-rose-500'>
-                      {Math.round(discountRate * 100)}%
+                      {t('已优惠')}
                     </Text>
                   )}
                 </div>
               )}
             </div>
-            {hasDiscount && !amountLoading && (
+            {hasPromoDiscount && !amountLoading && (
               <>
                 <div className='flex justify-between items-center'>
                   <Text className='text-slate-500 dark:text-slate-400'>
@@ -108,8 +119,29 @@ const PaymentConfirmModal = ({
                     {`- ${discountAmount.toFixed(2)} ${t('元')}`}
                   </Text>
                 </div>
+                <div className='flex justify-between items-center'>
+                  <Text className='text-slate-500 dark:text-slate-400'>
+                    {t('优惠后')}：
+                  </Text>
+                  <Text className='text-slate-700 dark:text-slate-200'>
+                    {paidAmountText}
+                  </Text>
+                </div>
               </>
             )}
+            <div className='flex justify-between items-center gap-3'>
+              <Text strong className='text-slate-700 dark:text-slate-200'>
+                {t('优惠码')}：
+              </Text>
+              <Input
+                value={promoCode}
+                onChange={setPromoCode}
+                onBlur={onPromoCodeBlur}
+                placeholder={t('可选')}
+                size='small'
+                style={{ width: 180 }}
+              />
+            </div>
             <div className='flex justify-between items-center'>
               <Text strong className='text-slate-700 dark:text-slate-200'>
                 {t('支付方式')}：
@@ -139,6 +171,28 @@ const PaymentConfirmModal = ({
                             className='mr-2'
                             size={16}
                             color='#635BFF'
+                          />
+                        ) : payMethod.type === 'bepusdt' ? (
+                          <img
+                            src='/pay-usdt.svg'
+                            alt='USDT'
+                            className='mr-2'
+                            style={{
+                              width: 16,
+                              height: 16,
+                              objectFit: 'contain',
+                            }}
+                          />
+                        ) : payMethod.type === 'okpay' ? (
+                          <img
+                            src='/pay-okpay.svg'
+                            alt='OKPay'
+                            className='mr-2'
+                            style={{
+                              width: 16,
+                              height: 16,
+                              objectFit: 'contain',
+                            }}
                           />
                         ) : payMethod.icon ? (
                           <img

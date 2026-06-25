@@ -241,6 +241,21 @@ export type BillingSettings = {
   CreemWebhookSecret: string
   CreemTestMode: boolean
   CreemProducts: string
+  BepusdtApiUrl: string
+  BepusdtAuthToken: string
+  BepusdtUnitPrice: number
+  BepusdtMinTopUp: number
+  BepusdtTimeout: number
+  BepusdtChains: string
+  OkpayGatewayUrl: string
+  OkpayMerchantId: string
+  OkpayMerchantToken: string
+  OkpayExchangeRate: number
+  OkpayAutoExchangeEnabled: boolean
+  OkpayUsdtCnyRate: number
+  OkpayRateApiUrl: string
+  OkpayMinTopUp: number
+  OkpayCoin: string
   WaffoEnabled: boolean
   WaffoApiKey: string
   WaffoPrivateKey: string
@@ -259,10 +274,32 @@ export type BillingSettings = {
   WaffoPancakeMerchantID: string
   WaffoPancakePrivateKey: string
   WaffoPancakeReturnURL: string
+  WaffoPancakeUnitPrice: number
+  WaffoPancakeMinTopUp: number
   // Bound by the operator through the catalog flow in the admin Pancake
   // section (saved via /api/option/waffo-pancake/save).
   WaffoPancakeStoreID: string
   WaffoPancakeProductID: string
+  'affiliate_setting.first_level_enabled': boolean
+  'affiliate_setting.first_level_ratio': number
+  'affiliate_setting.second_level_enabled': boolean
+  'affiliate_setting.second_level_ratio': number
+  'affiliate_setting.settlement_delay_seconds': number
+  'affiliate_setting.min_withdrawal_amount': number
+  'affiliate_setting.trigger_topup_enabled': boolean
+  'affiliate_setting.trigger_subscription_enabled': boolean
+  'affiliate_setting.filter_redemption_topup_enabled': boolean
+  'affiliate_setting.payout_methods': string
+  'affiliate_setting.usdt_chain': string
+  'affiliate_setting.promotion_template': string
+  'affiliate_setting.review_enabled': boolean
+  'affiliate_setting.auto_approve_after_days': number
+  'affiliate_setting.agreement_enabled': boolean
+  'affiliate_setting.agreement_text': string
+  'affiliate_setting.inviter_min_account_age_days': number
+  'affiliate_setting.inviter_min_recharge_amount': number
+  'affiliate_setting.invitee_min_account_age_days': number
+  'affiliate_setting.invitee_min_recharge_amount': number
   'checkin_setting.enabled': boolean
   'checkin_setting.min_quota': number
   'checkin_setting.max_quota': number
@@ -282,6 +319,8 @@ export type OperationsSettings = {
   AutomaticRetryStatusCodes: string
   'monitor_setting.auto_test_channel_enabled': boolean
   'monitor_setting.auto_test_channel_minutes': number
+  'monitor_setting.auto_disable_threshold': number
+  'monitor_setting.auto_enable_threshold': number
   SMTPServer: string
   SMTPPort: string
   SMTPAccount: string
@@ -293,6 +332,7 @@ export type OperationsSettings = {
   WorkerValidKey: string
   WorkerAllowHttpImageRequestEnabled: boolean
   LogConsumeEnabled: boolean
+  ForceRecordLogIpEnabled: boolean
   'performance_setting.disk_cache_enabled': boolean
   'performance_setting.disk_cache_threshold_mb': number
   'performance_setting.disk_cache_max_size_mb': number
@@ -313,9 +353,12 @@ export type SecuritySettings = {
   ModelRequestRateLimitSuccessCount: number
   ModelRequestRateLimitDurationMinutes: number
   ModelRequestRateLimitGroup: string
+  ModelRequestRateLimitUserGroup: string
   CheckSensitiveEnabled: boolean
   CheckSensitiveOnPromptEnabled: boolean
   SensitiveWords: string
+  SensitiveRules: string
+  SensitiveRuleChannelIds: string
   'fetch_setting.enable_ssrf_protection': boolean
   'fetch_setting.allow_private_ip': boolean
   'fetch_setting.domain_filter_mode': boolean

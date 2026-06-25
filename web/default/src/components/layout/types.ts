@@ -35,6 +35,7 @@ type BaseNavItem = {
  */
 export type NavLink = BaseNavItem & {
   url: LinkProps['to'] | (string & {})
+  external?: boolean
   items?: never
   type?: never
 }
@@ -91,6 +92,7 @@ export type TopNavLink = {
   disabled?: boolean
   requiresAuth?: boolean
   external?: boolean
+  icon?: string
 }
 
 /**

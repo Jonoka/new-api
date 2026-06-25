@@ -51,6 +51,8 @@ import { toast } from 'sonner'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { useHiddenClickUnlock } from '@/hooks/use-hidden-click-unlock'
+import { getVendors } from '@/features/models/api'
+import { vendorsQueryKeys } from '@/features/models/lib'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -212,6 +214,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.remark?.trim() ||
     values.priority ||
     values.weight ||
+    values.concurrency_limit ||
     values.proxy?.trim() ||
     values.system_prompt?.trim() ||
     values.force_format ||
@@ -219,9 +222,18 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.pass_through_body_enabled ||
     values.system_prompt_override ||
     values.claude_beta_query ||
+    values.claude_code_fingerprint_enabled ||
+    values.claude_code_transport_fingerprint_enabled ||
     values.upstream_model_update_check_enabled ||
     values.upstream_model_update_auto_sync_enabled ||
-    values.upstream_model_update_ignored_models?.trim()
+    values.upstream_model_update_ignored_models?.trim() ||
+    values.monitor_enabled !== 'inherit' ||
+    values.monitor_test_interval_minutes?.trim() ||
+    values.monitor_response_time_threshold_seconds?.trim() ||
+    values.monitor_auto_disable_enabled !== 'inherit' ||
+    values.monitor_auto_enable_enabled !== 'inherit' ||
+    values.monitor_disable_threshold?.trim() ||
+    values.monitor_enable_threshold?.trim()
   )
 }
 
@@ -328,6 +340,11 @@ export function ChannelMutateDrawer({
   const { data: prefillGroupsData } = useQuery({
     queryKey: ['prefill_groups', 'model'],
     queryFn: () => getPrefillGroups('model'),
+  })
+
+  const { data: vendorsData } = useQuery({
+    queryKey: vendorsQueryKeys.list({ page_size: 1000 }),
+    queryFn: () => getVendors({ page_size: 1000 }),
   })
 
   const { copyToClipboard } = useCopyToClipboard()
@@ -462,6 +479,16 @@ export function ChannelMutateDrawer({
     }
     return options
   }, [currentType, t])
+
+  const vendors = useMemo(
+    () => vendorsData?.data?.items || [],
+    [vendorsData?.data?.items]
+  )
+
+  const vendorOptions = useMemo(
+    () => vendors.map((vendor) => ({ value: vendor.id, label: vendor.name })),
+    [vendors]
+  )
 
   // Extract redirect models from model_mapping (target values)
   const redirectModelList = useMemo(
@@ -1092,7 +1119,7 @@ export function ChannelMutateDrawer({
                         name='type'
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>{t('Type *')}</FormLabel>
+                            <FormLabel>{t('Protocol Type *')}</FormLabel>
                             <FormControl>
                               <Combobox
                                 options={channelTypeOptions}
@@ -1106,12 +1133,64 @@ export function ChannelMutateDrawer({
                                     field.onChange(nextType)
                                   }
                                 }}
-                                placeholder={t('Select channel type')}
-                                searchPlaceholder={t('Search channel type...')}
-                                emptyText={t('No channel type found.')}
+                                placeholder={t('Select protocol type')}
+                                searchPlaceholder={t('Search protocol type...')}
+                                emptyText={t('No protocol type found.')}
                                 allowCustomValue
                               />
                             </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name='vendor_id'
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>{t('Vendor')}</FormLabel>
+                            <Select
+                              items={[
+                                { value: 'none', label: t('No vendor') },
+                                ...vendorOptions.map((vendor) => ({
+                                  value: String(vendor.value),
+                                  label: vendor.label,
+                                })),
+                              ]}
+                              onValueChange={(value) =>
+                                field.onChange(
+                                  value && value !== 'none'
+                                    ? Number(value)
+                                    : undefined
+                                )
+                              }
+                              value={field.value ? String(field.value) : 'none'}
+                            >
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder={t('Select vendor')} />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent alignItemWithTrigger={false}>
+                                <SelectGroup>
+                                  <SelectItem value='none'>
+                                    {t('No vendor')}
+                                  </SelectItem>
+                                  {vendorOptions.map((vendor) => (
+                                    <SelectItem
+                                      key={vendor.value}
+                                      value={String(vendor.value)}
+                                    >
+                                      {vendor.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectGroup>
+                              </SelectContent>
+                            </Select>
+                            <FormDescription>
+                              {t('Used for management and display grouping only.')}
+                            </FormDescription>
                             <FormMessage />
                           </FormItem>
                         )}
@@ -2545,6 +2624,33 @@ export function ChannelMutateDrawer({
                               </FormItem>
                             )}
                           />
+
+                          <FormField
+                            control={form.control}
+                            name='concurrency_limit'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Concurrency Limit')}</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={0}
+                                    placeholder='0'
+                                    {...field}
+                                    onChange={(e) =>
+                                      field.onChange(Number(e.target.value))
+                                    }
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t(
+                                    '0 means unlimited. Requests over this limit will use other available channels.'
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
                         </div>
 
                         <FormField
@@ -2875,6 +2981,247 @@ export function ChannelMutateDrawer({
                           )}
                         />
                       </div>
+
+                      <div className='flex flex-col gap-4 border-t pt-4'>
+                        <SubHeading
+                          title={t('Channel Monitoring')}
+                          icon={<RefreshCw className='h-3.5 w-3.5' />}
+                        />
+                        <div className='grid gap-4 sm:grid-cols-2'>
+                          <FormField
+                            control={form.control}
+                            name='monitor_enabled'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Monitoring')}</FormLabel>
+                                <Select
+                                  value={field.value || 'inherit'}
+                                  onValueChange={field.onChange}
+                                >
+                                  <FormControl>
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent alignItemWithTrigger={false}>
+                                    <SelectGroup>
+                                      <SelectItem value='inherit'>
+                                        {t('Inherit global')}
+                                      </SelectItem>
+                                      <SelectItem value='enabled'>
+                                        {t('Enabled')}
+                                      </SelectItem>
+                                      <SelectItem value='disabled'>
+                                        {t('Disabled')}
+                                      </SelectItem>
+                                    </SelectGroup>
+                                  </SelectContent>
+                                </Select>
+                                <FormDescription>
+                                  {t(
+                                    'Controls whether scheduled monitoring tests include this channel'
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name='monitor_test_interval_minutes'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>
+                                  {t('Monitor interval override (minutes)')}
+                                </FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={1}
+                                    step={1}
+                                    placeholder={t('Inherit global')}
+                                    {...field}
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t('Leave empty to use the global schedule')}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+
+                        <div className='grid gap-4 sm:grid-cols-2'>
+                          <FormField
+                            control={form.control}
+                            name='monitor_response_time_threshold_seconds'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>
+                                  {t('Response time override (seconds)')}
+                                </FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={0}
+                                    step={1}
+                                    placeholder={t('Inherit global')}
+                                    {...field}
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t(
+                                    'Leave empty to use the global response time limit'
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name='monitor_auto_disable_enabled'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>
+                                  {t('Disable on monitor failure')}
+                                </FormLabel>
+                                <Select
+                                  value={field.value || 'inherit'}
+                                  onValueChange={field.onChange}
+                                >
+                                  <FormControl>
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent alignItemWithTrigger={false}>
+                                    <SelectGroup>
+                                      <SelectItem value='inherit'>
+                                        {t('Inherit global')}
+                                      </SelectItem>
+                                      <SelectItem value='enabled'>
+                                        {t('Enabled')}
+                                      </SelectItem>
+                                      <SelectItem value='disabled'>
+                                        {t('Disabled')}
+                                      </SelectItem>
+                                    </SelectGroup>
+                                  </SelectContent>
+                                </Select>
+                                <FormDescription>
+                                  {t(
+                                    'Controls automatic disabling for this channel during monitoring'
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+
+                        <div className='grid gap-4 sm:grid-cols-2'>
+                          <FormField
+                            control={form.control}
+                            name='monitor_disable_threshold'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>
+                                  {t('Channel failure threshold')}
+                                </FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={1}
+                                    step={1}
+                                    placeholder={t('Inherit global')}
+                                    {...field}
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t(
+                                    'Disable after this many failed monitoring tests in a row'
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name='monitor_auto_enable_enabled'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>
+                                  {t('Enable on monitor success')}
+                                </FormLabel>
+                                <Select
+                                  value={field.value || 'inherit'}
+                                  onValueChange={field.onChange}
+                                >
+                                  <FormControl>
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent alignItemWithTrigger={false}>
+                                    <SelectGroup>
+                                      <SelectItem value='inherit'>
+                                        {t('Inherit global')}
+                                      </SelectItem>
+                                      <SelectItem value='enabled'>
+                                        {t('Enabled')}
+                                      </SelectItem>
+                                      <SelectItem value='disabled'>
+                                        {t('Disabled')}
+                                      </SelectItem>
+                                    </SelectGroup>
+                                  </SelectContent>
+                                </Select>
+                                <FormDescription>
+                                  {t(
+                                    'Controls automatic re-enabling for this channel during monitoring'
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+
+                        <div className='grid gap-4 sm:grid-cols-2'>
+                          <FormField
+                            control={form.control}
+                            name='monitor_enable_threshold'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>
+                                  {t('Channel success threshold')}
+                                </FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={1}
+                                    step={1}
+                                    placeholder={t('Inherit global')}
+                                    {...field}
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t(
+                                    'Enable after this many successful monitoring tests in a row'
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+                      </div>
                     </div>
 
                     {/* ── Extra Settings ── */}
@@ -3097,6 +3444,83 @@ export function ChannelMutateDrawer({
                                         <Switch
                                           checked={field.value}
                                           onCheckedChange={field.onChange}
+                                        />
+                                      </FormControl>
+                                    </FormItem>
+                                  )}
+                                />
+
+                                <FormField
+                                  control={form.control}
+                                  name='claude_code_fingerprint_enabled'
+                                  render={({ field }) => (
+                                    <FormItem className='flex items-center justify-between gap-3 px-4 py-3'>
+                                      <div className='space-y-0.5'>
+                                        <FormLabel className='text-sm'>
+                                          {t(
+                                            'Use Claude Code fingerprint access'
+                                          )}
+                                        </FormLabel>
+                                        <FormDescription>
+                                          {t(
+                                            'Send Anthropic requests with Claude Code headers, system marker, and metadata'
+                                          )}
+                                        </FormDescription>
+                                      </div>
+                                      <FormControl>
+                                        <Switch
+                                          checked={field.value}
+                                          onCheckedChange={field.onChange}
+                                        />
+                                      </FormControl>
+                                    </FormItem>
+                                  )}
+                                />
+
+                                <FormField
+                                  control={form.control}
+                                  name='claude_code_transport_fingerprint_enabled'
+                                  render={({ field }) => (
+                                    <FormItem className='flex items-center justify-between gap-3 px-4 py-3'>
+                                      <div className='space-y-0.5'>
+                                        <FormLabel className='text-sm'>
+                                          {t(
+                                            'Use Claude Code transport fingerprint'
+                                          )}
+                                        </FormLabel>
+                                        <FormDescription>
+                                          {t(
+                                            'Send Anthropic requests with the built-in uTLS Claude Code Node24 transport fingerprint while keeping Header Override priority'
+                                          )}
+                                        </FormDescription>
+                                      </div>
+                                      <FormControl>
+                                        <Switch
+                                          checked={field.value}
+                                          onCheckedChange={field.onChange}
+                                        />
+                                      </FormControl>
+                                    </FormItem>
+                                  )}
+                                />
+
+                                <FormField
+                                  control={form.control}
+                                  name='claude_code_version'
+                                  render={({ field }) => (
+                                    <FormItem className='px-4 py-3'>
+                                      <FormLabel className='text-sm'>
+                                        {t('Claude Code Version')}
+                                      </FormLabel>
+                                      <FormDescription>
+                                        {t(
+                                          'Custom Claude Code version for User-Agent header, leave empty to use default'
+                                        )}
+                                      </FormDescription>
+                                      <FormControl>
+                                        <Input
+                                          placeholder='2.1.156'
+                                          {...field}
                                         />
                                       </FormControl>
                                     </FormItem>

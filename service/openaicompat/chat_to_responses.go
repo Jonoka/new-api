@@ -73,6 +73,18 @@ func convertChatResponseFormatToResponsesText(reqFormat *dto.ResponseFormat) jso
 	return textRaw
 }
 
+func hasCacheControlContentPart(msg dto.Message) bool {
+	if msg.Content == nil || msg.IsStringContent() {
+		return false
+	}
+	for _, part := range msg.ParseContent() {
+		if len(part.CacheControl) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*dto.OpenAIResponsesRequest, error) {
 	if req == nil {
 		return nil, errors.New("request is nil")
@@ -126,7 +138,7 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 		}
 
 		// Prefer mapping system/developer messages into `instructions`.
-		if role == "system" || role == "developer" {
+		if (role == "system" || role == "developer") && !hasCacheControlContentPart(msg) {
 			if msg.Content == nil {
 				continue
 			}
@@ -219,10 +231,11 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 				if role == "assistant" {
 					textType = "output_text"
 				}
-				contentParts = append(contentParts, map[string]any{
+				contentPart := map[string]any{
 					"type": textType,
 					"text": part.Text,
-				})
+				}
+				contentParts = append(contentParts, contentPart)
 			case dto.ContentTypeImageURL:
 				contentParts = append(contentParts, map[string]any{
 					"type":      "input_image",
@@ -371,21 +384,27 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 	if req.TopP != nil {
 		topP = common.GetPointer(lo.FromPtr(req.TopP))
 	}
+	var promptCacheKey json.RawMessage
+	if strings.TrimSpace(req.PromptCacheKey) != "" {
+		promptCacheKey, _ = common.Marshal(req.PromptCacheKey)
+	}
 
 	out := &dto.OpenAIResponsesRequest{
-		Model:             req.Model,
-		Input:             inputRaw,
-		Instructions:      instructionsRaw,
-		Stream:            req.Stream,
-		Temperature:       req.Temperature,
-		Text:              textRaw,
-		ToolChoice:        toolChoiceRaw,
-		Tools:             toolsRaw,
-		TopP:              topP,
-		User:              req.User,
-		ParallelToolCalls: parallelToolCallsRaw,
-		Store:             req.Store,
-		Metadata:          req.Metadata,
+		Model:                req.Model,
+		Input:                inputRaw,
+		Instructions:         instructionsRaw,
+		Stream:               req.Stream,
+		Temperature:          req.Temperature,
+		Text:                 textRaw,
+		ToolChoice:           toolChoiceRaw,
+		Tools:                toolsRaw,
+		TopP:                 topP,
+		User:                 req.User,
+		ParallelToolCalls:    parallelToolCallsRaw,
+		Store:                req.Store,
+		Metadata:             req.Metadata,
+		PromptCacheKey:       promptCacheKey,
+		PromptCacheRetention: req.PromptCacheRetention,
 	}
 	if req.MaxTokens != nil || req.MaxCompletionTokens != nil {
 		out.MaxOutputTokens = lo.ToPtr(maxOutputTokens)

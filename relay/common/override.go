@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	rootconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
@@ -22,9 +23,43 @@ const (
 	paramOverrideContextRequestHeaders = "request_headers"
 	paramOverrideContextHeaderOverride = "header_override"
 	paramOverrideContextAuditRecorder  = "__param_override_audit_recorder"
+	paramOverrideContextClaudeCode     = "__claude_code_fingerprint_enabled"
 )
 
 var errSourceHeaderNotFound = errors.New("source header does not exist")
+
+var claudeCodeProtectedHeaderNames = map[string]struct{}{
+	"authorization":     {},
+	"x-api-key":         {},
+	"user-agent":        {},
+	"x-app":             {},
+	"anthropic-version": {},
+	"anthropic-beta":    {},
+	"anthropic-dangerous-direct-browser-access": {},
+	"x-stainless-lang":                          {},
+	"x-stainless-package-version":               {},
+	"x-stainless-os":                            {},
+	"x-stainless-arch":                          {},
+	"x-stainless-runtime":                       {},
+	"x-stainless-runtime-version":               {},
+	"x-stainless-retry-count":                   {},
+	"x-stainless-timeout":                       {},
+	"x-client-request-id":                       {},
+	"x-claude-code-session-id":                  {},
+}
+
+func IsClaudeCodeFingerprintEnabled(info *RelayInfo) bool {
+	return info != nil &&
+		info.ChannelMeta != nil &&
+		info.ApiType == rootconstant.APITypeAnthropic &&
+		(info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled ||
+			info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled)
+}
+
+func IsClaudeCodeProtectedHeader(name string) bool {
+	_, ok := claudeCodeProtectedHeaderNames[normalizeHeaderContextKey(name)]
+	return ok
+}
 
 var paramOverrideSensitivePathPrefixes = []string{
 	"model",
@@ -944,6 +979,9 @@ func applyOperations(jsonData []byte, operations []ParamOperation, conditionCont
 				return nil, parseErr
 			}
 			for _, headerName := range headerNames {
+				if isClaudeCodeFingerprintEnabledInContext(context) && IsClaudeCodeProtectedHeader(headerName) {
+					continue
+				}
 				if err = copyHeaderInContext(context, headerName, headerName, op.KeepOrigin); err != nil {
 					if errors.Is(err, errSourceHeaderNotFound) {
 						err = nil
@@ -1542,6 +1580,14 @@ func syncRuntimeHeaderOverrideFromContext(info *RelayInfo, context map[string]in
 	info.UseRuntimeHeadersOverride = true
 }
 
+func isClaudeCodeFingerprintEnabledInContext(context map[string]interface{}) bool {
+	if context == nil {
+		return false
+	}
+	enabled, ok := context[paramOverrideContextClaudeCode].(bool)
+	return ok && enabled
+}
+
 func moveValue(data []byte, fromPath, toPath string) ([]byte, error) {
 	sourceValue := gjson.GetBytes(data, fromPath)
 	if !sourceValue.Exists() {
@@ -2101,5 +2147,6 @@ func BuildParamOverrideContext(info *RelayInfo) map[string]interface{} {
 	}
 
 	ctx["is_channel_test"] = info.IsChannelTest
+	ctx[paramOverrideContextClaudeCode] = IsClaudeCodeFingerprintEnabled(info)
 	return ctx
 }

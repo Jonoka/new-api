@@ -142,6 +142,24 @@ export function getPaymentIcon(
           />
         </span>
       )
+    case PAYMENT_TYPES.BEPUSDT:
+      return (
+        <img
+          src='/pay-usdt.svg'
+          alt='USDT'
+          className={className}
+          style={{ objectFit: 'contain' }}
+        />
+      )
+    case PAYMENT_TYPES.OKPAY:
+      return (
+        <img
+          src='/pay-okpay.svg'
+          alt='OKPay'
+          className={className}
+          style={{ objectFit: 'contain' }}
+        />
+      )
     default:
       return <CreditCard className={className} />
   }

@@ -41,9 +41,11 @@ export default function SettingsMonitoring(props) {
     AutomaticDisableKeywords: '',
     AutomaticDisableStatusCodes: '401',
     AutomaticRetryStatusCodes:
-      '100-199,300-399,401-407,409-499,500-503,505-523,525-599',
+      '100-199,300-399,401-407,409-499,500-599',
     'monitor_setting.auto_test_channel_enabled': false,
     'monitor_setting.auto_test_channel_minutes': 10,
+    'monitor_setting.auto_disable_threshold': 1,
+    'monitor_setting.auto_enable_threshold': 1,
   });
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
@@ -53,6 +55,10 @@ export default function SettingsMonitoring(props) {
   const parsedAutoRetryStatusCodes = parseHttpStatusCodeRules(
     inputs.AutomaticRetryStatusCodes || '',
   );
+  const normalizePositiveInteger = (value, fallback = 1) => {
+    const parsed = parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed >= 1 ? parsed : fallback;
+  };
 
   function onSubmit() {
     const updateArray = compareObjects(inputs, inputsRow);
@@ -159,7 +165,43 @@ export default function SettingsMonitoring(props) {
                     setInputs({
                       ...inputs,
                       'monitor_setting.auto_test_channel_minutes':
-                        parseInt(value),
+                        normalizePositiveInteger(value),
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  label={t('连续失败几次后禁用通道')}
+                  step={1}
+                  min={1}
+                  suffix={t('次')}
+                  extraText={t('连续监控测试失败达到该次数后才自动禁用通道')}
+                  placeholder={''}
+                  field={'monitor_setting.auto_disable_threshold'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      'monitor_setting.auto_disable_threshold':
+                        normalizePositiveInteger(value),
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  label={t('连续成功几次后启用通道')}
+                  step={1}
+                  min={1}
+                  suffix={t('次')}
+                  extraText={t('连续监控测试成功达到该次数后才自动启用通道')}
+                  placeholder={''}
+                  field={'monitor_setting.auto_enable_threshold'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      'monitor_setting.auto_enable_threshold':
+                        normalizePositiveInteger(value),
                     })
                   }
                 />
@@ -254,7 +296,7 @@ export default function SettingsMonitoring(props) {
                   label={t('自动重试状态码')}
                   placeholder={t('例如：401, 403, 429, 500-599')}
                   extraText={t(
-                    '支持填写单个状态码或范围（含首尾），使用逗号分隔；504 和 524 始终不重试，不受此处配置影响',
+                    '支持填写单个状态码或范围（含首尾），使用逗号分隔',
                   )}
                   field={'AutomaticRetryStatusCodes'}
                   onChange={(value) =>

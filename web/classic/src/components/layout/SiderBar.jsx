@@ -36,8 +36,10 @@ const routerMap = {
   token: '/console/token',
   redemption: '/console/redemption',
   topup: '/console/topup',
+  affiliate: '/console/affiliate',
   user: '/console/user',
   subscription: '/console/subscription',
+  affiliate_admin: '/console/affiliate-admin',
   log: '/console/log',
   midjourney: '/console/midjourney',
   setting: '/console/setting',
@@ -45,9 +47,12 @@ const routerMap = {
   detail: '/console',
   pricing: '/pricing',
   task: '/console/task',
+  game_center: '/console/game-center',
   models: '/console/models',
   deployment: '/console/deployment',
+  game_management: '/console/game-management',
   playground: '/console/playground',
+  canvas: '/console/canvas',
   personal: '/console/personal',
 };
 
@@ -105,6 +110,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         className:
           localStorage.getItem('enable_task') === 'true' ? '' : 'tableHiddle',
       },
+      {
+        text: t('游戏中心'),
+        itemKey: 'game_center',
+        to: '/game-center',
+      },
     ];
 
     // 根据配置过滤项目
@@ -128,6 +138,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('钱包管理'),
         itemKey: 'topup',
         to: '/topup',
+      },
+      {
+        text: t('返佣分成'),
+        itemKey: 'affiliate',
+        to: '/affiliate',
       },
       {
         text: t('个人设置'),
@@ -172,9 +187,15 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {
-        text: t('兑换码管理'),
+        text: t('营销福利'),
         itemKey: 'redemption',
         to: '/redemption',
+        className: isAdmin() ? '' : 'tableHiddle',
+      },
+      {
+        text: t('游戏管理'),
+        itemKey: 'game_management',
+        to: '/game-management',
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {
@@ -182,6 +203,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         itemKey: 'user',
         to: '/user',
         className: isAdmin() ? '' : 'tableHiddle',
+      },
+      {
+        text: t('返佣分成设置'),
+        itemKey: 'affiliate_admin',
+        to: '/affiliate-admin',
+        className: isRoot() ? '' : 'tableHiddle',
       },
       {
         text: t('系统设置'),
@@ -206,6 +233,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('操练场'),
         itemKey: 'playground',
         to: '/playground',
+      },
+      {
+        text: t('无限画布'),
+        itemKey: 'canvas',
+        to: '/canvas',
       },
       {
         text: t('聊天'),

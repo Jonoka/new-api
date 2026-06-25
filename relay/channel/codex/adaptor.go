@@ -21,6 +21,40 @@ import (
 type Adaptor struct {
 }
 
+const (
+	defaultOpenAIBetaHeaderValue      = "responses=experimental"
+	defaultCodexOriginatorHeaderValue = "codex_cli_rs"
+)
+
+var codexClientHeaderPassthrough = map[string]struct{}{
+	"openai-beta": {},
+	"originator":  {},
+	"session_id":  {},
+	"user-agent":  {},
+}
+
+func copyCodexClientHeaders(c *gin.Context, req *http.Header) {
+	if c == nil || c.Request == nil || req == nil {
+		return
+	}
+	for name, values := range c.Request.Header {
+		if len(values) == 0 {
+			continue
+		}
+		value := strings.TrimSpace(values[0])
+		if value == "" {
+			continue
+		}
+		lower := strings.ToLower(name)
+		if _, ok := codexClientHeaderPassthrough[lower]; !ok && !strings.HasPrefix(lower, "x-codex-") {
+			continue
+		}
+		if req.Get(name) == "" {
+			req.Set(name, value)
+		}
+	}
+}
+
 func (a *Adaptor) ConvertGeminiRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeminiChatRequest) (any, error) {
 	return nil, errors.New("codex channel: endpoint not supported")
 }
@@ -94,6 +128,9 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	// Keep it consistent with Codex CLI behavior by defaulting to an empty string.
 	if len(request.Instructions) == 0 {
 		request.Instructions = json.RawMessage(`""`)
+	}
+	if info != nil && info.IsStream {
+		request.Stream = common.GetPointer(true)
 	}
 
 	if isCompact {
@@ -171,11 +208,13 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 	req.Set("Authorization", "Bearer "+accessToken)
 	req.Set("chatgpt-account-id", accountID)
 
+	copyCodexClientHeaders(c, req)
+
 	if req.Get("OpenAI-Beta") == "" {
-		req.Set("OpenAI-Beta", "responses=experimental")
+		req.Set("OpenAI-Beta", defaultOpenAIBetaHeaderValue)
 	}
 	if req.Get("originator") == "" {
-		req.Set("originator", "codex_cli_rs")
+		req.Set("originator", defaultCodexOriginatorHeaderValue)
 	}
 
 	// chatgpt.com/backend-api/codex/responses is strict about Content-Type.

@@ -173,6 +173,59 @@ func UserAuth() func(c *gin.Context) {
 	}
 }
 
+func UserSessionAuth() func(c *gin.Context) {
+	return func(c *gin.Context) {
+		session := sessions.Default(c)
+		username := session.Get("username")
+		role := session.Get("role")
+		id := session.Get("id")
+		status := session.Get("status")
+		group := session.Get("group")
+
+		if username == nil || role == nil || id == nil || status == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"success": false,
+				"message": common.TranslateMessage(c, i18n.MsgAuthNotLoggedIn),
+			})
+			c.Abort()
+			return
+		}
+		if status.(int) == common.UserStatusDisabled {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": common.TranslateMessage(c, i18n.MsgAuthUserBanned),
+			})
+			c.Abort()
+			return
+		}
+		if role.(int) < common.RoleCommonUser {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": common.TranslateMessage(c, i18n.MsgAuthInsufficientPrivilege),
+			})
+			c.Abort()
+			return
+		}
+		if !validUserInfo(username.(string), role.(int)) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": common.TranslateMessage(c, i18n.MsgAuthUserInfoInvalid),
+			})
+			c.Abort()
+			return
+		}
+
+		c.Header("Auth-Version", "864b7076dbcd0a3c01b5520316720ebf")
+		c.Set("username", username)
+		c.Set("role", role)
+		c.Set("id", id)
+		c.Set("group", group)
+		c.Set("user_group", group)
+		c.Set("use_access_token", false)
+		c.Next()
+	}
+}
+
 func AdminAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		authHelper(c, common.RoleAdminUser)
@@ -378,23 +431,52 @@ func TokenAuth() func(c *gin.Context) {
 		}
 
 		userCache.WriteContext(c)
+		model.RecordUserIP(token.UserId, c.ClientIP(), "api_call")
 
 		userGroup := userCache.Group
 		tokenGroup := token.Group
 		if tokenGroup != "" {
-			// check common.UserUsableGroups[userGroup]
-			if _, ok := service.GetUserUsableGroups(userGroup)[tokenGroup]; !ok {
-				abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("无权访问 %s 分组", tokenGroup))
-				return
-			}
-			// check group in common.GroupRatio
-			if !ratio_setting.ContainsGroupRatio(tokenGroup) {
-				if tokenGroup != "auto" {
-					abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("分组 %s 已被弃用", tokenGroup))
+			if strings.Contains(tokenGroup, ",") {
+				// 多分组令牌：逐个校验每个分组的权限
+				usableGroups := service.GetUserUsableGroups(userGroup)
+				groups := strings.Split(tokenGroup, ",")
+				validGroups := make([]string, 0, len(groups))
+				for _, g := range groups {
+					g = strings.TrimSpace(g)
+					if g == "" {
+						continue
+					}
+					if _, ok := usableGroups[g]; !ok {
+						abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("无权访问 %s 分组", g))
+						return
+					}
+					if !ratio_setting.ContainsGroupRatio(g) {
+						abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("分组 %s 已被弃用", g))
+						return
+					}
+					validGroups = append(validGroups, g)
+				}
+				if len(validGroups) == 0 {
+					abortWithOpenAiMessage(c, http.StatusForbidden, "令牌未配置有效分组")
 					return
 				}
+				// 整个逗号串传递，由路由层解析
+				userGroup = tokenGroup
+			} else {
+				// 单分组或 auto：保持原有逻辑
+				if _, ok := service.GetUserUsableGroups(userGroup)[tokenGroup]; !ok {
+					abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("无权访问 %s 分组", tokenGroup))
+					return
+				}
+				// check group in common.GroupRatio
+				if !ratio_setting.ContainsGroupRatio(tokenGroup) {
+					if tokenGroup != "auto" {
+						abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("分组 %s 已被弃用", tokenGroup))
+						return
+					}
+				}
+				userGroup = tokenGroup
 			}
-			userGroup = tokenGroup
 		}
 		common.SetContextKey(c, constant.ContextKeyUsingGroup, userGroup)
 

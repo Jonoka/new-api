@@ -89,12 +89,27 @@ export interface PlanPayload {
 export interface SubscriptionPayRequest {
   plan_id: number
   payment_method?: string
+  promo_code?: string
+}
+
+export interface SubscriptionAmountPreview {
+  promo_code_id?: number
+  code?: string
+  name?: string
+  discount_type?: string
+  discount_value?: number
+  original_amount?: number
+  discount_amount?: number
+  paid_amount?: number
+  actual_paid_quota?: number
 }
 
 export interface SubscriptionPayResponse {
   success: boolean
   message?: string
   data?: {
+    completed?: boolean
+    trade_no?: string
     // Stripe-style hosted checkout link.
     pay_link?: string
     // Waffo Pancake / Creem hosted checkout URL.
@@ -108,6 +123,12 @@ export interface SubscriptionPayResponse {
     token_expires_at?: number | string
   }
   url?: string
+}
+
+export interface SubscriptionAmountResponse {
+  message?: string
+  data?: string
+  discount?: SubscriptionAmountPreview
 }
 
 export interface CreateUserSubscriptionRequest {

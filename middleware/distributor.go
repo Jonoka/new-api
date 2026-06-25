@@ -29,9 +29,13 @@ type ModelRequest struct {
 	Group string `json:"group,omitempty"`
 }
 
+const channelConcurrencyContextKey = "channel_concurrency_acquired_id"
+
 func Distribute() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		var channel *model.Channel
+		var selectGroup string
+		usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 		channelId, ok := common.GetContextKey(c, constant.ContextKeyTokenSpecificChannelId)
 		modelRequest, shouldSelectChannel, err := getModelRequest(c)
 		if err != nil {
@@ -81,8 +85,6 @@ func Distribute() func(c *gin.Context) {
 					abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorModelNameRequired))
 					return
 				}
-				var selectGroup string
-				usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 				// check path is /pg/chat/completions
 				if strings.HasPrefix(c.Request.URL.Path, "/pg/chat/completions") {
 					playgroundRequest := &dto.PlayGroundRequest{}
@@ -101,8 +103,8 @@ func Distribute() func(c *gin.Context) {
 					}
 				}
 
-				if preferredChannelID, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
-					preferred, err := model.CacheGetChannel(preferredChannelID)
+				if affinityBinding, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
+					preferred, err := model.CacheGetChannel(affinityBinding.ChannelID)
 					if err == nil && preferred != nil {
 						if preferred.Status != common.ChannelStatusEnabled {
 							if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
@@ -114,6 +116,19 @@ func Distribute() func(c *gin.Context) {
 							autoGroups := service.GetUserAutoGroup(userGroup)
 							for _, g := range autoGroups {
 								if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
+									selectGroup = g
+									common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
+									channel = preferred
+									service.MarkChannelAffinityUsed(c, g, preferred.Id)
+									break
+								}
+							}
+						} else if strings.Contains(usingGroup, ",") {
+							// 多分组令牌亲和性检查
+							multiGroups := strings.Split(usingGroup, ",")
+							for _, g := range multiGroups {
+								g = strings.TrimSpace(g)
+								if g != "" && model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
 									selectGroup = g
 									common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
 									channel = preferred
@@ -140,6 +155,8 @@ func Distribute() func(c *gin.Context) {
 						showGroup := usingGroup
 						if usingGroup == "auto" {
 							showGroup = fmt.Sprintf("auto(%s)", selectGroup)
+						} else if strings.Contains(usingGroup, ",") {
+							showGroup = fmt.Sprintf("multi(%s)", selectGroup)
 						}
 						message := i18n.T(c, i18n.MsgDistributorGetChannelFailed, map[string]any{"Group": showGroup, "Model": modelRequest.Model, "Error": err.Error()})
 						// 如果错误，但是渠道不为空，说明是数据库一致性问题
@@ -158,7 +175,64 @@ func Distribute() func(c *gin.Context) {
 			}
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
-		SetupContextForSelectedChannel(c, channel, modelRequest.Model)
+		if !shouldSelectChannel && channel == nil {
+			common.SetContextKey(c, constant.ContextKeyOriginalModel, modelRequest.Model)
+			c.Next()
+			return
+		}
+		var preferredMultiKeyIndex *int
+		if affinityBinding, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
+			if affinityBinding.ChannelID == channel.Id && affinityBinding.BindMultiKey {
+				preferredMultiKeyIndex = &affinityBinding.MultiKeyIndex
+			}
+		}
+		newAPIError := SetupContextForSelectedChannelWithPreferredMultiKeyIndex(c, channel, modelRequest.Model, preferredMultiKeyIndex)
+		if newAPIError != nil && !ok && shouldSelectChannel {
+			releaseChannelConcurrencyForContext(c)
+			channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+				Ctx:        c,
+				ModelName:  modelRequest.Model,
+				TokenGroup: usingGroup,
+				Retry:      common.GetPointer(0),
+			})
+			if err != nil {
+				showGroup := usingGroup
+				if usingGroup == "auto" {
+					showGroup = fmt.Sprintf("auto(%s)", selectGroup)
+				} else if strings.Contains(usingGroup, ",") {
+					showGroup = fmt.Sprintf("multi(%s)", selectGroup)
+				}
+				message := i18n.T(c, i18n.MsgDistributorGetChannelFailed, map[string]any{"Group": showGroup, "Model": modelRequest.Model, "Error": err.Error()})
+				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, message, types.ErrorCodeModelNotFound)
+				return
+			}
+			if channel == nil {
+				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+				return
+			}
+			newAPIError = SetupContextForSelectedChannel(c, channel, modelRequest.Model)
+		}
+		if newAPIError != nil {
+			releaseChannelConcurrencyForContext(c)
+			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, newAPIError.Error(), types.ErrorCodeGetChannelFailed)
+			return
+		}
+		defer releaseChannelConcurrencyForContext(c)
+		if modelRequest.Group != "" {
+			common.SetContextKey(c, constant.ContextKeySelectedChannelGroup, modelRequest.Group)
+		} else if selectGroup != "" {
+			common.SetContextKey(c, constant.ContextKeySelectedChannelGroup, selectGroup)
+		} else {
+			common.SetContextKey(c, constant.ContextKeySelectedChannelGroup, usingGroup)
+		}
+		// 多分组令牌：将 UsingGroup 更新为实际命中的分组，确保日志和计费使用正确的分组
+		if selectGroup != "" && strings.Contains(usingGroup, ",") {
+			common.SetContextKey(c, constant.ContextKeyUsingGroup, selectGroup)
+		}
+		common.SetContextKey(c, constant.ContextKeyOriginalModel, modelRequest.Model)
+		if channel != nil {
+			common.SetContextKey(c, constant.ContextKeySelectedChannel, channel)
+		}
 		c.Next()
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
 			service.RecordChannelAffinity(c, channel.Id)
@@ -349,12 +423,12 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 			modelRequest.Model = c.Param("model")
 		}
 	}
-	if strings.HasPrefix(c.Request.URL.Path, "/v1/images/generations/") {
+	if isImageGenerationTaskPath(c.Request.URL.Path) {
 		// image task polling has no request body model; keep channel selection disabled
 		// and do not fall back to the legacy dall-e default.
-	} else if strings.HasPrefix(c.Request.URL.Path, "/v1/images/generations") {
+	} else if isImageGenerationPath(c.Request.URL.Path) {
 		modelRequest.Model = common.GetStringIfEmpty(modelRequest.Model, "dall-e")
-	} else if strings.HasPrefix(c.Request.URL.Path, "/v1/images/edits") {
+	} else if isImageEditPath(c.Request.URL.Path) {
 		//modelRequest.Model = common.GetStringIfEmpty(c.PostForm("model"), "gpt-image-1")
 		contentType := c.ContentType()
 		if slices.Contains([]string{gin.MIMEPOSTForm, gin.MIMEMultipartPOSTForm}, contentType) {
@@ -403,11 +477,60 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 	return &modelRequest, shouldSelectChannel, nil
 }
 
-func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, modelName string) *types.NewAPIError {
-	c.Set("original_model", modelName) // for retry
+func isImageGenerationTaskPath(path string) bool {
+	return strings.HasPrefix(path, "/v1/images/generations/") || strings.HasPrefix(path, "/canvas/v1/images/generations/")
+}
+
+func isImageGenerationPath(path string) bool {
+	return strings.HasPrefix(path, "/v1/images/generations") || strings.HasPrefix(path, "/canvas/v1/images/generations")
+}
+
+func isImageEditPath(path string) bool {
+	return strings.HasPrefix(path, "/v1/images/edits") || strings.HasPrefix(path, "/canvas/v1/images/edits")
+}
+
+func setupChannelKeyForContext(c *gin.Context, channel *model.Channel, preferredMultiKeyIndex *int) (newAPIError *types.NewAPIError) {
+	var (
+		key   string
+		index int
+	)
+	if preferredMultiKeyIndex != nil {
+		key, index, newAPIError = channel.GetKeyByIndex(*preferredMultiKeyIndex)
+	} else {
+		key, index, newAPIError = channel.GetNextEnabledKey()
+	}
+	if newAPIError != nil {
+		return newAPIError
+	}
+	if channel.ChannelInfo.IsMultiKey {
+		common.SetContextKey(c, constant.ContextKeyChannelIsMultiKey, true)
+		common.SetContextKey(c, constant.ContextKeyChannelMultiKeyIndex, index)
+		common.SetContextKey(c, constant.ContextKeyChannelPreferredMultiKeyIndex, index)
+	} else {
+		// 必须设置为 false，否则在重试到单个 key 的时候会导致日志显示错误
+		common.SetContextKey(c, constant.ContextKeyChannelIsMultiKey, false)
+	}
+	common.SetContextKey(c, constant.ContextKeyChannelKey, key)
+	return nil
+}
+
+func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, modelName string) (newAPIError *types.NewAPIError) {
+	return SetupContextForSelectedChannelWithPreferredMultiKeyIndex(c, channel, modelName, getPreferredMultiKeyIndexFromContext(c, channel))
+}
+
+func SetupContextForSelectedChannelWithPreferredMultiKeyIndex(c *gin.Context, channel *model.Channel, modelName string, preferredMultiKeyIndex *int) (newAPIError *types.NewAPIError) {
+	common.SetContextKey(c, constant.ContextKeyOriginalModel, modelName)
 	if channel == nil {
 		return types.NewError(errors.New("channel is nil"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
+	if !tryAcquireChannelConcurrencyForContext(c, channel) {
+		return types.NewError(errors.New("渠道并发已达上限"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+	}
+	defer func() {
+		if newAPIError != nil {
+			releaseChannelConcurrencyForContext(c)
+		}
+	}()
 	common.SetContextKey(c, constant.ContextKeyChannelId, channel.Id)
 	common.SetContextKey(c, constant.ContextKeyChannelName, channel.Name)
 	common.SetContextKey(c, constant.ContextKeyChannelType, channel.Type)
@@ -428,19 +551,10 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	common.SetContextKey(c, constant.ContextKeyChannelModelMapping, channel.GetModelMapping())
 	common.SetContextKey(c, constant.ContextKeyChannelStatusCodeMapping, channel.GetStatusCodeMapping())
 
-	key, index, newAPIError := channel.GetNextEnabledKey()
+	newAPIError = setupChannelKeyForContext(c, channel, preferredMultiKeyIndex)
 	if newAPIError != nil {
 		return newAPIError
 	}
-	if channel.ChannelInfo.IsMultiKey {
-		common.SetContextKey(c, constant.ContextKeyChannelIsMultiKey, true)
-		common.SetContextKey(c, constant.ContextKeyChannelMultiKeyIndex, index)
-	} else {
-		// 必须设置为 false，否则在重试到单个 key 的时候会导致日志显示错误
-		common.SetContextKey(c, constant.ContextKeyChannelIsMultiKey, false)
-	}
-	// c.Request.Header.Set("Authorization", fmt.Sprintf("Bearer %s", key))
-	common.SetContextKey(c, constant.ContextKeyChannelKey, key)
 	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, channel.GetBaseURL())
 
 	common.SetContextKey(c, constant.ContextKeySystemPromptOverride, false)
@@ -467,9 +581,54 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	return nil
 }
 
+func getPreferredMultiKeyIndexFromContext(c *gin.Context, channel *model.Channel) *int {
+	if c == nil || channel == nil || !channel.ChannelInfo.IsMultiKey {
+		return nil
+	}
+	selectedChannel, ok := common.GetContextKeyType[*model.Channel](c, constant.ContextKeySelectedChannel)
+	if ok && selectedChannel != nil && selectedChannel.Id == channel.Id {
+		if index, ok := common.GetContextKeyType[int](c, constant.ContextKeyChannelPreferredMultiKeyIndex); ok && index >= 0 {
+			return common.GetPointer(index)
+		}
+	}
+	return nil
+}
+
 // extractModelNameFromGeminiPath 从 Gemini API URL 路径中提取模型名
 // 输入格式: /v1beta/models/gemini-2.0-flash:generateContent
 // 输出: gemini-2.0-flash
+func tryAcquireChannelConcurrencyForContext(c *gin.Context, channel *model.Channel) bool {
+	acquiredChannelID, ok := c.Get(channelConcurrencyContextKey)
+	if ok {
+		if channelID, ok := acquiredChannelID.(int); ok && channelID == channel.Id {
+			return true
+		}
+	}
+
+	if !model.TryAcquireChannelConcurrency(channel) {
+		return false
+	}
+	releaseChannelConcurrencyForContext(c)
+	c.Set(channelConcurrencyContextKey, channel.Id)
+	return true
+}
+
+func releaseChannelConcurrencyForContext(c *gin.Context) {
+	acquiredChannelID, ok := c.Get(channelConcurrencyContextKey)
+	if !ok {
+		return
+	}
+	channelID, ok := acquiredChannelID.(int)
+	if !ok || channelID <= 0 {
+		return
+	}
+
+	model.ReleaseChannelConcurrency(channelID)
+	if c.Keys != nil {
+		delete(c.Keys, channelConcurrencyContextKey)
+	}
+}
+
 func extractModelNameFromGeminiPath(path string) string {
 	// 查找 "/models/" 的位置
 	modelsPrefix := "/models/"

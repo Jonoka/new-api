@@ -11,13 +11,15 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 	"github.com/stripe/stripe-go/v81"
 	"github.com/stripe/stripe-go/v81/checkout/session"
 	"github.com/thanhpk/randstr"
 )
 
 type SubscriptionStripePayRequest struct {
-	PlanId int `json:"plan_id"`
+	PlanId    int    `json:"plan_id"`
+	PromoCode string `json:"promo_code"`
 }
 
 func SubscriptionRequestStripePay(c *gin.Context) {
@@ -40,16 +42,8 @@ func SubscriptionRequestStripePay(c *gin.Context) {
 		common.ApiErrorMsg(c, "套餐未启用")
 		return
 	}
-	if plan.StripePriceId == "" {
+	if plan.StripePriceId == "" && strings.TrimSpace(req.PromoCode) == "" {
 		common.ApiErrorMsg(c, "该套餐未配置 StripePriceId")
-		return
-	}
-	if !strings.HasPrefix(setting.StripeApiSecret, "sk_") && !strings.HasPrefix(setting.StripeApiSecret, "rk_") {
-		common.ApiErrorMsg(c, "Stripe 未配置或密钥无效")
-		return
-	}
-	if setting.StripeWebhookSecret == "" {
-		common.ApiErrorMsg(c, "Stripe Webhook 未配置")
 		return
 	}
 
@@ -79,25 +73,72 @@ func SubscriptionRequestStripePay(c *gin.Context) {
 	reference := fmt.Sprintf("sub-stripe-ref-%d-%d-%s", user.Id, time.Now().UnixMilli(), randstr.String(4))
 	referenceId := "sub_ref_" + common.Sha1([]byte(reference))
 
-	payLink, err := genStripeSubscriptionLink(referenceId, user.StripeCustomer, user.Email, plan.StripePriceId)
+	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetSubscription, plan.Id, plan.PriceAmount)
 	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Stripe 订阅支付链接创建失败 trade_no=%s plan_id=%d error=%q", referenceId, plan.Id, err.Error()))
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "拉起支付失败"})
+		common.ApiError(c, err)
 		return
+	}
+	payMoney := plan.PriceAmount
+	if discount != nil {
+		payMoney = discount.PaidAmount
+	}
+	if payMoney < 0 {
+		common.ApiErrorMsg(c, "套餐金额过低")
+		return
+	}
+
+	stripePriceId := plan.StripePriceId
+	if discount != nil {
+		stripePriceId = ""
+	}
+	if payMoney >= 0.01 {
+		if !strings.HasPrefix(setting.StripeApiSecret, "sk_") && !strings.HasPrefix(setting.StripeApiSecret, "rk_") {
+			common.ApiErrorMsg(c, "Stripe 未配置或密钥无效")
+			return
+		}
+		if setting.StripeWebhookSecret == "" {
+			common.ApiErrorMsg(c, "Stripe Webhook 未配置")
+			return
+		}
 	}
 
 	order := &model.SubscriptionOrder{
 		UserId:          userId,
 		PlanId:          plan.Id,
-		Money:           plan.PriceAmount,
+		Money:           payMoney,
 		TradeNo:         referenceId,
 		PaymentMethod:   model.PaymentMethodStripe,
 		PaymentProvider: model.PaymentProviderStripe,
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}
+	model.ApplyPromoCodeResultToSubscriptionOrder(order, discount)
 	if err := order.Insert(); err != nil {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "创建订单失败"})
+		return
+	}
+	if payMoney < 0.01 {
+		if err := model.CompleteFreeSubscriptionOrder(referenceId, model.PaymentProviderStripe); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"message":   "success",
+			"completed": true,
+			"data": gin.H{
+				"completed": true,
+				"trade_no":  referenceId,
+				"discount":  discount,
+			},
+		})
+		return
+	}
+
+	payLink, err := genStripeSubscriptionLink(referenceId, user.StripeCustomer, user.Email, stripePriceId, plan.Title, payMoney)
+	if err != nil {
+		_ = model.ExpireSubscriptionOrder(referenceId, model.PaymentProviderStripe)
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Stripe 订阅支付链接创建失败 trade_no=%s plan_id=%d error=%q", referenceId, plan.Id, err.Error()))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "拉起支付失败"})
 		return
 	}
 
@@ -109,20 +150,33 @@ func SubscriptionRequestStripePay(c *gin.Context) {
 	})
 }
 
-func genStripeSubscriptionLink(referenceId string, customerId string, email string, priceId string) (string, error) {
+func genStripeSubscriptionLink(referenceId string, customerId string, email string, priceId string, planTitle string, payMoney float64) (string, error) {
 	stripe.Key = setting.StripeApiSecret
+	lineItem := &stripe.CheckoutSessionLineItemParams{
+		Quantity: stripe.Int64(1),
+	}
+	mode := stripe.CheckoutSessionModeSubscription
+	if priceId != "" {
+		lineItem.Price = stripe.String(priceId)
+	} else {
+		mode = stripe.CheckoutSessionModePayment
+		lineItem.PriceData = &stripe.CheckoutSessionLineItemPriceDataParams{
+			Currency: stripe.String("usd"),
+			ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
+				Name: stripe.String(planTitle),
+			},
+			UnitAmount: stripe.Int64(int64(decimal.NewFromFloat(payMoney).Mul(decimal.NewFromInt(100)).Round(0).IntPart())),
+		}
+	}
 
 	params := &stripe.CheckoutSessionParams{
 		ClientReferenceID: stripe.String(referenceId),
 		SuccessURL:        stripe.String(paymentReturnPath("/console/topup")),
 		CancelURL:         stripe.String(paymentReturnPath("/console/topup")),
 		LineItems: []*stripe.CheckoutSessionLineItemParams{
-			{
-				Price:    stripe.String(priceId),
-				Quantity: stripe.Int64(1),
-			},
+			lineItem,
 		},
-		Mode: stripe.String(string(stripe.CheckoutSessionModeSubscription)),
+		Mode: stripe.String(string(mode)),
 	}
 
 	if "" == customerId {
