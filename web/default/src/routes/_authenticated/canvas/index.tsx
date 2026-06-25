@@ -18,11 +18,17 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { isSidebarModuleEnabled } from '@/lib/nav-modules'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 import { Main } from '@/components/layout'
 import { CanvasLauncher } from '@/features/canvas'
 
 export const Route = createFileRoute('/_authenticated/canvas/')({
   beforeLoad: () => {
+    const { auth } = useAuthStore.getState()
+    if (!auth.user || auth.user.role < ROLE.ADMIN) {
+      throw redirect({ to: '/403' })
+    }
     if (!isSidebarModuleEnabled('chat', 'canvas')) {
       throw redirect({ to: '/dashboard' })
     }

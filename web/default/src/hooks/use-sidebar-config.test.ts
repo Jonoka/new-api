@@ -19,12 +19,25 @@ describe('sidebar config filtering', () => {
     },
   ]
 
+  const canvasGroups: NavGroup[] = [
+    {
+      title: 'Chat',
+      items: [
+        {
+          title: 'Infinite Canvas',
+          url: '/canvas',
+        },
+      ],
+    },
+  ]
+
   test('lets users hide administrator custom sidebar items', () => {
     const filtered = filterSidebarNavGroups(
       groups,
       { custom: { enabled: true, [customKey]: true } },
       { custom: { enabled: true, [customKey]: false } },
-      undefined
+      undefined,
+      true
     )
 
     assert.equal(filtered.length, 0)
@@ -35,7 +48,8 @@ describe('sidebar config filtering', () => {
       groups,
       { custom: { enabled: true, [customKey]: false } },
       { custom: { enabled: true, [customKey]: true } },
-      undefined
+      undefined,
+      true
     )
 
     assert.equal(filtered.length, 0)
@@ -46,10 +60,36 @@ describe('sidebar config filtering', () => {
       groups,
       { custom: { enabled: true, [customKey]: true } },
       { custom: { enabled: true, [customKey]: true } },
-      undefined
+      undefined,
+      true
     )
 
     assert.equal(filtered.length, 1)
     assert.equal(filtered[0].items[0].title, 'Custom Tool')
+  })
+
+  test('hides infinite canvas from non-admin users', () => {
+    const filtered = filterSidebarNavGroups(
+      canvasGroups,
+      { chat: { enabled: true, canvas: true } },
+      null,
+      undefined,
+      false
+    )
+
+    assert.equal(filtered.length, 0)
+  })
+
+  test('keeps infinite canvas visible for admin users', () => {
+    const filtered = filterSidebarNavGroups(
+      canvasGroups,
+      { chat: { enabled: true, canvas: true } },
+      null,
+      undefined,
+      true
+    )
+
+    assert.equal(filtered.length, 1)
+    assert.equal(filtered[0].items[0].title, 'Infinite Canvas')
   })
 })

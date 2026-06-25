@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useMemo } from 'react'
 import { useAuthStore } from '@/stores/auth-store'
+import { ROLE } from '@/lib/roles'
 import {
   getSidebarCustomModuleKey,
   parseCustomNavItems,
@@ -199,7 +200,8 @@ function isModuleEnabled(
   url: string,
   adminConfig: SidebarModulesAdminConfig,
   userConfig: SidebarModulesUserConfig,
-  permissionConfig: SidebarModulesPermissionConfig
+  permissionConfig: SidebarModulesPermissionConfig,
+  isAdmin: boolean
 ): boolean {
   if (url.startsWith(CUSTOM_MODULE_PREFIX)) {
     const adminCustom = adminConfig.custom
@@ -225,6 +227,10 @@ function isModuleEnabled(
   if (!mapping) {
     // No mapping config, default to visible (e.g. system settings and new features)
     return true
+  }
+
+  if (normalizedUrl === '/canvas' && !isAdmin) {
+    return false
   }
 
   const { section, module } = mapping
@@ -259,7 +265,8 @@ function isNavItemVisible(
   item: NavItem,
   adminConfig: SidebarModulesAdminConfig,
   userConfig: SidebarModulesUserConfig,
-  permissionConfig: SidebarModulesPermissionConfig
+  permissionConfig: SidebarModulesPermissionConfig,
+  isAdmin: boolean
 ): boolean {
   // Handle dynamic chat presets type — also runs the admin × user AND gate
   if ('type' in item && item.type === 'chat-presets') {
@@ -277,7 +284,7 @@ function isNavItemVisible(
   if ('url' in item && item.url) {
     const configUrls = item.configUrls ?? [item.url]
     return configUrls.some((url) =>
-      isModuleEnabled(url as string, adminConfig, userConfig, permissionConfig)
+      isModuleEnabled(url as string, adminConfig, userConfig, permissionConfig, isAdmin)
     )
   }
 
@@ -289,7 +296,8 @@ function isNavItemVisible(
         subItem.url as string,
         adminConfig,
         userConfig,
-        permissionConfig
+        permissionConfig,
+        isAdmin
       )
     )
   }
@@ -304,7 +312,8 @@ function filterNavItems(
   items: NavItem[],
   adminConfig: SidebarModulesAdminConfig,
   userConfig: SidebarModulesUserConfig,
-  permissionConfig: SidebarModulesPermissionConfig
+  permissionConfig: SidebarModulesPermissionConfig,
+  isAdmin: boolean
 ): NavItem[] {
   return items
     .map((item) => {
@@ -315,7 +324,8 @@ function filterNavItems(
             subItem.url as string,
             adminConfig,
             userConfig,
-            permissionConfig
+            permissionConfig,
+            isAdmin
           )
         )
 
@@ -327,7 +337,7 @@ function filterNavItems(
       return item
     })
     .filter((item) =>
-      isNavItemVisible(item, adminConfig, userConfig, permissionConfig)
+      isNavItemVisible(item, adminConfig, userConfig, permissionConfig, isAdmin)
     )
 }
 
@@ -335,7 +345,8 @@ export function filterSidebarNavGroups(
   navGroups: NavGroup[],
   adminConfig: SidebarModulesAdminConfig,
   userConfig: SidebarModulesUserConfig,
-  permissionConfig: SidebarModulesPermissionConfig
+  permissionConfig: SidebarModulesPermissionConfig,
+  isAdmin: boolean
 ): NavGroup[] {
   return navGroups
     .map((group) => ({
@@ -344,7 +355,8 @@ export function filterSidebarNavGroups(
         group.items,
         adminConfig,
         userConfig,
-        permissionConfig
+        permissionConfig,
+        isAdmin
       ),
     }))
     .filter((group) => group.items.length > 0)
@@ -391,6 +403,7 @@ export function useSidebarConfig(navGroups: NavGroup[]): NavGroup[] {
   }, [auth?.user?.permissions?.sidebar_settings, auth?.user?.sidebar_modules])
 
   const permissionConfig = auth?.user?.permissions?.sidebar_modules
+  const isAdmin = Boolean(auth?.user && auth.user.role >= ROLE.ADMIN)
 
   const filteredNavGroups = useMemo(
     () =>
@@ -398,9 +411,10 @@ export function useSidebarConfig(navGroups: NavGroup[]): NavGroup[] {
         navGroups,
         adminConfig,
         userConfig,
-        permissionConfig
+        permissionConfig,
+        isAdmin
       ),
-    [navGroups, adminConfig, userConfig, permissionConfig]
+    [navGroups, adminConfig, userConfig, permissionConfig, isAdmin]
   )
 
   return filteredNavGroups

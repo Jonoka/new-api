@@ -238,6 +238,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('无限画布'),
         itemKey: 'canvas',
         to: '/canvas',
+        className: isAdmin() ? '' : 'tableHiddle',
       },
       {
         text: t('聊天'),
@@ -253,7 +254,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
     });
 
     return filteredItems;
-  }, [chatItems, t, isModuleVisible]);
+  }, [chatItems, isAdmin(), t, isModuleVisible]);
 
   // 更新路由映射，添加聊天路由
   const updateRouterMapWithChats = (chats) => {
