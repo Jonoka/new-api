@@ -421,6 +421,48 @@ func TestApplyPromoCodeResultToStripeTopUpKeepsRechargeCreditMoney(t *testing.T)
 	assert.Equal(t, int(50*common.QuotaPerUnit), topUp.AffiliateSourceQuota)
 }
 
+func TestGetUserTotalRechargeAmountUsesActualPaidAmount(t *testing.T) {
+	truncateTables(t)
+
+	insertMarketingUser(t, 839, 0, 0)
+	require.NoError(t, DB.Create(&TopUp{
+		UserId:          839,
+		Money:           30,
+		ActualMoney:     0,
+		TradeNo:         "legacy-paid-topup",
+		PaymentProvider: PaymentProviderEpay,
+		Status:          common.TopUpStatusSuccess,
+	}).Error)
+	require.NoError(t, DB.Create(&TopUp{
+		UserId:          839,
+		Money:           100,
+		OriginalMoney:   100,
+		DiscountMoney:   50,
+		ActualMoney:     50,
+		PromoCodeId:     1,
+		PromoCode:       "HALF",
+		TradeNo:         "half-paid-topup",
+		PaymentProvider: PaymentProviderEpay,
+		Status:          common.TopUpStatusSuccess,
+	}).Error)
+	require.NoError(t, DB.Create(&TopUp{
+		UserId:          839,
+		Money:           100,
+		OriginalMoney:   100,
+		DiscountMoney:   100,
+		ActualMoney:     0,
+		PromoCodeId:     2,
+		PromoCode:       "FREE",
+		TradeNo:         "free-stripe-topup",
+		PaymentProvider: PaymentProviderStripe,
+		Status:          common.TopUpStatusSuccess,
+	}).Error)
+
+	total, err := GetUserTotalRechargeAmount(839)
+	require.NoError(t, err)
+	assert.InDelta(t, 80, total, 0.000001)
+}
+
 func TestCompleteEpayTopUp_RecordsPromoAndAffiliateInOneCompletion(t *testing.T) {
 	truncateTables(t)
 	resetAffiliateSettingForTest(t)
