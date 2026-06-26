@@ -1,4 +1,4 @@
-export const CANVAS_APP_ORIGIN = 'https://canvas.maolaoapi.com'
+export const CANVAS_APP_ORIGIN = 'https://canvas.jo2api.com'
 
 type CanvasLaunchUrlOptions = {
   canvasOrigin: string
