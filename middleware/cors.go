@@ -50,7 +50,17 @@ func isAllowedCredentialOrigin(c *gin.Context, origin string) bool {
 			return true
 		}
 	}
-	return host == "maolaoapi.com" || strings.HasSuffix(host, ".maolaoapi.com")
+	return isAllowedCanvasHost(host)
+}
+
+func isAllowedCanvasHost(host string) bool {
+	allowedDomains := []string{"jo2api.com", "maolaoapi.com"}
+	for _, domain := range allowedDomains {
+		if host == domain || strings.HasSuffix(host, "."+domain) {
+			return true
+		}
+	}
+	return false
 }
 
 func PoweredBy() gin.HandlerFunc {

@@ -19,7 +19,7 @@ func TestCORSPreflightAllowsCanvasJsonRequests(t *testing.T) {
 	})
 
 	request := httptest.NewRequest(http.MethodOptions, "/canvas/v1/images/generations?group=Image2", nil)
-	request.Header.Set("Origin", "https://canvas.maolaoapi.com")
+	request.Header.Set("Origin", "https://canvas.jo2api.com")
 	request.Header.Set("Access-Control-Request-Method", http.MethodPost)
 	request.Header.Set("Access-Control-Request-Headers", "content-type")
 
@@ -27,6 +27,6 @@ func TestCORSPreflightAllowsCanvasJsonRequests(t *testing.T) {
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusNoContent, recorder.Code)
-	require.Equal(t, "https://canvas.maolaoapi.com", recorder.Header().Get("Access-Control-Allow-Origin"))
+	require.Equal(t, "https://canvas.jo2api.com", recorder.Header().Get("Access-Control-Allow-Origin"))
 	require.Contains(t, strings.ToLower(recorder.Header().Get("Access-Control-Allow-Headers")), "content-type")
 }

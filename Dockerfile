@@ -20,7 +20,11 @@ COPY web/classic/bun.lock .
 RUN bun install
 COPY ./web/classic .
 COPY ./VERSION .
-RUN VITE_REACT_APP_VERSION=$(cat VERSION) bun run build
+ARG CANVAS_LAUNCHER_CACHE_KEY=unknown
+RUN echo "CANVAS_LAUNCHER_CACHE_KEY=${CANVAS_LAUNCHER_CACHE_KEY}" && \
+    VITE_REACT_APP_VERSION=$(cat VERSION) bun run build && \
+    grep -R "canvas.jo2api.com" dist && \
+    ! grep -R "canvas.maolaoapi.com" dist
 
 FROM golang:1.26.1-alpine@sha256:2389ebfa5b7f43eeafbd6be0c3700cc46690ef842ad962f6c5bd6be49ed82039 AS builder2
 ENV GO111MODULE=on CGO_ENABLED=0

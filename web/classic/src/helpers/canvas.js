@@ -1,4 +1,4 @@
-export const CANVAS_APP_ORIGIN = 'https://canvas.maolaoapi.com';
+export const CANVAS_APP_ORIGIN = 'https://canvas.jo2api.com';
 
 export function buildCanvasLaunchUrl({
   canvasOrigin = CANVAS_APP_ORIGIN,

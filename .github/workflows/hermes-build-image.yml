@@ -74,7 +74,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
-            CANVAS_LAUNCHER_CACHE_KEY=${{ hashFiles('web/default/src/features/canvas/lib.ts') }}
+            CANVAS_LAUNCHER_CACHE_KEY=${{ hashFiles('web/default/src/features/canvas/lib.ts', 'web/classic/src/helpers/canvas.js') }}
           provenance: false
           sbom: false
 
