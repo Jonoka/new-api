@@ -292,6 +292,26 @@ func TestTransferAffiliateQuotaToBalance(t *testing.T) {
 	assert.Equal(t, 1100, user.Quota)
 }
 
+func TestGetAffiliateBalanceNormalizesTotalQuotaFloor(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	insertAffiliateUser(t, 31, 0, 0)
+	require.NoError(t, DB.Create(&AffiliateBalance{
+		UserId:         31,
+		AvailableQuota: 6280,
+		TotalQuota:     5480,
+	}).Error)
+
+	balance := getAffiliateBalanceForTest(t, 31)
+	assert.Equal(t, 6280, balance.AvailableQuota)
+	assert.Equal(t, 6280, balance.TotalQuota)
+
+	var saved AffiliateBalance
+	require.NoError(t, DB.Where("user_id = ?", 31).First(&saved).Error)
+	assert.Equal(t, 6280, saved.TotalQuota)
+}
+
 func TestGetAffiliateLeaderboardAggregatesInvitesAndCommissionByPeriod(t *testing.T) {
 	truncateTables(t)
 	resetAffiliateSettingForTest(t)
