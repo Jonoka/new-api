@@ -646,3 +646,31 @@ func TestGetTokenKeyRequiresOwnershipAndReturnsFullKey(t *testing.T) {
 		t.Fatalf("unauthorized key response leaked raw token key: %s", unauthorizedRecorder.Body.String())
 	}
 }
+
+func TestNormalizeTokenGroupRatioLimitsTrimsAndSerializes(t *testing.T) {
+	normalized, err := normalizeTokenGroupRatioLimits("default,vip", `{" default ": 1.2, "vip": 2}`)
+	if err != nil {
+		t.Fatalf("expected normalize token group ratio limits to succeed: %v", err)
+	}
+
+	var limits map[string]float64
+	if err := common.Unmarshal([]byte(normalized), &limits); err != nil {
+		t.Fatalf("failed to decode normalized limits: %v", err)
+	}
+	if limits["default"] != 1.2 {
+		t.Fatalf("expected default limit 1.2, got %v", limits["default"])
+	}
+	if limits["vip"] != 2 {
+		t.Fatalf("expected vip limit 2, got %v", limits["vip"])
+	}
+}
+
+func TestNormalizeTokenGroupRatioLimitsRejectsAutoGroup(t *testing.T) {
+	_, err := normalizeTokenGroupRatioLimits("auto", `{"auto": 1}`)
+	if err == nil {
+		t.Fatalf("expected auto group ratio limit to be rejected")
+	}
+	if !strings.Contains(err.Error(), "auto 分组不支持设置倍率保护") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

@@ -57,6 +57,11 @@ func Distribute() func(c *gin.Context) {
 				abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorChannelDisabled))
 				return
 			}
+			userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+			if err := service.CheckTokenGroupRatioLimit(c, userGroup, usingGroup); err != nil {
+				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, err.Error(), types.ErrorCodeModelNotFound)
+				return
+			}
 		} else {
 			// Select a channel for the user
 			// check token model mapping
@@ -116,6 +121,10 @@ func Distribute() func(c *gin.Context) {
 							autoGroups := service.GetUserAutoGroup(userGroup)
 							for _, g := range autoGroups {
 								if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
+									if err := service.CheckTokenGroupRatioLimit(c, userGroup, g); err != nil {
+										abortWithOpenAiMessage(c, http.StatusServiceUnavailable, err.Error(), types.ErrorCodeModelNotFound)
+										return
+									}
 									selectGroup = g
 									common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
 									channel = preferred
@@ -129,6 +138,11 @@ func Distribute() func(c *gin.Context) {
 							for _, g := range multiGroups {
 								g = strings.TrimSpace(g)
 								if g != "" && model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
+									userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+									if err := service.CheckTokenGroupRatioLimit(c, userGroup, g); err != nil {
+										abortWithOpenAiMessage(c, http.StatusServiceUnavailable, err.Error(), types.ErrorCodeModelNotFound)
+										return
+									}
 									selectGroup = g
 									common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
 									channel = preferred
@@ -137,6 +151,11 @@ func Distribute() func(c *gin.Context) {
 								}
 							}
 						} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) {
+							userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+							if err := service.CheckTokenGroupRatioLimit(c, userGroup, usingGroup); err != nil {
+								abortWithOpenAiMessage(c, http.StatusServiceUnavailable, err.Error(), types.ErrorCodeModelNotFound)
+								return
+							}
 							channel = preferred
 							selectGroup = usingGroup
 							service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)

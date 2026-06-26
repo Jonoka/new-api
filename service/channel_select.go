@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -9,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -45,6 +47,28 @@ func (p *RetryParam) IncreaseRetry() {
 
 func (p *RetryParam) ResetRetryNextTry() {
 	p.resetNextTry = true
+}
+
+func CheckTokenGroupRatioLimit(ctx *gin.Context, userGroup string, usingGroup string) error {
+	if ctx == nil || usingGroup == "" {
+		return nil
+	}
+	limits, ok := common.GetContextKeyType[map[string]float64](ctx, constant.ContextKeyTokenGroupRatioLimits)
+	if !ok || len(limits) == 0 {
+		return nil
+	}
+	maxRatio, ok := limits[usingGroup]
+	if !ok || maxRatio <= 0 {
+		return nil
+	}
+	actualRatio, hasSpecialRatio := ratio_setting.GetGroupGroupRatio(userGroup, usingGroup)
+	if !hasSpecialRatio {
+		actualRatio = ratio_setting.GetGroupRatio(usingGroup)
+	}
+	if actualRatio > maxRatio {
+		return fmt.Errorf("分组 %s 当前实际倍率 %.6g 已超过令牌倍率保护 %.6g", usingGroup, actualRatio, maxRatio)
+	}
+	return nil
 }
 
 // CacheGetRandomSatisfiedChannel tries to get a random channel that satisfies the requirements.
@@ -132,6 +156,9 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroup, autoGroup)
 			selectGroup = autoGroup
+			if err := CheckTokenGroupRatioLimit(param.Ctx, userGroup, autoGroup); err != nil {
+				return nil, selectGroup, err
+			}
 			logger.LogDebug(param.Ctx, "Auto selected group: %s", autoGroup)
 
 			// Prepare state for next retry
@@ -177,6 +204,9 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			if err != nil {
 				return nil, selectGroup, err
 			}
+			if err := CheckTokenGroupRatioLimit(param.Ctx, userGroup, candidateGroups[0]); err != nil {
+				return nil, selectGroup, err
+			}
 		} else {
 			// 多候选分组：按用户排序依次尝试（复用 auto 的 group-advancement 模式）
 			startGroupIndex := 0
@@ -203,6 +233,9 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 				}
 				common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroup, g)
 				selectGroup = g
+				if err := CheckTokenGroupRatioLimit(param.Ctx, userGroup, g); err != nil {
+					return nil, selectGroup, err
+				}
 				logger.LogDebug(param.Ctx, "Multi-group selected group: %s", g)
 
 				// 多分组天然支持跨分组重试
@@ -221,6 +254,11 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 		channel, err = model.GetRandomSatisfiedChannelWithExclusions(param.TokenGroup, param.ModelName, param.GetRetry(), param.ExcludedChannelIDs)
 		if err != nil {
 			return nil, param.TokenGroup, err
+		}
+		if channel != nil {
+			if err := CheckTokenGroupRatioLimit(param.Ctx, userGroup, param.TokenGroup); err != nil {
+				return nil, param.TokenGroup, err
+			}
 		}
 	}
 	return channel, selectGroup, nil

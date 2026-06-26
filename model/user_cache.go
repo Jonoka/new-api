@@ -91,6 +91,10 @@ func GetUserCache(userId int) (userCache *UserBase, err error) {
 		}
 	}()
 
+	if _, expireErr := ExpireDueSubscriptionsForUser(userId); expireErr != nil {
+		common.SysLog(fmt.Sprintf("failed to expire due subscriptions for user %d: %v", userId, expireErr))
+	}
+
 	// Try getting from Redis first
 	userCache, err = cacheGetUserBase(userId)
 	if err == nil {
