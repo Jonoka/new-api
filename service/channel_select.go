@@ -2,7 +2,6 @@ package service
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -66,7 +65,7 @@ func CheckTokenGroupRatioLimit(ctx *gin.Context, userGroup string, usingGroup st
 		actualRatio = ratio_setting.GetGroupRatio(usingGroup)
 	}
 	if actualRatio > maxRatio {
-		return fmt.Errorf("分组 %s 当前实际倍率 %.6g 已超过令牌倍率保护 %.6g", usingGroup, actualRatio, maxRatio)
+		return errors.New("超过令牌倍率保护")
 	}
 	return nil
 }

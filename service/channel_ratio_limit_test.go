@@ -19,7 +19,9 @@ func TestCheckTokenGroupRatioLimitRejectsRatioAboveLimit(t *testing.T) {
 	err := CheckTokenGroupRatioLimit(ctx, "default", "default")
 
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "已超过令牌倍率保护")
+	require.Equal(t, "超过令牌倍率保护", err.Error())
+	require.NotContains(t, err.Error(), "0.5")
+	require.NotContains(t, err.Error(), "1")
 }
 
 func TestCheckTokenGroupRatioLimitAllowsRatioWithinLimit(t *testing.T) {
