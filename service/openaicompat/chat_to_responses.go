@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/setting/reasoning"
 	"github.com/samber/lo"
 )
 
@@ -412,7 +413,7 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 
 	if req.ReasoningEffort != "" {
 		out.Reasoning = &dto.Reasoning{
-			Effort:  req.ReasoningEffort,
+			Effort:  reasoning.NormalizeOpenAIReasoningEffort(req.ReasoningEffort),
 			Summary: "detailed",
 		}
 	}

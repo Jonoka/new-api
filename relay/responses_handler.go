@@ -119,6 +119,11 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 				return newAPIErrorFromParamOverride(err)
 			}
 		}
+		if cleanedJSONData, removed := service.RemoveIncompleteOpenAIResponsesReasoningHistoryFromJSON(jsonData); removed {
+			jsonData = cleanedJSONData
+			attachedPreviousResponseID = false
+			service.DropOpenAIResponsesPreviousResponseID(request)
+		}
 		relaycommon.MergeOpenAISessionBridgeOverride(info, jsonData)
 		syncResponsesStreamStateFromBody(c, info, jsonData)
 		retryJSONData := append([]byte(nil), jsonData...)

@@ -230,6 +230,12 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	if request == nil {
 		return nil, errors.New("request is nil")
 	}
+	if normalizedReasoning, effort := normalizeOpenAIReasoningRawEffort(request.Reasoning); len(normalizedReasoning) > 0 {
+		request.Reasoning = normalizedReasoning
+		if info != nil && info.ReasoningEffort == "" && effort != "" {
+			info.ReasoningEffort = effort
+		}
+	}
 	if info.ChannelType != constant.ChannelTypeOpenAI && info.ChannelType != constant.ChannelTypeAzure {
 		request.StreamOptions = nil
 	}
@@ -243,6 +249,7 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 			info.UpstreamModelName = strings.TrimSuffix(info.UpstreamModelName, "-thinking")
 			request.Model = info.UpstreamModelName
 			if len(request.Reasoning) == 0 {
+				request.ReasoningEffort = reasoning.NormalizeOpenAIReasoningEffort(request.ReasoningEffort)
 				reasoning := map[string]any{
 					"enabled": true,
 				}
@@ -264,6 +271,7 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 			if len(request.Reasoning) == 0 {
 				// 适配 OpenAI 的 ReasoningEffort 格式
 				if request.ReasoningEffort != "" {
+					request.ReasoningEffort = reasoning.NormalizeOpenAIReasoningEffort(request.ReasoningEffort)
 					reasoning := map[string]any{
 						"enabled": true,
 					}
@@ -351,7 +359,10 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 			request.Model = originModel
 		}
 
-		info.ReasoningEffort = request.ReasoningEffort
+		request.ReasoningEffort = reasoning.NormalizeOpenAIReasoningEffort(request.ReasoningEffort)
+		if request.ReasoningEffort != "" {
+			info.ReasoningEffort = request.ReasoningEffort
+		}
 
 		// o系列模型developer适配（o1-mini除外）
 		if !strings.HasPrefix(info.UpstreamModelName, "o1-mini") && !strings.HasPrefix(info.UpstreamModelName, "o1-preview") {
@@ -577,6 +588,27 @@ func isJSONRequest(c *gin.Context) bool {
 	return strings.HasPrefix(c.Request.Header.Get("Content-Type"), "application/json")
 }
 
+func normalizeOpenAIReasoningRawEffort(raw json.RawMessage) (json.RawMessage, string) {
+	if len(raw) == 0 {
+		return raw, ""
+	}
+	var obj map[string]any
+	if err := common.Unmarshal(raw, &obj); err != nil || len(obj) == 0 {
+		return raw, ""
+	}
+	effort, ok := obj["effort"].(string)
+	if !ok || strings.TrimSpace(effort) == "" {
+		return raw, ""
+	}
+	normalized := reasoning.NormalizeOpenAIReasoningEffort(effort)
+	obj["effort"] = normalized
+	updated, err := common.Marshal(obj)
+	if err != nil {
+		return raw, normalized
+	}
+	return updated, normalized
+}
+
 // detectImageMimeType determines the MIME type based on the file extension
 func detectImageMimeType(filename string) string {
 	ext := strings.ToLower(filepath.Ext(filename))
@@ -609,6 +641,9 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 			request.Reasoning.Effort = effort
 		}
 		request.Model = originModel
+	}
+	if request.Reasoning != nil && request.Reasoning.Effort != "" {
+		request.Reasoning.Effort = reasoning.NormalizeOpenAIReasoningEffort(request.Reasoning.Effort)
 	}
 	if info != nil && request.Reasoning != nil && request.Reasoning.Effort != "" {
 		info.ReasoningEffort = request.Reasoning.Effort

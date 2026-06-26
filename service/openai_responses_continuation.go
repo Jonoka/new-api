@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/cachex"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/samber/hot"
+	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
@@ -173,6 +174,43 @@ func RemoveOpenAIResponsesPreviousResponseIDFromJSON(data []byte) []byte {
 		}
 	}
 	return updated
+}
+
+func RemoveIncompleteOpenAIResponsesReasoningHistoryFromJSON(data []byte) ([]byte, bool) {
+	if len(data) == 0 || !strings.Contains(string(data), `"reasoning"`) {
+		return data, false
+	}
+	input := gjson.GetBytes(data, "input")
+	if !input.IsArray() {
+		return data, false
+	}
+
+	removed := false
+	filtered := make([]any, 0)
+	input.ForEach(func(_, item gjson.Result) bool {
+		if item.Get("type").String() == "reasoning" && strings.TrimSpace(item.Get("encrypted_content").String()) == "" {
+			removed = true
+			return true
+		}
+
+		var decoded any
+		if err := common.Unmarshal([]byte(item.Raw), &decoded); err != nil {
+			filtered = append(filtered, item.Value())
+		} else {
+			filtered = append(filtered, decoded)
+		}
+		return true
+	})
+	if !removed {
+		return data, false
+	}
+
+	updated, err := sjson.SetBytes(data, "input", filtered)
+	if err != nil {
+		return data, false
+	}
+	updated = RemoveOpenAIResponsesPreviousResponseIDFromJSON(updated)
+	return updated, true
 }
 
 func TrimOpenAIResponsesInputToLatestTurn(req *dto.OpenAIResponsesRequest) {
