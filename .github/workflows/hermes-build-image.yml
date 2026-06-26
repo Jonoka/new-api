@@ -73,6 +73,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: |
+            CANVAS_LAUNCHER_CACHE_KEY=${{ hashFiles('web/default/src/features/canvas/lib.ts') }}
           provenance: false
           sbom: false
 
