@@ -9,8 +9,8 @@ COPY ./VERSION .
 ARG CANVAS_LAUNCHER_CACHE_KEY=unknown
 RUN echo "CANVAS_LAUNCHER_CACHE_KEY=${CANVAS_LAUNCHER_CACHE_KEY}" && \
     DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=$(cat VERSION) bun run build && \
-    grep -R "canvas.jo2api.com" dist && \
-    ! grep -R "canvas.maolaoapi.com" dist
+    grep -R -q "canvas.jo2api.com" dist && \
+    ! grep -R -q "canvas.maolaoapi.com" dist
 
 FROM oven/bun:1@sha256:0733e50325078969732ebe3b15ce4c4be5082f18c4ac1a0f0ca4839c2e4e42a7 AS builder-classic
 
@@ -23,8 +23,8 @@ COPY ./VERSION .
 ARG CANVAS_LAUNCHER_CACHE_KEY=unknown
 RUN echo "CANVAS_LAUNCHER_CACHE_KEY=${CANVAS_LAUNCHER_CACHE_KEY}" && \
     VITE_REACT_APP_VERSION=$(cat VERSION) bun run build && \
-    grep -R "canvas.jo2api.com" dist && \
-    ! grep -R "canvas.maolaoapi.com" dist
+    grep -R -q "canvas.jo2api.com" dist && \
+    ! grep -R -q "canvas.maolaoapi.com" dist
 
 FROM golang:1.26.1-alpine@sha256:2389ebfa5b7f43eeafbd6be0c3700cc46690ef842ad962f6c5bd6be49ed82039 AS builder2
 ENV GO111MODULE=on CGO_ENABLED=0
