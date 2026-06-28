@@ -501,7 +501,7 @@ func TestSubscriptionRequestAmount_UsesPaymentSpecificRatesForCnyPlan(t *testing
 		assert.InDelta(t, 188/7.3, response.AmountUSD, 0.000001)
 	})
 
-	t.Run("bepusdt uses independent unit price", func(t *testing.T) {
+	t.Run("bepusdt keeps configured CNY plan price", func(t *testing.T) {
 		ctx, recorder := newSubscriptionPaymentContext(t, SubscriptionAmountRequest{
 			PlanId:        plan.Id,
 			PaymentMethod: model.PaymentMethodBepusdt,
@@ -518,8 +518,46 @@ func TestSubscriptionRequestAmount_UsesPaymentSpecificRatesForCnyPlan(t *testing
 		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 		assert.Equal(t, "success", response.Message)
 		assert.Equal(t, model.SubscriptionCurrencyCNY, response.Currency)
-		assert.Equal(t, "185.42", response.Data)
-		assert.InDelta(t, 185.42, response.Amount, 0.000001)
+		assert.Equal(t, "188.00", response.Data)
+		assert.InDelta(t, 188, response.Amount, 0.000001)
+	})
+
+	t.Run("bepusdt keeps CNY discount amount", func(t *testing.T) {
+		require.NoError(t, db.Create(&model.PromoCode{
+			Name:                     "人民币套餐半价",
+			Code:                     "BEPUSDT_HALF",
+			Status:                   common.RedemptionCodeStatusEnabled,
+			DiscountType:             model.PromoCodeDiscountTypePercent,
+			DiscountValue:            50,
+			AppliesToAllSubscription: true,
+			MaxRedeemCount:           10,
+			CreatedTime:              common.GetTimestamp(),
+		}).Error)
+
+		ctx, recorder := newSubscriptionPaymentContext(t, SubscriptionAmountRequest{
+			PlanId:        plan.Id,
+			PaymentMethod: model.PaymentMethodBepusdt,
+			PromoCode:     "BEPUSDT_HALF",
+		}, 901)
+		SubscriptionRequestAmount(ctx)
+
+		assert.Equal(t, http.StatusOK, recorder.Code)
+		var response struct {
+			Message  string                         `json:"message"`
+			Data     string                         `json:"data"`
+			Amount   float64                        `json:"amount"`
+			Currency string                         `json:"currency"`
+			Discount *model.PromoCodeDiscountResult `json:"discount"`
+		}
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+		assert.Equal(t, "success", response.Message)
+		assert.Equal(t, model.SubscriptionCurrencyCNY, response.Currency)
+		assert.Equal(t, "94.00", response.Data)
+		assert.InDelta(t, 94, response.Amount, 0.000001)
+		require.NotNil(t, response.Discount)
+		assert.InDelta(t, 188, response.Discount.OriginalAmount, 0.000001)
+		assert.InDelta(t, 94, response.Discount.DiscountAmount, 0.000001)
+		assert.InDelta(t, 94, response.Discount.PaidAmount, 0.000001)
 	})
 }
 

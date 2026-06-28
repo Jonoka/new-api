@@ -183,8 +183,20 @@ func SubscriptionRequestAmount(c *gin.Context) {
 	switch {
 	case paymentMethod == model.PaymentMethodBepusdt:
 		displayCurrency = model.SubscriptionCurrencyCNY
-		displayAmount = getBepusdtPayMoneyFromUSD(payMoneyUSD)
-		displayDiscount = convertSubscriptionDiscountToBepusdtMoney(discount)
+		displayDiscount, err = convertSubscriptionDiscountToBepusdtMoney(plan, discount)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		if displayDiscount != nil {
+			displayAmount = displayDiscount.PaidAmount
+		} else {
+			displayAmount, err = getSubscriptionBepusdtPayMoney(plan, payMoneyUSD)
+			if err != nil {
+				common.ApiError(c, err)
+				return
+			}
+		}
 	case paymentMethod == model.PaymentMethodBalance:
 		displayCurrency = model.SubscriptionCurrencyUSD
 		displayAmount = payMoneyUSD

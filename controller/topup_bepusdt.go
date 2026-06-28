@@ -400,8 +400,21 @@ func SubscriptionRequestBepusdtPay(c *gin.Context) {
 		return
 	}
 
-	payMoney := getBepusdtPayMoneyFromUSD(paidUSD)
-	bepusdtDiscount := convertSubscriptionDiscountToBepusdtMoney(discount)
+	bepusdtDiscount, err := convertSubscriptionDiscountToBepusdtMoney(plan, discount)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	var payMoney float64
+	if bepusdtDiscount != nil {
+		payMoney = bepusdtDiscount.PaidAmount
+	} else {
+		payMoney, err = getSubscriptionBepusdtPayMoney(plan, paidUSD)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	}
 	order := &model.SubscriptionOrder{
 		UserId:          userId,
 		PlanId:          plan.Id,
