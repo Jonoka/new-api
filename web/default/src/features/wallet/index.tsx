@@ -76,6 +76,7 @@ export function Wallet(props: WalletProps) {
     useState<CreemProduct | null>(null)
   const [showSubscriptionPanel, setShowSubscriptionPanel] = useState(true)
   const [bepusdtChainDialogOpen, setBepusdtChainDialogOpen] = useState(false)
+  const [selectedBepusdtTradeType, setSelectedBepusdtTradeType] = useState('')
 
   const { status } = useStatus()
   const { currency } = useSystemConfig()
@@ -180,10 +181,14 @@ export function Wallet(props: WalletProps) {
         return
       }
 
-      // For bepusdt, open chain selection dialog instead of confirm dialog
       if (isBepusdtPayment(method.type)) {
-        setBepusdtChainDialogOpen(true)
-        return
+        const chains = topupInfo?.bepusdt_chains || []
+        const selectedStillValid = chains.some(
+          (chain) => chain.trade_type === selectedBepusdtTradeType
+        )
+        if (!selectedStillValid) {
+          setSelectedBepusdtTradeType(chains[0]?.trade_type || '')
+        }
       }
 
       // Calculate payment amount and show confirmation dialog
@@ -200,17 +205,29 @@ export function Wallet(props: WalletProps) {
 
     const isPancake = isWaffoPancakePayment(selectedPaymentMethod.type)
     const isOkpay_ = isOkpayPayment(selectedPaymentMethod.type)
+    const isBepusdt = isBepusdtPayment(selectedPaymentMethod.type)
     let success: boolean
     if (isPancake) {
       success = await processWaffoPancakePayment(topupAmount, promoCode)
     } else if (isOkpay_) {
       success = await processOkpayPayment(topupAmount, promoCode)
+    } else if (isBepusdt) {
+      if (!selectedBepusdtTradeType) {
+        setBepusdtChainDialogOpen(true)
+        return
+      }
+      success = await processBepusdtPayment(
+        topupAmount,
+        selectedBepusdtTradeType,
+        promoCode
+      )
     } else {
       success = await processPayment(topupAmount, selectedPaymentMethod.type, promoCode)
     }
 
     if (success) {
       setConfirmDialogOpen(false)
+      setSelectedBepusdtTradeType('')
       await fetchUser()
     }
   }
@@ -256,16 +273,9 @@ export function Wallet(props: WalletProps) {
   }
 
   // Handle Bepusdt chain selection and payment
-  const handleBepusdtChainConfirm = async (tradeType: string) => {
-    const success = await processBepusdtPayment(
-      topupAmount,
-      tradeType,
-      promoCode
-    )
-    if (success) {
-      setBepusdtChainDialogOpen(false)
-      await fetchUser()
-    }
+  const handleBepusdtChainConfirm = (tradeType: string) => {
+    setSelectedBepusdtTradeType(tradeType)
+    setBepusdtChainDialogOpen(false)
   }
 
   // Get discount rate for current topup amount
@@ -345,16 +355,26 @@ export function Wallet(props: WalletProps) {
 
       <PaymentConfirmDialog
         open={confirmDialogOpen}
-        onOpenChange={setConfirmDialogOpen}
+        onOpenChange={(open) => {
+          setConfirmDialogOpen(open)
+          if (!open) {
+            setSelectedBepusdtTradeType('')
+          }
+        }}
         onConfirm={handlePaymentConfirm}
         topupAmount={topupAmount}
         paymentAmount={paymentAmount}
         paymentAmountText={paymentAmountText}
         paymentMethod={selectedPaymentMethod}
         calculating={calculating}
-        processing={processing || pancakeProcessing || okpayProcessing}
+        processing={
+          processing || pancakeProcessing || okpayProcessing || bepusdtProcessing
+        }
         discountRate={getDiscountRate()}
         usdExchangeRate={effectiveUsdExchangeRate}
+        bepusdtChains={topupInfo?.bepusdt_chains || []}
+        selectedBepusdtTradeType={selectedBepusdtTradeType}
+        onSelectBepusdtTradeType={setSelectedBepusdtTradeType}
       />
 
       <BillingHistoryDialog

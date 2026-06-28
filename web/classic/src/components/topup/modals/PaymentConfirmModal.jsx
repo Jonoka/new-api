@@ -18,7 +18,14 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Modal, Typography, Card, Skeleton, Input } from '@douyinfe/semi-ui';
+import {
+  Modal,
+  Typography,
+  Card,
+  Skeleton,
+  Input,
+  Select,
+} from '@douyinfe/semi-ui';
 import { SiAlipay, SiWechat, SiStripe } from 'react-icons/si';
 import { CreditCard } from 'lucide-react';
 
@@ -42,13 +49,20 @@ const PaymentConfirmModal = ({
   promoDiscount,
   amountText,
   onPromoCodeBlur,
+  bepusdtChains = [],
+  bepusdtSelectedChain,
+  setBepusdtSelectedChain,
 }) => {
   const hasPromoDiscount =
     promoDiscount && Number(promoDiscount.discount_amount || 0) > 0;
   const originalAmount = Number(promoDiscount?.original_amount || 0);
   const discountAmount = Number(promoDiscount?.discount_amount || 0);
   const paidAmount = Number(promoDiscount?.paid_amount ?? amountNumber ?? 0);
-  const paidAmountText = payWay === 'okpay' && amountText ? amountText : `${paidAmount.toFixed(2)} ${t('元')}`;
+  const useAmountText =
+    (payWay === 'okpay' || payWay === 'bepusdt') && amountText;
+  const paidAmountText = useAmountText
+    ? amountText
+    : `${paidAmount.toFixed(2)} ${t('元')}`;
   return (
     <Modal
       title={
@@ -128,6 +142,24 @@ const PaymentConfirmModal = ({
                   </Text>
                 </div>
               </>
+            )}
+            {payWay === 'bepusdt' && bepusdtChains.length > 0 && (
+              <div className='flex justify-between items-center gap-3'>
+                <Text strong className='text-slate-700 dark:text-slate-200'>
+                  {t('支付网络')}：
+                </Text>
+                <Select
+                  value={bepusdtSelectedChain}
+                  onChange={setBepusdtSelectedChain}
+                  optionList={bepusdtChains.map((chain) => ({
+                    value: chain.trade_type,
+                    label: chain.name,
+                  }))}
+                  size='small'
+                  style={{ width: 180 }}
+                  placeholder={t('选择 USDT 网络')}
+                />
+              </div>
             )}
             <div className='flex justify-between items-center gap-3'>
               <Text strong className='text-slate-700 dark:text-slate-200'>

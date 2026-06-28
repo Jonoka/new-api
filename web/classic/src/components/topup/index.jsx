@@ -27,7 +27,7 @@ import {
   renderQuota,
   renderQuotaWithAmount,
 } from '../../helpers';
-import { Button, Modal, Toast } from '@douyinfe/semi-ui';
+import { Modal, Toast } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
@@ -92,7 +92,6 @@ const TopUp = () => {
   const [bepusdtChains, setBepusdtChains] = useState([]);
   const [enableOkpayTopUp, setEnableOkpayTopUp] = useState(false);
   const [bepusdtSelectedChain, setBepusdtSelectedChain] = useState(null);
-  const [bepusdtChainModalVisible, setBepusdtChainModalVisible] = useState(false);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [open, setOpen] = useState(false);
@@ -271,13 +270,12 @@ const TopUp = () => {
         showError(t('管理员未配置 USDT 链'));
         return;
       }
-      // 多条链时弹出选择
-      if (chains.length > 1) {
-        setBepusdtChainModalVisible(true);
-        return;
+      if (
+        !bepusdtSelectedChain ||
+        !chains.some((chain) => chain.trade_type === bepusdtSelectedChain)
+      ) {
+        setBepusdtSelectedChain(chains[0].trade_type);
       }
-      // 只有一条链直接设置
-      setBepusdtSelectedChain(chains[0].trade_type);
     } else if (payment === 'okpay') {
       if (!enableOkpayTopUp) {
         showError(t('管理员未开启 OKPay 充值！'));
@@ -336,6 +334,10 @@ const TopUp = () => {
       // Stripe 支付处理
       if (amount === 0) {
         await getStripeAmount();
+      }
+    } else if (payWay === 'bepusdt') {
+      if (amount === 0) {
+        await getBepusdtAmount();
       }
     } else {
       // 普通支付处理
@@ -839,7 +841,7 @@ const TopUp = () => {
   }, [statusState?.status]);
 
   const renderAmount = () => {
-    if (payWay === 'okpay' && amountText) {
+    if ((payWay === 'okpay' || payWay === 'bepusdt') && amountText) {
       return amountText;
     }
     return amount + ' ' + t('元');
@@ -920,6 +922,7 @@ const TopUp = () => {
     setOpen(false);
     setPromoCode('');
     setPromoDiscount(null);
+    setAmountText('');
   };
 
   const handleTransferCancel = () => {
@@ -985,6 +988,9 @@ const TopUp = () => {
         promoDiscount={promoDiscount}
         amountText={amountText}
         onPromoCodeBlur={() => requestAmountByPayment(payWay)}
+        bepusdtChains={bepusdtChains}
+        bepusdtSelectedChain={bepusdtSelectedChain}
+        setBepusdtSelectedChain={setBepusdtSelectedChain}
       />
 
       {/* 充值账单模态框 */}
@@ -1020,47 +1026,6 @@ const TopUp = () => {
             <p>{t('是否确认充值？')}</p>
           </>
         )}
-      </Modal>
-
-      {/* Bepusdt 链选择模态框 */}
-      <Modal
-        title={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <img src='/pay-usdt.svg' alt='USDT' style={{ width: 20, height: 20 }} />
-            {t('选择 USDT 网络')}
-          </div>
-        }
-        visible={bepusdtChainModalVisible}
-        onCancel={() => setBepusdtChainModalVisible(false)}
-        footer={null}
-        maskClosable={true}
-        size='small'
-        centered
-        style={{ maxWidth: 400 }}
-        bodyStyle={{ paddingBottom: 24 }}
-      >
-        <p style={{ marginBottom: 16, color: 'var(--semi-color-text-2)', fontSize: 14 }}>
-          {t('请选择支付使用的区块链网络')}
-        </p>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'center' }}>
-          {(bepusdtChains || []).map((chain) => (
-            <Button
-              key={chain.trade_type}
-              theme='light'
-              size='large'
-              style={{ minWidth: 100 }}
-              icon={<img src='/pay-usdt.svg' alt='' style={{ width: 16, height: 16 }} />}
-              onClick={() => {
-                setBepusdtSelectedChain(chain.trade_type);
-                setBepusdtChainModalVisible(false);
-                setPayWay('bepusdt');
-                setOpen(true);
-              }}
-            >
-              {chain.name}
-            </Button>
-          ))}
-        </div>
       </Modal>
 
       {/* 主布局区域 */}

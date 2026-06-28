@@ -29,10 +29,18 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { DEFAULT_DISCOUNT_RATE } from '../../constants'
-import { formatCurrency, getPaymentIcon } from '../../lib'
-import type { PaymentMethod } from '../../types'
+import { formatCurrency, getPaymentIcon, isBepusdtPayment } from '../../lib'
+import type { BepusdtChain, PaymentMethod } from '../../types'
 
 interface PaymentConfirmDialogProps {
   open: boolean
@@ -46,6 +54,9 @@ interface PaymentConfirmDialogProps {
   processing: boolean
   discountRate?: number
   usdExchangeRate?: number
+  bepusdtChains?: BepusdtChain[]
+  selectedBepusdtTradeType?: string
+  onSelectBepusdtTradeType?: (tradeType: string) => void
 }
 
 export function PaymentConfirmDialog({
@@ -60,8 +71,15 @@ export function PaymentConfirmDialog({
   processing,
   discountRate = DEFAULT_DISCOUNT_RATE,
   usdExchangeRate = 1,
+  bepusdtChains = [],
+  selectedBepusdtTradeType = '',
+  onSelectBepusdtTradeType,
 }: PaymentConfirmDialogProps) {
   const { t } = useTranslation()
+  const isBepusdt = isBepusdtPayment(paymentMethod?.type || '')
+  const selectedBepusdtChain = bepusdtChains.find(
+    (chain) => chain.trade_type === selectedBepusdtTradeType
+  )
   const hasDiscount = discountRate > 0 && discountRate < 1 && paymentAmount > 0
   const originalAmount = hasDiscount ? paymentAmount / discountRate : 0
   const discountAmount = hasDiscount ? originalAmount - paymentAmount : 0
@@ -120,6 +138,40 @@ export function PaymentConfirmDialog({
                   {formatCurrency(discountAmount)}
                 </span>
               </div>
+            </div>
+          )}
+
+          {isBepusdt && bepusdtChains.length > 0 && (
+            <div className='flex items-center justify-between gap-3'>
+              <span className='text-muted-foreground text-sm'>
+                {t('Network')}
+              </span>
+              <Select
+                value={selectedBepusdtTradeType}
+                onValueChange={(value) => {
+                  if (value) {
+                    onSelectBepusdtTradeType?.(value)
+                  }
+                }}
+              >
+                <SelectTrigger className='h-8 min-w-36'>
+                  <SelectValue placeholder={t('Select USDT Network')}>
+                    {selectedBepusdtChain?.name || selectedBepusdtTradeType}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent alignItemWithTrigger={false}>
+                  <SelectGroup>
+                    {bepusdtChains.map((chain) => (
+                      <SelectItem
+                        key={chain.trade_type}
+                        value={chain.trade_type}
+                      >
+                        {chain.name}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </div>
           )}
 

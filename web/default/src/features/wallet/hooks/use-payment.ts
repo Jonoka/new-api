@@ -21,6 +21,7 @@ import i18next from 'i18next'
 import { toast } from 'sonner'
 import {
   calculateAmount,
+  calculateBepusdtAmount,
   calculateOkpayAmount,
   calculateStripeAmount,
   calculateWaffoPancakeAmount,
@@ -30,6 +31,7 @@ import {
 } from '../api'
 import {
   isStripePayment,
+  isBepusdtPayment,
   isOkpayPayment,
   isWaffoPancakePayment,
   submitPaymentForm,
@@ -53,6 +55,7 @@ export function usePayment() {
 
         const isStripe = isStripePayment(paymentType)
         const isPancake = isWaffoPancakePayment(paymentType)
+        const isBepusdt = isBepusdtPayment(paymentType)
         const isOkpay = isOkpayPayment(paymentType)
         const response = isStripe
           ? await calculateStripeAmount({
@@ -64,6 +67,11 @@ export function usePayment() {
                 amount: topupAmount,
                 promo_code: promoCode,
               })
+            : isBepusdt
+              ? await calculateBepusdtAmount({
+                  amount: topupAmount,
+                  promo_code: promoCode,
+                })
             : isOkpay
               ? await calculateOkpayAmount({
                   amount: topupAmount,
