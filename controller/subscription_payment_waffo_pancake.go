@@ -41,6 +41,11 @@ func SubscriptionRequestWaffoPancakePay(c *gin.Context) {
 		common.ApiErrorMsg(c, "套餐未启用")
 		return
 	}
+	planPriceUSD, err := model.SubscriptionPlanPriceUSD(plan)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 
 	userId := c.GetInt("id")
 	user, err := model.GetUserById(userId, false)
@@ -68,12 +73,12 @@ func SubscriptionRequestWaffoPancakePay(c *gin.Context) {
 	// WAFFO_PANCAKE_SUB- prefix (vs. wallet's WAFFO_PANCAKE-) drives webhook
 	// dispatch in WaffoPancakeWebhook.
 	tradeNo := fmt.Sprintf("WAFFO_PANCAKE_SUB-%d-%d-%s", userId, time.Now().UnixMilli(), randstr.String(6))
-	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetSubscription, plan.Id, plan.PriceAmount)
+	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetSubscription, plan.Id, planPriceUSD)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	payMoney := plan.PriceAmount
+	payMoney := planPriceUSD
 	if discount != nil {
 		payMoney = discount.PaidAmount
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/cachex"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/samber/hot"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
@@ -22,6 +23,11 @@ const (
 	SubscriptionDurationDay    = "day"
 	SubscriptionDurationHour   = "hour"
 	SubscriptionDurationCustom = "custom"
+)
+
+const (
+	SubscriptionCurrencyUSD = "USD"
+	SubscriptionCurrencyCNY = "CNY"
 )
 
 // Subscription quota reset period
@@ -185,12 +191,71 @@ func (p *SubscriptionPlan) BeforeCreate(tx *gorm.DB) error {
 	now := common.GetTimestamp()
 	p.CreatedAt = now
 	p.UpdatedAt = now
+	p.Currency = NormalizeSubscriptionPlanCurrency(p.Currency)
 	return nil
 }
 
 func (p *SubscriptionPlan) BeforeUpdate(tx *gorm.DB) error {
 	p.UpdatedAt = common.GetTimestamp()
+	p.Currency = NormalizeSubscriptionPlanCurrency(p.Currency)
 	return nil
+}
+
+func NormalizeSubscriptionPlanCurrency(currency string) string {
+	currency = strings.ToUpper(strings.TrimSpace(currency))
+	switch currency {
+	case "", SubscriptionCurrencyUSD:
+		return SubscriptionCurrencyUSD
+	case "RMB", "CNY", "CN¥", "¥":
+		return SubscriptionCurrencyCNY
+	default:
+		return currency
+	}
+}
+
+func ValidateSubscriptionPlanCurrency(currency string) error {
+	switch NormalizeSubscriptionPlanCurrency(currency) {
+	case SubscriptionCurrencyUSD, SubscriptionCurrencyCNY:
+		return nil
+	default:
+		return errors.New("不支持的套餐币种")
+	}
+}
+
+func SubscriptionPlanPriceUSD(plan *SubscriptionPlan) (float64, error) {
+	if plan == nil {
+		return 0, errors.New("subscription plan is nil")
+	}
+	if plan.PriceAmount < 0 {
+		return 0, errors.New("套餐价格不能为负数")
+	}
+	price := decimal.NewFromFloat(plan.PriceAmount)
+	switch NormalizeSubscriptionPlanCurrency(plan.Currency) {
+	case SubscriptionCurrencyUSD:
+		return price.Round(6).InexactFloat64(), nil
+	case SubscriptionCurrencyCNY:
+		if operation_setting.Price <= 0 {
+			return 0, errors.New("人民币汇率配置错误")
+		}
+		return price.Div(decimal.NewFromFloat(operation_setting.Price)).Round(6).InexactFloat64(), nil
+	default:
+		return 0, errors.New("不支持的套餐币种")
+	}
+}
+
+func SubscriptionPlanCurrencyAmountFromUSD(amountUSD float64, currency string) (float64, error) {
+	amount := decimal.NewFromFloat(amountUSD)
+	switch NormalizeSubscriptionPlanCurrency(currency) {
+	case SubscriptionCurrencyUSD:
+		return amount.Round(2).InexactFloat64(), nil
+	case SubscriptionCurrencyCNY:
+		if operation_setting.Price <= 0 {
+			return 0, errors.New("人民币汇率配置错误")
+		}
+		return amount.Mul(decimal.NewFromFloat(operation_setting.Price)).Round(2).InexactFloat64(), nil
+	default:
+		return 0, errors.New("不支持的套餐币种")
+	}
 }
 
 // Subscription order (payment -> webhook -> create UserSubscription)
@@ -1012,11 +1077,15 @@ func PurchaseSubscriptionWithBalance(userId int, planId int, promoCode string) e
 			return errors.New("套餐价格不能为负数")
 		}
 
-		requiredQuota, err := calcSubscriptionBalanceQuota(plan.PriceAmount)
+		planPriceUSD, err := SubscriptionPlanPriceUSD(plan)
 		if err != nil {
 			return err
 		}
-		discount, err := calculatePromoCodeDiscountTx(tx, promoCode, PromoCodeTargetSubscription, plan.Id, plan.PriceAmount)
+		requiredQuota, err := calcSubscriptionBalanceQuota(planPriceUSD)
+		if err != nil {
+			return err
+		}
+		discount, err := calculatePromoCodeDiscountTx(tx, promoCode, PromoCodeTargetSubscription, plan.Id, planPriceUSD)
 		if err != nil {
 			return err
 		}
@@ -1047,7 +1116,7 @@ func PurchaseSubscriptionWithBalance(userId int, planId int, promoCode string) e
 		order := &SubscriptionOrder{
 			UserId:          userId,
 			PlanId:          plan.Id,
-			Money:           plan.PriceAmount,
+			Money:           planPriceUSD,
 			TradeNo:         tradeNo,
 			PaymentMethod:   PaymentMethodBalance,
 			PaymentProvider: PaymentProviderBalance,
@@ -1055,6 +1124,9 @@ func PurchaseSubscriptionWithBalance(userId int, planId int, promoCode string) e
 			CreateTime:      now,
 			CompleteTime:    now,
 			ProviderPayload: fmt.Sprintf("charged_quota=%d", requiredQuota),
+		}
+		if discount == nil {
+			order.AffiliateSourceQuota = requiredQuota
 		}
 		ApplyPromoCodeResultToSubscriptionOrder(order, discount)
 		if err := tx.Create(order).Error; err != nil {

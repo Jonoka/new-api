@@ -56,6 +56,11 @@ func SubscriptionRequestCreemPay(c *gin.Context) {
 		common.ApiErrorMsg(c, "套餐未启用")
 		return
 	}
+	planPriceUSD, err := model.SubscriptionPlanPriceUSD(plan)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	if plan.CreemProductId == "" {
 		common.ApiErrorMsg(c, "该套餐未配置 CreemProductId")
 		return
@@ -90,7 +95,7 @@ func SubscriptionRequestCreemPay(c *gin.Context) {
 
 	reference := "sub-creem-ref-" + randstr.String(6)
 	referenceId := "sub_ref_" + common.Sha1([]byte(reference+time.Now().String()+user.Username))
-	payMoney := plan.PriceAmount
+	payMoney := planPriceUSD
 	if payMoney < 0.01 {
 		common.ApiErrorMsg(c, "套餐金额过低")
 		return
@@ -125,7 +130,7 @@ func SubscriptionRequestCreemPay(c *gin.Context) {
 	product := &CreemProduct{
 		ProductId: plan.CreemProductId,
 		Name:      plan.Title,
-		Price:     plan.PriceAmount,
+		Price:     payMoney,
 		Currency:  currency,
 		Quota:     0,
 	}

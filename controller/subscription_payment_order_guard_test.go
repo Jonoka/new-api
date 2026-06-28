@@ -434,3 +434,155 @@ func TestSubscriptionRequestAmount_AppliesPromoCodeDiscount(t *testing.T) {
 	require.NoError(t, err)
 	assert.InDelta(t, 40, paid, 0.000001)
 }
+
+func TestAdminCreateSubscriptionPlan_PreservesConfiguredCurrency(t *testing.T) {
+	db := setupSubscriptionPaymentControllerTestDB(t)
+	withConfirmedPaymentCompliance(t)
+
+	ctx, recorder := newSubscriptionPaymentContext(t, AdminUpsertSubscriptionPlanRequest{
+		Plan: model.SubscriptionPlan{
+			Title:         "人民币套餐",
+			PriceAmount:   188,
+			Currency:      "cny",
+			DurationUnit:  model.SubscriptionDurationMonth,
+			DurationValue: 1,
+			Enabled:       true,
+			TotalAmount:   1000,
+		},
+	}, 901)
+	AdminCreateSubscriptionPlan(ctx)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	var plan model.SubscriptionPlan
+	require.NoError(t, db.Where("title = ?", "人民币套餐").First(&plan).Error)
+	assert.Equal(t, model.SubscriptionCurrencyCNY, plan.Currency)
+}
+
+func TestSubscriptionRequestAmount_UsesPaymentSpecificRatesForCnyPlan(t *testing.T) {
+	db := setupSubscriptionPaymentControllerTestDB(t)
+	withConfirmedPaymentCompliance(t)
+	plan := seedSubscriptionPaymentUserAndPlan(t, db, func(plan *model.SubscriptionPlan) {
+		plan.PriceAmount = 188
+		plan.Currency = model.SubscriptionCurrencyCNY
+	})
+
+	originalPrice := operation_setting.Price
+	originalBepusdtUnitPrice := setting.BepusdtUnitPrice
+	originalPayMethods := operation_setting.PayMethods
+	operation_setting.Price = 7.3
+	setting.BepusdtUnitPrice = 7.2
+	operation_setting.PayMethods = []map[string]string{{"type": "alipay", "name": "支付宝"}}
+	t.Cleanup(func() {
+		operation_setting.Price = originalPrice
+		setting.BepusdtUnitPrice = originalBepusdtUnitPrice
+		operation_setting.PayMethods = originalPayMethods
+	})
+
+	t.Run("epay keeps configured CNY plan price", func(t *testing.T) {
+		ctx, recorder := newSubscriptionPaymentContext(t, SubscriptionAmountRequest{
+			PlanId:        plan.Id,
+			PaymentMethod: "alipay",
+		}, 901)
+		SubscriptionRequestAmount(ctx)
+
+		assert.Equal(t, http.StatusOK, recorder.Code)
+		var response struct {
+			Message   string  `json:"message"`
+			Data      string  `json:"data"`
+			Amount    float64 `json:"amount"`
+			Currency  string  `json:"currency"`
+			AmountUSD float64 `json:"amount_usd"`
+		}
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+		assert.Equal(t, "success", response.Message)
+		assert.Equal(t, model.SubscriptionCurrencyCNY, response.Currency)
+		assert.Equal(t, "188.00", response.Data)
+		assert.InDelta(t, 188, response.Amount, 0.000001)
+		assert.InDelta(t, 188/7.3, response.AmountUSD, 0.000001)
+	})
+
+	t.Run("bepusdt uses independent unit price", func(t *testing.T) {
+		ctx, recorder := newSubscriptionPaymentContext(t, SubscriptionAmountRequest{
+			PlanId:        plan.Id,
+			PaymentMethod: model.PaymentMethodBepusdt,
+		}, 901)
+		SubscriptionRequestAmount(ctx)
+
+		assert.Equal(t, http.StatusOK, recorder.Code)
+		var response struct {
+			Message  string  `json:"message"`
+			Data     string  `json:"data"`
+			Amount   float64 `json:"amount"`
+			Currency string  `json:"currency"`
+		}
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+		assert.Equal(t, "success", response.Message)
+		assert.Equal(t, model.SubscriptionCurrencyCNY, response.Currency)
+		assert.Equal(t, "185.42", response.Data)
+		assert.InDelta(t, 185.42, response.Amount, 0.000001)
+	})
+}
+
+func TestPurchaseSubscriptionWithBalance_UsesCnyPlanAsUsdBase(t *testing.T) {
+	db := setupSubscriptionPaymentControllerTestDB(t)
+	plan := seedSubscriptionPaymentUserAndPlan(t, db, func(plan *model.SubscriptionPlan) {
+		plan.PriceAmount = 73
+		plan.Currency = model.SubscriptionCurrencyCNY
+	})
+	require.NoError(t, db.Model(&model.User{}).Where("id = ?", 901).Update("quota", int(10*common.QuotaPerUnit)).Error)
+
+	originalPrice := operation_setting.Price
+	operation_setting.Price = 7.3
+	t.Cleanup(func() {
+		operation_setting.Price = originalPrice
+	})
+
+	require.NoError(t, model.PurchaseSubscriptionWithBalance(901, plan.Id, ""))
+
+	var user model.User
+	require.NoError(t, db.First(&user, 901).Error)
+	assert.Equal(t, 0, user.Quota)
+
+	var order model.SubscriptionOrder
+	require.NoError(t, db.Where("payment_provider = ?", model.PaymentProviderBalance).First(&order).Error)
+	assert.InDelta(t, 10, order.Money, 0.000001)
+	assert.Equal(t, int(10*common.QuotaPerUnit), order.AffiliateSourceQuota)
+}
+
+func TestBepusdtWebhookCompletesSubscriptionOrder(t *testing.T) {
+	db := setupSubscriptionPaymentControllerTestDB(t)
+	plan := seedSubscriptionPaymentUserAndPlan(t, db, nil)
+	order := &model.SubscriptionOrder{
+		UserId:          901,
+		PlanId:          plan.Id,
+		Money:           19.99,
+		TradeNo:         "BEPUSDT_SUB_TEST",
+		PaymentMethod:   model.PaymentMethodBepusdt,
+		PaymentProvider: model.PaymentProviderBepusdt,
+		CreateTime:      common.GetTimestamp(),
+		Status:          common.TopUpStatusPending,
+	}
+	require.NoError(t, order.Insert())
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/bepusdt/notify", nil)
+
+	handleBepusdtPaymentSuccess(ctx, &bepusdtNotifyPayload{
+		OrderId:      order.TradeNo,
+		TradeId:      "trade_123",
+		Status:       2,
+		ActualAmount: "2.77",
+	})
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "ok", recorder.Body.String())
+
+	var savedOrder model.SubscriptionOrder
+	require.NoError(t, db.Where("trade_no = ?", order.TradeNo).First(&savedOrder).Error)
+	assert.Equal(t, common.TopUpStatusSuccess, savedOrder.Status)
+
+	var subCount int64
+	require.NoError(t, db.Model(&model.UserSubscription{}).Where("user_id = ? AND plan_id = ?", 901, plan.Id).Count(&subCount).Error)
+	assert.EqualValues(t, 1, subCount)
+}

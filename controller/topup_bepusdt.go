@@ -3,6 +3,7 @@ package controller
 import (
 	"bytes"
 	"crypto/md5"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -32,6 +33,12 @@ type BepusdtPayRequest struct {
 // BepusdtAmountRequest 金额计算请求
 type BepusdtAmountRequest struct {
 	Amount    int64  `json:"amount"`
+	PromoCode string `json:"promo_code"`
+}
+
+type SubscriptionBepusdtPayRequest struct {
+	PlanId    int    `json:"plan_id"`
+	TradeType string `json:"trade_type"`
 	PromoCode string `json:"promo_code"`
 }
 
@@ -153,6 +160,13 @@ func getBepusdtPayMoney(amount int64, group string) float64 {
 
 	payMoney := dAmount.Mul(dUnitPrice).Mul(dTopupGroupRatio).Mul(dDiscount)
 	return payMoney.InexactFloat64()
+}
+
+func getBepusdtPayMoneyFromUSD(amount float64) float64 {
+	return decimal.NewFromFloat(amount).
+		Mul(decimal.NewFromFloat(setting.BepusdtUnitPrice)).
+		Round(2).
+		InexactFloat64()
 }
 
 // getBepusdtMinTopup 获取最低充值额度
@@ -320,9 +334,140 @@ func RequestBepusdtPay(c *gin.Context) {
 	})
 }
 
+func SubscriptionRequestBepusdtPay(c *gin.Context) {
+	if !requirePaymentCompliance(c) {
+		return
+	}
+
+	var req SubscriptionBepusdtPayRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.PlanId <= 0 {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "参数错误"})
+		return
+	}
+	if req.TradeType == "" {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "请选择支付链"})
+		return
+	}
+	if !isValidBepusdtTradeType(req.TradeType) {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "不支持的支付链"})
+		return
+	}
+
+	plan, err := model.GetSubscriptionPlanById(req.PlanId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if !plan.Enabled {
+		common.ApiErrorMsg(c, "套餐未启用")
+		return
+	}
+	planPriceUSD, err := model.SubscriptionPlanPriceUSD(plan)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if planPriceUSD < 0.01 {
+		common.ApiErrorMsg(c, "套餐金额过低")
+		return
+	}
+
+	userId := c.GetInt("id")
+	if plan.MaxPurchasePerUser > 0 {
+		count, err := model.CountUserSubscriptionsByPlan(userId, plan.Id)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		if count >= int64(plan.MaxPurchasePerUser) {
+			common.ApiErrorMsg(c, "已达到该套餐购买上限")
+			return
+		}
+	}
+
+	tradeNo := fmt.Sprintf("BEPUSDT_SUBUSR%dNO%s%d", userId, common.GetRandomString(6), time.Now().Unix())
+	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetSubscription, plan.Id, planPriceUSD)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	paidUSD := planPriceUSD
+	if discount != nil {
+		paidUSD = discount.PaidAmount
+	}
+	if paidUSD < 0 {
+		common.ApiErrorMsg(c, "套餐金额过低")
+		return
+	}
+
+	payMoney := getBepusdtPayMoneyFromUSD(paidUSD)
+	bepusdtDiscount := convertSubscriptionDiscountToBepusdtMoney(discount)
+	order := &model.SubscriptionOrder{
+		UserId:          userId,
+		PlanId:          plan.Id,
+		Money:           payMoney,
+		TradeNo:         tradeNo,
+		PaymentMethod:   model.PaymentMethodBepusdt,
+		PaymentProvider: model.PaymentProviderBepusdt,
+		CreateTime:      time.Now().Unix(),
+		Status:          common.TopUpStatusPending,
+	}
+	if discount == nil {
+		order.AffiliateSourceQuota = subscriptionPaidQuotaFromUSD(paidUSD)
+	}
+	model.ApplyPromoCodeResultToSubscriptionOrder(order, bepusdtDiscount)
+	if err := order.Insert(); err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Bepusdt 订阅订单创建失败 user_id=%d plan_id=%d trade_no=%s error=%q", userId, plan.Id, tradeNo, err.Error()))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "创建订单失败"})
+		return
+	}
+
+	if payMoney < 0.01 {
+		if err := model.CompleteFreeSubscriptionOrder(tradeNo, model.PaymentProviderBepusdt); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"message":   "success",
+			"completed": true,
+			"data": gin.H{
+				"completed": true,
+				"trade_no":  tradeNo,
+				"discount":  discount,
+			},
+		})
+		return
+	}
+
+	callBackAddress := service.GetCallbackAddress()
+	notifyUrl := callBackAddress + "/api/bepusdt/notify"
+	redirectUrl := paymentReturnPath("/console/topup")
+	paymentUrl, err := createBepusdtTransaction(c, tradeNo, payMoney, req.TradeType, notifyUrl, redirectUrl, fmt.Sprintf("SUB:%s", plan.Title))
+	if err != nil {
+		_ = model.ExpireSubscriptionOrder(tradeNo, model.PaymentProviderBepusdt)
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Bepusdt 订阅拉起支付失败 user_id=%d plan_id=%d trade_no=%s trade_type=%s money=%.2f error=%q", userId, plan.Id, tradeNo, req.TradeType, payMoney, err.Error()))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": fmt.Sprintf("拉起支付失败: %s", err.Error())})
+		return
+	}
+
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Bepusdt 订阅订单创建成功 user_id=%d plan_id=%d trade_no=%s trade_type=%s money=%.2f CNY", userId, plan.Id, tradeNo, req.TradeType, payMoney))
+	c.JSON(http.StatusOK, gin.H{
+		"message": "success",
+		"data": gin.H{
+			"payment_url": paymentUrl,
+			"trade_no":    tradeNo,
+			"discount":    discount,
+		},
+	})
+}
+
 // createBepusdtTransaction 调用 bepusdt API 创建交易订单
-func createBepusdtTransaction(c *gin.Context, orderId string, amountCNY float64, tradeType string, notifyUrl string, redirectUrl string) (string, error) {
+func createBepusdtTransaction(c *gin.Context, orderId string, amountCNY float64, tradeType string, notifyUrl string, redirectUrl string, names ...string) (string, error) {
 	apiUrl := strings.TrimRight(setting.BepusdtApiUrl, "/") + "/api/v1/order/create-transaction"
+	name := fmt.Sprintf("TopUp-%s", orderId)
+	if len(names) > 0 && strings.TrimSpace(names[0]) != "" {
+		name = strings.TrimSpace(names[0])
+	}
 
 	// 签名用字符串 map（amount 格式必须与 JSON body 中的数字表示一致）
 	amountStr := strconv.FormatFloat(amountCNY, 'f', -1, 64)
@@ -334,7 +479,7 @@ func createBepusdtTransaction(c *gin.Context, orderId string, amountCNY float64,
 		"trade_type":   tradeType,
 		"notify_url":   notifyUrl,
 		"redirect_url": redirectUrl,
-		"name":         fmt.Sprintf("TopUp-%s", orderId),
+		"name":         name,
 		"timeout":      timeoutStr,
 	}
 	params["signature"] = generateBepusdtSignature(params, setting.BepusdtAuthToken)
@@ -347,7 +492,7 @@ func createBepusdtTransaction(c *gin.Context, orderId string, amountCNY float64,
 		"trade_type":   tradeType,
 		"notify_url":   notifyUrl,
 		"redirect_url": redirectUrl,
-		"name":         fmt.Sprintf("TopUp-%s", orderId),
+		"name":         name,
 		"timeout":      setting.BepusdtTimeout,
 		"signature":    params["signature"],
 	}
@@ -446,7 +591,9 @@ func BepusdtNotify(c *gin.Context) {
 		// 订单过期
 		logger.LogInfo(c.Request.Context(), fmt.Sprintf("Bepusdt 订单已过期 order_id=%s trade_id=%s", payload.OrderId, payload.TradeId))
 		if payload.OrderId != "" {
-			_ = model.UpdatePendingTopUpStatus(payload.OrderId, model.PaymentProviderBepusdt, common.TopUpStatusExpired)
+			if err := model.UpdatePendingTopUpStatus(payload.OrderId, model.PaymentProviderBepusdt, common.TopUpStatusExpired); err != nil {
+				_ = model.ExpireSubscriptionOrder(payload.OrderId, model.PaymentProviderBepusdt)
+			}
 		}
 		_, _ = c.Writer.Write([]byte("ok"))
 	default:
@@ -469,7 +616,18 @@ func handleBepusdtPaymentSuccess(c *gin.Context, payload *bepusdtNotifyPayload) 
 
 	topUp := model.GetTopUpByTradeNo(tradeNo)
 	if topUp == nil {
-		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Bepusdt 充值订单不存在 trade_no=%s trade_id=%s", tradeNo, payload.TradeId))
+		err := model.CompleteSubscriptionOrder(tradeNo, common.GetJsonString(payload), model.PaymentProviderBepusdt, model.PaymentMethodBepusdt)
+		if err == nil {
+			logger.LogInfo(c.Request.Context(), fmt.Sprintf("Bepusdt USDT 订阅购买成功 trade_no=%s trade_id=%s actual_amount=%v block_tx=%s client_ip=%s", tradeNo, payload.TradeId, payload.ActualAmount, payload.BlockTransactionId, c.ClientIP()))
+			_, _ = c.Writer.Write([]byte("ok"))
+			return
+		}
+		if !errors.Is(err, model.ErrSubscriptionOrderNotFound) {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("Bepusdt 订阅处理失败 trade_no=%s trade_id=%s client_ip=%s error=%q", tradeNo, payload.TradeId, c.ClientIP(), err.Error()))
+			c.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Bepusdt 充值/订阅订单不存在 trade_no=%s trade_id=%s", tradeNo, payload.TradeId))
 		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}

@@ -42,7 +42,12 @@ func SubscriptionRequestEpay(c *gin.Context) {
 		common.ApiErrorMsg(c, "套餐未启用")
 		return
 	}
-	if plan.PriceAmount < 0.01 {
+	planPriceUSD, err := model.SubscriptionPlanPriceUSD(plan)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if planPriceUSD < 0.01 {
 		common.ApiErrorMsg(c, "套餐金额过低")
 		return
 	}
@@ -67,12 +72,12 @@ func SubscriptionRequestEpay(c *gin.Context) {
 	tradeNo := fmt.Sprintf("%s%d", common.GetRandomString(6), time.Now().Unix())
 	tradeNo = fmt.Sprintf("SUBUSR%dNO%s", userId, tradeNo)
 
-	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetSubscription, plan.Id, plan.PriceAmount)
+	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetSubscription, plan.Id, planPriceUSD)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	basePayMoney := plan.PriceAmount
+	basePayMoney := planPriceUSD
 	if discount != nil {
 		basePayMoney = discount.PaidAmount
 	}
@@ -159,16 +164,51 @@ func SubscriptionRequestEpay(c *gin.Context) {
 }
 
 func convertSubscriptionDiscountToEpayMoney(discount *model.PromoCodeDiscountResult) *model.PromoCodeDiscountResult {
+	return convertSubscriptionDiscountAmount(discount, getEpayPayMoneyFromUSD)
+}
+
+func convertSubscriptionDiscountToBepusdtMoney(discount *model.PromoCodeDiscountResult) *model.PromoCodeDiscountResult {
+	return convertSubscriptionDiscountAmount(discount, getBepusdtPayMoneyFromUSD)
+}
+
+func convertSubscriptionDiscountToPlanCurrency(discount *model.PromoCodeDiscountResult, currency string) (*model.PromoCodeDiscountResult, error) {
 	if discount == nil {
-		return nil
+		return nil, nil
+	}
+	converted, err := convertSubscriptionDiscountAmountWithError(discount, func(amount float64) (float64, error) {
+		return model.SubscriptionPlanCurrencyAmountFromUSD(amount, currency)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return converted, nil
+}
+
+func convertSubscriptionDiscountAmount(discount *model.PromoCodeDiscountResult, convert func(float64) float64) *model.PromoCodeDiscountResult {
+	converted, _ := convertSubscriptionDiscountAmountWithError(discount, func(amount float64) (float64, error) {
+		return convert(amount), nil
+	})
+	return converted
+}
+
+func convertSubscriptionDiscountAmountWithError(discount *model.PromoCodeDiscountResult, convert func(float64) (float64, error)) (*model.PromoCodeDiscountResult, error) {
+	if discount == nil {
+		return nil, nil
 	}
 	converted := *discount
-	converted.OriginalAmount = getEpayPayMoneyFromUSD(discount.OriginalAmount)
-	converted.PaidAmount = getEpayPayMoneyFromUSD(discount.PaidAmount)
-	converted.DiscountAmount = getEpayPayMoneyFromUSD(discount.DiscountAmount)
-	// 返佣按套餐美元价折后金额计算，订单金额按易支付实收金额记录。
+	var err error
+	if converted.OriginalAmount, err = convert(discount.OriginalAmount); err != nil {
+		return nil, err
+	}
+	if converted.PaidAmount, err = convert(discount.PaidAmount); err != nil {
+		return nil, err
+	}
+	if converted.DiscountAmount, err = convert(discount.DiscountAmount); err != nil {
+		return nil, err
+	}
+	// 返佣按套餐美元价折后金额计算，订单金额按实际网关实收金额记录。
 	converted.ActualPaidQuota = discount.ActualPaidQuota
-	return &converted
+	return &converted, nil
 }
 
 func subscriptionPaidQuotaFromUSD(amount float64) int {

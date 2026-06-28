@@ -42,6 +42,11 @@ func SubscriptionRequestStripePay(c *gin.Context) {
 		common.ApiErrorMsg(c, "套餐未启用")
 		return
 	}
+	planPriceUSD, err := model.SubscriptionPlanPriceUSD(plan)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	if plan.StripePriceId == "" && strings.TrimSpace(req.PromoCode) == "" {
 		common.ApiErrorMsg(c, "该套餐未配置 StripePriceId")
 		return
@@ -73,12 +78,12 @@ func SubscriptionRequestStripePay(c *gin.Context) {
 	reference := fmt.Sprintf("sub-stripe-ref-%d-%d-%s", user.Id, time.Now().UnixMilli(), randstr.String(4))
 	referenceId := "sub_ref_" + common.Sha1([]byte(reference))
 
-	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetSubscription, plan.Id, plan.PriceAmount)
+	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetSubscription, plan.Id, planPriceUSD)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	payMoney := plan.PriceAmount
+	payMoney := planPriceUSD
 	if discount != nil {
 		payMoney = discount.PaidAmount
 	}

@@ -144,6 +144,13 @@ export async function paySubscriptionBalance(
   return res.data
 }
 
+export async function paySubscriptionBepusdt(
+  data: SubscriptionPayRequest & { trade_type: string }
+): Promise<SubscriptionPayResponse> {
+  const res = await api.post('/api/subscription/bepusdt/pay', data)
+  return res.data
+}
+
 // Mints a Pancake OnetimeProduct (see controller for the OnetimeProduct vs
 // SubscriptionProduct rationale) using persisted creds + StoreID.
 export async function createWaffoPancakeSubscriptionProduct(data: {

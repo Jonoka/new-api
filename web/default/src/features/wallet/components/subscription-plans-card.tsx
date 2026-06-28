@@ -52,7 +52,12 @@ import {
   updateBillingPreference,
 } from '@/features/subscriptions/api'
 import { SubscriptionPurchaseDialog } from '@/features/subscriptions/components/dialogs/subscription-purchase-dialog'
-import { formatDuration, formatResetPeriod } from '@/features/subscriptions/lib'
+import {
+  formatDuration,
+  formatPlanCurrencyAmount,
+  formatPlanQuotaAllowance,
+  formatResetPeriod,
+} from '@/features/subscriptions/lib'
 import type {
   PlanRecord,
   UserSubscriptionRecord,
@@ -67,9 +72,15 @@ interface SubscriptionPlansCardProps {
 }
 
 function getEpayMethods(payMethods: PaymentMethod[] = []): PaymentMethod[] {
-  return payMethods.filter(
-    (m) => m?.type && m.type !== 'stripe' && m.type !== 'creem'
-  )
+  const nonEpayTypes = new Set([
+    'stripe',
+    'creem',
+    'bepusdt',
+    'okpay',
+    'waffo',
+    'waffo_pancake',
+  ])
+  return payMethods.filter((m) => m?.type && !nonEpayTypes.has(m.type))
 }
 
 function getBillingPreferenceLabel(
@@ -116,7 +127,12 @@ export function SubscriptionPlansCard({
   const enableStripe = !!topupInfo?.enable_stripe_topup
   const enableCreem = !!topupInfo?.enable_creem_topup
   const enableWaffoPancake = !!topupInfo?.enable_waffo_pancake_topup
+  const enableBepusdt = !!topupInfo?.enable_bepusdt_topup
   const enableOnlineTopUp = !!topupInfo?.enable_online_topup
+  const bepusdtChains = useMemo(
+    () => topupInfo?.bepusdt_chains || [],
+    [topupInfo?.bepusdt_chains]
+  )
   const epayMethods = useMemo(
     () => getEpayMethods(topupInfo?.pay_methods),
     [topupInfo?.pay_methods]
@@ -515,21 +531,22 @@ export function SubscriptionPlansCard({
             {plans.map((p, index) => {
               const plan = p?.plan
               if (!plan) return null
-              const totalAmount = Number(plan.total_amount || 0)
-              const price = Number(plan.price_amount || 0).toFixed(2)
+              const price = formatPlanCurrencyAmount(
+                Number(plan.price_amount || 0),
+                plan.currency
+              )
               const isPopular = index === 0 && plans.length > 1
               const limit = Number(plan.max_purchase_per_user || 0)
               const count = activePlanPurchaseCountMap.get(plan.id) || 0
               const reached = limit > 0 && count >= limit
+              const quotaBenefitLines = formatPlanQuotaAllowance(plan, t)
 
               const benefits = [
                 `${t('Validity Period')}: ${formatDuration(plan, t)}`,
                 formatResetPeriod(plan, t) !== t('No Reset')
                   ? `${t('Quota Reset')}: ${formatResetPeriod(plan, t)}`
                   : null,
-                totalAmount > 0
-                  ? `${t('Total Quota')}: ${formatQuota(totalAmount)}`
-                  : `${t('Total Quota')}: ${t('Unlimited')}`,
+                ...quotaBenefitLines,
                 limit > 0 ? `${t('Purchase Limit')}: ${limit}` : null,
                 plan.upgrade_group
                   ? `${t('Upgrade Group')}: ${plan.upgrade_group}`
@@ -570,7 +587,7 @@ export function SubscriptionPlansCard({
 
                     <div className='py-2'>
                       <span className='text-primary text-2xl font-bold'>
-                        ${price}
+                        {price}
                       </span>
                     </div>
 
@@ -635,6 +652,8 @@ export function SubscriptionPlansCard({
         enableStripe={enableStripe}
         enableCreem={enableCreem}
         enableWaffoPancake={enableWaffoPancake}
+        enableBepusdt={enableBepusdt}
+        bepusdtChains={bepusdtChains}
         enableOnlineTopUp={enableOnlineTopUp}
         epayMethods={epayMethods}
         userQuota={userQuota}

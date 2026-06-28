@@ -29,8 +29,9 @@ type SubscriptionBalancePayRequest struct {
 }
 
 type SubscriptionAmountRequest struct {
-	PlanId    int    `json:"plan_id"`
-	PromoCode string `json:"promo_code"`
+	PlanId        int    `json:"plan_id"`
+	PromoCode     string `json:"promo_code"`
+	PaymentMethod string `json:"payment_method"`
 }
 
 // ---- User APIs ----
@@ -147,23 +148,68 @@ func SubscriptionRequestAmount(c *gin.Context) {
 		return
 	}
 
-	payMoney := plan.PriceAmount
-	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetSubscription, plan.Id, payMoney)
+	planPriceUSD, err := model.SubscriptionPlanPriceUSD(plan)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	payMoneyUSD := planPriceUSD
+	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetSubscription, plan.Id, planPriceUSD)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	if discount != nil {
-		payMoney = discount.PaidAmount
+		payMoneyUSD = discount.PaidAmount
 	}
-	if payMoney < 0 {
+	if payMoneyUSD < 0 {
 		common.ApiErrorMsg(c, "套餐金额过低")
 		return
 	}
 
-	response := gin.H{"message": "success", "data": strconv.FormatFloat(payMoney, 'f', 2, 64)}
-	if discount != nil {
-		response["discount"] = discount
+	paymentMethod := strings.ToLower(strings.TrimSpace(req.PaymentMethod))
+	displayCurrency := model.NormalizeSubscriptionPlanCurrency(plan.Currency)
+	displayAmount, err := model.SubscriptionPlanCurrencyAmountFromUSD(payMoneyUSD, displayCurrency)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	displayDiscount, err := convertSubscriptionDiscountToPlanCurrency(discount, displayCurrency)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	switch {
+	case paymentMethod == model.PaymentMethodBepusdt:
+		displayCurrency = model.SubscriptionCurrencyCNY
+		displayAmount = getBepusdtPayMoneyFromUSD(payMoneyUSD)
+		displayDiscount = convertSubscriptionDiscountToBepusdtMoney(discount)
+	case paymentMethod == model.PaymentMethodBalance:
+		displayCurrency = model.SubscriptionCurrencyUSD
+		displayAmount = payMoneyUSD
+		displayDiscount = discount
+	case paymentMethod != "":
+		if !operation_setting.ContainsPayMethod(paymentMethod) {
+			common.ApiErrorMsg(c, "支付方式不存在")
+			return
+		}
+		displayCurrency = model.SubscriptionCurrencyCNY
+		displayAmount = getEpayPayMoneyFromUSD(payMoneyUSD)
+		displayDiscount = convertSubscriptionDiscountToEpayMoney(discount)
+	}
+
+	response := gin.H{
+		"message":        "success",
+		"data":           strconv.FormatFloat(displayAmount, 'f', 2, 64),
+		"amount":         displayAmount,
+		"currency":       displayCurrency,
+		"amount_usd":     payMoneyUSD,
+		"plan_currency":  model.NormalizeSubscriptionPlanCurrency(plan.Currency),
+		"payment_method": paymentMethod,
+	}
+	if displayDiscount != nil {
+		response["discount"] = displayDiscount
 	}
 	c.JSON(http.StatusOK, response)
 }
@@ -212,10 +258,11 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 		common.ApiErrorMsg(c, "价格不能超过9999")
 		return
 	}
-	if req.Plan.Currency == "" {
-		req.Plan.Currency = "USD"
+	req.Plan.Currency = model.NormalizeSubscriptionPlanCurrency(req.Plan.Currency)
+	if err := model.ValidateSubscriptionPlanCurrency(req.Plan.Currency); err != nil {
+		common.ApiError(c, err)
+		return
 	}
-	req.Plan.Currency = "USD"
 	if req.Plan.DurationUnit == "" {
 		req.Plan.DurationUnit = model.SubscriptionDurationMonth
 	}
@@ -279,10 +326,11 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		return
 	}
 	req.Plan.Id = id
-	if req.Plan.Currency == "" {
-		req.Plan.Currency = "USD"
+	req.Plan.Currency = model.NormalizeSubscriptionPlanCurrency(req.Plan.Currency)
+	if err := model.ValidateSubscriptionPlanCurrency(req.Plan.Currency); err != nil {
+		common.ApiError(c, err)
+		return
 	}
-	req.Plan.Currency = "USD"
 	if req.Plan.DurationUnit == "" {
 		req.Plan.DurationUnit = model.SubscriptionDurationMonth
 	}
