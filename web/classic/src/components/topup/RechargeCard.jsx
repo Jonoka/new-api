@@ -74,6 +74,8 @@ const RechargeCard = ({
   renderAmount,
   amountLoading,
   payMethods,
+  enableBepusdtTopUp = false,
+  bepusdtChains = [],
   preTopUp,
   paymentLoading,
   payWay,
@@ -702,6 +704,8 @@ const RechargeCard = ({
                 loading={subscriptionLoading}
                 plans={subscriptionPlans}
                 payMethods={payMethods}
+                enableBepusdtTopUp={enableBepusdtTopUp}
+                bepusdtChains={bepusdtChains}
                 enableOnlineTopUp={enableOnlineTopUp}
                 enableStripeTopUp={enableStripeTopUp}
                 enableCreemTopUp={enableCreemTopUp}

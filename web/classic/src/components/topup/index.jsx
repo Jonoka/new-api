@@ -183,7 +183,10 @@ const TopUp = () => {
       setAmount(0);
       setAmountText('');
       setPromoDiscount(null);
-      Toast.error({ content: '错误：' + (data || fallbackError), id: 'getAmount' });
+      Toast.error({
+        content: '错误：' + (data || fallbackError),
+        id: 'getAmount',
+      });
       return false;
     }
     showError(response);
@@ -362,7 +365,9 @@ const TopUp = () => {
         });
       } else if (payWay === 'bepusdt') {
         // Bepusdt 使用已选链
-        const tradeType = bepusdtSelectedChain || (bepusdtChains[0] && bepusdtChains[0].trade_type);
+        const tradeType =
+          bepusdtSelectedChain ||
+          (bepusdtChains[0] && bepusdtChains[0].trade_type);
         if (!tradeType) {
           showError(t('请选择支付链'));
           setConfirmLoading(false);
@@ -1053,6 +1058,8 @@ const TopUp = () => {
           renderAmount={renderAmount}
           amountLoading={amountLoading}
           payMethods={confirmPayMethods}
+          enableBepusdtTopUp={enableBepusdtTopUp}
+          bepusdtChains={bepusdtChains}
           preTopUp={preTopUp}
           paymentLoading={paymentLoading}
           payWay={payWay}

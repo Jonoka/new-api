@@ -32,3 +32,22 @@ export function formatSubscriptionResetPeriod(plan, t) {
   }
   return t('不重置');
 }
+
+export function normalizeSubscriptionPlanCurrency(currency) {
+  return currency === 'CNY' ? 'CNY' : 'USD';
+}
+
+export function formatSubscriptionPlanAmount(amount, currency) {
+  const normalizedCurrency = normalizeSubscriptionPlanCurrency(currency);
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: normalizedCurrency,
+      currencyDisplay: 'narrowSymbol',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(Number(amount || 0));
+  } catch (e) {
+    return `${normalizedCurrency} ${Number(amount || 0).toFixed(2)}`;
+  }
+}

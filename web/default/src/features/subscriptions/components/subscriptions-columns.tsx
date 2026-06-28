@@ -24,7 +24,11 @@ import { DataTableColumnHeader } from '@/components/data-table'
 import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge } from '@/components/status-badge'
 import { TableId } from '@/components/table-id'
-import { formatDuration, formatResetPeriod } from '../lib'
+import {
+  formatDuration,
+  formatPlanCurrencyAmount,
+  formatResetPeriod,
+} from '../lib'
 import type { PlanRecord } from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
 
@@ -74,7 +78,10 @@ export function useSubscriptionsColumns(): ColumnDef<PlanRecord>[] {
         ),
         cell: ({ row }) => (
           <span className='font-semibold text-emerald-600'>
-            ${Number(row.original.plan.price_amount || 0).toFixed(2)}
+            {formatPlanCurrencyAmount(
+              Number(row.original.plan.price_amount || 0),
+              row.original.plan.currency
+            )}
           </span>
         ),
         size: 100,

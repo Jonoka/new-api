@@ -33,8 +33,8 @@ import { Crown, CalendarClock, Package } from 'lucide-react';
 import { SiStripe } from 'react-icons/si';
 import { IconCreditCard } from '@douyinfe/semi-icons';
 import { renderQuota } from '../../../helpers';
-import { getCurrencyConfig } from '../../../helpers/render';
 import {
+  formatSubscriptionPlanAmount,
   formatSubscriptionDuration,
   formatSubscriptionResetPeriod,
 } from '../../../helpers/subscriptionFormat';
@@ -50,6 +50,10 @@ const SubscriptionPurchaseModal = ({
   selectedEpayMethod,
   setSelectedEpayMethod,
   epayMethods = [],
+  enableBepusdtTopUp = false,
+  bepusdtChains = [],
+  selectedBepusdtTradeType,
+  setSelectedBepusdtTradeType,
   enableOnlineTopUp = false,
   enableStripeTopUp = false,
   enableCreemTopUp = false,
@@ -57,38 +61,52 @@ const SubscriptionPurchaseModal = ({
   promoCode,
   setPromoCode,
   promoDiscount,
+  amountPreview,
   amountLoading = false,
   onPromoCodeBlur,
   onPayStripe,
   onPayCreem,
+  onPayBepusdt,
   onPayEpay,
 }) => {
   const plan = selectedPlan?.plan;
   const totalAmount = Number(plan?.total_amount || 0);
-  const { symbol, rate } = getCurrencyConfig();
   const price = plan ? Number(plan.price_amount || 0) : 0;
   const hasPromoDiscount =
     promoDiscount && Number(promoDiscount.discount_amount || 0) > 0;
   const paidPrice = hasPromoDiscount
     ? Number(promoDiscount.paid_amount || 0)
     : price;
-  const convertedPrice = paidPrice * rate;
-  const displayPrice = convertedPrice.toFixed(
-    Number.isInteger(convertedPrice) ? 0 : 2,
+  const previewAmount =
+    typeof amountPreview?.amount === 'number'
+      ? amountPreview.amount
+      : Number(amountPreview?.data || Number.NaN);
+  const amountDue = Number.isFinite(previewAmount) ? previewAmount : paidPrice;
+  const amountDueCurrency = amountPreview?.currency || plan?.currency || 'USD';
+  const planPriceText = formatSubscriptionPlanAmount(price, plan?.currency);
+  const displayPrice = formatSubscriptionPlanAmount(
+    amountDue,
+    amountDueCurrency,
   );
   const originalPrice = Number(promoDiscount?.original_amount || price);
   const discountAmount = Number(promoDiscount?.discount_amount || 0);
-  const displayOriginalPrice = (originalPrice * rate).toFixed(
-    Number.isInteger(originalPrice * rate) ? 0 : 2,
+  const displayOriginalPrice = formatSubscriptionPlanAmount(
+    originalPrice,
+    amountDueCurrency,
   );
-  const displayDiscountAmount = (discountAmount * rate).toFixed(
-    Number.isInteger(discountAmount * rate) ? 0 : 2,
+  const displayDiscountAmount = formatSubscriptionPlanAmount(
+    discountAmount,
+    amountDueCurrency,
   );
   // 只有当管理员开启支付网关 AND 套餐配置了对应的支付ID时才显示
   const hasStripe = enableStripeTopUp && !!plan?.stripe_price_id;
   const hasCreem = enableCreemTopUp && !!plan?.creem_product_id;
+  const hasBepusdt =
+    enableBepusdtTopUp &&
+    Array.isArray(bepusdtChains) &&
+    bepusdtChains.length > 0;
   const hasEpay = enableOnlineTopUp && epayMethods.length > 0;
-  const hasAnyPayment = hasStripe || hasCreem || hasEpay;
+  const hasAnyPayment = hasStripe || hasCreem || hasBepusdt || hasEpay;
   const purchaseLimit = Number(purchaseLimitInfo?.limit || 0);
   const purchaseCount = Number(purchaseLimitInfo?.count || 0);
   const purchaseLimitReached =
@@ -178,6 +196,14 @@ const SubscriptionPurchaseModal = ({
               <Divider margin={8} />
               <div className='flex justify-between items-center'>
                 <Text strong className='text-slate-700 dark:text-slate-200'>
+                  {t('套餐价格')}：
+                </Text>
+                <Text className='text-slate-900 dark:text-slate-100'>
+                  {planPriceText}
+                </Text>
+              </div>
+              <div className='flex justify-between items-center'>
+                <Text strong className='text-slate-700 dark:text-slate-200'>
                   {t('应付金额')}：
                 </Text>
                 {amountLoading ? (
@@ -185,7 +211,6 @@ const SubscriptionPurchaseModal = ({
                 ) : (
                   <div className='flex items-baseline space-x-2'>
                     <Text strong className='text-xl text-purple-600'>
-                      {symbol}
                       {displayPrice}
                     </Text>
                     {hasPromoDiscount && (
@@ -203,7 +228,6 @@ const SubscriptionPurchaseModal = ({
                       {t('原价')}：
                     </Text>
                     <Text delete className='text-slate-500 dark:text-slate-400'>
-                      {symbol}
                       {displayOriginalPrice}
                     </Text>
                   </div>
@@ -212,8 +236,7 @@ const SubscriptionPurchaseModal = ({
                       {t('优惠')}：
                     </Text>
                     <Text className='text-emerald-600 dark:text-emerald-400'>
-                      - {symbol}
-                      {displayDiscountAmount}
+                      - {displayDiscountAmount}
                     </Text>
                   </div>
                 </>
@@ -277,6 +300,43 @@ const SubscriptionPurchaseModal = ({
                       Creem
                     </Button>
                   )}
+                </div>
+              )}
+
+              {/* USDT */}
+              {hasBepusdt && (
+                <div className='space-y-2'>
+                  <div className='flex gap-2'>
+                    <Select
+                      value={selectedBepusdtTradeType}
+                      onChange={setSelectedBepusdtTradeType}
+                      style={{ flex: 1 }}
+                      size='default'
+                      placeholder={t('选择支付链')}
+                      optionList={bepusdtChains.map((chain) => ({
+                        value: chain.trade_type,
+                        label: chain.name || chain.trade_type,
+                      }))}
+                      disabled={purchaseLimitReached}
+                    />
+                    <Button
+                      theme='solid'
+                      type='primary'
+                      onClick={onPayBepusdt}
+                      loading={paying}
+                      disabled={
+                        !selectedBepusdtTradeType || purchaseLimitReached
+                      }
+                    >
+                      USDT
+                    </Button>
+                  </div>
+                  <Banner
+                    type='info'
+                    description={t('USDT 订阅支付无平台手续费')}
+                    className='!rounded-xl'
+                    closeIcon={null}
+                  />
                 </div>
               )}
 

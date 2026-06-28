@@ -114,10 +114,12 @@ export function SubscriptionPurchaseDialog(props: Props) {
 
   const plan = props.plan?.plan
   const planId = plan?.id || 0
+  const hasConfiguredBepusdt =
+    !!props.enableBepusdt && (props.bepusdtChains || []).length > 0
 
   function getPreviewPaymentMethod() {
     if (selectedEpayMethod) return selectedEpayMethod
-    if (props.enableBepusdt && (props.bepusdtChains || []).length > 0) {
+    if (hasConfiguredBepusdt) {
       return 'bepusdt'
     }
     return 'balance'
@@ -160,7 +162,12 @@ export function SubscriptionPurchaseDialog(props: Props) {
   }
 
   useEffect(() => {
-    if (props.open && props.epayMethods && props.epayMethods.length > 0) {
+    if (
+      props.open &&
+      !hasConfiguredBepusdt &&
+      props.epayMethods &&
+      props.epayMethods.length > 0
+    ) {
       setSelectedEpayMethod(props.epayMethods[0].type)
     } else if (!props.open) {
       setSelectedEpayMethod('')
@@ -172,7 +179,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
       setSelectedBepusdtTradeType('')
       setAmountLoading(false)
     }
-  }, [props.open, props.epayMethods])
+  }, [props.open, props.epayMethods, hasConfiguredBepusdt])
 
   useEffect(() => {
     if (!props.open || !planId) return
@@ -186,8 +193,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const hasCreem = props.enableCreem && !!plan.creem_product_id
   const hasWaffoPancake =
     props.enableWaffoPancake && !!plan.waffo_pancake_product_id
-  const hasBepusdt =
-    props.enableBepusdt && (props.bepusdtChains || []).length > 0
+  const hasBepusdt = hasConfiguredBepusdt
   const hasEpay =
     props.enableOnlineTopUp && (props.epayMethods || []).length > 0
   const hasAnyPayment =

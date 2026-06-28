@@ -71,7 +71,10 @@ interface SubscriptionPlansCardProps {
   onPurchaseSuccess?: () => void | Promise<void>
 }
 
-function getEpayMethods(payMethods: PaymentMethod[] = []): PaymentMethod[] {
+function getEpayMethods(
+  payMethods: PaymentMethod[] = [],
+  hasNativeBepusdt = false
+): PaymentMethod[] {
   const nonEpayTypes = new Set([
     'stripe',
     'creem',
@@ -80,6 +83,9 @@ function getEpayMethods(payMethods: PaymentMethod[] = []): PaymentMethod[] {
     'waffo',
     'waffo_pancake',
   ])
+  if (hasNativeBepusdt) {
+    nonEpayTypes.add('usdt')
+  }
   return payMethods.filter((m) => m?.type && !nonEpayTypes.has(m.type))
 }
 
@@ -133,9 +139,10 @@ export function SubscriptionPlansCard({
     () => topupInfo?.bepusdt_chains || [],
     [topupInfo?.bepusdt_chains]
   )
+  const hasNativeBepusdt = enableBepusdt && bepusdtChains.length > 0
   const epayMethods = useMemo(
-    () => getEpayMethods(topupInfo?.pay_methods),
-    [topupInfo?.pay_methods]
+    () => getEpayMethods(topupInfo?.pay_methods, hasNativeBepusdt),
+    [topupInfo?.pay_methods, hasNativeBepusdt]
   )
 
   const fetchPlans = useCallback(async () => {

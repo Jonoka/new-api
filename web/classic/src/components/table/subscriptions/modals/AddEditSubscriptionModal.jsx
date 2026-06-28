@@ -108,7 +108,7 @@ const AddEditSubscriptionModal = ({
       title: p.title || '',
       subtitle: p.subtitle || '',
       price_amount: Number(p.price_amount || 0),
-      currency: 'USD',
+      currency: p.currency === 'CNY' ? 'CNY' : 'USD',
       duration_unit: p.duration_unit || 'month',
       duration_value: Number(p.duration_value || 1),
       custom_seconds: Number(p.custom_seconds || 0),
@@ -152,7 +152,7 @@ const AddEditSubscriptionModal = ({
         plan: {
           ...values,
           price_amount: Number(values.price_amount || 0),
-          currency: 'USD',
+          currency: values.currency === 'CNY' ? 'CNY' : 'USD',
           duration_value: Number(values.duration_value || 0),
           custom_seconds: Number(values.custom_seconds || 0),
           quota_reset_period: values.quota_reset_period || 'never',
@@ -343,12 +343,14 @@ const AddEditSubscriptionModal = ({
                     </Col>
 
                     <Col span={12}>
-                      <Form.Input
+                      <Form.Select
                         field='currency'
                         label={t('币种')}
-                        disabled
-                        extraText={t('由全站货币展示设置统一控制')}
-                      />
+                        extraText={t('仅订阅套餐购买价格使用此币种')}
+                      >
+                        <Select.Option value='USD'>USD</Select.Option>
+                        <Select.Option value='CNY'>CNY</Select.Option>
+                      </Form.Select>
                     </Col>
 
                     <Col span={12}>
