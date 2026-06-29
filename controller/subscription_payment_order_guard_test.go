@@ -469,7 +469,7 @@ func TestSubscriptionRequestAmount_UsesPaymentSpecificRatesForCnyPlan(t *testing
 	originalPrice := operation_setting.Price
 	originalBepusdtUnitPrice := setting.BepusdtUnitPrice
 	originalPayMethods := operation_setting.PayMethods
-	operation_setting.Price = 7.3
+	operation_setting.Price = 1.03
 	setting.BepusdtUnitPrice = 7.2
 	operation_setting.PayMethods = []map[string]string{{"type": "alipay", "name": "支付宝"}}
 	t.Cleanup(func() {
@@ -478,7 +478,7 @@ func TestSubscriptionRequestAmount_UsesPaymentSpecificRatesForCnyPlan(t *testing
 		operation_setting.PayMethods = originalPayMethods
 	})
 
-	t.Run("epay keeps configured CNY plan price", func(t *testing.T) {
+	t.Run("epay applies payment price for CNY plan", func(t *testing.T) {
 		ctx, recorder := newSubscriptionPaymentContext(t, SubscriptionAmountRequest{
 			PlanId:        plan.Id,
 			PaymentMethod: "alipay",
@@ -496,9 +496,9 @@ func TestSubscriptionRequestAmount_UsesPaymentSpecificRatesForCnyPlan(t *testing
 		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 		assert.Equal(t, "success", response.Message)
 		assert.Equal(t, model.SubscriptionCurrencyCNY, response.Currency)
-		assert.Equal(t, "188.00", response.Data)
-		assert.InDelta(t, 188, response.Amount, 0.000001)
-		assert.InDelta(t, 188/7.3, response.AmountUSD, 0.000001)
+		assert.Equal(t, "193.64", response.Data)
+		assert.InDelta(t, 193.64, response.Amount, 0.000001)
+		assert.InDelta(t, 188/1.03, response.AmountUSD, 0.000001)
 	})
 
 	t.Run("bepusdt keeps configured CNY plan price", func(t *testing.T) {
@@ -602,6 +602,61 @@ func TestSubscriptionRequestAmount_UsesEpayRateForUsdPlan(t *testing.T) {
 	var count int64
 	require.NoError(t, db.Model(&model.SubscriptionOrder{}).Count(&count).Error)
 	assert.EqualValues(t, 0, count)
+}
+
+func TestSubscriptionEpayPay_UsesEpayPriceForCnyPlanOrderAndGatewayAmount(t *testing.T) {
+	db := setupSubscriptionPaymentControllerTestDB(t)
+	withConfirmedPaymentCompliance(t)
+	plan := seedSubscriptionPaymentUserAndPlan(t, db, func(plan *model.SubscriptionPlan) {
+		plan.PriceAmount = 188
+		plan.Currency = model.SubscriptionCurrencyCNY
+	})
+
+	originalPayAddress := operation_setting.PayAddress
+	originalEpayID := operation_setting.EpayId
+	originalEpayKey := operation_setting.EpayKey
+	originalPayMethods := operation_setting.PayMethods
+	originalPrice := operation_setting.Price
+	operation_setting.PayAddress = "https://pay.example.com"
+	operation_setting.EpayId = "epay_id"
+	operation_setting.EpayKey = "epay_key"
+	operation_setting.PayMethods = []map[string]string{{"type": "alipay", "name": "支付宝"}}
+	operation_setting.Price = 1.03
+	t.Cleanup(func() {
+		operation_setting.PayAddress = originalPayAddress
+		operation_setting.EpayId = originalEpayID
+		operation_setting.EpayKey = originalEpayKey
+		operation_setting.PayMethods = originalPayMethods
+		operation_setting.Price = originalPrice
+	})
+
+	ctx, recorder := newSubscriptionPaymentContext(t, SubscriptionEpayPayRequest{
+		PlanId:        plan.Id,
+		PaymentMethod: "alipay",
+	}, 901)
+	SubscriptionRequestEpay(ctx)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Message string            `json:"message"`
+		Data    map[string]string `json:"data"`
+		URL     string            `json:"url"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Equal(t, "success", response.Message)
+	require.NotEmpty(t, response.URL)
+	require.Equal(t, "193.64", response.Data["money"])
+
+	var order model.SubscriptionOrder
+	require.NoError(t, db.First(&order).Error)
+	assert.Equal(t, common.TopUpStatusPending, order.Status)
+	assert.Equal(t, model.PaymentProviderEpay, order.PaymentProvider)
+	assert.InDelta(t, 193.64, order.OriginalMoney, 0.000001)
+	assert.InDelta(t, 193.64, order.ActualMoney, 0.000001)
+	assert.InDelta(t, 193.64, order.Money, 0.000001)
+	expectedPaidUSD, err := model.SubscriptionPlanPriceUSD(plan)
+	require.NoError(t, err)
+	assert.Equal(t, subscriptionPaidQuotaFromUSD(expectedPaidUSD), order.AffiliateSourceQuota)
 }
 
 func TestSubscriptionRequestAmount_PreviewsInvoiceFeeWithoutTitle(t *testing.T) {

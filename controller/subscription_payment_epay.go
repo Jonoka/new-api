@@ -197,7 +197,7 @@ func getSubscriptionEpayPayMoney(plan *model.SubscriptionPlan, amountUSD float64
 		return 0, fmt.Errorf("subscription plan is nil")
 	}
 	if model.NormalizeSubscriptionPlanCurrency(plan.Currency) == model.SubscriptionCurrencyCNY {
-		return model.SubscriptionPlanCurrencyAmountFromUSD(amountUSD, model.SubscriptionCurrencyCNY)
+		return getSubscriptionCNYPlanEpayMoney(plan.PriceAmount), nil
 	}
 	return getEpayPayMoneyFromUSD(amountUSD), nil
 }
@@ -207,9 +207,60 @@ func convertSubscriptionDiscountToEpayPlanMoney(plan *model.SubscriptionPlan, di
 		return nil, nil
 	}
 	if model.NormalizeSubscriptionPlanCurrency(plan.Currency) == model.SubscriptionCurrencyCNY {
-		return convertSubscriptionDiscountToCNYPlanMoney(plan, discount)
+		return convertSubscriptionDiscountToCNYPlanEpayMoney(plan, discount)
 	}
 	return convertSubscriptionDiscountAmount(discount, getEpayPayMoneyFromUSD), nil
+}
+
+func getSubscriptionCNYPlanEpayMoney(amountCNY float64) float64 {
+	return decimal.NewFromFloat(amountCNY).
+		Mul(decimal.NewFromFloat(operation_setting.Price)).
+		Round(2).
+		InexactFloat64()
+}
+
+func convertSubscriptionDiscountToCNYPlanEpayMoney(plan *model.SubscriptionPlan, discount *model.PromoCodeDiscountResult) (*model.PromoCodeDiscountResult, error) {
+	if plan == nil {
+		return nil, fmt.Errorf("subscription plan is nil")
+	}
+	if discount == nil {
+		return nil, nil
+	}
+
+	original := decimal.NewFromFloat(getSubscriptionCNYPlanEpayMoney(plan.PriceAmount))
+	discountAmount := decimal.Zero
+	switch discount.DiscountType {
+	case model.PromoCodeDiscountTypePercent:
+		discountAmount = original.Mul(decimal.NewFromInt(discount.DiscountValue)).
+			Div(decimal.NewFromInt(100)).
+			Round(2)
+	case model.PromoCodeDiscountTypeFixed:
+		discountAmount = decimal.NewFromFloat(getEpayPayMoneyFromUSD(
+			decimal.NewFromInt(discount.DiscountValue).
+				Div(decimal.NewFromFloat(common.QuotaPerUnit)).
+				InexactFloat64(),
+		))
+	default:
+		return convertSubscriptionDiscountAmount(discount, getEpayPayMoneyFromUSD), nil
+	}
+
+	if discountAmount.LessThan(decimal.Zero) {
+		discountAmount = decimal.Zero
+	}
+	if discountAmount.GreaterThan(original) {
+		discountAmount = original
+	}
+	paid := original.Sub(discountAmount).Round(2)
+	if paid.LessThan(decimal.Zero) {
+		paid = decimal.Zero
+	}
+
+	converted := *discount
+	converted.OriginalAmount = original.InexactFloat64()
+	converted.DiscountAmount = discountAmount.InexactFloat64()
+	converted.PaidAmount = paid.InexactFloat64()
+	converted.ActualPaidQuota = discount.ActualPaidQuota
+	return &converted, nil
 }
 
 func getSubscriptionBepusdtPayMoney(plan *model.SubscriptionPlan, amountUSD float64) (float64, error) {
