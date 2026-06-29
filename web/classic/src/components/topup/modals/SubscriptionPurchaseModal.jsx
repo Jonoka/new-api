@@ -29,7 +29,7 @@ import {
   Input,
 } from '@douyinfe/semi-ui';
 import { Crown, CalendarClock, Package } from 'lucide-react';
-import { SiStripe } from 'react-icons/si';
+import { SiAlipay, SiStripe, SiWechat } from 'react-icons/si';
 import { IconCreditCard } from '@douyinfe/semi-icons';
 import { renderQuota } from '../../../helpers';
 import {
@@ -40,6 +40,42 @@ import {
 import InvoiceRequestForm from '../../invoice/InvoiceRequestForm';
 
 const { Text } = Typography;
+
+const paymentIconStyle = {
+  width: 16,
+  height: 16,
+  objectFit: 'contain',
+};
+
+const renderPaymentIcon = (option, selected = false, size = 16) => {
+  const color = selected ? '#fff' : undefined;
+  const iconStyle = { ...paymentIconStyle, width: size, height: size };
+  const type = option?.value || option?.type || option?.kind;
+  const name = option?.label || option?.name || type;
+
+  if (type === 'alipay') {
+    return <SiAlipay size={size} color={color || '#1677FF'} />;
+  }
+  if (type === 'wxpay') {
+    return <SiWechat size={size} color={color || '#07C160'} />;
+  }
+  if (type === 'stripe') {
+    return <SiStripe size={size} color={color || '#635BFF'} />;
+  }
+  if (type === 'bepusdt' || type === 'usdt') {
+    return <img src='/pay-usdt.svg' alt='USDT' style={iconStyle} />;
+  }
+  if (type === 'okpay') {
+    return <img src='/pay-okpay.svg' alt='OKPay' style={iconStyle} />;
+  }
+  if (option?.icon) {
+    return <img src={option.icon} alt={name} style={iconStyle} />;
+  }
+  if (type === 'creem') {
+    return <IconCreditCard />;
+  }
+  return <IconCreditCard />;
+};
 
 const SubscriptionPurchaseModal = ({
   t,
@@ -238,7 +274,7 @@ const SubscriptionPurchaseModal = ({
                   <Text type='tertiary'>{t('计算中')}</Text>
                 ) : (
                   <div className='flex items-baseline space-x-2'>
-                    <Text strong className='text-xl text-purple-600'>
+                    <Text strong className='text-xl text-red-600'>
                       {displayPrice}
                     </Text>
                     {hasPromoDiscount && (
@@ -324,13 +360,7 @@ const SubscriptionPurchaseModal = ({
                         onSelectPaymentKind?.(option.kind, option.value)
                       }
                       disabled={purchaseLimitReached || amountLoading}
-                      icon={
-                        option.kind === 'stripe' ? (
-                          <SiStripe size={14} color={selected ? '#fff' : '#635BFF'} />
-                        ) : option.kind === 'creem' ? (
-                          <IconCreditCard />
-                        ) : null
-                      }
+                      icon={renderPaymentIcon(option, selected, 16)}
                     >
                       {option.label}
                     </Button>
@@ -350,7 +380,9 @@ const SubscriptionPurchaseModal = ({
                             : 'light'
                         }
                         type='primary'
-                        onClick={() => setSelectedBepusdtTradeType(chain.trade_type)}
+                        onClick={() =>
+                          setSelectedBepusdtTradeType(chain.trade_type)
+                        }
                         disabled={purchaseLimitReached}
                       >
                         {chain.name || chain.trade_type}
@@ -378,7 +410,14 @@ const SubscriptionPurchaseModal = ({
 
               {selectedPaymentKind === 'epay' && hasEpay && (
                 <div className='flex gap-2 items-center'>
-                  <div className='flex-1 rounded-lg border border-solid border-[var(--semi-color-border)] px-3 py-2 text-sm'>
+                  <div className='flex-1 rounded-lg border border-solid border-[var(--semi-color-border)] px-3 py-2 text-sm flex items-center gap-2'>
+                    {renderPaymentIcon(
+                      epayMethods.find(
+                        (method) => method.type === selectedEpayMethod,
+                      ),
+                      false,
+                      16,
+                    )}
                     {selectedEpayLabel || t('选择支付方式')}
                   </div>
                   <Button

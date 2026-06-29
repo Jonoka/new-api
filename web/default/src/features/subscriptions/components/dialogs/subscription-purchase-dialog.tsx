@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { DEFAULT_CURRENCY_CONFIG } from '@/stores/system-config-store'
 import { formatQuota } from '@/lib/format'
+import { cn } from '@/lib/utils'
 import { useSystemConfig } from '@/hooks/use-system-config'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
@@ -44,7 +45,6 @@ import {
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { GroupBadge } from '@/components/group-badge'
-import { cn } from '@/lib/utils'
 import { InvoiceRequestForm } from '@/features/invoices/components/invoice-request-form'
 import {
   createEmptyInvoiceRequest,
@@ -56,6 +56,7 @@ import {
   type InvoiceRequest,
 } from '@/features/invoices/types'
 import { BepusdtChainDialog } from '@/features/wallet/components/dialogs/bepusdt-chain-dialog'
+import { getPaymentIcon } from '@/features/wallet/lib'
 import type { BepusdtChain } from '@/features/wallet/types'
 import {
   paySubscriptionStripe,
@@ -81,6 +82,7 @@ import type {
 interface PaymentMethod {
   type: string
   name?: string
+  icon?: string
 }
 
 interface Props {
@@ -301,6 +303,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
           kind: 'epay',
           value: method.type,
           label: method.name || method.type,
+          icon: method.icon,
         }))
       : []),
     ...(hasBepusdt
@@ -333,7 +336,9 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const selectedPaymentLabel =
     externalPaymentOptions.find((option) => {
       if (option.kind === 'epay') {
-        return selectedPaymentKind === 'epay' && option.value === selectedEpayMethod
+        return (
+          selectedPaymentKind === 'epay' && option.value === selectedEpayMethod
+        )
       }
       return selectedPaymentKind === option.kind
     })?.label || ''
@@ -680,7 +685,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
               <div className='flex items-center justify-between'>
                 <span className='text-sm font-medium'>{t('Amount Due')}</span>
                 <div className='flex items-baseline gap-2'>
-                  <span className='text-primary text-lg font-bold'>
+                  <span className='text-lg font-bold text-red-600 dark:text-red-400'>
                     {amountLoading && !amountPreview ? '...' : amountDueText}
                   </span>
                   {hasPromoDiscount && !amountLoading && (
@@ -794,12 +799,20 @@ export function SubscriptionPurchaseDialog(props: Props) {
                           key={option.key}
                           type='button'
                           variant={selected ? 'default' : 'outline'}
-                          className={cn('min-w-0 justify-center truncate')}
+                          className={cn(
+                            'min-w-0 justify-center gap-2 truncate'
+                          )}
                           onClick={() =>
                             handleSelectPayment(option.kind, option.value)
                           }
                           disabled={paying || amountLoading || limitReached}
                         >
+                          {getPaymentIcon(
+                            option.value,
+                            'h-4 w-4 shrink-0',
+                            option.icon,
+                            option.label
+                          )}
                           <span className='truncate'>{option.label}</span>
                         </Button>
                       )
@@ -809,7 +822,15 @@ export function SubscriptionPurchaseDialog(props: Props) {
 
                 {selectedPaymentKind === 'epay' && hasEpay && (
                   <div className='grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2'>
-                    <div className='bg-muted/40 rounded-md border px-3 py-2 text-sm'>
+                    <div className='bg-muted/40 flex items-center gap-2 rounded-md border px-3 py-2 text-sm'>
+                      {getPaymentIcon(
+                        selectedEpayMethod,
+                        'h-4 w-4 shrink-0',
+                        (props.epayMethods || []).find(
+                          (m) => m.type === selectedEpayMethod
+                        )?.icon,
+                        selectedEpayMethodLabel
+                      )}
                       {selectedEpayMethodLabel}
                     </div>
                     <Button
@@ -841,7 +862,9 @@ export function SubscriptionPurchaseDialog(props: Props) {
                   <Button
                     className='w-full'
                     onClick={handlePayStripe}
-                    disabled={paying || amountLoading || limitReached || !invoiceValid}
+                    disabled={
+                      paying || amountLoading || limitReached || !invoiceValid
+                    }
                   >
                     Stripe
                   </Button>
@@ -850,23 +873,24 @@ export function SubscriptionPurchaseDialog(props: Props) {
                   <Button
                     className='w-full'
                     onClick={handlePayCreem}
-                    disabled={paying || amountLoading || limitReached || !invoiceValid}
+                    disabled={
+                      paying || amountLoading || limitReached || !invoiceValid
+                    }
                   >
                     Creem
                   </Button>
                 )}
-                {selectedPaymentKind === 'waffo_pancake' &&
-                  hasWaffoPancake && (
-                    <Button
-                      className='w-full'
-                      onClick={handlePayWaffoPancake}
-                      disabled={
-                        paying || amountLoading || limitReached || !invoiceValid
-                      }
-                    >
-                      Waffo Pancake
-                    </Button>
-                  )}
+                {selectedPaymentKind === 'waffo_pancake' && hasWaffoPancake && (
+                  <Button
+                    className='w-full'
+                    onClick={handlePayWaffoPancake}
+                    disabled={
+                      paying || amountLoading || limitReached || !invoiceValid
+                    }
+                  >
+                    Waffo Pancake
+                  </Button>
+                )}
               </div>
             )}
           </div>
