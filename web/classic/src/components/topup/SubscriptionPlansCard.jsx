@@ -179,7 +179,7 @@ const SubscriptionPlansCard = ({
   };
 
   const openBuy = (p) => {
-    const firstEpayMethod = hasBepusdt ? '' : epayMethods?.[0]?.type || '';
+    const firstEpayMethod = epayMethods?.[0]?.type || '';
     setSelectedPlan(p);
     setSelectedEpayMethod(firstEpayMethod);
     setSelectedPaymentKind(
@@ -254,6 +254,16 @@ const SubscriptionPlansCard = ({
     setSelectedBepusdtTradeType(value);
     setSelectedPaymentKind('bepusdt');
     loadAmountPreview('bepusdt', promoCode.trim(), true);
+  };
+
+  const handlePaymentKindSelect = (kind, value) => {
+    setSelectedPaymentKind(kind);
+    if (kind === 'epay') {
+      setSelectedEpayMethod(value);
+      loadAmountPreview(value || 'balance', promoCode.trim(), true);
+      return;
+    }
+    loadAmountPreview(value, promoCode.trim(), true);
   };
 
   const handleCompletedPurchase = async () => {
@@ -879,6 +889,8 @@ const SubscriptionPlansCard = ({
         bepusdtChains={bepusdtChains}
         selectedBepusdtTradeType={selectedBepusdtTradeType}
         setSelectedBepusdtTradeType={handleBepusdtTradeTypeChange}
+        selectedPaymentKind={selectedPaymentKind}
+        onSelectPaymentKind={handlePaymentKindSelect}
         enableOnlineTopUp={enableOnlineTopUp}
         enableStripeTopUp={enableStripeTopUp}
         enableCreemTopUp={enableCreemTopUp}

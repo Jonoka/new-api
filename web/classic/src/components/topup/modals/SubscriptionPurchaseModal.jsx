@@ -24,7 +24,6 @@ import {
   Typography,
   Card,
   Button,
-  Select,
   Divider,
   Tooltip,
   Input,
@@ -55,6 +54,8 @@ const SubscriptionPurchaseModal = ({
   bepusdtChains = [],
   selectedBepusdtTradeType,
   setSelectedBepusdtTradeType,
+  selectedPaymentKind = '',
+  onSelectPaymentKind,
   enableOnlineTopUp = false,
   enableStripeTopUp = false,
   enableCreemTopUp = false,
@@ -112,6 +113,28 @@ const SubscriptionPurchaseModal = ({
     bepusdtChains.length > 0;
   const hasEpay = enableOnlineTopUp && epayMethods.length > 0;
   const hasAnyPayment = hasStripe || hasCreem || hasBepusdt || hasEpay;
+  const paymentOptions = [
+    ...(hasEpay
+      ? epayMethods.map((method) => ({
+          key: `epay:${method.type}`,
+          kind: 'epay',
+          value: method.type,
+          label: method.name || method.type,
+        }))
+      : []),
+    ...(hasBepusdt
+      ? [{ key: 'bepusdt', kind: 'bepusdt', value: 'bepusdt', label: 'USDT' }]
+      : []),
+    ...(hasStripe
+      ? [{ key: 'stripe', kind: 'stripe', value: 'stripe', label: 'Stripe' }]
+      : []),
+    ...(hasCreem
+      ? [{ key: 'creem', kind: 'creem', value: 'creem', label: 'Creem' }]
+      : []),
+  ];
+  const selectedEpayLabel =
+    epayMethods.find((method) => method.type === selectedEpayMethod)?.name ||
+    selectedEpayMethod;
   const purchaseLimit = Number(purchaseLimitInfo?.limit || 0);
   const purchaseCount = Number(purchaseLimitInfo?.count || 0);
   const purchaseLimitReached =
@@ -285,63 +308,54 @@ const SubscriptionPurchaseModal = ({
                 {t('选择支付方式')}：
               </Text>
 
-              {/* Stripe / Creem */}
-              {(hasStripe || hasCreem) && (
-                <div className='flex gap-2'>
-                  {hasStripe && (
+              <div className='grid grid-cols-2 sm:grid-cols-3 gap-2'>
+                {paymentOptions.map((option) => {
+                  const selected =
+                    option.kind === 'epay'
+                      ? selectedPaymentKind === 'epay' &&
+                        selectedEpayMethod === option.value
+                      : selectedPaymentKind === option.kind;
+                  return (
                     <Button
-                      theme='light'
-                      className='flex-1'
-                      icon={<SiStripe size={14} color='#635BFF' />}
-                      onClick={onPayStripe}
-                      loading={paying}
-                      disabled={purchaseLimitReached}
-                    >
-                      Stripe
-                    </Button>
-                  )}
-                  {hasCreem && (
-                    <Button
-                      theme='light'
-                      className='flex-1'
-                      icon={<IconCreditCard />}
-                      onClick={onPayCreem}
-                      loading={paying}
-                      disabled={purchaseLimitReached}
-                    >
-                      Creem
-                    </Button>
-                  )}
-                </div>
-              )}
-
-              {/* USDT */}
-              {hasBepusdt && (
-                <div className='space-y-2'>
-                  <div className='flex gap-2'>
-                    <Select
-                      value={selectedBepusdtTradeType}
-                      onChange={setSelectedBepusdtTradeType}
-                      style={{ flex: 1 }}
-                      size='default'
-                      placeholder={t('选择支付链')}
-                      optionList={bepusdtChains.map((chain) => ({
-                        value: chain.trade_type,
-                        label: chain.name || chain.trade_type,
-                      }))}
-                      disabled={purchaseLimitReached}
-                    />
-                    <Button
-                      theme='solid'
+                      key={option.key}
+                      theme={selected ? 'solid' : 'light'}
                       type='primary'
-                      onClick={onPayBepusdt}
-                      loading={paying}
-                      disabled={
-                        !selectedBepusdtTradeType || purchaseLimitReached
+                      onClick={() =>
+                        onSelectPaymentKind?.(option.kind, option.value)
+                      }
+                      disabled={purchaseLimitReached || amountLoading}
+                      icon={
+                        option.kind === 'stripe' ? (
+                          <SiStripe size={14} color={selected ? '#fff' : '#635BFF'} />
+                        ) : option.kind === 'creem' ? (
+                          <IconCreditCard />
+                        ) : null
                       }
                     >
-                      USDT
+                      {option.label}
                     </Button>
+                  );
+                })}
+              </div>
+
+              {selectedPaymentKind === 'bepusdt' && hasBepusdt && (
+                <div className='space-y-2'>
+                  <div className='grid grid-cols-2 gap-2'>
+                    {bepusdtChains.map((chain) => (
+                      <Button
+                        key={chain.trade_type}
+                        theme={
+                          selectedBepusdtTradeType === chain.trade_type
+                            ? 'solid'
+                            : 'light'
+                        }
+                        type='primary'
+                        onClick={() => setSelectedBepusdtTradeType(chain.trade_type)}
+                        disabled={purchaseLimitReached}
+                      >
+                        {chain.name || chain.trade_type}
+                      </Button>
+                    ))}
                   </div>
                   <Banner
                     type='info'
@@ -349,24 +363,24 @@ const SubscriptionPurchaseModal = ({
                     className='!rounded-xl'
                     closeIcon={null}
                   />
+                  <Button
+                    theme='solid'
+                    type='primary'
+                    block
+                    onClick={onPayBepusdt}
+                    loading={paying}
+                    disabled={!selectedBepusdtTradeType || purchaseLimitReached}
+                  >
+                    USDT
+                  </Button>
                 </div>
               )}
 
-              {/* 易支付 */}
-              {hasEpay && (
-                <div className='flex gap-2'>
-                  <Select
-                    value={selectedEpayMethod}
-                    onChange={setSelectedEpayMethod}
-                    style={{ flex: 1 }}
-                    size='default'
-                    placeholder={t('选择支付方式')}
-                    optionList={epayMethods.map((m) => ({
-                      value: m.type,
-                      label: m.name || m.type,
-                    }))}
-                    disabled={purchaseLimitReached}
-                  />
+              {selectedPaymentKind === 'epay' && hasEpay && (
+                <div className='flex gap-2 items-center'>
+                  <div className='flex-1 rounded-lg border border-solid border-[var(--semi-color-border)] px-3 py-2 text-sm'>
+                    {selectedEpayLabel || t('选择支付方式')}
+                  </div>
                   <Button
                     theme='solid'
                     type='primary'
@@ -377,6 +391,32 @@ const SubscriptionPurchaseModal = ({
                     {t('支付')}
                   </Button>
                 </div>
+              )}
+              {selectedPaymentKind === 'stripe' && hasStripe && (
+                <Button
+                  theme='solid'
+                  type='primary'
+                  block
+                  icon={<SiStripe size={14} color='#fff' />}
+                  onClick={onPayStripe}
+                  loading={paying}
+                  disabled={purchaseLimitReached}
+                >
+                  Stripe
+                </Button>
+              )}
+              {selectedPaymentKind === 'creem' && hasCreem && (
+                <Button
+                  theme='solid'
+                  type='primary'
+                  block
+                  icon={<IconCreditCard />}
+                  onClick={onPayCreem}
+                  loading={paying}
+                  disabled={purchaseLimitReached}
+                >
+                  Creem
+                </Button>
               )}
             </div>
           ) : (

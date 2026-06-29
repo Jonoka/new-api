@@ -1,5 +1,5 @@
 import React from 'react';
-import { Banner, Input, Radio, Typography } from '@douyinfe/semi-ui';
+import { Banner, Input, Radio, TextArea, Typography } from '@douyinfe/semi-ui';
 
 const { Text } = Typography;
 
@@ -102,7 +102,7 @@ const InvoiceRequestForm = ({
               placeholder={t('联系电话')}
             />
           </div>
-          <Input.TextArea
+          <TextArea
             value={invoice.remark}
             onChange={(remark) => patchInvoice({ remark })}
             placeholder={t('发票备注')}

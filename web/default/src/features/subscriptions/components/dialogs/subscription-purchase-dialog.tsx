@@ -42,16 +42,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { GroupBadge } from '@/components/group-badge'
+import { cn } from '@/lib/utils'
 import { InvoiceRequestForm } from '@/features/invoices/components/invoice-request-form'
 import {
   createEmptyInvoiceRequest,
@@ -121,6 +114,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const [bepusdtChainOpen, setBepusdtChainOpen] = useState(false)
   const [bepusdtConfirmOpen, setBepusdtConfirmOpen] = useState(false)
   const [selectedBepusdtTradeType, setSelectedBepusdtTradeType] = useState('')
+  const [selectedPaymentKind, setSelectedPaymentKind] = useState('')
   const normalizedInvoiceConfig = useMemo(
     () => normalizeInvoiceConfig(props.invoiceConfig),
     [props.invoiceConfig]
@@ -135,10 +129,14 @@ export function SubscriptionPurchaseDialog(props: Props) {
     !!props.enableBepusdt && (props.bepusdtChains || []).length > 0
 
   function getPreviewPaymentMethod() {
-    if (selectedEpayMethod) return selectedEpayMethod
-    if (hasConfiguredBepusdt) {
+    if (selectedPaymentKind === 'bepusdt' && hasConfiguredBepusdt) {
       return 'bepusdt'
     }
+    if (selectedPaymentKind === 'epay' && selectedEpayMethod) {
+      return selectedEpayMethod
+    }
+    if (selectedPaymentKind) return selectedPaymentKind
+    if (selectedEpayMethod) return selectedEpayMethod
     return 'balance'
   }
 
@@ -181,15 +179,26 @@ export function SubscriptionPurchaseDialog(props: Props) {
   }
 
   useEffect(() => {
-    if (
-      props.open &&
-      !hasConfiguredBepusdt &&
-      props.epayMethods &&
-      props.epayMethods.length > 0
-    ) {
-      setSelectedEpayMethod(props.epayMethods[0].type)
+    if (props.open) {
+      const firstEpayMethod = props.epayMethods?.[0]?.type || ''
+      setSelectedEpayMethod(firstEpayMethod)
+      setSelectedPaymentKind(
+        props.enableOnlineTopUp && firstEpayMethod
+          ? 'epay'
+          : hasConfiguredBepusdt
+            ? 'bepusdt'
+            : props.enableStripe && props.plan?.plan?.stripe_price_id
+              ? 'stripe'
+              : props.enableCreem && props.plan?.plan?.creem_product_id
+                ? 'creem'
+                : props.enableWaffoPancake &&
+                    props.plan?.plan?.waffo_pancake_product_id
+                  ? 'waffo_pancake'
+                  : ''
+      )
     } else if (!props.open) {
       setSelectedEpayMethod('')
+      setSelectedPaymentKind('')
       setPromoCode('')
       setPromoDiscount(null)
       setAmountPreview(null)
@@ -206,13 +215,19 @@ export function SubscriptionPurchaseDialog(props: Props) {
     props.epayMethods,
     hasConfiguredBepusdt,
     normalizedInvoiceConfig.types,
+    props.enableStripe,
+    props.enableCreem,
+    props.enableWaffoPancake,
+    props.plan?.plan?.stripe_price_id,
+    props.plan?.plan?.creem_product_id,
+    props.plan?.plan?.waffo_pancake_product_id,
   ])
 
   useEffect(() => {
     if (!props.open || !planId) return
     void loadAmountPreview(getPreviewPaymentMethod(), promoCode.trim(), true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.open, planId, selectedEpayMethod])
+  }, [props.open, planId, selectedEpayMethod, selectedPaymentKind])
 
   if (!plan) return null
 
@@ -272,6 +287,59 @@ export function SubscriptionPurchaseDialog(props: Props) {
     invoiceRequest
   )
   const invoiceDisabled = paying || amountLoading
+  const externalPaymentOptions = [
+    ...(hasEpay
+      ? (props.epayMethods || []).map((method) => ({
+          key: `epay:${method.type}`,
+          kind: 'epay',
+          value: method.type,
+          label: method.name || method.type,
+        }))
+      : []),
+    ...(hasBepusdt
+      ? [
+          {
+            key: 'bepusdt',
+            kind: 'bepusdt',
+            value: 'bepusdt',
+            label: 'USDT',
+          },
+        ]
+      : []),
+    ...(hasStripe
+      ? [{ key: 'stripe', kind: 'stripe', value: 'stripe', label: 'Stripe' }]
+      : []),
+    ...(hasCreem
+      ? [{ key: 'creem', kind: 'creem', value: 'creem', label: 'Creem' }]
+      : []),
+    ...(hasWaffoPancake
+      ? [
+          {
+            key: 'waffo_pancake',
+            kind: 'waffo_pancake',
+            value: 'waffo_pancake',
+            label: 'Waffo Pancake',
+          },
+        ]
+      : []),
+  ]
+  const selectedPaymentLabel =
+    externalPaymentOptions.find((option) => {
+      if (option.kind === 'epay') {
+        return selectedPaymentKind === 'epay' && option.value === selectedEpayMethod
+      }
+      return selectedPaymentKind === option.kind
+    })?.label || ''
+
+  const handleSelectPayment = (kind: string, value: string) => {
+    setSelectedPaymentKind(kind)
+    if (kind === 'epay') {
+      setSelectedEpayMethod(value)
+      void loadAmountPreview(value, promoCode.trim(), true, invoiceRequest)
+      return
+    }
+    void loadAmountPreview(value, promoCode.trim(), true, invoiceRequest)
+  }
 
   const handleCompletedPurchase = () => {
     toast.success(t('Subscription purchased successfully'))
@@ -706,87 +774,37 @@ export function SubscriptionPurchaseDialog(props: Props) {
                 <p className='text-muted-foreground text-xs'>
                   {t('Select payment method')}
                 </p>
-                {(hasStripe || hasCreem || hasWaffoPancake) && (
-                  <div className='grid grid-cols-2 gap-2 sm:flex'>
-                    {hasStripe && (
-                      <Button
-                        variant='outline'
-                        className='flex-1'
-                        onClick={handlePayStripe}
-                        disabled={paying || limitReached || !invoiceValid}
-                      >
-                        Stripe
-                      </Button>
-                    )}
-                    {hasCreem && (
-                      <Button
-                        variant='outline'
-                        className='flex-1'
-                        onClick={handlePayCreem}
-                        disabled={paying || limitReached || !invoiceValid}
-                      >
-                        Creem
-                      </Button>
-                    )}
-                    {hasWaffoPancake && (
-                      <Button
-                        variant='outline'
-                        className='flex-1'
-                        onClick={handlePayWaffoPancake}
-                        disabled={paying || limitReached || !invoiceValid}
-                      >
-                        Waffo Pancake
-                      </Button>
-                    )}
+                {externalPaymentOptions.length > 0 && (
+                  <div className='grid grid-cols-2 gap-2 sm:grid-cols-3'>
+                    {externalPaymentOptions.map((option) => {
+                      const selected =
+                        option.kind === 'epay'
+                          ? selectedPaymentKind === 'epay' &&
+                            selectedEpayMethod === option.value
+                          : selectedPaymentKind === option.kind
+                      return (
+                        <Button
+                          key={option.key}
+                          type='button'
+                          variant={selected ? 'default' : 'outline'}
+                          className={cn('min-w-0 justify-center truncate')}
+                          onClick={() =>
+                            handleSelectPayment(option.kind, option.value)
+                          }
+                          disabled={paying || amountLoading || limitReached}
+                        >
+                          <span className='truncate'>{option.label}</span>
+                        </Button>
+                      )
+                    })}
                   </div>
                 )}
-                {hasBepusdt && (
-                  <Button
-                    variant='outline'
-                    className='w-full'
-                    onClick={handleOpenBepusdtChains}
-                    disabled={
-                      paying || amountLoading || limitReached || !invoiceValid
-                    }
-                  >
-                    USDT
-                  </Button>
-                )}
-                {hasEpay && (
-                  <div className='grid grid-cols-[minmax(0,1fr)_auto] gap-2'>
-                    <Select
-                      items={[
-                        ...(props.epayMethods || []).map((m) => ({
-                          value: m.type,
-                          label: m.name || m.type,
-                        })),
-                      ]}
-                      value={selectedEpayMethod}
-                      onValueChange={(v) => {
-                        if (v === null) return
-                        setSelectedEpayMethod(v)
-                        void loadAmountPreview(
-                          v,
-                          promoCode.trim(),
-                          true,
-                          invoiceRequest
-                        )
-                      }}
-                      disabled={limitReached}
-                    >
-                      <SelectTrigger className='flex-1'>
-                        <SelectValue>{selectedEpayMethodLabel}</SelectValue>
-                      </SelectTrigger>
-                      <SelectContent alignItemWithTrigger={false}>
-                        <SelectGroup>
-                          {(props.epayMethods || []).map((m) => (
-                            <SelectItem key={m.type} value={m.type}>
-                              {m.name || m.type}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
+
+                {selectedPaymentKind === 'epay' && hasEpay && (
+                  <div className='grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2'>
+                    <div className='bg-muted/40 rounded-md border px-3 py-2 text-sm'>
+                      {selectedEpayMethodLabel}
+                    </div>
                     <Button
                       onClick={handlePayEpay}
                       disabled={
@@ -800,6 +818,48 @@ export function SubscriptionPurchaseDialog(props: Props) {
                     </Button>
                   </div>
                 )}
+                {selectedPaymentKind === 'bepusdt' && hasBepusdt && (
+                  <Button
+                    variant='outline'
+                    className='w-full'
+                    onClick={handleOpenBepusdtChains}
+                    disabled={
+                      paying || amountLoading || limitReached || !invoiceValid
+                    }
+                  >
+                    {selectedPaymentLabel || 'USDT'}
+                  </Button>
+                )}
+                {selectedPaymentKind === 'stripe' && hasStripe && (
+                  <Button
+                    className='w-full'
+                    onClick={handlePayStripe}
+                    disabled={paying || amountLoading || limitReached || !invoiceValid}
+                  >
+                    Stripe
+                  </Button>
+                )}
+                {selectedPaymentKind === 'creem' && hasCreem && (
+                  <Button
+                    className='w-full'
+                    onClick={handlePayCreem}
+                    disabled={paying || amountLoading || limitReached || !invoiceValid}
+                  >
+                    Creem
+                  </Button>
+                )}
+                {selectedPaymentKind === 'waffo_pancake' &&
+                  hasWaffoPancake && (
+                    <Button
+                      className='w-full'
+                      onClick={handlePayWaffoPancake}
+                      disabled={
+                        paying || amountLoading || limitReached || !invoiceValid
+                      }
+                    >
+                      Waffo Pancake
+                    </Button>
+                  )}
               </div>
             )}
           </div>
