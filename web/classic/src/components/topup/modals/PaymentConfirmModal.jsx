@@ -28,6 +28,7 @@ import {
 } from '@douyinfe/semi-ui';
 import { SiAlipay, SiWechat, SiStripe } from 'react-icons/si';
 import { CreditCard } from 'lucide-react';
+import InvoiceRequestForm from '../../invoice/InvoiceRequestForm';
 
 const { Text } = Typography;
 
@@ -48,6 +49,10 @@ const PaymentConfirmModal = ({
   setPromoCode,
   promoDiscount,
   amountText,
+  invoiceConfig,
+  invoiceRequest,
+  setInvoiceRequest,
+  invoiceFee,
   onPromoCodeBlur,
   bepusdtChains = [],
   bepusdtSelectedChain,
@@ -174,6 +179,13 @@ const PaymentConfirmModal = ({
                 style={{ width: 180 }}
               />
             </div>
+            <InvoiceRequestForm
+              t={t}
+              config={invoiceConfig}
+              value={invoiceRequest}
+              onChange={setInvoiceRequest}
+              invoiceFee={invoiceFee}
+            />
             <div className='flex justify-between items-center'>
               <Text strong className='text-slate-700 dark:text-slate-200'>
                 {t('支付方式')}：

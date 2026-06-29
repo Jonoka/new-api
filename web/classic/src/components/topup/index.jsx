@@ -35,6 +35,7 @@ import { StatusContext } from '../../context/Status';
 import RechargeCard from './RechargeCard';
 import PaymentConfirmModal from './modals/PaymentConfirmModal';
 import TopupHistoryModal from './modals/TopupHistoryModal';
+import { createEmptyInvoiceRequest } from '../invoice/InvoiceRequestForm';
 
 // Reject non-navigable schemes (e.g. javascript:, data:) and relative URLs.
 // Only http / https are allowed for backend-provided redirect targets.
@@ -103,6 +104,15 @@ const TopUp = () => {
   const [promoCode, setPromoCode] = useState('');
   const [promoDiscount, setPromoDiscount] = useState(null);
   const [amountText, setAmountText] = useState('');
+  const [invoiceConfig, setInvoiceConfig] = useState({
+    enabled: false,
+    types: ['personal', 'company'],
+    currency: 'CNY',
+  });
+  const [invoiceRequest, setInvoiceRequest] = useState(
+    createEmptyInvoiceRequest(),
+  );
+  const [invoicePreview, setInvoicePreview] = useState(null);
 
   // 账单Modal状态
   const [openHistory, setOpenHistory] = useState(false);
@@ -152,6 +162,9 @@ const TopUp = () => {
     return code ? { promo_code: code } : {};
   };
 
+  const buildInvoicePayload = () =>
+    invoiceRequest?.required ? { invoice: invoiceRequest } : {};
+
   const requestAmountByPayment = async (payment, value) => {
     if (payment === 'stripe') {
       return getStripeAmount(value);
@@ -178,11 +191,16 @@ const TopUp = () => {
         setAmount(parseFloat(data));
         setAmountText(response.data.amount_text || '');
         setPromoDiscount(discount || null);
+        setInvoicePreview({
+          fee: Number(response.data.invoice_fee || 0),
+          total: Number(response.data.invoice_total_amount || 0),
+        });
         return true;
       }
       setAmount(0);
       setAmountText('');
       setPromoDiscount(null);
+      setInvoicePreview(null);
       Toast.error({
         content: '错误：' + (data || fallbackError),
         id: 'getAmount',
@@ -292,6 +310,8 @@ const TopUp = () => {
     }
 
     setPayWay(payment);
+    setInvoiceRequest(createEmptyInvoiceRequest());
+    setInvoicePreview(null);
     setPaymentLoading(true);
     try {
       const selectedMinTopUp = getPaymentMinTopUp(payment);
@@ -362,6 +382,7 @@ const TopUp = () => {
           amount: parseInt(topUpCount),
           payment_method: 'stripe',
           ...buildPromoPayload(),
+          ...buildInvoicePayload(),
         });
       } else if (payWay === 'bepusdt') {
         // Bepusdt 使用已选链
@@ -377,12 +398,14 @@ const TopUp = () => {
           amount: parseInt(topUpCount),
           trade_type: tradeType,
           ...buildPromoPayload(),
+          ...buildInvoicePayload(),
         });
       } else if (payWay === 'okpay') {
         // OKPay 支付请求
         res = await API.post('/api/user/okpay/pay', {
           amount: parseInt(topUpCount),
           ...buildPromoPayload(),
+          ...buildInvoicePayload(),
         });
       } else {
         // 普通支付请求
@@ -390,6 +413,7 @@ const TopUp = () => {
           amount: parseInt(topUpCount),
           payment_method: payWay,
           ...buildPromoPayload(),
+          ...buildInvoicePayload(),
         });
       }
 
@@ -503,6 +527,7 @@ const TopUp = () => {
       const requestBody = {
         amount: parseInt(topUpCount),
         ...buildPromoPayload(),
+        ...buildInvoicePayload(),
       };
       if (payMethodIndex != null) {
         requestBody.pay_method_index = payMethodIndex;
@@ -536,6 +561,7 @@ const TopUp = () => {
       const res = await API.post('/api/user/waffo/amount', {
         amount: parseInt(value),
         ...buildPromoPayload(),
+        ...buildInvoicePayload(),
       });
       updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
@@ -557,6 +583,7 @@ const TopUp = () => {
       const res = await API.post('/api/user/waffo-pancake/pay', {
         amount: parseInt(topUpCount),
         ...buildPromoPayload(),
+        ...buildInvoicePayload(),
       });
       if (res !== undefined) {
         const { message, data } = res.data;
@@ -599,6 +626,7 @@ const TopUp = () => {
       const res = await API.post('/api/user/waffo-pancake/amount', {
         amount: parseInt(value),
         ...buildPromoPayload(),
+        ...buildInvoicePayload(),
       });
       updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
@@ -687,7 +715,9 @@ const TopUp = () => {
         setTopupInfo({
           amount_options: data.amount_options || [],
           discount: data.discount || {},
+          invoice: data.invoice || { enabled: false },
         });
+        setInvoiceConfig(data.invoice || { enabled: false });
 
         // 处理支付方式
         let payMethods = data.pay_methods || [];
@@ -772,6 +802,7 @@ const TopUp = () => {
           setTopupInfo((prev) => ({
             ...prev,
             enable_redemption: data.enable_redemption !== false,
+            invoice: data.invoice || { enabled: false },
             payment_compliance_confirmed:
               data.payment_compliance_confirmed !== false,
             payment_compliance_terms_version:
@@ -861,6 +892,7 @@ const TopUp = () => {
       const res = await API.post('/api/user/amount', {
         amount: parseFloat(value),
         ...buildPromoPayload(),
+        ...buildInvoicePayload(),
       });
       updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
@@ -878,6 +910,7 @@ const TopUp = () => {
       const res = await API.post('/api/user/stripe/amount', {
         amount: parseFloat(value),
         ...buildPromoPayload(),
+        ...buildInvoicePayload(),
       });
       updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
@@ -896,6 +929,7 @@ const TopUp = () => {
       const res = await API.post('/api/user/bepusdt/amount', {
         amount: parseFloat(value),
         ...buildPromoPayload(),
+        ...buildInvoicePayload(),
       });
       updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
@@ -914,6 +948,7 @@ const TopUp = () => {
       const res = await API.post('/api/user/okpay/amount', {
         amount: parseFloat(value),
         ...buildPromoPayload(),
+        ...buildInvoicePayload(),
       });
       updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
@@ -928,6 +963,8 @@ const TopUp = () => {
     setPromoCode('');
     setPromoDiscount(null);
     setAmountText('');
+    setInvoiceRequest(createEmptyInvoiceRequest());
+    setInvoicePreview(null);
   };
 
   const handleTransferCancel = () => {
@@ -992,6 +1029,10 @@ const TopUp = () => {
         setPromoCode={setPromoCode}
         promoDiscount={promoDiscount}
         amountText={amountText}
+        invoiceConfig={invoiceConfig}
+        invoiceRequest={invoiceRequest}
+        setInvoiceRequest={setInvoiceRequest}
+        invoiceFee={invoicePreview?.fee || 0}
         onPromoCodeBlur={() => requestAmountByPayment(payWay)}
         bepusdtChains={bepusdtChains}
         bepusdtSelectedChain={bepusdtSelectedChain}
@@ -1081,6 +1122,7 @@ const TopUp = () => {
           activeSubscriptions={activeSubscriptions}
           allSubscriptions={allSubscriptions}
           reloadSubscriptionSelf={getSubscriptionSelf}
+          invoiceConfig={invoiceConfig}
           enableRedemption={topupInfo.enable_redemption !== false}
         />
       </div>

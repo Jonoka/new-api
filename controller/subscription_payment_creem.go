@@ -18,8 +18,9 @@ import (
 )
 
 type SubscriptionCreemPayRequest struct {
-	PlanId    int    `json:"plan_id"`
-	PromoCode string `json:"promo_code"`
+	PlanId    int                  `json:"plan_id"`
+	PromoCode string               `json:"promo_code"`
+	Invoice   model.InvoiceRequest `json:"invoice"`
 }
 
 func SubscriptionRequestCreemPay(c *gin.Context) {
@@ -44,6 +45,10 @@ func SubscriptionRequestCreemPay(c *gin.Context) {
 	}
 	if strings.TrimSpace(req.PromoCode) != "" {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "Creem 固定产品暂不支持优惠码，请选择其他支付方式"})
+		return
+	}
+	if req.Invoice.Required {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "Creem 固定产品暂不支持开发票，请选择其他支付方式"})
 		return
 	}
 

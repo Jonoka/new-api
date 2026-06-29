@@ -50,6 +50,10 @@ const PaymentSetting = ({
     PayMethods: '',
     AmountOptions: '',
     AmountDiscount: '',
+    InvoiceEnabled: false,
+    InvoiceTypes: '["personal","company"]',
+    InvoiceFeeRules:
+      '[{"min":0,"max":500,"type":"fixed","value":50},{"min":501,"max":2000,"type":"fixed","value":100},{"min":2001,"max":5000,"type":"fixed","value":175},{"min":5000,"type":"percent","value":5}]',
 
     StripeApiSecret: '',
     StripeWebhookSecret: '',
@@ -163,17 +167,28 @@ const PaymentSetting = ({
             }
             break;
           case 'payment_setting.amount_discount':
+          case 'InvoiceTypes':
+          case 'InvoiceFeeRules':
             try {
-              newInputs['AmountDiscount'] = JSON.stringify(
+              newInputs[
+                item.key === 'payment_setting.amount_discount'
+                  ? 'AmountDiscount'
+                  : item.key
+              ] = JSON.stringify(
                 JSON.parse(item.value),
                 null,
                 2,
               );
             } catch (error) {
-              newInputs['AmountDiscount'] = item.value;
+              newInputs[
+                item.key === 'payment_setting.amount_discount'
+                  ? 'AmountDiscount'
+                  : item.key
+              ] = item.value;
             }
             break;
           case 'payment_setting.compliance_confirmed':
+          case 'InvoiceEnabled':
             newInputs[item.key] = toBoolean(item.value);
             break;
           case 'payment_setting.compliance_confirmed_at':

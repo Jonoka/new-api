@@ -18,9 +18,10 @@ import (
 )
 
 type SubscriptionEpayPayRequest struct {
-	PlanId        int    `json:"plan_id"`
-	PaymentMethod string `json:"payment_method"`
-	PromoCode     string `json:"promo_code"`
+	PlanId        int                  `json:"plan_id"`
+	PaymentMethod string               `json:"payment_method"`
+	PromoCode     string               `json:"promo_code"`
+	Invoice       model.InvoiceRequest `json:"invoice"`
 }
 
 func SubscriptionRequestEpay(c *gin.Context) {
@@ -88,11 +89,20 @@ func SubscriptionRequestEpay(c *gin.Context) {
 	}
 	payMoney := getEpayPayMoneyFromUSD(basePayMoney)
 	epayDiscount := convertSubscriptionDiscountToEpayMoney(discount)
+	invoiceAmounts, err := buildInvoicePaymentAmounts(req.Invoice, model.PaymentProviderEpay, payMoney)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	totalPayMoney := payMoney
+	if invoiceAmounts.Required {
+		totalPayMoney = invoiceAmounts.TotalPayment
+	}
 
 	var returnUrl *url.URL
 	var notifyUrl *url.URL
 	var client *epay.Client
-	if payMoney >= 0.01 {
+	if totalPayMoney >= 0.01 {
 		callBackAddress := service.GetCallbackAddress()
 		returnUrl, err = url.Parse(callBackAddress + "/api/subscription/epay/return")
 		if err != nil {
@@ -115,7 +125,7 @@ func SubscriptionRequestEpay(c *gin.Context) {
 	order := &model.SubscriptionOrder{
 		UserId:          userId,
 		PlanId:          plan.Id,
-		Money:           payMoney,
+		Money:           totalPayMoney,
 		TradeNo:         tradeNo,
 		PaymentMethod:   req.PaymentMethod,
 		PaymentProvider: model.PaymentProviderEpay,
@@ -126,11 +136,12 @@ func SubscriptionRequestEpay(c *gin.Context) {
 		order.AffiliateSourceQuota = subscriptionPaidQuotaFromUSD(basePayMoney)
 	}
 	model.ApplyPromoCodeResultToSubscriptionOrder(order, epayDiscount)
+	applyInvoiceToSubscriptionOrder(order, invoiceAmounts, payMoney, payMoney, subscriptionPaidQuotaFromUSD(basePayMoney))
 	if err := order.Insert(); err != nil {
 		common.ApiErrorMsg(c, "创建订单失败")
 		return
 	}
-	if payMoney < 0.01 {
+	if totalPayMoney < 0.01 {
 		if err := model.CompleteFreeSubscriptionOrder(tradeNo, model.PaymentProviderEpay); err != nil {
 			common.ApiError(c, err)
 			return
@@ -151,7 +162,7 @@ func SubscriptionRequestEpay(c *gin.Context) {
 		Type:           req.PaymentMethod,
 		ServiceTradeNo: tradeNo,
 		Name:           fmt.Sprintf("SUB:%s", plan.Title),
-		Money:          strconv.FormatFloat(payMoney, 'f', 2, 64),
+		Money:          strconv.FormatFloat(totalPayMoney, 'f', 2, 64),
 		Device:         epay.PC,
 		NotifyUrl:      notifyUrl,
 		ReturnUrl:      returnUrl,

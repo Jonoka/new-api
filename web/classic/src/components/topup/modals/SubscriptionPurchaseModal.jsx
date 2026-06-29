@@ -38,6 +38,7 @@ import {
   formatSubscriptionDuration,
   formatSubscriptionResetPeriod,
 } from '../../../helpers/subscriptionFormat';
+import InvoiceRequestForm from '../../invoice/InvoiceRequestForm';
 
 const { Text } = Typography;
 
@@ -63,6 +64,9 @@ const SubscriptionPurchaseModal = ({
   promoDiscount,
   amountPreview,
   amountLoading = false,
+  invoiceConfig,
+  invoiceRequest,
+  setInvoiceRequest,
   onPromoCodeBlur,
   onPayStripe,
   onPayCreem,
@@ -83,6 +87,7 @@ const SubscriptionPurchaseModal = ({
       : Number(amountPreview?.data || Number.NaN);
   const amountDue = Number.isFinite(previewAmount) ? previewAmount : paidPrice;
   const amountDueCurrency = amountPreview?.currency || plan?.currency || 'USD';
+  const invoiceFee = Number(amountPreview?.invoice_fee || 0);
   const planPriceText = formatSubscriptionPlanAmount(price, plan?.currency);
   const displayPrice = formatSubscriptionPlanAmount(
     amountDue,
@@ -254,6 +259,13 @@ const SubscriptionPurchaseModal = ({
                   style={{ width: 180 }}
                 />
               </div>
+              <InvoiceRequestForm
+                t={t}
+                config={invoiceConfig}
+                value={invoiceRequest}
+                onChange={setInvoiceRequest}
+                invoiceFee={invoiceFee}
+              />
             </div>
           </Card>
 

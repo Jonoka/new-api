@@ -26,14 +26,16 @@ import (
 
 // OkpayPayRequest 用户发起 OKPay 支付请求
 type OkpayPayRequest struct {
-	Amount    int64  `json:"amount"`
-	PromoCode string `json:"promo_code"`
+	Amount    int64                `json:"amount"`
+	PromoCode string               `json:"promo_code"`
+	Invoice   model.InvoiceRequest `json:"invoice"`
 }
 
 // OkpayAmountRequest 金额计算请求
 type OkpayAmountRequest struct {
-	Amount    int64  `json:"amount"`
-	PromoCode string `json:"promo_code"`
+	Amount    int64                `json:"amount"`
+	PromoCode string               `json:"promo_code"`
+	Invoice   model.InvoiceRequest `json:"invoice"`
 }
 
 type okpayPaymentAmount struct {
@@ -315,7 +317,16 @@ func RequestOkpayAmount(c *gin.Context) {
 	if discount != nil {
 		fiatPayMoney = discount.PaidAmount
 	}
-	paymentAmount := getOkpayPaymentAmountFromFiat(fiatPayMoney)
+	invoiceAmounts, err := buildInvoicePaymentAmounts(req.Invoice, model.PaymentProviderOkpay, fiatPayMoney)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+		return
+	}
+	totalFiatPayMoney := fiatPayMoney
+	if invoiceAmounts.Required {
+		totalFiatPayMoney = invoiceAmounts.TotalPayment
+	}
+	paymentAmount := getOkpayPaymentAmountFromFiat(totalFiatPayMoney)
 	coinAmountText := decimal.NewFromFloat(paymentAmount.CoinAmount).StringFixed(8)
 
 	response := gin.H{
@@ -333,6 +344,7 @@ func RequestOkpayAmount(c *gin.Context) {
 	if discount != nil {
 		response["discount"] = discount
 	}
+	addInvoiceFieldsToResponse(response, invoiceAmounts)
 	c.JSON(http.StatusOK, response)
 }
 
@@ -371,6 +383,15 @@ func RequestOkpayPay(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
 	}
+	invoiceAmounts, err := buildInvoicePaymentAmounts(req.Invoice, model.PaymentProviderOkpay, fiatPayMoney)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+		return
+	}
+	totalFiatPayMoney := fiatPayMoney
+	if invoiceAmounts.Required {
+		totalFiatPayMoney = invoiceAmounts.TotalPayment
+	}
 
 	tradeNo := fmt.Sprintf("USR%dNO%s%d", id, common.GetRandomString(6), time.Now().Unix())
 
@@ -378,7 +399,7 @@ func RequestOkpayPay(c *gin.Context) {
 	topUp := &model.TopUp{
 		UserId:          id,
 		Amount:          amount,
-		Money:           fiatPayMoney,
+		Money:           totalFiatPayMoney,
 		TradeNo:         tradeNo,
 		PaymentMethod:   model.PaymentMethodOkpay,
 		PaymentProvider: model.PaymentProviderOkpay,
@@ -389,6 +410,7 @@ func RequestOkpayPay(c *gin.Context) {
 	if discount != nil {
 		topUp.AffiliateSourceQuota = calculateOkpayAffiliateSourceQuota(amount, originalFiatPayMoney, fiatPayMoney)
 	}
+	applyInvoiceToTopUp(topUp, invoiceAmounts, originalFiatPayMoney, fiatPayMoney, true)
 	err = topUp.Insert()
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay 创建充值订单失败 user_id=%d trade_no=%s amount=%d error=%q", id, tradeNo, req.Amount, err.Error()))
@@ -397,7 +419,7 @@ func RequestOkpayPay(c *gin.Context) {
 	}
 
 	// 处理 0 元优惠订单
-	if fiatPayMoney < 0.01 {
+	if totalFiatPayMoney < 0.01 {
 		completedTopUp, quotaToAdd, completedNow, err := model.CompleteFreeTopUp(tradeNo, model.PaymentProviderOkpay)
 		if err != nil {
 			logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay 0元优惠充值完成失败 user_id=%d trade_no=%s amount=%d error=%q", id, tradeNo, req.Amount, err.Error()))
@@ -417,7 +439,7 @@ func RequestOkpayPay(c *gin.Context) {
 	redirectUrl := paymentReturnPath("/console/log")
 
 	// OKPay 金额需要 8 位小数
-	paymentAmount := getOkpayPaymentAmountFromFiat(fiatPayMoney)
+	paymentAmount := getOkpayPaymentAmountFromFiat(totalFiatPayMoney)
 	dPayMoney := decimal.NewFromFloat(paymentAmount.CoinAmount)
 
 	payload := map[string]string{
@@ -497,7 +519,7 @@ func RequestOkpayPay(c *gin.Context) {
 		return
 	}
 
-	logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay 充值订单创建成功 user_id=%d trade_no=%s amount=%d fiat_money=%.2f CNY coin_amount=%s coin=%s rate=%.8f rate_source=%s auto_rate_failed=%t", id, tradeNo, req.Amount, fiatPayMoney, payload["amount"], paymentAmount.Coin, paymentAmount.Rate, paymentAmount.RateSource, paymentAmount.AutoRateFailed))
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay 充值订单创建成功 user_id=%d trade_no=%s amount=%d fiat_money=%.2f CNY coin_amount=%s coin=%s rate=%.8f rate_source=%s auto_rate_failed=%t", id, tradeNo, req.Amount, totalFiatPayMoney, payload["amount"], paymentAmount.Coin, paymentAmount.Rate, paymentAmount.RateSource, paymentAmount.AutoRateFailed))
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "success",

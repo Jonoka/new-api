@@ -39,6 +39,10 @@ export default function SettingsGeneralPayment(props) {
     PayMethods: '',
     AmountOptions: '',
     AmountDiscount: '',
+    InvoiceEnabled: false,
+    InvoiceTypes: '["personal","company"]',
+    InvoiceFeeRules:
+      '[{"min":0,"max":500,"type":"fixed","value":50},{"min":501,"max":2000,"type":"fixed","value":100},{"min":2001,"max":5000,"type":"fixed","value":175},{"min":5000,"type":"percent","value":5}]',
   });
   const [originInputs, setOriginInputs] = useState({});
   const formApiRef = useRef(null);
@@ -52,6 +56,11 @@ export default function SettingsGeneralPayment(props) {
         PayMethods: props.options.PayMethods || '',
         AmountOptions: props.options.AmountOptions || '',
         AmountDiscount: props.options.AmountDiscount || '',
+        InvoiceEnabled: !!props.options.InvoiceEnabled,
+        InvoiceTypes: props.options.InvoiceTypes || '["personal","company"]',
+        InvoiceFeeRules:
+          props.options.InvoiceFeeRules ||
+          '[{"min":0,"max":500,"type":"fixed","value":50},{"min":501,"max":2000,"type":"fixed","value":100},{"min":2001,"max":5000,"type":"fixed","value":175},{"min":5000,"type":"percent","value":5}]',
       };
       setInputs(currentInputs);
       setOriginInputs({ ...currentInputs });
@@ -98,6 +107,22 @@ export default function SettingsGeneralPayment(props) {
       return;
     }
 
+    if (
+      originInputs.InvoiceTypes !== inputs.InvoiceTypes &&
+      !verifyJSON(inputs.InvoiceTypes)
+    ) {
+      showError(t('发票类型配置不是合法的 JSON 数组'));
+      return;
+    }
+
+    if (
+      originInputs.InvoiceFeeRules !== inputs.InvoiceFeeRules &&
+      !verifyJSON(inputs.InvoiceFeeRules)
+    ) {
+      showError(t('发票费用规则不是合法的 JSON 数组'));
+      return;
+    }
+
     setLoading(true);
     try {
       const options = [
@@ -129,6 +154,21 @@ export default function SettingsGeneralPayment(props) {
         options.push({
           key: 'payment_setting.amount_discount',
           value: inputs.AmountDiscount,
+        });
+      }
+      if (originInputs.InvoiceEnabled !== inputs.InvoiceEnabled) {
+        options.push({
+          key: 'InvoiceEnabled',
+          value: inputs.InvoiceEnabled,
+        });
+      }
+      if (originInputs.InvoiceTypes !== inputs.InvoiceTypes) {
+        options.push({ key: 'InvoiceTypes', value: inputs.InvoiceTypes });
+      }
+      if (originInputs.InvoiceFeeRules !== inputs.InvoiceFeeRules) {
+        options.push({
+          key: 'InvoiceFeeRules',
+          value: inputs.InvoiceFeeRules,
         });
       }
 
@@ -234,6 +274,44 @@ export default function SettingsGeneralPayment(props) {
                 autosize
                 extraText={t(
                   '设置不同充值金额对应的折扣，键为充值金额，值为折扣率，例如：{"100": 0.95, "200": 0.9, "500": 0.85}',
+                )}
+              />
+            </Col>
+          </Row>
+          <Row
+            gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
+            style={{ marginTop: 16 }}
+          >
+            <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+              <Form.Switch
+                field='InvoiceEnabled'
+                label={t('发票开关')}
+                checkedText={t('开')}
+                uncheckedText={t('关')}
+                extraText={t('开启后，充值和购买订阅时可选择申请发票')}
+              />
+            </Col>
+            <Col xs={24} sm={24} md={16} lg={16} xl={16}>
+              <Form.TextArea
+                field='InvoiceTypes'
+                label={t('发票类型配置')}
+                placeholder='["personal","company"]'
+                autosize
+                extraText={t(
+                  'personal 表示对私，company 表示对公，可按需保留其中一种',
+                )}
+              />
+            </Col>
+          </Row>
+          <Row style={{ marginTop: 16 }}>
+            <Col span={24}>
+              <Form.TextArea
+                field='InvoiceFeeRules'
+                label={t('发票费用规则')}
+                placeholder='[{"min":0,"max":500,"type":"fixed","value":50},{"min":500,"type":"percent","value":5}]'
+                autosize
+                extraText={t(
+                  '费用按人民币计算。type 为 fixed 时 value 是固定金额，type 为 percent 时 value 是百分比',
                 )}
               />
             </Col>

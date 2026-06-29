@@ -84,6 +84,7 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
   personal: {
     enabled: true,
     topup: true,
+    invoice: true,
     affiliate: true,
     personal: true,
   },
@@ -96,6 +97,7 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
     affiliate_admin: true,
     setting: true,
     subscription: true,
+    invoice_admin: true,
     game: true,
   },
   customItems: [],

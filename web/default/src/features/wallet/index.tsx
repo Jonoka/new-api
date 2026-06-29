@@ -22,10 +22,16 @@ import { getSelf } from '@/lib/api'
 import { useStatus } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
 import { SectionPageLayout } from '@/components/layout'
+import {
+  createEmptyInvoiceRequest,
+  isInvoiceRequestValid,
+  normalizeInvoiceConfig,
+  type InvoiceRequest,
+} from '@/features/invoices/types'
+import { BepusdtChainDialog } from './components/dialogs/bepusdt-chain-dialog'
 import { BillingHistoryDialog } from './components/dialogs/billing-history-dialog'
 import { CreemConfirmDialog } from './components/dialogs/creem-confirm-dialog'
 import { PaymentConfirmDialog } from './components/dialogs/payment-confirm-dialog'
-import { BepusdtChainDialog } from './components/dialogs/bepusdt-chain-dialog'
 import { RechargeFormCard } from './components/recharge-form-card'
 import { SubscriptionPlansCard } from './components/subscription-plans-card'
 import { WalletStatsCard } from './components/wallet-stats-card'
@@ -77,10 +83,20 @@ export function Wallet(props: WalletProps) {
   const [showSubscriptionPanel, setShowSubscriptionPanel] = useState(true)
   const [bepusdtChainDialogOpen, setBepusdtChainDialogOpen] = useState(false)
   const [selectedBepusdtTradeType, setSelectedBepusdtTradeType] = useState('')
+  const [selectedWaffoMethodIndex, setSelectedWaffoMethodIndex] = useState<
+    number | null
+  >(null)
+  const [invoiceRequest, setInvoiceRequest] = useState<InvoiceRequest>(
+    createEmptyInvoiceRequest()
+  )
 
   const { status } = useStatus()
   const { currency } = useSystemConfig()
   const { topupInfo, presetAmounts, loading: topupLoading } = useTopupInfo()
+  const invoiceConfig = useMemo(
+    () => normalizeInvoiceConfig(topupInfo?.invoice),
+    [topupInfo?.invoice]
+  )
 
   // Calculate effective exchange rate - when display type is USD, use rate of 1
   const effectiveUsdExchangeRate = useMemo(() => {
@@ -91,6 +107,7 @@ export function Wallet(props: WalletProps) {
   const {
     amount: paymentAmount,
     amountText: paymentAmountText,
+    invoiceFee,
     calculating,
     processing,
     calculatePaymentAmount,
@@ -98,13 +115,12 @@ export function Wallet(props: WalletProps) {
   } = usePayment()
   const { redeeming, redeemCode } = useRedemption()
   const { processing: creemProcessing, processCreemPayment } = useCreemPayment()
-  const { processWaffoPayment } = useWaffoPayment()
+  const { processing: waffoProcessing, processWaffoPayment } = useWaffoPayment()
   const { processing: pancakeProcessing, processWaffoPancakePayment } =
     useWaffoPancakePayment()
   const { processing: bepusdtProcessing, processBepusdtPayment } =
     useBepusdtPayment()
-  const { processing: okpayProcessing, processOkpayPayment } =
-    useOkpayPayment()
+  const { processing: okpayProcessing, processOkpayPayment } = useOkpayPayment()
 
   // Fetch and refresh user data
   const fetchUser = useCallback(async () => {
@@ -141,9 +157,20 @@ export function Wallet(props: WalletProps) {
 
       // Calculate initial payment amount with default payment type
       const defaultPaymentType = getDefaultPaymentType(topupInfo)
-      calculatePaymentAmount(minTopup, defaultPaymentType, promoCode)
+      calculatePaymentAmount(
+        minTopup,
+        defaultPaymentType,
+        promoCode,
+        invoiceRequest
+      )
     }
-  }, [topupInfo, topupAmount, calculatePaymentAmount, promoCode])
+  }, [
+    topupInfo,
+    topupAmount,
+    calculatePaymentAmount,
+    promoCode,
+    invoiceRequest,
+  ])
 
   // Get current payment type (selected or default)
   const getCurrentPaymentType = useCallback(() => {
@@ -154,24 +181,61 @@ export function Wallet(props: WalletProps) {
   const handleSelectPreset = (preset: PresetAmount) => {
     setTopupAmount(preset.value)
     setSelectedPreset(preset.value)
-    calculatePaymentAmount(preset.value, getCurrentPaymentType(), promoCode)
+    calculatePaymentAmount(
+      preset.value,
+      getCurrentPaymentType(),
+      promoCode,
+      invoiceRequest
+    )
   }
 
   // Handle topup amount change
   const handleTopupAmountChange = (amount: number) => {
     setTopupAmount(amount)
     setSelectedPreset(null)
-    calculatePaymentAmount(amount, getCurrentPaymentType(), promoCode)
+    calculatePaymentAmount(
+      amount,
+      getCurrentPaymentType(),
+      promoCode,
+      invoiceRequest
+    )
   }
 
   const handlePromoCodeChange = (code: string) => {
     setPromoCode(code)
-    calculatePaymentAmount(topupAmount, getCurrentPaymentType(), code)
+    calculatePaymentAmount(
+      topupAmount,
+      getCurrentPaymentType(),
+      code,
+      invoiceRequest
+    )
   }
+
+  const handleInvoiceRequestChange = useCallback(
+    (request: InvoiceRequest) => {
+      setInvoiceRequest(request)
+      if (confirmDialogOpen) {
+        calculatePaymentAmount(
+          topupAmount,
+          getCurrentPaymentType(),
+          promoCode,
+          request
+        )
+      }
+    },
+    [
+      calculatePaymentAmount,
+      confirmDialogOpen,
+      getCurrentPaymentType,
+      promoCode,
+      topupAmount,
+    ]
+  )
 
   // Handle payment method selection
   const handlePaymentMethodSelect = async (method: PaymentMethod) => {
     setSelectedPaymentMethod(method)
+    setSelectedWaffoMethodIndex(null)
     setPaymentLoading(method.type)
 
     try {
@@ -192,7 +256,16 @@ export function Wallet(props: WalletProps) {
       }
 
       // Calculate payment amount and show confirmation dialog
-      await calculatePaymentAmount(topupAmount, method.type, promoCode)
+      const nextInvoiceRequest = createEmptyInvoiceRequest(
+        invoiceConfig.types[0]
+      )
+      setInvoiceRequest(nextInvoiceRequest)
+      await calculatePaymentAmount(
+        topupAmount,
+        method.type,
+        promoCode,
+        nextInvoiceRequest
+      )
       setConfirmDialogOpen(true)
     } finally {
       setPaymentLoading(null)
@@ -202,15 +275,26 @@ export function Wallet(props: WalletProps) {
   // Handle payment confirmation
   const handlePaymentConfirm = async () => {
     if (!selectedPaymentMethod) return
+    if (!isInvoiceRequestValid(invoiceConfig, invoiceRequest)) {
+      return
+    }
 
     const isPancake = isWaffoPancakePayment(selectedPaymentMethod.type)
     const isOkpay_ = isOkpayPayment(selectedPaymentMethod.type)
     const isBepusdt = isBepusdtPayment(selectedPaymentMethod.type)
     let success: boolean
     if (isPancake) {
-      success = await processWaffoPancakePayment(topupAmount, promoCode)
+      success = await processWaffoPancakePayment(
+        topupAmount,
+        promoCode,
+        invoiceRequest
+      )
     } else if (isOkpay_) {
-      success = await processOkpayPayment(topupAmount, promoCode)
+      success = await processOkpayPayment(
+        topupAmount,
+        promoCode,
+        invoiceRequest
+      )
     } else if (isBepusdt) {
       if (!selectedBepusdtTradeType) {
         setBepusdtChainDialogOpen(true)
@@ -219,15 +303,30 @@ export function Wallet(props: WalletProps) {
       success = await processBepusdtPayment(
         topupAmount,
         selectedBepusdtTradeType,
-        promoCode
+        promoCode,
+        invoiceRequest
+      )
+    } else if (selectedPaymentMethod.type === 'waffo') {
+      success = await processWaffoPayment(
+        topupAmount,
+        selectedWaffoMethodIndex ?? undefined,
+        promoCode,
+        invoiceRequest
       )
     } else {
-      success = await processPayment(topupAmount, selectedPaymentMethod.type, promoCode)
+      success = await processPayment(
+        topupAmount,
+        selectedPaymentMethod.type,
+        promoCode,
+        invoiceRequest
+      )
     }
 
     if (success) {
       setConfirmDialogOpen(false)
       setSelectedBepusdtTradeType('')
+      setSelectedWaffoMethodIndex(null)
+      setInvoiceRequest(createEmptyInvoiceRequest(invoiceConfig.types[0]))
       await fetchUser()
     }
   }
@@ -261,12 +360,29 @@ export function Wallet(props: WalletProps) {
     }
   }
 
-  const handleWaffoMethodSelect = async (_method: unknown, index: number) => {
+  const handleWaffoMethodSelect = async (method: unknown, index: number) => {
     const loadingKey = `waffo-${index}`
     setPaymentLoading(loadingKey)
 
     try {
-      await processWaffoPayment(topupAmount, index, promoCode)
+      const waffoMethod = method as { name?: string; icon?: string }
+      const nextInvoiceRequest = createEmptyInvoiceRequest(
+        invoiceConfig.types[0]
+      )
+      setSelectedPaymentMethod({
+        type: 'waffo',
+        name: waffoMethod.name || 'Waffo',
+        icon: waffoMethod.icon,
+      })
+      setSelectedWaffoMethodIndex(index)
+      setInvoiceRequest(nextInvoiceRequest)
+      await calculatePaymentAmount(
+        topupAmount,
+        'waffo',
+        promoCode,
+        nextInvoiceRequest
+      )
+      setConfirmDialogOpen(true)
     } finally {
       setPaymentLoading(null)
     }
@@ -359,6 +475,8 @@ export function Wallet(props: WalletProps) {
           setConfirmDialogOpen(open)
           if (!open) {
             setSelectedBepusdtTradeType('')
+            setSelectedWaffoMethodIndex(null)
+            setInvoiceRequest(createEmptyInvoiceRequest(invoiceConfig.types[0]))
           }
         }}
         onConfirm={handlePaymentConfirm}
@@ -368,13 +486,21 @@ export function Wallet(props: WalletProps) {
         paymentMethod={selectedPaymentMethod}
         calculating={calculating}
         processing={
-          processing || pancakeProcessing || okpayProcessing || bepusdtProcessing
+          processing ||
+          waffoProcessing ||
+          pancakeProcessing ||
+          okpayProcessing ||
+          bepusdtProcessing
         }
         discountRate={getDiscountRate()}
         usdExchangeRate={effectiveUsdExchangeRate}
         bepusdtChains={topupInfo?.bepusdt_chains || []}
         selectedBepusdtTradeType={selectedBepusdtTradeType}
         onSelectBepusdtTradeType={setSelectedBepusdtTradeType}
+        invoiceConfig={invoiceConfig}
+        invoiceRequest={invoiceRequest}
+        onInvoiceRequestChange={handleInvoiceRequestChange}
+        invoiceFee={invoiceFee}
       />
 
       <BillingHistoryDialog

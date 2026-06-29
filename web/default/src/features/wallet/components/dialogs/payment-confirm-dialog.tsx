@@ -38,6 +38,12 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { InvoiceRequestForm } from '@/features/invoices/components/invoice-request-form'
+import {
+  isInvoiceRequestValid,
+  type InvoiceConfig,
+  type InvoiceRequest,
+} from '@/features/invoices/types'
 import { DEFAULT_DISCOUNT_RATE } from '../../constants'
 import { formatCurrency, getPaymentIcon, isBepusdtPayment } from '../../lib'
 import type { BepusdtChain, PaymentMethod } from '../../types'
@@ -57,6 +63,10 @@ interface PaymentConfirmDialogProps {
   bepusdtChains?: BepusdtChain[]
   selectedBepusdtTradeType?: string
   onSelectBepusdtTradeType?: (tradeType: string) => void
+  invoiceConfig?: InvoiceConfig | null
+  invoiceRequest: InvoiceRequest
+  onInvoiceRequestChange: (request: InvoiceRequest) => void
+  invoiceFee?: number
 }
 
 export function PaymentConfirmDialog({
@@ -74,6 +84,10 @@ export function PaymentConfirmDialog({
   bepusdtChains = [],
   selectedBepusdtTradeType = '',
   onSelectBepusdtTradeType,
+  invoiceConfig,
+  invoiceRequest,
+  onInvoiceRequestChange,
+  invoiceFee = 0,
 }: PaymentConfirmDialogProps) {
   const { t } = useTranslation()
   const isBepusdt = isBepusdtPayment(paymentMethod?.type || '')
@@ -83,6 +97,7 @@ export function PaymentConfirmDialog({
   const hasDiscount = discountRate > 0 && discountRate < 1 && paymentAmount > 0
   const originalAmount = hasDiscount ? paymentAmount / discountRate : 0
   const discountAmount = hasDiscount ? originalAmount - paymentAmount : 0
+  const invoiceValid = isInvoiceRequestValid(invoiceConfig, invoiceRequest)
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -191,13 +206,24 @@ export function PaymentConfirmDialog({
               </div>
             </div>
           </div>
+
+          <InvoiceRequestForm
+            config={invoiceConfig}
+            value={invoiceRequest}
+            onChange={onInvoiceRequestChange}
+            invoiceFee={invoiceFee}
+            disabled={processing}
+          />
         </div>
 
         <AlertDialogFooter className='grid grid-cols-2 gap-2 sm:flex'>
           <AlertDialogCancel disabled={processing}>
             {t('Cancel')}
           </AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm} disabled={processing}>
+          <AlertDialogAction
+            onClick={onConfirm}
+            disabled={processing || !invoiceValid}
+          >
             {processing && <Loader2 className='mr-2 h-4 w-4 animate-spin' />}
             {t('Confirm Payment')}
           </AlertDialogAction>

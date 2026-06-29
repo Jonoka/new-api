@@ -22,6 +22,16 @@ type TopUp struct {
 	PromoCodeId          int     `json:"promo_code_id" gorm:"index"`
 	PromoCode            string  `json:"promo_code" gorm:"type:varchar(64);default:''"`
 	AffiliateSourceQuota int     `json:"affiliate_source_quota"`
+	InvoiceRequired      bool    `json:"invoice_required"`
+	InvoiceType          string  `json:"invoice_type" gorm:"type:varchar(32);default:''"`
+	InvoiceTitle         string  `json:"invoice_title" gorm:"type:varchar(255);default:''"`
+	InvoiceTaxNo         string  `json:"invoice_tax_no" gorm:"type:varchar(128);default:''"`
+	InvoiceEmail         string  `json:"invoice_email" gorm:"type:varchar(255);default:''"`
+	InvoicePhone         string  `json:"invoice_phone" gorm:"type:varchar(64);default:''"`
+	InvoiceRemark        string  `json:"invoice_remark" gorm:"type:text"`
+	InvoiceBaseAmount    float64 `json:"invoice_base_amount"`
+	InvoiceFeeAmount     float64 `json:"invoice_fee_amount"`
+	InvoiceStatus        string  `json:"invoice_status" gorm:"type:varchar(32);default:''"`
 	TradeNo              string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
 	PaymentMethod        string  `json:"payment_method" gorm:"type:varchar(50)"`
 	PaymentProvider      string  `json:"payment_provider" gorm:"type:varchar(50);default:''"`
@@ -71,7 +81,7 @@ func normalizeTopUpMoneySnapshot(topUp *TopUp) {
 	if topUp.OriginalMoney == 0 {
 		topUp.OriginalMoney = topUp.Money
 	}
-	if topUp.ActualMoney == 0 && topUp.Money > 0 {
+	if topUp.ActualMoney == 0 && topUp.Money > 0 && topUp.PromoCodeId == 0 {
 		topUp.ActualMoney = topUp.Money
 	}
 	if topUp.Money == 0 && topUp.ActualMoney > 0 {
@@ -173,6 +183,10 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 		}
 
 		if err := recordTopUpPromoUsageTx(tx, topUp, false); err != nil {
+			return err
+		}
+
+		if err := CreateInvoiceRecordFromTopUpTx(tx, topUp); err != nil {
 			return err
 		}
 
@@ -413,6 +427,10 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 			return err
 		}
 
+		if err := CreateInvoiceRecordFromTopUpTx(tx, topUp); err != nil {
+			return err
+		}
+
 		if err := createAffiliateRewardsForPaymentTx(tx, topUp.UserId, AffiliateSourceTopUp, topUp.TradeNo, topUpAffiliateSourceQuota(topUp, quotaToAdd)); err != nil {
 			return err
 		}
@@ -478,6 +496,9 @@ func CompleteEpayTopUp(tradeNo string, actualPaymentMethod string) (*TopUp, int,
 			return err
 		}
 		if err := recordTopUpPromoUsageTx(tx, topUp, false); err != nil {
+			return err
+		}
+		if err := CreateInvoiceRecordFromTopUpTx(tx, topUp); err != nil {
 			return err
 		}
 		if err := createAffiliateRewardsForPaymentTx(tx, topUp.UserId, AffiliateSourceTopUp, topUp.TradeNo, topUpAffiliateSourceQuota(topUp, quotaToAdd)); err != nil {
@@ -551,6 +572,9 @@ func CompleteFreeTopUp(tradeNo string, expectedPaymentProvider string) (*TopUp, 
 			return err
 		}
 		if err := recordTopUpPromoUsageTx(tx, topUp, true); err != nil {
+			return err
+		}
+		if err := CreateInvoiceRecordFromTopUpTx(tx, topUp); err != nil {
 			return err
 		}
 		if err := createAffiliateRewardsForPaymentTx(tx, topUp.UserId, AffiliateSourceTopUp, topUp.TradeNo, topUpAffiliateSourceQuota(topUp, 0)); err != nil {
@@ -637,6 +661,10 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 			return err
 		}
 
+		if err := CreateInvoiceRecordFromTopUpTx(tx, topUp); err != nil {
+			return err
+		}
+
 		if err := createAffiliateRewardsForPaymentTx(tx, topUp.UserId, AffiliateSourceTopUp, topUp.TradeNo, topUpAffiliateSourceQuota(topUp, int(quota))); err != nil {
 			return err
 		}
@@ -703,6 +731,10 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 		}
 
 		if err := recordTopUpPromoUsageTx(tx, topUp, false); err != nil {
+			return err
+		}
+
+		if err := CreateInvoiceRecordFromTopUpTx(tx, topUp); err != nil {
 			return err
 		}
 
@@ -777,6 +809,10 @@ func RechargeBepusdt(tradeNo string, callerIp string) (err error) {
 			return err
 		}
 
+		if err := CreateInvoiceRecordFromTopUpTx(tx, topUp); err != nil {
+			return err
+		}
+
 		if err := createAffiliateRewardsForPaymentTx(tx, topUp.UserId, AffiliateSourceTopUp, topUp.TradeNo, topUpAffiliateSourceQuota(topUp, quotaToAdd)); err != nil {
 			return err
 		}
@@ -848,6 +884,10 @@ func RechargeOkpay(tradeNo string, callerIp string) (err error) {
 			return err
 		}
 
+		if err := CreateInvoiceRecordFromTopUpTx(tx, topUp); err != nil {
+			return err
+		}
+
 		if err := createAffiliateRewardsForPaymentTx(tx, topUp.UserId, AffiliateSourceTopUp, topUp.TradeNo, topUpAffiliateSourceQuota(topUp, quotaToAdd)); err != nil {
 			return err
 		}
@@ -914,6 +954,10 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 		}
 
 		if err := recordTopUpPromoUsageTx(tx, topUp, false); err != nil {
+			return err
+		}
+
+		if err := CreateInvoiceRecordFromTopUpTx(tx, topUp); err != nil {
 			return err
 		}
 

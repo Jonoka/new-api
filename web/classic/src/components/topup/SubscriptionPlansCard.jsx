@@ -38,6 +38,7 @@ import {
   formatSubscriptionDuration,
   formatSubscriptionResetPeriod,
 } from '../../helpers/subscriptionFormat';
+import { createEmptyInvoiceRequest } from '../invoice/InvoiceRequestForm';
 
 const { Text } = Typography;
 
@@ -93,6 +94,7 @@ const SubscriptionPlansCard = ({
   activeSubscriptions = [],
   allSubscriptions = [],
   reloadSubscriptionSelf,
+  invoiceConfig,
   withCard = true,
 }) => {
   const [open, setOpen] = useState(false);
@@ -106,6 +108,9 @@ const SubscriptionPlansCard = ({
   const [amountLoading, setAmountLoading] = useState(false);
   const [selectedBepusdtTradeType, setSelectedBepusdtTradeType] = useState('');
   const [selectedPaymentKind, setSelectedPaymentKind] = useState('');
+  const [invoiceRequest, setInvoiceRequest] = useState(
+    createEmptyInvoiceRequest(),
+  );
 
   const hasBepusdt =
     enableBepusdtTopUp &&
@@ -126,6 +131,9 @@ const SubscriptionPlansCard = ({
     return 'balance';
   };
 
+  const buildInvoicePayload = () =>
+    invoiceRequest?.required ? { invoice: invoiceRequest } : {};
+
   const loadAmountPreview = async (
     paymentMethod = getPreviewPaymentMethod(),
     code = promoCode.trim(),
@@ -140,6 +148,7 @@ const SubscriptionPlansCard = ({
         plan_id: selectedPlan.plan.id,
         promo_code: code,
         payment_method: paymentMethod,
+        ...buildInvoicePayload(),
       });
       if (res.data?.message === 'success') {
         setAmountPreview(res.data);
@@ -180,6 +189,7 @@ const SubscriptionPlansCard = ({
     setPromoCode('');
     setPromoDiscount(null);
     setAmountPreview(null);
+    setInvoiceRequest(createEmptyInvoiceRequest());
     setOpen(true);
   };
 
@@ -194,6 +204,7 @@ const SubscriptionPlansCard = ({
     setSelectedEpayMethod('');
     setSelectedBepusdtTradeType('');
     setSelectedPaymentKind('');
+    setInvoiceRequest(createEmptyInvoiceRequest());
   };
 
   useEffect(() => {
@@ -201,6 +212,12 @@ const SubscriptionPlansCard = ({
     loadAmountPreview(getPreviewPaymentMethod(), promoCode.trim(), true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, selectedPlan?.plan?.id, selectedEpayMethod, selectedPaymentKind]);
+
+  useEffect(() => {
+    if (!open || !selectedPlan?.plan?.id) return;
+    loadAmountPreview(getPreviewPaymentMethod(), promoCode.trim(), true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoiceRequest]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -215,6 +232,7 @@ const SubscriptionPlansCard = ({
     const code = promoCode.trim();
     return code ? { promo_code: code } : {};
   };
+
 
   const handlePromoCodeChange = (value) => {
     setPromoCode(value);
@@ -254,6 +272,7 @@ const SubscriptionPlansCard = ({
       const res = await API.post('/api/subscription/stripe/pay', {
         plan_id: selectedPlan.plan.id,
         ...buildPromoPayload(),
+        ...buildInvoicePayload(),
       });
       if (res.data?.message === 'success') {
         if (res.data.completed || res.data.data?.completed) {
@@ -291,6 +310,7 @@ const SubscriptionPlansCard = ({
       const res = await API.post('/api/subscription/creem/pay', {
         plan_id: selectedPlan.plan.id,
         ...buildPromoPayload(),
+        ...buildInvoicePayload(),
       });
       if (res.data?.message === 'success') {
         window.open(res.data.data?.checkout_url, '_blank');
@@ -321,6 +341,7 @@ const SubscriptionPlansCard = ({
         plan_id: selectedPlan.plan.id,
         payment_method: selectedEpayMethod,
         ...buildPromoPayload(),
+        ...buildInvoicePayload(),
       });
       if (res.data?.message === 'success') {
         if (res.data.completed || res.data.data?.completed) {
@@ -358,6 +379,7 @@ const SubscriptionPlansCard = ({
         plan_id: selectedPlan.plan.id,
         trade_type: tradeType,
         ...buildPromoPayload(),
+        ...buildInvoicePayload(),
       });
       if (res.data?.message === 'success') {
         if (res.data.completed || res.data.data?.completed) {
@@ -873,6 +895,9 @@ const SubscriptionPlansCard = ({
         promoDiscount={promoDiscount}
         amountPreview={amountPreview}
         amountLoading={amountLoading}
+        invoiceConfig={invoiceConfig}
+        invoiceRequest={invoiceRequest}
+        setInvoiceRequest={setInvoiceRequest}
         onPromoCodeBlur={previewSubscriptionAmount}
         onPayStripe={payStripe}
         onPayCreem={payCreem}

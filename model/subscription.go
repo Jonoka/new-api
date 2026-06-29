@@ -270,6 +270,16 @@ type SubscriptionOrder struct {
 	PromoCodeId          int     `json:"promo_code_id" gorm:"index"`
 	PromoCode            string  `json:"promo_code" gorm:"type:varchar(64);default:''"`
 	AffiliateSourceQuota int     `json:"affiliate_source_quota"`
+	InvoiceRequired      bool    `json:"invoice_required"`
+	InvoiceType          string  `json:"invoice_type" gorm:"type:varchar(32);default:''"`
+	InvoiceTitle         string  `json:"invoice_title" gorm:"type:varchar(255);default:''"`
+	InvoiceTaxNo         string  `json:"invoice_tax_no" gorm:"type:varchar(128);default:''"`
+	InvoiceEmail         string  `json:"invoice_email" gorm:"type:varchar(255);default:''"`
+	InvoicePhone         string  `json:"invoice_phone" gorm:"type:varchar(64);default:''"`
+	InvoiceRemark        string  `json:"invoice_remark" gorm:"type:text"`
+	InvoiceBaseAmount    float64 `json:"invoice_base_amount"`
+	InvoiceFeeAmount     float64 `json:"invoice_fee_amount"`
+	InvoiceStatus        string  `json:"invoice_status" gorm:"type:varchar(32);default:''"`
 
 	TradeNo         string `json:"trade_no" gorm:"unique;type:varchar(255);index"`
 	PaymentMethod   string `json:"payment_method" gorm:"type:varchar(50)"`
@@ -840,6 +850,9 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 		if err := recordSubscriptionPromoUsageTx(tx, &order, false); err != nil {
 			return err
 		}
+		if err := CreateInvoiceRecordFromSubscriptionOrderTx(tx, &order); err != nil {
+			return err
+		}
 		if err := createAffiliateRewardsForPaymentTx(tx, order.UserId, AffiliateSourceSubscription, order.TradeNo, subscriptionOrderAffiliateSourceQuota(&order)); err != nil {
 			return err
 		}
@@ -917,6 +930,9 @@ func CompleteFreeSubscriptionOrder(tradeNo string, expectedPaymentProvider strin
 		if err := recordSubscriptionPromoUsageTx(tx, &order, true); err != nil {
 			return err
 		}
+		if err := CreateInvoiceRecordFromSubscriptionOrderTx(tx, &order); err != nil {
+			return err
+		}
 		if err := createAffiliateRewardsForPaymentTx(tx, order.UserId, AffiliateSourceSubscription, order.TradeNo, subscriptionOrderAffiliateSourceQuota(&order)); err != nil {
 			return err
 		}
@@ -962,6 +978,16 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 				PromoCodeId:          order.PromoCodeId,
 				PromoCode:            order.PromoCode,
 				AffiliateSourceQuota: order.AffiliateSourceQuota,
+				InvoiceRequired:      order.InvoiceRequired,
+				InvoiceType:          order.InvoiceType,
+				InvoiceTitle:         order.InvoiceTitle,
+				InvoiceTaxNo:         order.InvoiceTaxNo,
+				InvoiceEmail:         order.InvoiceEmail,
+				InvoicePhone:         order.InvoicePhone,
+				InvoiceRemark:        order.InvoiceRemark,
+				InvoiceBaseAmount:    order.InvoiceBaseAmount,
+				InvoiceFeeAmount:     order.InvoiceFeeAmount,
+				InvoiceStatus:        order.InvoiceStatus,
 				TradeNo:              order.TradeNo,
 				PaymentMethod:        order.PaymentMethod,
 				PaymentProvider:      order.PaymentProvider,
@@ -980,6 +1006,16 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 	topup.PromoCodeId = order.PromoCodeId
 	topup.PromoCode = order.PromoCode
 	topup.AffiliateSourceQuota = order.AffiliateSourceQuota
+	topup.InvoiceRequired = order.InvoiceRequired
+	topup.InvoiceType = order.InvoiceType
+	topup.InvoiceTitle = order.InvoiceTitle
+	topup.InvoiceTaxNo = order.InvoiceTaxNo
+	topup.InvoiceEmail = order.InvoiceEmail
+	topup.InvoicePhone = order.InvoicePhone
+	topup.InvoiceRemark = order.InvoiceRemark
+	topup.InvoiceBaseAmount = order.InvoiceBaseAmount
+	topup.InvoiceFeeAmount = order.InvoiceFeeAmount
+	topup.InvoiceStatus = order.InvoiceStatus
 	if topup.PaymentMethod == "" {
 		topup.PaymentMethod = order.PaymentMethod
 	} else if topup.PaymentMethod != order.PaymentMethod {
@@ -1056,9 +1092,13 @@ func calcSubscriptionBalanceQuota(priceAmount float64) (int, error) {
 }
 
 // PurchaseSubscriptionWithBalance creates a subscription by deducting the user's wallet quota.
-func PurchaseSubscriptionWithBalance(userId int, planId int, promoCode string) error {
+func PurchaseSubscriptionWithBalance(userId int, planId int, promoCode string, invoiceReq ...InvoiceRequest) error {
 	if userId <= 0 || planId <= 0 {
 		return errors.New("invalid userId or planId")
+	}
+	req := InvoiceRequest{}
+	if len(invoiceReq) > 0 {
+		req = invoiceReq[0]
 	}
 
 	var logPlanTitle string
@@ -1092,17 +1132,32 @@ func PurchaseSubscriptionWithBalance(userId int, planId int, promoCode string) e
 		if discount != nil {
 			requiredQuota = discount.ActualPaidQuota
 		}
+		businessPaidUSD := planPriceUSD
+		if discount != nil {
+			businessPaidUSD = discount.PaidAmount
+		}
+		invoiceBaseCNY := PaymentAmountToCNY(businessPaidUSD, PaymentProviderBalance)
+		normalizedInvoiceReq, invoiceFeeCNY, err := ValidateInvoiceRequest(req, invoiceBaseCNY)
+		if err != nil {
+			return err
+		}
+		invoiceFeeUSD := AmountCNYToPaymentCurrency(invoiceFeeCNY, PaymentProviderBalance)
+		invoiceQuota, err := calcSubscriptionBalanceQuota(invoiceFeeUSD)
+		if err != nil {
+			return err
+		}
+		totalRequiredQuota := requiredQuota + invoiceQuota
 
 		var user User
 		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id = ?", userId).First(&user).Error; err != nil {
 			return err
 		}
-		if requiredQuota > 0 && user.Quota < requiredQuota {
+		if totalRequiredQuota > 0 && user.Quota < totalRequiredQuota {
 			return errors.New("余额不足")
 		}
-		if requiredQuota > 0 {
+		if totalRequiredQuota > 0 {
 			if err := tx.Model(&User{}).Where("id = ?", userId).
-				Update("quota", gorm.Expr("quota - ?", requiredQuota)).Error; err != nil {
+				Update("quota", gorm.Expr("quota - ?", totalRequiredQuota)).Error; err != nil {
 				return err
 			}
 		}
@@ -1123,16 +1178,23 @@ func PurchaseSubscriptionWithBalance(userId int, planId int, promoCode string) e
 			Status:          common.TopUpStatusSuccess,
 			CreateTime:      now,
 			CompleteTime:    now,
-			ProviderPayload: fmt.Sprintf("charged_quota=%d", requiredQuota),
+			ProviderPayload: fmt.Sprintf("charged_quota=%d invoice_quota=%d", totalRequiredQuota, invoiceQuota),
 		}
 		if discount == nil {
 			order.AffiliateSourceQuota = requiredQuota
 		}
 		ApplyPromoCodeResultToSubscriptionOrder(order, discount)
+		if normalizedInvoiceReq.Required {
+			AddInvoiceSnapshotToSubscriptionOrder(order, normalizedInvoiceReq, invoiceBaseCNY, invoiceFeeCNY)
+			order.Money = decimal.NewFromFloat(businessPaidUSD).Add(decimal.NewFromFloat(invoiceFeeUSD)).Round(2).InexactFloat64()
+		}
 		if err := tx.Create(order).Error; err != nil {
 			return err
 		}
 		if err := recordSubscriptionPromoUsageTx(tx, order, true); err != nil {
+			return err
+		}
+		if err := CreateInvoiceRecordFromSubscriptionOrderTx(tx, order); err != nil {
 			return err
 		}
 		if err := createAffiliateRewardsForPaymentTx(tx, order.UserId, AffiliateSourceSubscription, order.TradeNo, subscriptionOrderAffiliateSourceQuota(order)); err != nil {
@@ -1141,7 +1203,7 @@ func PurchaseSubscriptionWithBalance(userId int, planId int, promoCode string) e
 
 		logPlanTitle = plan.Title
 		logMoney = order.Money
-		chargedQuota = requiredQuota
+		chargedQuota = totalRequiredQuota
 		upgradeGroup = strings.TrimSpace(plan.UpgradeGroup)
 		return nil
 	})

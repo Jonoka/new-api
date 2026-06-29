@@ -24,14 +24,16 @@ type BillingPreferenceRequest struct {
 }
 
 type SubscriptionBalancePayRequest struct {
-	PlanId    int    `json:"plan_id"`
-	PromoCode string `json:"promo_code"`
+	PlanId    int                  `json:"plan_id"`
+	PromoCode string               `json:"promo_code"`
+	Invoice   model.InvoiceRequest `json:"invoice"`
 }
 
 type SubscriptionAmountRequest struct {
-	PlanId        int    `json:"plan_id"`
-	PromoCode     string `json:"promo_code"`
-	PaymentMethod string `json:"payment_method"`
+	PlanId        int                  `json:"plan_id"`
+	PromoCode     string               `json:"promo_code"`
+	PaymentMethod string               `json:"payment_method"`
+	Invoice       model.InvoiceRequest `json:"invoice"`
 }
 
 // ---- User APIs ----
@@ -116,7 +118,7 @@ func SubscriptionRequestBalancePay(c *gin.Context) {
 		return
 	}
 
-	if err := model.PurchaseSubscriptionWithBalance(userId, req.PlanId, req.PromoCode); err != nil {
+	if err := model.PurchaseSubscriptionWithBalance(userId, req.PlanId, req.PromoCode, req.Invoice); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -223,6 +225,16 @@ func SubscriptionRequestAmount(c *gin.Context) {
 	if displayDiscount != nil {
 		response["discount"] = displayDiscount
 	}
+	invoiceAmounts, err := buildInvoicePaymentAmounts(req.Invoice, invoicePaymentProviderForDisplay(paymentMethod, displayCurrency), displayAmount)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if invoiceAmounts.Required {
+		response["data"] = strconv.FormatFloat(invoiceAmounts.TotalPayment, 'f', 2, 64)
+		response["amount"] = invoiceAmounts.TotalPayment
+	}
+	addInvoiceFieldsToResponse(response, invoiceAmounts)
 	c.JSON(http.StatusOK, response)
 }
 

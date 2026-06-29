@@ -60,6 +60,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       enabled: true,
       topup: true,
       affiliate: true,
+      invoice: true,
       personal: true,
     },
     admin: {
@@ -71,6 +72,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       user: true,
       subscription: true,
       game_management: true,
+      invoice_admin: true,
       affiliate_admin: true,
       setting: true,
     },
@@ -126,6 +128,7 @@ export default function SettingsSidebarModulesAdmin(props) {
         enabled: true,
         topup: true,
         affiliate: true,
+        invoice: true,
         personal: true,
       },
       admin: {
@@ -137,6 +140,7 @@ export default function SettingsSidebarModulesAdmin(props) {
         user: true,
         subscription: true,
         game_management: true,
+        invoice_admin: true,
         affiliate_admin: true,
         setting: true,
       },
@@ -203,6 +207,7 @@ export default function SettingsSidebarModulesAdmin(props) {
             enabled: true,
             topup: true,
             affiliate: true,
+            invoice: true,
             personal: true,
           },
           admin: {
@@ -214,6 +219,7 @@ export default function SettingsSidebarModulesAdmin(props) {
             user: true,
             subscription: true,
             game_management: true,
+            invoice_admin: true,
             affiliate_admin: true,
             setting: true,
           },
@@ -276,6 +282,11 @@ export default function SettingsSidebarModulesAdmin(props) {
           description: t('邀请返佣与提现管理'),
         },
         {
+          key: 'invoice',
+          title: t('发票中心'),
+          description: t('用户发票申请与下载记录'),
+        },
+        {
           key: 'personal',
           title: t('个人设置'),
           description: t('个人信息设置'),
@@ -310,6 +321,11 @@ export default function SettingsSidebarModulesAdmin(props) {
           description: t('预测局创建与结算'),
         },
         { key: 'user', title: t('用户管理'), description: t('用户账户管理') },
+        {
+          key: 'invoice_admin',
+          title: t('发票管理'),
+          description: t('审核和处理发票工单'),
+        },
         {
           key: 'affiliate_admin',
           title: t('返佣分成设置'),

@@ -30,6 +30,7 @@ import {
   ListTodo,
   MessageSquare,
   Radio,
+  ReceiptText,
   Settings,
   Ticket,
   User,
@@ -133,6 +134,11 @@ export function useSidebarData(): SidebarData {
             icon: Wallet,
           },
           {
+            title: t('Invoice Center'),
+            url: '/invoices',
+            icon: ReceiptText,
+          },
+          {
             title: t('Affiliate Commission'),
             url: '/affiliate',
             icon: HandCoins,
@@ -172,6 +178,11 @@ export function useSidebarData(): SidebarData {
             title: t('Subscription Management'),
             url: '/subscriptions',
             icon: CreditCard,
+          },
+          {
+            title: t('Invoice Management'),
+            url: '/invoice-management',
+            icon: ReceiptText,
           },
           {
             title: t('Affiliate Commission'),

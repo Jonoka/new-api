@@ -37,6 +37,7 @@ import Redemption from './pages/Redemption';
 import TopUp from './pages/TopUp';
 import Affiliate from './pages/Affiliate';
 import AffiliateAdmin from './pages/AffiliateAdmin';
+import InvoiceCenter from './pages/Invoice';
 import Log from './pages/Log';
 import Chat from './pages/Chat';
 import Chat2Link from './pages/Chat2Link';
@@ -314,6 +315,26 @@ function App() {
                 <Affiliate />
               </Suspense>
             </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/invoice'
+          element={
+            <PrivateRoute>
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <InvoiceCenter />
+              </Suspense>
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/invoice-admin'
+          element={
+            <AdminRoute>
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <InvoiceCenter adminOnly />
+              </Suspense>
+            </AdminRoute>
           }
         />
         <Route

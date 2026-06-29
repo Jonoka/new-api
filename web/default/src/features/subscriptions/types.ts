@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
+import type { InvoiceRequest } from '@/features/invoices/types'
 
 // ============================================================================
 // Subscription Plan Schema & Types
@@ -91,6 +92,7 @@ export interface SubscriptionPayRequest {
   payment_method?: string
   trade_type?: string
   promo_code?: string
+  invoice?: InvoiceRequest
 }
 
 export interface SubscriptionAmountPreview {
@@ -137,6 +139,13 @@ export interface SubscriptionAmountResponse {
   plan_currency?: string
   payment_method?: string
   discount?: SubscriptionAmountPreview
+  invoice_required?: boolean
+  invoice_base_amount?: number
+  invoice_fee?: number
+  invoice_total_amount?: number
+  invoice_fee_payment_amount?: number
+  invoice_payment_amount?: number
+  invoice_currency?: string
 }
 
 export interface CreateUserSubscriptionRequest {

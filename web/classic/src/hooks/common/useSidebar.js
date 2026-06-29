@@ -45,6 +45,7 @@ export const DEFAULT_ADMIN_CONFIG = {
     enabled: true,
     topup: true,
     affiliate: true,
+    invoice: true,
     personal: true,
   },
   admin: {
@@ -56,6 +57,7 @@ export const DEFAULT_ADMIN_CONFIG = {
     user: true,
     subscription: true,
     game_management: true,
+    invoice_admin: true,
     affiliate_admin: true,
     setting: true,
   },

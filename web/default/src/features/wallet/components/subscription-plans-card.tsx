@@ -663,6 +663,7 @@ export function SubscriptionPlansCard({
         bepusdtChains={bepusdtChains}
         enableOnlineTopUp={enableOnlineTopUp}
         epayMethods={epayMethods}
+        invoiceConfig={topupInfo?.invoice}
         userQuota={userQuota}
         onPurchaseSuccess={onPurchaseSuccess}
         purchaseLimit={

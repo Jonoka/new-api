@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Crown, CalendarClock, Loader2, Package } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -52,6 +52,15 @@ import {
 } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { GroupBadge } from '@/components/group-badge'
+import { InvoiceRequestForm } from '@/features/invoices/components/invoice-request-form'
+import {
+  createEmptyInvoiceRequest,
+  getInvoicePayload,
+  isInvoiceRequestValid,
+  normalizeInvoiceConfig,
+  type InvoiceConfig,
+  type InvoiceRequest,
+} from '@/features/invoices/types'
 import { BepusdtChainDialog } from '@/features/wallet/components/dialogs/bepusdt-chain-dialog'
 import type { BepusdtChain } from '@/features/wallet/types'
 import {
@@ -91,6 +100,7 @@ interface Props {
   bepusdtChains?: BepusdtChain[]
   enableOnlineTopUp?: boolean
   epayMethods?: PaymentMethod[]
+  invoiceConfig?: InvoiceConfig | null
   purchaseLimit?: number
   purchaseCount?: number
   userQuota?: number
@@ -111,6 +121,13 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const [bepusdtChainOpen, setBepusdtChainOpen] = useState(false)
   const [bepusdtConfirmOpen, setBepusdtConfirmOpen] = useState(false)
   const [selectedBepusdtTradeType, setSelectedBepusdtTradeType] = useState('')
+  const normalizedInvoiceConfig = useMemo(
+    () => normalizeInvoiceConfig(props.invoiceConfig),
+    [props.invoiceConfig]
+  )
+  const [invoiceRequest, setInvoiceRequest] = useState<InvoiceRequest>(
+    createEmptyInvoiceRequest()
+  )
 
   const plan = props.plan?.plan
   const planId = plan?.id || 0
@@ -128,7 +145,8 @@ export function SubscriptionPurchaseDialog(props: Props) {
   async function loadAmountPreview(
     paymentMethod = getPreviewPaymentMethod(),
     code = promoCode.trim(),
-    silent = false
+    silent = false,
+    request = invoiceRequest
   ) {
     if (!planId) return null
     setAmountLoading(true)
@@ -137,6 +155,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
         plan_id: planId,
         promo_code: code,
         payment_method: paymentMethod,
+        ...getInvoicePayload(request),
       })
       if (res.message === 'success') {
         setAmountPreview(res)
@@ -177,9 +196,17 @@ export function SubscriptionPurchaseDialog(props: Props) {
       setBepusdtChainOpen(false)
       setBepusdtConfirmOpen(false)
       setSelectedBepusdtTradeType('')
+      setInvoiceRequest(
+        createEmptyInvoiceRequest(normalizedInvoiceConfig.types[0])
+      )
       setAmountLoading(false)
     }
-  }, [props.open, props.epayMethods, hasConfiguredBepusdt])
+  }, [
+    props.open,
+    props.epayMethods,
+    hasConfiguredBepusdt,
+    normalizedInvoiceConfig.types,
+  ])
 
   useEffect(() => {
     if (!props.open || !planId) return
@@ -220,8 +247,10 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const amountDueCurrency = amountPreview?.currency || plan.currency || 'USD'
   const amountDueText = formatPlanCurrencyAmount(amountDue, amountDueCurrency)
   const paidPriceUSD =
-    Number(amountPreview?.amount_usd || 0) ||
-    (plan.currency === 'USD' ? paidDisplayAmount : 0)
+    amountDueCurrency === 'USD'
+      ? amountDue
+      : Number(amountPreview?.amount_usd || 0) ||
+        (plan.currency === 'USD' ? paidDisplayAmount : 0)
   const quotaPerUnit =
     currency?.quotaPerUnit && currency.quotaPerUnit > 0
       ? currency.quotaPerUnit
@@ -237,6 +266,12 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const selectedBepusdtChain = (props.bepusdtChains || []).find(
     (chain) => chain.trade_type === selectedBepusdtTradeType
   )
+  const invoiceFee = Number(amountPreview?.invoice_fee || 0)
+  const invoiceValid = isInvoiceRequestValid(
+    normalizedInvoiceConfig,
+    invoiceRequest
+  )
+  const invoiceDisabled = paying || amountLoading
 
   const handleCompletedPurchase = () => {
     toast.success(t('Subscription purchased successfully'))
@@ -248,18 +283,40 @@ export function SubscriptionPurchaseDialog(props: Props) {
     const code = promoCode.trim()
     if (!code) {
       setPromoDiscount(null)
-      void loadAmountPreview(getPreviewPaymentMethod(), '', true)
+      void loadAmountPreview(
+        getPreviewPaymentMethod(),
+        '',
+        true,
+        invoiceRequest
+      )
       return
     }
-    await loadAmountPreview(getPreviewPaymentMethod(), code)
+    await loadAmountPreview(
+      getPreviewPaymentMethod(),
+      code,
+      false,
+      invoiceRequest
+    )
+  }
+
+  const handleInvoiceRequestChange = (request: InvoiceRequest) => {
+    setInvoiceRequest(request)
+    void loadAmountPreview(
+      getPreviewPaymentMethod(),
+      promoCode.trim(),
+      true,
+      request
+    )
   }
 
   const handlePayStripe = async () => {
+    if (!invoiceValid) return
     setPaying(true)
     try {
       const res = await paySubscriptionStripe({
         plan_id: plan.id,
         promo_code: promoCode,
+        ...getInvoicePayload(invoiceRequest),
       })
       if (res.message === 'success' && res.data?.completed) {
         handleCompletedPurchase()
@@ -282,6 +339,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
   }
 
   const handlePayCreem = async () => {
+    if (!invoiceValid) return
     if (promoCode.trim()) {
       toast.error(t('Creem does not support promo codes yet'))
       return
@@ -291,6 +349,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
       const res = await paySubscriptionCreem({
         plan_id: plan.id,
         promo_code: promoCode,
+        ...getInvoicePayload(invoiceRequest),
       })
       if (res.message === 'success' && res.data?.checkout_url) {
         window.open(res.data.checkout_url, '_blank')
@@ -313,11 +372,13 @@ export function SubscriptionPurchaseDialog(props: Props) {
   // In-tab redirect (not window.open) — user-gesture context is lost
   // across the await, so a popup would be blocked. Same as the wallet hook.
   const handlePayWaffoPancake = async () => {
+    if (!invoiceValid) return
     setPaying(true)
     try {
       const res = await paySubscriptionWaffoPancake({
         plan_id: plan.id,
         promo_code: promoCode,
+        ...getInvoicePayload(invoiceRequest),
       })
       if (res.message === 'success' && res.data?.completed) {
         handleCompletedPurchase()
@@ -343,6 +404,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
     /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
 
   const handlePayEpay = async () => {
+    if (!invoiceValid) return
     if (!selectedEpayMethod) {
       toast.error(t('Please select a payment method'))
       return
@@ -353,6 +415,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
         plan_id: plan.id,
         payment_method: selectedEpayMethod,
         promo_code: promoCode,
+        ...getInvoicePayload(invoiceRequest),
       })
       if (res.message === 'success' && res.data?.completed) {
         handleCompletedPurchase()
@@ -390,11 +453,13 @@ export function SubscriptionPurchaseDialog(props: Props) {
   }
 
   const handlePayBalance = async () => {
+    if (!invoiceValid) return
     setPaying(true)
     try {
       const res = await paySubscriptionBalance({
         plan_id: plan.id,
         promo_code: promoCode,
+        ...getInvoicePayload(invoiceRequest),
       })
       if (res.success) {
         toast.success(t('Subscription purchased successfully'))
@@ -415,7 +480,13 @@ export function SubscriptionPurchaseDialog(props: Props) {
   }
 
   const handleOpenBepusdtChains = async () => {
-    const preview = await loadAmountPreview('bepusdt', promoCode.trim())
+    if (!invoiceValid) return
+    const preview = await loadAmountPreview(
+      'bepusdt',
+      promoCode.trim(),
+      false,
+      invoiceRequest
+    )
     if (preview?.message === 'success') {
       setBepusdtChainOpen(true)
     }
@@ -428,6 +499,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
   }
 
   const handlePayBepusdt = async () => {
+    if (!invoiceValid) return
     if (!selectedBepusdtTradeType) {
       toast.error(t('Please select a payment network'))
       return
@@ -438,6 +510,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
         plan_id: plan.id,
         trade_type: selectedBepusdtTradeType,
         promo_code: promoCode,
+        ...getInvoicePayload(invoiceRequest),
       })
       if (res.message === 'success' && res.data?.completed) {
         setBepusdtConfirmOpen(false)
@@ -556,6 +629,14 @@ export function SubscriptionPurchaseDialog(props: Props) {
                   </span>
                 </div>
               )}
+              {invoiceFee > 0 && !amountLoading && (
+                <div className='flex justify-between text-xs'>
+                  <span className='text-muted-foreground'>
+                    {t('Invoice fee')}
+                  </span>
+                  <span>{`¥${invoiceFee.toFixed(2)}`}</span>
+                </div>
+              )}
             </div>
 
             {limitReached && (
@@ -591,7 +672,8 @@ export function SubscriptionPurchaseDialog(props: Props) {
                   amountLoading ||
                   limitReached ||
                   !balanceAmountReady ||
-                  insufficientBalance
+                  insufficientBalance ||
+                  !invoiceValid
                 }
               >
                 {t('Pay with Balance')}
@@ -611,6 +693,14 @@ export function SubscriptionPurchaseDialog(props: Props) {
               />
             </div>
 
+            <InvoiceRequestForm
+              config={normalizedInvoiceConfig}
+              value={invoiceRequest}
+              onChange={handleInvoiceRequestChange}
+              invoiceFee={invoiceFee}
+              disabled={invoiceDisabled}
+            />
+
             {hasAnyPayment && (
               <div className='space-y-3'>
                 <p className='text-muted-foreground text-xs'>
@@ -623,7 +713,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
                         variant='outline'
                         className='flex-1'
                         onClick={handlePayStripe}
-                        disabled={paying || limitReached}
+                        disabled={paying || limitReached || !invoiceValid}
                       >
                         Stripe
                       </Button>
@@ -633,7 +723,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
                         variant='outline'
                         className='flex-1'
                         onClick={handlePayCreem}
-                        disabled={paying || limitReached}
+                        disabled={paying || limitReached || !invoiceValid}
                       >
                         Creem
                       </Button>
@@ -643,7 +733,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
                         variant='outline'
                         className='flex-1'
                         onClick={handlePayWaffoPancake}
-                        disabled={paying || limitReached}
+                        disabled={paying || limitReached || !invoiceValid}
                       >
                         Waffo Pancake
                       </Button>
@@ -655,7 +745,9 @@ export function SubscriptionPurchaseDialog(props: Props) {
                     variant='outline'
                     className='w-full'
                     onClick={handleOpenBepusdtChains}
-                    disabled={paying || amountLoading || limitReached}
+                    disabled={
+                      paying || amountLoading || limitReached || !invoiceValid
+                    }
                   >
                     USDT
                   </Button>
@@ -673,7 +765,12 @@ export function SubscriptionPurchaseDialog(props: Props) {
                       onValueChange={(v) => {
                         if (v === null) return
                         setSelectedEpayMethod(v)
-                        void loadAmountPreview(v, promoCode.trim(), true)
+                        void loadAmountPreview(
+                          v,
+                          promoCode.trim(),
+                          true,
+                          invoiceRequest
+                        )
                       }}
                       disabled={limitReached}
                     >
@@ -692,7 +789,12 @@ export function SubscriptionPurchaseDialog(props: Props) {
                     </Select>
                     <Button
                       onClick={handlePayEpay}
-                      disabled={paying || !selectedEpayMethod || limitReached}
+                      disabled={
+                        paying ||
+                        !selectedEpayMethod ||
+                        limitReached ||
+                        !invoiceValid
+                      }
                     >
                       {t('Pay')}
                     </Button>
@@ -746,7 +848,10 @@ export function SubscriptionPurchaseDialog(props: Props) {
             <AlertDialogCancel disabled={paying}>
               {t('Cancel')}
             </AlertDialogCancel>
-            <AlertDialogAction onClick={handlePayBepusdt} disabled={paying}>
+            <AlertDialogAction
+              onClick={handlePayBepusdt}
+              disabled={paying || !invoiceValid}
+            >
               {paying && <Loader2 className='mr-2 h-4 w-4 animate-spin' />}
               {t('Confirm Payment')}
             </AlertDialogAction>
