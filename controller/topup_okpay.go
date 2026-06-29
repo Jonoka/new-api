@@ -317,7 +317,7 @@ func RequestOkpayAmount(c *gin.Context) {
 	if discount != nil {
 		fiatPayMoney = discount.PaidAmount
 	}
-	invoiceAmounts, err := buildInvoicePaymentAmounts(req.Invoice, model.PaymentProviderOkpay, fiatPayMoney)
+	invoiceAmounts, err := buildInvoicePaymentPreviewAmounts(req.Invoice, model.PaymentProviderOkpay, fiatPayMoney)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
 		return

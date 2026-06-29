@@ -263,6 +263,39 @@ func ValidateInvoiceRequest(req InvoiceRequest, baseAmountCNY float64) (InvoiceR
 	return req, fee, nil
 }
 
+func ValidateInvoicePreviewRequest(req InvoiceRequest, baseAmountCNY float64) (InvoiceRequest, float64, error) {
+	req.Type = normalizeInvoiceType(req.Type)
+	req.Title = strings.TrimSpace(req.Title)
+	req.TaxNo = strings.TrimSpace(req.TaxNo)
+	req.Email = strings.TrimSpace(req.Email)
+	req.Phone = strings.TrimSpace(req.Phone)
+	req.Remark = strings.TrimSpace(req.Remark)
+
+	if !req.Required {
+		return InvoiceRequest{}, 0, nil
+	}
+	if !InvoiceEnabled {
+		return req, 0, errors.New("当前不支持开发票")
+	}
+	if req.Type == "" {
+		types := GetInvoiceTypes()
+		if len(types) > 0 {
+			req.Type = types[0]
+		}
+	}
+	if req.Type == "" {
+		return req, 0, errors.New("请选择发票类型")
+	}
+	if !InvoiceTypeEnabled(req.Type) {
+		return req, 0, errors.New("当前不支持该发票类型")
+	}
+	fee, err := CalculateInvoiceFee(baseAmountCNY)
+	if err != nil {
+		return req, 0, err
+	}
+	return req, fee, nil
+}
+
 func InvoiceTypeEnabled(invoiceType string) bool {
 	invoiceType = normalizeInvoiceType(invoiceType)
 	for _, typ := range GetInvoiceTypes() {

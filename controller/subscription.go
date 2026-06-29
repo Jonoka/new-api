@@ -209,8 +209,20 @@ func SubscriptionRequestAmount(c *gin.Context) {
 			return
 		}
 		displayCurrency = model.SubscriptionCurrencyCNY
-		displayAmount = getEpayPayMoneyFromUSD(payMoneyUSD)
-		displayDiscount = convertSubscriptionDiscountToEpayMoney(discount)
+		displayDiscount, err = convertSubscriptionDiscountToEpayPlanMoney(plan, discount)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		if displayDiscount != nil {
+			displayAmount = displayDiscount.PaidAmount
+		} else {
+			displayAmount, err = getSubscriptionEpayPayMoney(plan, payMoneyUSD)
+			if err != nil {
+				common.ApiError(c, err)
+				return
+			}
+		}
 	}
 
 	response := gin.H{
@@ -225,7 +237,7 @@ func SubscriptionRequestAmount(c *gin.Context) {
 	if displayDiscount != nil {
 		response["discount"] = displayDiscount
 	}
-	invoiceAmounts, err := buildInvoicePaymentAmounts(req.Invoice, invoicePaymentProviderForDisplay(paymentMethod, displayCurrency), displayAmount)
+	invoiceAmounts, err := buildInvoicePaymentPreviewAmounts(req.Invoice, invoicePaymentProviderForDisplay(paymentMethod, displayCurrency), displayAmount)
 	if err != nil {
 		common.ApiError(c, err)
 		return

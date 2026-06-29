@@ -87,8 +87,21 @@ func SubscriptionRequestEpay(c *gin.Context) {
 		common.ApiErrorMsg(c, "套餐金额过低")
 		return
 	}
-	payMoney := getEpayPayMoneyFromUSD(basePayMoney)
-	epayDiscount := convertSubscriptionDiscountToEpayMoney(discount)
+	epayDiscount, err := convertSubscriptionDiscountToEpayPlanMoney(plan, discount)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	var payMoney float64
+	if epayDiscount != nil {
+		payMoney = epayDiscount.PaidAmount
+	} else {
+		payMoney, err = getSubscriptionEpayPayMoney(plan, basePayMoney)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	}
 	invoiceAmounts, err := buildInvoicePaymentAmounts(req.Invoice, model.PaymentProviderEpay, payMoney)
 	if err != nil {
 		common.ApiError(c, err)
@@ -177,6 +190,26 @@ func SubscriptionRequestEpay(c *gin.Context) {
 
 func convertSubscriptionDiscountToEpayMoney(discount *model.PromoCodeDiscountResult) *model.PromoCodeDiscountResult {
 	return convertSubscriptionDiscountAmount(discount, getEpayPayMoneyFromUSD)
+}
+
+func getSubscriptionEpayPayMoney(plan *model.SubscriptionPlan, amountUSD float64) (float64, error) {
+	if plan == nil {
+		return 0, fmt.Errorf("subscription plan is nil")
+	}
+	if model.NormalizeSubscriptionPlanCurrency(plan.Currency) == model.SubscriptionCurrencyCNY {
+		return model.SubscriptionPlanCurrencyAmountFromUSD(amountUSD, model.SubscriptionCurrencyCNY)
+	}
+	return getEpayPayMoneyFromUSD(amountUSD), nil
+}
+
+func convertSubscriptionDiscountToEpayPlanMoney(plan *model.SubscriptionPlan, discount *model.PromoCodeDiscountResult) (*model.PromoCodeDiscountResult, error) {
+	if discount == nil {
+		return nil, nil
+	}
+	if model.NormalizeSubscriptionPlanCurrency(plan.Currency) == model.SubscriptionCurrencyCNY {
+		return convertSubscriptionDiscountToCNYPlanMoney(plan, discount)
+	}
+	return convertSubscriptionDiscountAmount(discount, getEpayPayMoneyFromUSD), nil
 }
 
 func getSubscriptionBepusdtPayMoney(plan *model.SubscriptionPlan, amountUSD float64) (float64, error) {

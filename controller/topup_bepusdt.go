@@ -224,7 +224,7 @@ func RequestBepusdtAmount(c *gin.Context) {
 	if discount != nil {
 		payMoney = discount.PaidAmount
 	}
-	invoiceAmounts, err := buildInvoicePaymentAmounts(req.Invoice, model.PaymentProviderBepusdt, payMoney)
+	invoiceAmounts, err := buildInvoicePaymentPreviewAmounts(req.Invoice, model.PaymentProviderBepusdt, payMoney)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
 		return

@@ -178,10 +178,27 @@ const TopUp = () => {
     return true;
   };
 
-  const buildInvoicePayload = (request = invoiceRequest) =>
-    request?.required && isInvoiceRequestReady(request)
-      ? { invoice: request }
-      : {};
+  const isInvoicePreviewRequestReady = (request) => {
+    if (!request?.required || !invoiceConfig?.enabled) {
+      return false;
+    }
+    const types =
+      Array.isArray(invoiceConfig?.types) && invoiceConfig.types.length > 0
+        ? invoiceConfig.types
+        : ['personal', 'company'];
+    const invoiceType = types.includes(request.type) ? request.type : types[0];
+    return types.includes(invoiceType);
+  };
+
+  const buildInvoicePayload = (
+    request = invoiceRequest,
+    { preview = false } = {},
+  ) => {
+    const ready = preview
+      ? isInvoicePreviewRequestReady(request)
+      : isInvoiceRequestReady(request);
+    return request?.required && ready ? { invoice: request } : {};
+  };
 
   const requestAmountByPayment = async (payment, value, request) => {
     if (payment === 'stripe') {
@@ -584,7 +601,7 @@ const TopUp = () => {
       const res = await API.post('/api/user/waffo/amount', {
         amount: parseInt(value),
         ...buildPromoPayload(),
-        ...buildInvoicePayload(request),
+        ...buildInvoicePayload(request, { preview: true }),
       });
       updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
@@ -649,7 +666,7 @@ const TopUp = () => {
       const res = await API.post('/api/user/waffo-pancake/amount', {
         amount: parseInt(value),
         ...buildPromoPayload(),
-        ...buildInvoicePayload(request),
+        ...buildInvoicePayload(request, { preview: true }),
       });
       updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
@@ -915,7 +932,7 @@ const TopUp = () => {
       const res = await API.post('/api/user/amount', {
         amount: parseFloat(value),
         ...buildPromoPayload(),
-        ...buildInvoicePayload(request),
+        ...buildInvoicePayload(request, { preview: true }),
       });
       updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
@@ -933,7 +950,7 @@ const TopUp = () => {
       const res = await API.post('/api/user/stripe/amount', {
         amount: parseFloat(value),
         ...buildPromoPayload(),
-        ...buildInvoicePayload(request),
+        ...buildInvoicePayload(request, { preview: true }),
       });
       updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
@@ -952,7 +969,7 @@ const TopUp = () => {
       const res = await API.post('/api/user/bepusdt/amount', {
         amount: parseFloat(value),
         ...buildPromoPayload(),
-        ...buildInvoicePayload(request),
+        ...buildInvoicePayload(request, { preview: true }),
       });
       updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
@@ -971,7 +988,7 @@ const TopUp = () => {
       const res = await API.post('/api/user/okpay/amount', {
         amount: parseFloat(value),
         ...buildPromoPayload(),
-        ...buildInvoicePayload(request),
+        ...buildInvoicePayload(request, { preview: true }),
       });
       updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {

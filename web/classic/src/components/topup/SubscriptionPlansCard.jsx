@@ -147,10 +147,27 @@ const SubscriptionPlansCard = ({
     return true;
   };
 
-  const buildInvoicePayload = (request = invoiceRequest) =>
-    request?.required && isInvoiceRequestReady(request)
-      ? { invoice: request }
-      : {};
+  const isInvoicePreviewRequestReady = (request) => {
+    if (!request?.required || !invoiceConfig?.enabled) {
+      return false;
+    }
+    const types =
+      Array.isArray(invoiceConfig?.types) && invoiceConfig.types.length > 0
+        ? invoiceConfig.types
+        : ['personal', 'company'];
+    const invoiceType = types.includes(request.type) ? request.type : types[0];
+    return types.includes(invoiceType);
+  };
+
+  const buildInvoicePayload = (
+    request = invoiceRequest,
+    { preview = false } = {},
+  ) => {
+    const ready = preview
+      ? isInvoicePreviewRequestReady(request)
+      : isInvoiceRequestReady(request);
+    return request?.required && ready ? { invoice: request } : {};
+  };
 
   const loadAmountPreview = async (
     paymentMethod = getPreviewPaymentMethod(),
@@ -167,7 +184,7 @@ const SubscriptionPlansCard = ({
         plan_id: selectedPlan.plan.id,
         promo_code: code,
         payment_method: paymentMethod,
-        ...buildInvoicePayload(request),
+        ...buildInvoicePayload(request, { preview: true }),
       });
       if (res.data?.message === 'success') {
         setAmountPreview(res.data);

@@ -140,6 +140,21 @@ export function isInvoiceRequestValid(
   return true
 }
 
+export function isInvoicePreviewRequestEnabled(
+  config: InvoiceConfig | undefined | null,
+  request: InvoiceRequest | undefined | null
+): boolean {
+  if (!request?.required) return false
+  const normalizedConfig = normalizeInvoiceConfig(config)
+  const invoiceType = normalizedConfig.types.includes(request.type)
+    ? request.type
+    : normalizedConfig.types[0]
+  return (
+    normalizedConfig.enabled &&
+    normalizedConfig.types.includes(invoiceType)
+  )
+}
+
 export function getInvoicePayload(request: InvoiceRequest | undefined | null): {
   invoice?: InvoiceRequest
 } {

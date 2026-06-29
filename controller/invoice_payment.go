@@ -21,8 +21,16 @@ func roundPaymentAmount(amount float64) float64 {
 }
 
 func buildInvoicePaymentAmounts(req model.InvoiceRequest, paymentProvider string, businessPaymentAmount float64) (*invoicePaymentAmounts, error) {
+	return buildInvoicePaymentAmountsWithValidator(req, paymentProvider, businessPaymentAmount, model.ValidateInvoiceRequest)
+}
+
+func buildInvoicePaymentPreviewAmounts(req model.InvoiceRequest, paymentProvider string, businessPaymentAmount float64) (*invoicePaymentAmounts, error) {
+	return buildInvoicePaymentAmountsWithValidator(req, paymentProvider, businessPaymentAmount, model.ValidateInvoicePreviewRequest)
+}
+
+func buildInvoicePaymentAmountsWithValidator(req model.InvoiceRequest, paymentProvider string, businessPaymentAmount float64, validate func(model.InvoiceRequest, float64) (model.InvoiceRequest, float64, error)) (*invoicePaymentAmounts, error) {
 	baseCNY := model.PaymentAmountToCNY(businessPaymentAmount, paymentProvider)
-	normalizedReq, feeCNY, err := model.ValidateInvoiceRequest(req, baseCNY)
+	normalizedReq, feeCNY, err := validate(req, baseCNY)
 	if err != nil {
 		return nil, err
 	}

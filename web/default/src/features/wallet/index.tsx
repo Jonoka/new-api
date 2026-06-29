@@ -24,6 +24,7 @@ import { useSystemConfig } from '@/hooks/use-system-config'
 import { SectionPageLayout } from '@/components/layout'
 import {
   createEmptyInvoiceRequest,
+  isInvoicePreviewRequestEnabled,
   isInvoiceRequestValid,
   normalizeInvoiceConfig,
   type InvoiceRequest,
@@ -215,14 +216,13 @@ export function Wallet(props: WalletProps) {
     (request: InvoiceRequest) => {
       setInvoiceRequest(request)
       if (confirmDialogOpen) {
-        const previewRequest = isInvoiceRequestValid(invoiceConfig, request)
-          ? request
-          : createEmptyInvoiceRequest(request.type)
         calculatePaymentAmount(
           topupAmount,
           getCurrentPaymentType(),
           promoCode,
-          previewRequest
+          isInvoicePreviewRequestEnabled(invoiceConfig, request)
+            ? request
+            : createEmptyInvoiceRequest(request.type)
         )
       }
     },

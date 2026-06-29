@@ -56,7 +56,7 @@ func RequestWaffoPancakeAmount(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
 	}
-	invoiceAmounts, err := buildInvoicePaymentAmounts(req.Invoice, model.PaymentProviderWaffoPancake, payMoney)
+	invoiceAmounts, err := buildInvoicePaymentPreviewAmounts(req.Invoice, model.PaymentProviderWaffoPancake, payMoney)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
 		return

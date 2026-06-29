@@ -49,6 +49,7 @@ import { InvoiceRequestForm } from '@/features/invoices/components/invoice-reque
 import {
   createEmptyInvoiceRequest,
   getInvoicePayload,
+  isInvoicePreviewRequestEnabled,
   isInvoiceRequestValid,
   normalizeInvoiceConfig,
   type InvoiceConfig,
@@ -147,7 +148,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
     request = invoiceRequest
   ) {
     if (!planId) return null
-    const previewRequest = isInvoiceRequestValid(
+    const previewRequest = isInvoicePreviewRequestEnabled(
       normalizedInvoiceConfig,
       request
     )

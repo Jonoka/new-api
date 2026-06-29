@@ -561,6 +561,101 @@ func TestSubscriptionRequestAmount_UsesPaymentSpecificRatesForCnyPlan(t *testing
 	})
 }
 
+func TestSubscriptionRequestAmount_UsesEpayRateForUsdPlan(t *testing.T) {
+	db := setupSubscriptionPaymentControllerTestDB(t)
+	withConfirmedPaymentCompliance(t)
+	plan := seedSubscriptionPaymentUserAndPlan(t, db, func(plan *model.SubscriptionPlan) {
+		plan.PriceAmount = 188
+		plan.Currency = model.SubscriptionCurrencyUSD
+	})
+
+	originalPrice := operation_setting.Price
+	originalPayMethods := operation_setting.PayMethods
+	operation_setting.Price = 1.03
+	operation_setting.PayMethods = []map[string]string{{"type": "alipay", "name": "支付宝"}}
+	t.Cleanup(func() {
+		operation_setting.Price = originalPrice
+		operation_setting.PayMethods = originalPayMethods
+	})
+
+	ctx, recorder := newSubscriptionPaymentContext(t, SubscriptionAmountRequest{
+		PlanId:        plan.Id,
+		PaymentMethod: "alipay",
+	}, 901)
+	SubscriptionRequestAmount(ctx)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Message   string  `json:"message"`
+		Data      string  `json:"data"`
+		Amount    float64 `json:"amount"`
+		Currency  string  `json:"currency"`
+		AmountUSD float64 `json:"amount_usd"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, "success", response.Message)
+	assert.Equal(t, model.SubscriptionCurrencyCNY, response.Currency)
+	assert.Equal(t, "193.64", response.Data)
+	assert.InDelta(t, 193.64, response.Amount, 0.000001)
+	assert.InDelta(t, 188, response.AmountUSD, 0.000001)
+
+	var count int64
+	require.NoError(t, db.Model(&model.SubscriptionOrder{}).Count(&count).Error)
+	assert.EqualValues(t, 0, count)
+}
+
+func TestSubscriptionRequestAmount_PreviewsInvoiceFeeWithoutTitle(t *testing.T) {
+	_ = setupSubscriptionPaymentControllerTestDB(t)
+	withConfirmedPaymentCompliance(t)
+	plan := seedSubscriptionPaymentUserAndPlan(t, model.DB, func(plan *model.SubscriptionPlan) {
+		plan.PriceAmount = 100
+		plan.Currency = model.SubscriptionCurrencyCNY
+	})
+
+	originalInvoiceEnabled := model.InvoiceEnabled
+	originalInvoiceTypes := model.InvoiceTypes
+	originalInvoiceFeeRules := model.InvoiceFeeRules
+	originalPrice := operation_setting.Price
+	originalPayMethods := operation_setting.PayMethods
+	model.InvoiceEnabled = true
+	model.InvoiceTypes = `["personal","company"]`
+	model.InvoiceFeeRules = `[{"min":0,"max":500,"type":"fixed","value":50}]`
+	operation_setting.Price = 1
+	operation_setting.PayMethods = []map[string]string{{"type": "alipay", "name": "支付宝"}}
+	t.Cleanup(func() {
+		model.InvoiceEnabled = originalInvoiceEnabled
+		model.InvoiceTypes = originalInvoiceTypes
+		model.InvoiceFeeRules = originalInvoiceFeeRules
+		operation_setting.Price = originalPrice
+		operation_setting.PayMethods = originalPayMethods
+	})
+
+	ctx, recorder := newSubscriptionPaymentContext(t, SubscriptionAmountRequest{
+		PlanId:        plan.Id,
+		PaymentMethod: "alipay",
+		Invoice: model.InvoiceRequest{
+			Required: true,
+			Type:     model.InvoiceTypePersonal,
+		},
+	}, 901)
+	SubscriptionRequestAmount(ctx)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Message         string  `json:"message"`
+		Data            string  `json:"data"`
+		Amount          float64 `json:"amount"`
+		InvoiceRequired bool    `json:"invoice_required"`
+		InvoiceFee      float64 `json:"invoice_fee"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, "success", response.Message)
+	assert.Equal(t, "150.00", response.Data)
+	assert.InDelta(t, 150, response.Amount, 0.000001)
+	assert.True(t, response.InvoiceRequired)
+	assert.InDelta(t, 50, response.InvoiceFee, 0.000001)
+}
+
 func TestPurchaseSubscriptionWithBalance_UsesCnyPlanAsUsdBase(t *testing.T) {
 	db := setupSubscriptionPaymentControllerTestDB(t)
 	plan := seedSubscriptionPaymentUserAndPlan(t, db, func(plan *model.SubscriptionPlan) {
