@@ -162,26 +162,44 @@ const TopUp = () => {
     return code ? { promo_code: code } : {};
   };
 
-  const buildInvoicePayload = () =>
-    invoiceRequest?.required ? { invoice: invoiceRequest } : {};
+  const isInvoiceRequestReady = (request) => {
+    if (!request?.required) {
+      return true;
+    }
+    if (!invoiceConfig?.enabled) {
+      return false;
+    }
+    if (!request.title?.trim()) {
+      return false;
+    }
+    if (request.type === 'company' && !request.tax_no?.trim()) {
+      return false;
+    }
+    return true;
+  };
 
-  const requestAmountByPayment = async (payment, value) => {
+  const buildInvoicePayload = (request = invoiceRequest) =>
+    request?.required && isInvoiceRequestReady(request)
+      ? { invoice: request }
+      : {};
+
+  const requestAmountByPayment = async (payment, value, request) => {
     if (payment === 'stripe') {
-      return getStripeAmount(value);
+      return getStripeAmount(value, request);
     }
     if (payment === 'waffo_pancake') {
-      return getWaffoPancakeAmount(value);
+      return getWaffoPancakeAmount(value, request);
     }
     if (typeof payment === 'string' && payment.startsWith('waffo:')) {
-      return getWaffoAmount(value);
+      return getWaffoAmount(value, request);
     }
     if (payment === 'bepusdt') {
-      return getBepusdtAmount(value);
+      return getBepusdtAmount(value, request);
     }
     if (payment === 'okpay') {
-      return getOkpayAmount(value);
+      return getOkpayAmount(value, request);
     }
-    return getAmount(value);
+    return getAmount(value, request);
   };
 
   const updateAmountFromResponse = (response, fallbackError) => {
@@ -330,6 +348,11 @@ const TopUp = () => {
   };
 
   const onlineTopUp = async () => {
+    if (!isInvoiceRequestReady(invoiceRequest)) {
+      showError(t('请先填写完整的发票信息'));
+      return;
+    }
+
     if (payWay === 'waffo_pancake') {
       setConfirmLoading(true);
       try {
@@ -552,7 +575,7 @@ const TopUp = () => {
     }
   };
 
-  const getWaffoAmount = async (value) => {
+  const getWaffoAmount = async (value, request = invoiceRequest) => {
     if (value === undefined) {
       value = topUpCount;
     }
@@ -561,7 +584,7 @@ const TopUp = () => {
       const res = await API.post('/api/user/waffo/amount', {
         amount: parseInt(value),
         ...buildPromoPayload(),
-        ...buildInvoicePayload(),
+        ...buildInvoicePayload(request),
       });
       updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
@@ -617,7 +640,7 @@ const TopUp = () => {
     }
   };
 
-  const getWaffoPancakeAmount = async (value) => {
+  const getWaffoPancakeAmount = async (value, request = invoiceRequest) => {
     if (value === undefined) {
       value = topUpCount;
     }
@@ -626,7 +649,7 @@ const TopUp = () => {
       const res = await API.post('/api/user/waffo-pancake/amount', {
         amount: parseInt(value),
         ...buildPromoPayload(),
-        ...buildInvoicePayload(),
+        ...buildInvoicePayload(request),
       });
       updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
@@ -883,7 +906,7 @@ const TopUp = () => {
     return amount + ' ' + t('元');
   };
 
-  const getAmount = async (value) => {
+  const getAmount = async (value, request = invoiceRequest) => {
     if (value === undefined) {
       value = topUpCount;
     }
@@ -892,7 +915,7 @@ const TopUp = () => {
       const res = await API.post('/api/user/amount', {
         amount: parseFloat(value),
         ...buildPromoPayload(),
-        ...buildInvoicePayload(),
+        ...buildInvoicePayload(request),
       });
       updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
@@ -901,7 +924,7 @@ const TopUp = () => {
     setAmountLoading(false);
   };
 
-  const getStripeAmount = async (value) => {
+  const getStripeAmount = async (value, request = invoiceRequest) => {
     if (value === undefined) {
       value = topUpCount;
     }
@@ -910,7 +933,7 @@ const TopUp = () => {
       const res = await API.post('/api/user/stripe/amount', {
         amount: parseFloat(value),
         ...buildPromoPayload(),
-        ...buildInvoicePayload(),
+        ...buildInvoicePayload(request),
       });
       updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
@@ -920,7 +943,7 @@ const TopUp = () => {
     }
   };
 
-  const getBepusdtAmount = async (value) => {
+  const getBepusdtAmount = async (value, request = invoiceRequest) => {
     if (value === undefined) {
       value = topUpCount;
     }
@@ -929,7 +952,7 @@ const TopUp = () => {
       const res = await API.post('/api/user/bepusdt/amount', {
         amount: parseFloat(value),
         ...buildPromoPayload(),
-        ...buildInvoicePayload(),
+        ...buildInvoicePayload(request),
       });
       updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
@@ -939,7 +962,7 @@ const TopUp = () => {
     }
   };
 
-  const getOkpayAmount = async (value) => {
+  const getOkpayAmount = async (value, request = invoiceRequest) => {
     if (value === undefined) {
       value = topUpCount;
     }
@@ -948,7 +971,7 @@ const TopUp = () => {
       const res = await API.post('/api/user/okpay/amount', {
         amount: parseFloat(value),
         ...buildPromoPayload(),
-        ...buildInvoicePayload(),
+        ...buildInvoicePayload(request),
       });
       updateAmountFromResponse(res, t('获取金额失败'));
     } catch (err) {
@@ -973,6 +996,13 @@ const TopUp = () => {
 
   const handleOpenHistory = () => {
     setOpenHistory(true);
+  };
+
+  const handleInvoiceRequestChange = async (request) => {
+    setInvoiceRequest(request);
+    if (open && payWay) {
+      await requestAmountByPayment(payWay, topUpCount, request);
+    }
   };
 
   const handleHistoryCancel = () => {
@@ -1031,7 +1061,7 @@ const TopUp = () => {
         amountText={amountText}
         invoiceConfig={invoiceConfig}
         invoiceRequest={invoiceRequest}
-        setInvoiceRequest={setInvoiceRequest}
+        setInvoiceRequest={handleInvoiceRequestChange}
         invoiceFee={invoicePreview?.fee || 0}
         onPromoCodeBlur={() => requestAmountByPayment(payWay)}
         bepusdtChains={bepusdtChains}

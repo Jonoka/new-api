@@ -59,6 +59,7 @@ import { safeNumberFieldProps } from '../utils/numeric-field'
 import { AmountDiscountVisualEditor } from './amount-discount-visual-editor'
 import { AmountOptionsVisualEditor } from './amount-options-visual-editor'
 import { CreemProductsVisualEditor } from './creem-products-visual-editor'
+import { InvoiceSettingsVisualEditor } from './invoice-settings-visual-editor'
 import { PaymentMethodsVisualEditor } from './payment-methods-visual-editor'
 import {
   formatJsonForEditor,
@@ -1331,53 +1332,37 @@ export function PaymentSettingsSection({
               )}
             />
 
-            <div className='grid gap-6 md:grid-cols-2 md:items-start'>
-              <FormField
-                control={form.control}
-                name='InvoiceTypes'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Invoice types (JSON)')}</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        rows={3}
-                        placeholder={DEFAULT_INVOICE_TYPES}
-                        {...field}
-                        onChange={(event) => field.onChange(event.target.value)}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      {t('Supported values: personal and company')}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name='InvoiceFeeRules'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Invoice fee rules (JSON, CNY)')}</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        rows={5}
-                        placeholder={DEFAULT_INVOICE_FEE_RULES}
-                        {...field}
-                        onChange={(event) => field.onChange(event.target.value)}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      {t(
-                        'Rules match invoice amount in CNY. Use fixed for a flat fee or percent for a percentage fee.'
-                      )}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
+            <FormField
+              control={form.control}
+              name='InvoiceTypes'
+              render={({ field: typesField }) => (
+                <FormField
+                  control={form.control}
+                  name='InvoiceFeeRules'
+                  render={({ field: feeRulesField }) => (
+                    <FormItem>
+                      <FormLabel>{t('Invoice configuration')}</FormLabel>
+                      <FormControl>
+                        <InvoiceSettingsVisualEditor
+                          typesValue={typesField.value || DEFAULT_INVOICE_TYPES}
+                          feeRulesValue={
+                            feeRulesField.value || DEFAULT_INVOICE_FEE_RULES
+                          }
+                          onTypesChange={typesField.onChange}
+                          onFeeRulesChange={feeRulesField.onChange}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Invoice fee rules are calculated in CNY and added to the payable amount when users request an invoice.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+            />
           </div>
 
           <Separator />

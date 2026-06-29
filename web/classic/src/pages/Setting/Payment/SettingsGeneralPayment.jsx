@@ -18,7 +18,20 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Button, Col, Form, Row, Spin } from '@douyinfe/semi-ui';
+import {
+  Button,
+  Card,
+  Checkbox,
+  Col,
+  Form,
+  InputNumber,
+  Row,
+  Select,
+  Space,
+  Spin,
+  Table,
+  Typography,
+} from '@douyinfe/semi-ui';
 import {
   API,
   removeTrailingSlash,
@@ -27,6 +40,231 @@ import {
   verifyJSON,
 } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
+
+const DEFAULT_INVOICE_TYPES = '["personal","company"]';
+const DEFAULT_INVOICE_FEE_RULES =
+  '[{"min":0,"max":500,"type":"fixed","value":50},{"min":501,"max":2000,"type":"fixed","value":100},{"min":2001,"max":5000,"type":"fixed","value":175},{"min":5000,"type":"percent","value":5}]';
+
+const parseInvoiceTypes = (value) => {
+  try {
+    const parsed = JSON.parse(value || '[]');
+    if (!Array.isArray(parsed)) return ['personal', 'company'];
+    const types = parsed.filter(
+      (item) => item === 'personal' || item === 'company',
+    );
+    return types.length > 0 ? types : ['personal', 'company'];
+  } catch {
+    return ['personal', 'company'];
+  }
+};
+
+const parseInvoiceRules = (value) => {
+  try {
+    const parsed = JSON.parse(value || '[]');
+    if (!Array.isArray(parsed)) return parseInvoiceRules(DEFAULT_INVOICE_FEE_RULES);
+    const rules = parsed
+      .map((item) => ({
+        min: Number(item?.min ?? 0),
+        max:
+          item?.max === undefined || item?.max === ''
+            ? undefined
+            : Number(item.max),
+        type: item?.type === 'percent' ? 'percent' : 'fixed',
+        value: Number(item?.value ?? 0),
+      }))
+      .filter(
+        (rule) =>
+          Number.isFinite(rule.min) &&
+          (rule.max === undefined || Number.isFinite(rule.max)) &&
+          Number.isFinite(rule.value),
+      )
+      .sort((a, b) => a.min - b.min);
+    return rules.length > 0 ? rules : parseInvoiceRules(DEFAULT_INVOICE_FEE_RULES);
+  } catch {
+    return [
+      { min: 0, max: 500, type: 'fixed', value: 50 },
+      { min: 501, max: 2000, type: 'fixed', value: 100 },
+      { min: 2001, max: 5000, type: 'fixed', value: 175 },
+      { min: 5000, type: 'percent', value: 5 },
+    ];
+  }
+};
+
+const serializeInvoiceTypes = (types) =>
+  JSON.stringify(types.length > 0 ? types : ['personal'], null, 2);
+
+const serializeInvoiceRules = (rules) =>
+  JSON.stringify(
+    rules
+      .map((rule) => ({
+        min: Number(rule.min) || 0,
+        ...(rule.max !== undefined && Number(rule.max) > 0
+          ? { max: Number(rule.max) }
+          : {}),
+        type: rule.type === 'percent' ? 'percent' : 'fixed',
+        value: Number(rule.value) || 0,
+      }))
+      .sort((a, b) => a.min - b.min),
+    null,
+    2,
+  );
+
+const InvoiceSettingsVisualEditor = ({ t, typesValue, rulesValue, onChange }) => {
+  const types = parseInvoiceTypes(typesValue);
+  const rules = parseInvoiceRules(rulesValue);
+
+  const updateTypes = (nextTypes) => {
+    onChange({
+      InvoiceTypes: serializeInvoiceTypes(nextTypes),
+      InvoiceFeeRules: rulesValue,
+    });
+  };
+
+  const updateRules = (nextRules) => {
+    onChange({
+      InvoiceTypes: typesValue,
+      InvoiceFeeRules: serializeInvoiceRules(nextRules),
+    });
+  };
+
+  const toggleType = (type, checked) => {
+    const next = checked
+      ? Array.from(new Set([...types, type]))
+      : types.filter((item) => item !== type);
+    updateTypes(next.length > 0 ? next : [type]);
+  };
+
+  const patchRule = (index, patch) => {
+    const next = rules.map((rule, idx) =>
+      idx === index ? { ...rule, ...patch } : rule,
+    );
+    updateRules(next);
+  };
+
+  const addRule = () => {
+    const last = rules[rules.length - 1];
+    const nextMin = last?.max ? last.max + 1 : (last?.min || 0) + 1;
+    updateRules([...rules, { min: nextMin, type: 'fixed', value: 0 }]);
+  };
+
+  const deleteRule = (index) => {
+    const next = rules.filter((_, idx) => idx !== index);
+    updateRules(next.length > 0 ? next : parseInvoiceRules(DEFAULT_INVOICE_FEE_RULES));
+  };
+
+  const columns = [
+    {
+      title: t('最小金额'),
+      dataIndex: 'min',
+      render: (_, record, index) => (
+        <InputNumber
+          min={0}
+          value={record.min}
+          onChange={(value) => patchRule(index, { min: Number(value) || 0 })}
+          style={{ width: 120 }}
+        />
+      ),
+    },
+    {
+      title: t('最大金额'),
+      dataIndex: 'max',
+      render: (_, record, index) => (
+        <InputNumber
+          min={0}
+          value={record.max}
+          placeholder={t('无上限')}
+          onChange={(value) =>
+            patchRule(index, {
+              max:
+                value === undefined || value === null || value === ''
+                  ? undefined
+                  : Number(value),
+            })
+          }
+          style={{ width: 120 }}
+        />
+      ),
+    },
+    {
+      title: t('收费方式'),
+      dataIndex: 'type',
+      render: (_, record, index) => (
+        <Select
+          value={record.type}
+          onChange={(value) => patchRule(index, { type: value })}
+          style={{ width: 130 }}
+          optionList={[
+            { value: 'fixed', label: t('固定金额') },
+            { value: 'percent', label: t('百分比') },
+          ]}
+        />
+      ),
+    },
+    {
+      title: t('收费值'),
+      dataIndex: 'value',
+      render: (_, record, index) => (
+        <InputNumber
+          min={0}
+          value={record.value}
+          onChange={(value) => patchRule(index, { value: Number(value) || 0 })}
+          style={{ width: 120 }}
+        />
+      ),
+    },
+    {
+      title: t('操作'),
+      render: (_, __, index) => (
+        <Button type='danger' theme='borderless' onClick={() => deleteRule(index)}>
+          {t('删除')}
+        </Button>
+      ),
+    },
+  ];
+
+  return (
+    <Card bodyStyle={{ padding: 16 }}>
+      <Space vertical align='start' style={{ width: '100%' }}>
+        <div>
+          <Typography.Text strong>{t('发票类型')}</Typography.Text>
+          <div style={{ marginTop: 8 }}>
+            <Checkbox
+              checked={types.includes('personal')}
+              onChange={(event) => toggleType('personal', event.target.checked)}
+            >
+              {t('对私')}
+            </Checkbox>
+            <Checkbox
+              checked={types.includes('company')}
+              onChange={(event) => toggleType('company', event.target.checked)}
+              style={{ marginLeft: 16 }}
+            >
+              {t('对公')}
+            </Checkbox>
+          </div>
+        </div>
+
+        <div style={{ width: '100%' }}>
+          <div className='flex items-center justify-between' style={{ marginBottom: 8 }}>
+            <div>
+              <Typography.Text strong>{t('发票费用规则')}</Typography.Text>
+              <div style={{ color: 'var(--semi-color-text-2)', fontSize: 12 }}>
+                {t('费用按人民币计算。最大金额留空表示无上限')}
+              </div>
+            </div>
+            <Button onClick={addRule}>{t('新增规则')}</Button>
+          </div>
+          <Table
+            columns={columns}
+            dataSource={rules.map((rule, index) => ({ ...rule, key: index }))}
+            pagination={false}
+            size='small'
+          />
+        </div>
+      </Space>
+    </Card>
+  );
+};
 
 export default function SettingsGeneralPayment(props) {
   const { t } = useTranslation();
@@ -40,9 +278,8 @@ export default function SettingsGeneralPayment(props) {
     AmountOptions: '',
     AmountDiscount: '',
     InvoiceEnabled: false,
-    InvoiceTypes: '["personal","company"]',
-    InvoiceFeeRules:
-      '[{"min":0,"max":500,"type":"fixed","value":50},{"min":501,"max":2000,"type":"fixed","value":100},{"min":2001,"max":5000,"type":"fixed","value":175},{"min":5000,"type":"percent","value":5}]',
+    InvoiceTypes: DEFAULT_INVOICE_TYPES,
+    InvoiceFeeRules: DEFAULT_INVOICE_FEE_RULES,
   });
   const [originInputs, setOriginInputs] = useState({});
   const formApiRef = useRef(null);
@@ -57,10 +294,9 @@ export default function SettingsGeneralPayment(props) {
         AmountOptions: props.options.AmountOptions || '',
         AmountDiscount: props.options.AmountDiscount || '',
         InvoiceEnabled: !!props.options.InvoiceEnabled,
-        InvoiceTypes: props.options.InvoiceTypes || '["personal","company"]',
+        InvoiceTypes: props.options.InvoiceTypes || DEFAULT_INVOICE_TYPES,
         InvoiceFeeRules:
-          props.options.InvoiceFeeRules ||
-          '[{"min":0,"max":500,"type":"fixed","value":50},{"min":501,"max":2000,"type":"fixed","value":100},{"min":2001,"max":5000,"type":"fixed","value":175},{"min":5000,"type":"percent","value":5}]',
+          props.options.InvoiceFeeRules || DEFAULT_INVOICE_FEE_RULES,
       };
       setInputs(currentInputs);
       setOriginInputs({ ...currentInputs });
@@ -104,22 +340,6 @@ export default function SettingsGeneralPayment(props) {
       !verifyJSON(inputs.AmountDiscount)
     ) {
       showError(t('充值金额折扣配置不是合法的 JSON 对象'));
-      return;
-    }
-
-    if (
-      originInputs.InvoiceTypes !== inputs.InvoiceTypes &&
-      !verifyJSON(inputs.InvoiceTypes)
-    ) {
-      showError(t('发票类型配置不是合法的 JSON 数组'));
-      return;
-    }
-
-    if (
-      originInputs.InvoiceFeeRules !== inputs.InvoiceFeeRules &&
-      !verifyJSON(inputs.InvoiceFeeRules)
-    ) {
-      showError(t('发票费用规则不是合法的 JSON 数组'));
       return;
     }
 
@@ -292,27 +512,15 @@ export default function SettingsGeneralPayment(props) {
               />
             </Col>
             <Col xs={24} sm={24} md={16} lg={16} xl={16}>
-              <Form.TextArea
-                field='InvoiceTypes'
-                label={t('发票类型配置')}
-                placeholder='["personal","company"]'
-                autosize
-                extraText={t(
-                  'personal 表示对私，company 表示对公，可按需保留其中一种',
-                )}
-              />
-            </Col>
-          </Row>
-          <Row style={{ marginTop: 16 }}>
-            <Col span={24}>
-              <Form.TextArea
-                field='InvoiceFeeRules'
-                label={t('发票费用规则')}
-                placeholder='[{"min":0,"max":500,"type":"fixed","value":50},{"min":500,"type":"percent","value":5}]'
-                autosize
-                extraText={t(
-                  '费用按人民币计算。type 为 fixed 时 value 是固定金额，type 为 percent 时 value 是百分比',
-                )}
+              <InvoiceSettingsVisualEditor
+                t={t}
+                typesValue={inputs.InvoiceTypes}
+                rulesValue={inputs.InvoiceFeeRules}
+                onChange={(patch) => {
+                  const nextInputs = { ...inputs, ...patch };
+                  setInputs(nextInputs);
+                  formApiRef.current?.setValues(nextInputs);
+                }}
               />
             </Col>
           </Row>

@@ -147,13 +147,19 @@ export function SubscriptionPurchaseDialog(props: Props) {
     request = invoiceRequest
   ) {
     if (!planId) return null
+    const previewRequest = isInvoiceRequestValid(
+      normalizedInvoiceConfig,
+      request
+    )
+      ? request
+      : createEmptyInvoiceRequest(request.type)
     setAmountLoading(true)
     try {
       const res = await previewSubscriptionAmount({
         plan_id: planId,
         promo_code: code,
         payment_method: paymentMethod,
-        ...getInvoicePayload(request),
+        ...getInvoicePayload(previewRequest),
       })
       if (res.message === 'success') {
         setAmountPreview(res)

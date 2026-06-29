@@ -131,13 +131,32 @@ const SubscriptionPlansCard = ({
     return 'balance';
   };
 
-  const buildInvoicePayload = () =>
-    invoiceRequest?.required ? { invoice: invoiceRequest } : {};
+  const isInvoiceRequestReady = (request) => {
+    if (!request?.required) {
+      return true;
+    }
+    if (!invoiceConfig?.enabled) {
+      return false;
+    }
+    if (!request.title?.trim()) {
+      return false;
+    }
+    if (request.type === 'company' && !request.tax_no?.trim()) {
+      return false;
+    }
+    return true;
+  };
+
+  const buildInvoicePayload = (request = invoiceRequest) =>
+    request?.required && isInvoiceRequestReady(request)
+      ? { invoice: request }
+      : {};
 
   const loadAmountPreview = async (
     paymentMethod = getPreviewPaymentMethod(),
     code = promoCode.trim(),
     silent = false,
+    request = invoiceRequest,
   ) => {
     if (!selectedPlan?.plan?.id) {
       return null;
@@ -148,7 +167,7 @@ const SubscriptionPlansCard = ({
         plan_id: selectedPlan.plan.id,
         promo_code: code,
         payment_method: paymentMethod,
-        ...buildInvoicePayload(),
+        ...buildInvoicePayload(request),
       });
       if (res.data?.message === 'success') {
         setAmountPreview(res.data);
@@ -215,7 +234,12 @@ const SubscriptionPlansCard = ({
 
   useEffect(() => {
     if (!open || !selectedPlan?.plan?.id) return;
-    loadAmountPreview(getPreviewPaymentMethod(), promoCode.trim(), true);
+    loadAmountPreview(
+      getPreviewPaymentMethod(),
+      promoCode.trim(),
+      true,
+      invoiceRequest,
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [invoiceRequest]);
 
@@ -241,29 +265,34 @@ const SubscriptionPlansCard = ({
   };
 
   const previewSubscriptionAmount = async () => {
-    await loadAmountPreview(getPreviewPaymentMethod(), promoCode.trim());
+    await loadAmountPreview(
+      getPreviewPaymentMethod(),
+      promoCode.trim(),
+      false,
+      invoiceRequest,
+    );
   };
 
   const handleEpayMethodChange = (value) => {
     setSelectedEpayMethod(value);
     setSelectedPaymentKind('epay');
-    loadAmountPreview(value || 'balance', promoCode.trim(), true);
+    loadAmountPreview(value || 'balance', promoCode.trim(), true, invoiceRequest);
   };
 
   const handleBepusdtTradeTypeChange = (value) => {
     setSelectedBepusdtTradeType(value);
     setSelectedPaymentKind('bepusdt');
-    loadAmountPreview('bepusdt', promoCode.trim(), true);
+    loadAmountPreview('bepusdt', promoCode.trim(), true, invoiceRequest);
   };
 
   const handlePaymentKindSelect = (kind, value) => {
     setSelectedPaymentKind(kind);
     if (kind === 'epay') {
       setSelectedEpayMethod(value);
-      loadAmountPreview(value || 'balance', promoCode.trim(), true);
+      loadAmountPreview(value || 'balance', promoCode.trim(), true, invoiceRequest);
       return;
     }
-    loadAmountPreview(value, promoCode.trim(), true);
+    loadAmountPreview(value, promoCode.trim(), true, invoiceRequest);
   };
 
   const handleCompletedPurchase = async () => {
@@ -272,7 +301,28 @@ const SubscriptionPlansCard = ({
     closeBuy();
   };
 
+  const ensureInvoiceReady = () => {
+    if (isInvoiceRequestReady(invoiceRequest)) {
+      return true;
+    }
+    showError(t('请先填写完整的发票信息'));
+    return false;
+  };
+
+  const handleInvoiceRequestChange = (request) => {
+    setInvoiceRequest(request);
+    if (open && selectedPlan?.plan?.id) {
+      loadAmountPreview(
+        getPreviewPaymentMethod(),
+        promoCode.trim(),
+        true,
+        request,
+      );
+    }
+  };
+
   const payStripe = async () => {
+    if (!ensureInvoiceReady()) return;
     if (!selectedPlan?.plan?.stripe_price_id && !promoCode.trim()) {
       showError(t('该套餐未配置 Stripe'));
       return;
@@ -282,7 +332,7 @@ const SubscriptionPlansCard = ({
       const res = await API.post('/api/subscription/stripe/pay', {
         plan_id: selectedPlan.plan.id,
         ...buildPromoPayload(),
-        ...buildInvoicePayload(),
+        ...buildInvoicePayload(invoiceRequest),
       });
       if (res.data?.message === 'success') {
         if (res.data.completed || res.data.data?.completed) {
@@ -307,6 +357,7 @@ const SubscriptionPlansCard = ({
   };
 
   const payCreem = async () => {
+    if (!ensureInvoiceReady()) return;
     if (promoCode.trim()) {
       showError(t('Creem 暂不支持优惠码'));
       return;
@@ -320,7 +371,7 @@ const SubscriptionPlansCard = ({
       const res = await API.post('/api/subscription/creem/pay', {
         plan_id: selectedPlan.plan.id,
         ...buildPromoPayload(),
-        ...buildInvoicePayload(),
+        ...buildInvoicePayload(invoiceRequest),
       });
       if (res.data?.message === 'success') {
         window.open(res.data.data?.checkout_url, '_blank');
@@ -341,6 +392,7 @@ const SubscriptionPlansCard = ({
   };
 
   const payEpay = async () => {
+    if (!ensureInvoiceReady()) return;
     if (!selectedEpayMethod) {
       showError(t('请选择支付方式'));
       return;
@@ -351,7 +403,7 @@ const SubscriptionPlansCard = ({
         plan_id: selectedPlan.plan.id,
         payment_method: selectedEpayMethod,
         ...buildPromoPayload(),
-        ...buildInvoicePayload(),
+        ...buildInvoicePayload(invoiceRequest),
       });
       if (res.data?.message === 'success') {
         if (res.data.completed || res.data.data?.completed) {
@@ -376,6 +428,7 @@ const SubscriptionPlansCard = ({
   };
 
   const payBepusdt = async () => {
+    if (!ensureInvoiceReady()) return;
     const tradeType =
       selectedBepusdtTradeType || bepusdtChains?.[0]?.trade_type;
     if (!tradeType) {
@@ -389,7 +442,7 @@ const SubscriptionPlansCard = ({
         plan_id: selectedPlan.plan.id,
         trade_type: tradeType,
         ...buildPromoPayload(),
-        ...buildInvoicePayload(),
+        ...buildInvoicePayload(invoiceRequest),
       });
       if (res.data?.message === 'success') {
         if (res.data.completed || res.data.data?.completed) {
@@ -909,7 +962,7 @@ const SubscriptionPlansCard = ({
         amountLoading={amountLoading}
         invoiceConfig={invoiceConfig}
         invoiceRequest={invoiceRequest}
-        setInvoiceRequest={setInvoiceRequest}
+        setInvoiceRequest={handleInvoiceRequestChange}
         onPromoCodeBlur={previewSubscriptionAmount}
         onPayStripe={payStripe}
         onPayCreem={payCreem}

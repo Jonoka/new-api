@@ -215,11 +215,14 @@ export function Wallet(props: WalletProps) {
     (request: InvoiceRequest) => {
       setInvoiceRequest(request)
       if (confirmDialogOpen) {
+        const previewRequest = isInvoiceRequestValid(invoiceConfig, request)
+          ? request
+          : createEmptyInvoiceRequest(request.type)
         calculatePaymentAmount(
           topupAmount,
           getCurrentPaymentType(),
           promoCode,
-          request
+          previewRequest
         )
       }
     },
@@ -227,6 +230,7 @@ export function Wallet(props: WalletProps) {
       calculatePaymentAmount,
       confirmDialogOpen,
       getCurrentPaymentType,
+      invoiceConfig,
       promoCode,
       topupAmount,
     ]
