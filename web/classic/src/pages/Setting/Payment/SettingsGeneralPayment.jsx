@@ -61,7 +61,8 @@ const parseInvoiceTypes = (value) => {
 const parseInvoiceRules = (value) => {
   try {
     const parsed = JSON.parse(value || '[]');
-    if (!Array.isArray(parsed)) return parseInvoiceRules(DEFAULT_INVOICE_FEE_RULES);
+    if (!Array.isArray(parsed))
+      return parseInvoiceRules(DEFAULT_INVOICE_FEE_RULES);
     const rules = parsed
       .map((item) => ({
         min: Number(item?.min ?? 0),
@@ -79,7 +80,9 @@ const parseInvoiceRules = (value) => {
           Number.isFinite(rule.value),
       )
       .sort((a, b) => a.min - b.min);
-    return rules.length > 0 ? rules : parseInvoiceRules(DEFAULT_INVOICE_FEE_RULES);
+    return rules.length > 0
+      ? rules
+      : parseInvoiceRules(DEFAULT_INVOICE_FEE_RULES);
   } catch {
     return [
       { min: 0, max: 500, type: 'fixed', value: 50 },
@@ -109,7 +112,12 @@ const serializeInvoiceRules = (rules) =>
     2,
   );
 
-const InvoiceSettingsVisualEditor = ({ t, typesValue, rulesValue, onChange }) => {
+const InvoiceSettingsVisualEditor = ({
+  t,
+  typesValue,
+  rulesValue,
+  onChange,
+}) => {
   const types = parseInvoiceTypes(typesValue);
   const rules = parseInvoiceRules(rulesValue);
 
@@ -127,11 +135,8 @@ const InvoiceSettingsVisualEditor = ({ t, typesValue, rulesValue, onChange }) =>
     });
   };
 
-  const toggleType = (type, checked) => {
-    const next = checked
-      ? Array.from(new Set([...types, type]))
-      : types.filter((item) => item !== type);
-    updateTypes(next.length > 0 ? next : [type]);
+  const updateTypeSelection = (nextTypes) => {
+    updateTypes(nextTypes.length > 0 ? nextTypes : types);
   };
 
   const patchRule = (index, patch) => {
@@ -149,7 +154,9 @@ const InvoiceSettingsVisualEditor = ({ t, typesValue, rulesValue, onChange }) =>
 
   const deleteRule = (index) => {
     const next = rules.filter((_, idx) => idx !== index);
-    updateRules(next.length > 0 ? next : parseInvoiceRules(DEFAULT_INVOICE_FEE_RULES));
+    updateRules(
+      next.length > 0 ? next : parseInvoiceRules(DEFAULT_INVOICE_FEE_RULES),
+    );
   };
 
   const columns = [
@@ -215,7 +222,11 @@ const InvoiceSettingsVisualEditor = ({ t, typesValue, rulesValue, onChange }) =>
     {
       title: t('操作'),
       render: (_, __, index) => (
-        <Button type='danger' theme='borderless' onClick={() => deleteRule(index)}>
+        <Button
+          type='danger'
+          theme='borderless'
+          onClick={() => deleteRule(index)}
+        >
           {t('删除')}
         </Button>
       ),
@@ -228,24 +239,20 @@ const InvoiceSettingsVisualEditor = ({ t, typesValue, rulesValue, onChange }) =>
         <div>
           <Typography.Text strong>{t('发票类型')}</Typography.Text>
           <div style={{ marginTop: 8 }}>
-            <Checkbox
-              checked={types.includes('personal')}
-              onChange={(event) => toggleType('personal', event.target.checked)}
-            >
-              {t('对私')}
-            </Checkbox>
-            <Checkbox
-              checked={types.includes('company')}
-              onChange={(event) => toggleType('company', event.target.checked)}
-              style={{ marginLeft: 16 }}
-            >
-              {t('对公')}
-            </Checkbox>
+            <Checkbox.Group value={types} onChange={updateTypeSelection}>
+              <Checkbox value='personal'>{t('对私')}</Checkbox>
+              <Checkbox value='company' style={{ marginLeft: 16 }}>
+                {t('对公')}
+              </Checkbox>
+            </Checkbox.Group>
           </div>
         </div>
 
         <div style={{ width: '100%' }}>
-          <div className='flex items-center justify-between' style={{ marginBottom: 8 }}>
+          <div
+            className='flex items-center justify-between'
+            style={{ marginBottom: 8 }}
+          >
             <div>
               <Typography.Text strong>{t('发票费用规则')}</Typography.Text>
               <div style={{ color: 'var(--semi-color-text-2)', fontSize: 12 }}>
@@ -304,8 +311,11 @@ export default function SettingsGeneralPayment(props) {
     }
   }, [props.options]);
 
-  const handleFormChange = (values) => {
-    setInputs(values);
+  const handleFormChange = ({ InvoiceTypes, InvoiceFeeRules, ...values }) => {
+    setInputs((prev) => ({
+      ...prev,
+      ...values,
+    }));
   };
 
   const submitGeneralSettings = async () => {
@@ -517,9 +527,10 @@ export default function SettingsGeneralPayment(props) {
                 typesValue={inputs.InvoiceTypes}
                 rulesValue={inputs.InvoiceFeeRules}
                 onChange={(patch) => {
-                  const nextInputs = { ...inputs, ...patch };
-                  setInputs(nextInputs);
-                  formApiRef.current?.setValues(nextInputs);
+                  setInputs((prev) => ({
+                    ...prev,
+                    ...patch,
+                  }));
                 }}
               />
             </Col>

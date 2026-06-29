@@ -22,12 +22,12 @@ import {
   Button,
   Card,
   Form,
-  Input,
   Modal,
   Select,
   Space,
   Table,
   Tag,
+  TextArea,
   Toast,
   Typography,
 } from '@douyinfe/semi-ui';
@@ -301,8 +301,16 @@ const InvoiceCenter = ({ adminOnly = false }) => {
         onOk={saveInvoice}
         confirmLoading={saving}
       >
-        <Form initValues={formValues} onValueChange={setFormValues}>
-          <Form.Select field='status' label={t('状态')} style={{ width: '100%' }}>
+        <Form
+          key={editing?.id || 'invoice-edit'}
+          initValues={formValues}
+          onValueChange={setFormValues}
+        >
+          <Form.Select
+            field='status'
+            label={t('状态')}
+            style={{ width: '100%' }}
+          >
             {STATUS_OPTIONS.map((item) => (
               <Form.Select.Option key={item.value} value={item.value}>
                 {t(item.label)}
@@ -320,7 +328,7 @@ const InvoiceCenter = ({ adminOnly = false }) => {
             autosize
           />
           {editing && (
-            <Input.TextArea
+            <TextArea
               disabled
               autosize
               value={`${t('接收邮箱')}: ${editing.email || '-'}\n${t('联系电话')}: ${
