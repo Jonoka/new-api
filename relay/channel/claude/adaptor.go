@@ -25,6 +25,7 @@ import (
 	"github.com/cespare/xxhash/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/tidwall/sjson"
 )
 
 type Adaptor struct {
@@ -411,6 +412,38 @@ func SignBillingHeaderCCH(body []byte) []byte {
 	copy(result, body)
 	copy(result[idx:], []byte(cch))
 	return result
+}
+
+// ApplyClaudeCodeFinalBodyFingerprint 在下游 body 修改后重新写入 Claude Code 指纹字段，
+// 并对最终序列化 body 签名。
+func ApplyClaudeCodeFinalBodyFingerprint(info *relaycommon.RelayInfo, body []byte) ([]byte, error) {
+	if len(body) == 0 || info == nil || info.ApiType != rootconstant.APITypeAnthropic || !shouldUseClaudeCodeFingerprint(info) {
+		return body, nil
+	}
+
+	var request dto.ClaudeRequest
+	if err := common.Unmarshal(body, &request); err != nil {
+		return nil, err
+	}
+	if err := applyClaudeCodeRequestFingerprint(info, &request); err != nil {
+		return nil, err
+	}
+
+	systemBytes, err := common.Marshal(request.System)
+	if err != nil {
+		return nil, err
+	}
+	result, err := sjson.SetRawBytes(body, "system", systemBytes)
+	if err != nil {
+		return nil, err
+	}
+	if len(request.Metadata) > 0 {
+		result, err = sjson.SetRawBytes(result, "metadata", request.Metadata)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return SignBillingHeaderCCH(result), nil
 }
 
 func normalizeClaudeSystemBlocks(value any) []dto.ClaudeMediaMessage {

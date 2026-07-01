@@ -189,6 +189,7 @@ func applyHeaderOverridePlaceholders(template string, c *gin.Context, apiKey str
 //   - "re:<regex>" / "regex:<regex>": passthrough headers whose names match the regex (Go regexp)
 //
 // Passthrough rules are applied first, then normal overrides are applied, so explicit overrides win.
+// Claude Code 指纹开启时，受保护的指纹请求头不允许被覆盖。
 func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]string, error) {
 	headerOverride := make(map[string]string)
 	if info == nil {
@@ -270,6 +271,9 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 		if key == "" {
 			continue
 		}
+		if common.IsClaudeCodeFingerprintEnabled(info) && common.IsClaudeCodeProtectedHeader(key) {
+			continue
+		}
 
 		str, ok := v.(string)
 		if !ok {
@@ -342,14 +346,6 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	}
 	applyHeaderOverrideToRequest(req, headerOverride)
 	enforceFinalStreamHeaders(req, info)
-	// [CC-DEBUG] 临时调试：记录发往上游的关键指纹 headers（用 Warn 级别，不需要开 debug 模式）
-	if info != nil && info.ChannelMeta != nil &&
-		(info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled || info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled) {
-		common2.SysLog(fmt.Sprintf("[CC-DEBUG] outbound UA=%s | X-App=%s | beta=%s | version=%s | url=%s",
-			req.Header.Get("User-Agent"), req.Header.Get("X-App"),
-			req.Header.Get("anthropic-beta"), req.Header.Get("anthropic-version"),
-			fullRequestURL))
-	}
 	resp, err := doRequest(c, req, info)
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)

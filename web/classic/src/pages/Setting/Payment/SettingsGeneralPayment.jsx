@@ -72,12 +72,17 @@ const parseInvoiceRules = (value) => {
             : Number(item.max),
         type: item?.type === 'percent' ? 'percent' : 'fixed',
         value: Number(item?.value ?? 0),
+        max_fee:
+          item?.max_fee === undefined || item?.max_fee === ''
+            ? undefined
+            : Number(item.max_fee),
       }))
       .filter(
         (rule) =>
           Number.isFinite(rule.min) &&
           (rule.max === undefined || Number.isFinite(rule.max)) &&
-          Number.isFinite(rule.value),
+          Number.isFinite(rule.value) &&
+          (rule.max_fee === undefined || Number.isFinite(rule.max_fee)),
       )
       .sort((a, b) => a.min - b.min);
     return rules.length > 0
@@ -106,6 +111,11 @@ const serializeInvoiceRules = (rules) =>
           : {}),
         type: rule.type === 'percent' ? 'percent' : 'fixed',
         value: Number(rule.value) || 0,
+        ...(rule.type === 'percent' &&
+        rule.max_fee !== undefined &&
+        Number(rule.max_fee) > 0
+          ? { max_fee: Number(rule.max_fee) }
+          : {}),
       }))
       .sort((a, b) => a.min - b.min),
     null,
@@ -198,7 +208,12 @@ const InvoiceSettingsVisualEditor = ({
       render: (_, record, index) => (
         <Select
           value={record.type}
-          onChange={(value) => patchRule(index, { type: value })}
+          onChange={(value) =>
+            patchRule(index, {
+              type: value,
+              ...(value === 'percent' ? {} : { max_fee: undefined }),
+            })
+          }
           style={{ width: 130 }}
           optionList={[
             { value: 'fixed', label: t('固定金额') },
@@ -215,6 +230,27 @@ const InvoiceSettingsVisualEditor = ({
           min={0}
           value={record.value}
           onChange={(value) => patchRule(index, { value: Number(value) || 0 })}
+          style={{ width: 120 }}
+        />
+      ),
+    },
+    {
+      title: t('收费上限'),
+      dataIndex: 'max_fee',
+      render: (_, record, index) => (
+        <InputNumber
+          min={0}
+          value={record.type === 'percent' ? record.max_fee : undefined}
+          placeholder={t('无封顶')}
+          disabled={record.type !== 'percent'}
+          onChange={(value) =>
+            patchRule(index, {
+              max_fee:
+                value === undefined || value === null || value === ''
+                  ? undefined
+                  : Number(value),
+            })
+          }
           style={{ width: 120 }}
         />
       ),

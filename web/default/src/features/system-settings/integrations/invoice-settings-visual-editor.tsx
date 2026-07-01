@@ -47,6 +47,7 @@ type InvoiceFeeRule = {
   max?: number
   type: InvoiceFeeRuleType
   value: number
+  max_fee?: number
 }
 
 type InvoiceSettingsVisualEditorProps = {
@@ -90,12 +91,17 @@ function parseRules(value: string): InvoiceFeeRule[] {
             : Number(item.max),
         type: item?.type === 'percent' ? 'percent' : 'fixed',
         value: Number(item?.value ?? 0),
+        max_fee:
+          item?.max_fee === undefined || item?.max_fee === ''
+            ? undefined
+            : Number(item.max_fee),
       }))
       .filter(
         (rule) =>
           Number.isFinite(rule.min) &&
           (rule.max === undefined || Number.isFinite(rule.max)) &&
-          Number.isFinite(rule.value)
+          Number.isFinite(rule.value) &&
+          (rule.max_fee === undefined || Number.isFinite(rule.max_fee))
       )
       .sort((a, b) => a.min - b.min)
     return rules.length > 0 ? rules : DEFAULT_RULES
@@ -115,6 +121,11 @@ function serializeRules(rules: InvoiceFeeRule[]) {
       ...(rule.max !== undefined && rule.max > 0 ? { max: Number(rule.max) } : {}),
       type: rule.type === 'percent' ? 'percent' : 'fixed',
       value: Number(rule.value) || 0,
+      ...(rule.type === 'percent' &&
+      rule.max_fee !== undefined &&
+      Number(rule.max_fee) > 0
+        ? { max_fee: Number(rule.max_fee) }
+        : {}),
     }))
     .sort((a, b) => a.min - b.min)
   return JSON.stringify(normalized, null, 2)
@@ -139,7 +150,7 @@ export function InvoiceSettingsVisualEditor({
 
   const patchRule = (
     index: number,
-    patch: Partial<InvoiceFeeRule> & { maxText?: string }
+    patch: Partial<InvoiceFeeRule> & { maxText?: string; maxFeeText?: string }
   ) => {
     const next = rules.map((rule, idx) => {
       if (idx !== index) return rule
@@ -151,6 +162,17 @@ export function InvoiceSettingsVisualEditor({
         } else {
           merged.max = Number(text)
         }
+      }
+      if ('maxFeeText' in patch) {
+        const text = patch.maxFeeText ?? ''
+        if (text === '') {
+          delete merged.max_fee
+        } else {
+          merged.max_fee = Number(text)
+        }
+      }
+      if (merged.type !== 'percent') {
+        delete merged.max_fee
       }
       return merged
     })
@@ -219,6 +241,7 @@ export function InvoiceSettingsVisualEditor({
                 <TableHead>{t('Maximum')}</TableHead>
                 <TableHead>{t('Fee type')}</TableHead>
                 <TableHead>{t('Value')}</TableHead>
+                <TableHead>{t('Fee cap')}</TableHead>
                 <TableHead className='text-right'>{t('Actions')}</TableHead>
               </TableRow>
             </TableHeader>
@@ -277,6 +300,18 @@ export function InvoiceSettingsVisualEditor({
                       value={rule.value}
                       onChange={(event) =>
                         patchRule(index, { value: Number(event.target.value) })
+                      }
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      type='number'
+                      min={0}
+                      value={rule.type === 'percent' ? (rule.max_fee ?? '') : ''}
+                      placeholder={t('No cap')}
+                      disabled={rule.type !== 'percent'}
+                      onChange={(event) =>
+                        patchRule(index, { maxFeeText: event.target.value })
                       }
                     />
                   </TableCell>
@@ -362,6 +397,19 @@ export function InvoiceSettingsVisualEditor({
                   />
                 </label>
               </div>
+              <label className='space-y-1 text-xs'>
+                <span className='text-muted-foreground'>{t('Fee cap')}</span>
+                <Input
+                  type='number'
+                  min={0}
+                  value={rule.type === 'percent' ? (rule.max_fee ?? '') : ''}
+                  placeholder={t('No cap')}
+                  disabled={rule.type !== 'percent'}
+                  onChange={(event) =>
+                    patchRule(index, { maxFeeText: event.target.value })
+                  }
+                />
+              </label>
               <Button
                 type='button'
                 variant='ghost'

@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/relay/channel/claude"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -171,6 +172,13 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 			}
 		}
 		relaycommon.MergeOpenAISessionBridgeOverride(info, jsonData)
+
+		// OpenAI 兼容请求可能会被转换为 Claude 上游 body。
+		// 所有 body 修改完成后刷新 Claude Code 指纹字段，并签名 CCH。
+		jsonData, err = claude.ApplyClaudeCodeFinalBodyFingerprint(info, jsonData)
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
 
 		logger.LogDebug(c, "text request body: %s", jsonData)
 

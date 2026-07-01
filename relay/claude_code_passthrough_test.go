@@ -37,7 +37,7 @@ func TestShouldPassThroughRequestBodyRespectsPassThroughSettings(t *testing.T) {
 	}))
 }
 
-func TestShouldPassThroughRequestBodyAllowedWithClaudeCodeFingerprint(t *testing.T) {
+func TestShouldPassThroughRequestBodyDisabledWithClaudeCodeFingerprint(t *testing.T) {
 	originalGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
 	defer func() {
 		model_setting.GetGlobalSettings().PassThroughRequestEnabled = originalGlobal
@@ -56,10 +56,10 @@ func TestShouldPassThroughRequestBodyAllowedWithClaudeCodeFingerprint(t *testing
 		},
 	}
 
-	require.True(t, shouldPassThroughRequestBody(info))
+	require.False(t, shouldPassThroughRequestBody(info))
 }
 
-func TestShouldPassThroughRequestBodyAllowedWithClaudeCodeTransportFingerprint(t *testing.T) {
+func TestShouldPassThroughRequestBodyDisabledWithClaudeCodeTransportFingerprint(t *testing.T) {
 	originalGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
 	defer func() {
 		model_setting.GetGlobalSettings().PassThroughRequestEnabled = originalGlobal
@@ -78,5 +78,24 @@ func TestShouldPassThroughRequestBodyAllowedWithClaudeCodeTransportFingerprint(t
 		},
 	}
 
-	require.True(t, shouldPassThroughRequestBody(info))
+	require.False(t, shouldPassThroughRequestBody(info))
+}
+
+func TestClaudeCodeFingerprintDisablesPassthroughWhenGlobalPassthroughEnabled(t *testing.T) {
+	originalGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
+	defer func() {
+		model_setting.GetGlobalSettings().PassThroughRequestEnabled = originalGlobal
+	}()
+	model_setting.GetGlobalSettings().PassThroughRequestEnabled = true
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeFingerprintEnabled: true,
+			},
+		},
+	}
+
+	require.False(t, shouldPassThroughRequestBody(info))
 }

@@ -44,10 +44,11 @@ var (
 )
 
 type InvoiceFeeRule struct {
-	Min   float64 `json:"min"`
-	Max   float64 `json:"max,omitempty"`
-	Type  string  `json:"type"`
-	Value float64 `json:"value"`
+	Min    float64 `json:"min"`
+	Max    float64 `json:"max,omitempty"`
+	Type   string  `json:"type"`
+	Value  float64 `json:"value"`
+	MaxFee float64 `json:"max_fee,omitempty"`
 }
 
 type InvoiceRequest struct {
@@ -168,11 +169,14 @@ func ParseInvoiceFeeRules(value string) ([]InvoiceFeeRule, error) {
 		default:
 			return nil, errors.New("发票费用规则 type 仅支持 fixed/percent")
 		}
-		if rules[i].Min < 0 || rules[i].Max < 0 || rules[i].Value < 0 {
+		if rules[i].Min < 0 || rules[i].Max < 0 || rules[i].Value < 0 || rules[i].MaxFee < 0 {
 			return nil, errors.New("发票费用规则不能为负数")
 		}
 		if rules[i].Max > 0 && rules[i].Max < rules[i].Min {
 			return nil, errors.New("发票费用规则 max 不能小于 min")
+		}
+		if ruleType != InvoiceFeeRulePercent {
+			rules[i].MaxFee = 0
 		}
 	}
 	sort.SliceStable(rules, func(i, j int) bool {
@@ -224,7 +228,14 @@ func CalculateInvoiceFee(baseAmountCNY float64) (float64, error) {
 		case InvoiceFeeRuleFixed:
 			return decimal.NewFromFloat(rule.Value).Round(2).InexactFloat64(), nil
 		case InvoiceFeeRulePercent:
-			return amount.Mul(decimal.NewFromFloat(rule.Value)).Div(decimal.NewFromInt(100)).Round(2).InexactFloat64(), nil
+			fee := amount.Mul(decimal.NewFromFloat(rule.Value)).Div(decimal.NewFromInt(100))
+			if rule.MaxFee > 0 {
+				maxFee := decimal.NewFromFloat(rule.MaxFee)
+				if fee.GreaterThan(maxFee) {
+					fee = maxFee
+				}
+			}
+			return fee.Round(2).InexactFloat64(), nil
 		}
 	}
 	return 0, errors.New("未匹配到发票费用规则")

@@ -27,6 +27,7 @@ export interface InvoiceFeeRule {
   max?: number
   type: InvoiceFeeRuleType
   value: number
+  max_fee?: number
 }
 
 export interface InvoiceConfig {

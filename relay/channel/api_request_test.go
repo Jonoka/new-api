@@ -301,7 +301,7 @@ func TestProcessHeaderOverride_ClaudeCodeFingerprintSkipsPassHeadersProtectedHea
 	require.NotContains(t, headers, "x-claude-code-session-id")
 }
 
-func TestProcessHeaderOverride_ClaudeCodeFingerprintAllowsExplicitProtectedHeaderOverride(t *testing.T) {
+func TestProcessHeaderOverride_ClaudeCodeFingerprintSkipsExplicitProtectedHeaders(t *testing.T) {
 	t.Parallel()
 
 	gin.SetMode(gin.TestMode)
@@ -331,12 +331,12 @@ func TestProcessHeaderOverride_ClaudeCodeFingerprintAllowsExplicitProtectedHeade
 
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
-	require.Equal(t, "custom-agent", headers["user-agent"])
-	require.Equal(t, "custom-beta", headers["anthropic-beta"])
-	require.Equal(t, "custom-app", headers["x-app"])
-	require.Equal(t, "custom-lang", headers["x-stainless-lang"])
-	require.Equal(t, "custom-request-id", headers["x-client-request-id"])
-	require.Equal(t, "custom-session-id", headers["x-claude-code-session-id"])
+	require.NotContains(t, headers, "user-agent")
+	require.NotContains(t, headers, "anthropic-beta")
+	require.NotContains(t, headers, "x-app")
+	require.NotContains(t, headers, "x-stainless-lang")
+	require.NotContains(t, headers, "x-client-request-id")
+	require.NotContains(t, headers, "x-claude-code-session-id")
 	require.Equal(t, "custom-value", headers["x-custom-header"])
 }
 
@@ -422,6 +422,49 @@ func TestMergeOpenAISessionBridgeOverrideUsesClaudeCodeSessionHeader(t *testing.
 	require.Len(t, strings.Split(sessionID, "-"), 5)
 }
 
+func TestMergeOpenAISessionBridgeOverrideIgnoresClientRequestIDSeed(t *testing.T) {
+	t.Parallel()
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		RequestConversionChain: []types.RelayFormat{
+			types.RelayFormatClaude,
+			types.RelayFormatOpenAI,
+		},
+		RequestHeaders: map[string]string{
+			"X-Client-Request-Id": "req-123",
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeOpenAI,
+		},
+	}
+
+	relaycommon.MergeOpenAISessionBridgeOverride(info, []byte(`{"model":"gpt-5"}`))
+
+	require.False(t, info.UseRuntimeHeadersOverride)
+	require.Empty(t, info.RuntimeHeadersOverride)
+}
+
+func TestMergeOpenAISessionBridgeOverrideSkipsNilSessionSeed(t *testing.T) {
+	t.Parallel()
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		RequestConversionChain: []types.RelayFormat{
+			types.RelayFormatClaude,
+			types.RelayFormatOpenAIResponses,
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeOpenAI,
+		},
+	}
+
+	relaycommon.MergeOpenAISessionBridgeOverride(info, []byte(`{"model":"gpt-5"}`))
+
+	require.False(t, info.UseRuntimeHeadersOverride)
+	require.Empty(t, info.RuntimeHeadersOverride)
+}
+
 func TestMergeOpenAISessionBridgeOverrideKeepsExplicitSessionID(t *testing.T) {
 	t.Parallel()
 
@@ -460,7 +503,7 @@ func TestMergeOpenAISessionBridgeOverrideStableForSameSeed(t *testing.T) {
 			types.RelayFormatOpenAIResponses,
 		},
 		ChannelMeta: &relaycommon.ChannelMeta{
-			ApiType: constant.APITypeOpenAI,
+			ApiType:   constant.APITypeOpenAI,
 			ChannelId: 1001,
 		},
 	}
@@ -471,7 +514,7 @@ func TestMergeOpenAISessionBridgeOverrideStableForSameSeed(t *testing.T) {
 			types.RelayFormatOpenAIResponses,
 		},
 		ChannelMeta: &relaycommon.ChannelMeta{
-			ApiType: constant.APITypeOpenAI,
+			ApiType:   constant.APITypeOpenAI,
 			ChannelId: 1001,
 		},
 	}
@@ -492,8 +535,8 @@ func TestMergeOpenAISessionBridgeOverrideStableAcrossMultiKeyIndexWithinChannel(
 			types.RelayFormatOpenAIResponses,
 		},
 		ChannelMeta: &relaycommon.ChannelMeta{
-			ApiType: constant.APITypeOpenAI,
-			ChannelId: 2001,
+			ApiType:              constant.APITypeOpenAI,
+			ChannelId:            2001,
 			ChannelMultiKeyIndex: 1,
 		},
 	}
@@ -504,8 +547,8 @@ func TestMergeOpenAISessionBridgeOverrideStableAcrossMultiKeyIndexWithinChannel(
 			types.RelayFormatOpenAIResponses,
 		},
 		ChannelMeta: &relaycommon.ChannelMeta{
-			ApiType: constant.APITypeOpenAI,
-			ChannelId: 2001,
+			ApiType:              constant.APITypeOpenAI,
+			ChannelId:            2001,
 			ChannelMultiKeyIndex: 2,
 		},
 	}

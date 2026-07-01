@@ -630,6 +630,58 @@ func TestConvertClaudeRequestPrependsClaudeCodeSystemWithoutOverwritingMetadataU
 	require.JSONEq(t, `{"user_id":"`+existingClaudeCodeUserID+`","trace":"keep"}`, string(claudeReq.Metadata))
 }
 
+func TestApplyClaudeCodeFinalBodyFingerprintRestoresMutatedFingerprintBody(t *testing.T) {
+	t.Parallel()
+
+	adaptor := &Adaptor{}
+	req := &dto.ClaudeRequest{
+		Model: "claude-sonnet-4-20250514",
+		Messages: []dto.ClaudeMessage{
+			{Role: "user", Content: "original first user message"},
+		},
+	}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
+			ParamOverride: map[string]interface{}{
+				"operations": []interface{}{
+					map[string]interface{}{"mode": "set", "path": "system", "value": "broken system"},
+					map[string]interface{}{"mode": "set", "path": "metadata.user_id", "value": "broken-user"},
+					map[string]interface{}{"mode": "set", "path": "messages.0.content", "value": "changed first user message"},
+				},
+			},
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeFingerprintEnabled: true,
+			},
+		},
+	}
+
+	converted, err := adaptor.ConvertClaudeRequest(newClaudeFingerprintTestContext(), info, req)
+	require.NoError(t, err)
+	bodyBytes, err := common.Marshal(converted)
+	require.NoError(t, err)
+
+	mutatedBody, err := relaycommon.ApplyParamOverrideWithRelayInfo(bodyBytes, info)
+	require.NoError(t, err)
+	require.Contains(t, string(mutatedBody), "broken system")
+	require.Contains(t, string(mutatedBody), "broken-user")
+
+	finalBody, err := ApplyClaudeCodeFinalBodyFingerprint(info, mutatedBody)
+	require.NoError(t, err)
+	require.NotContains(t, string(finalBody), "broken system")
+	require.NotContains(t, string(finalBody), "broken-user")
+	require.NotContains(t, string(finalBody), "cch=00000;")
+
+	var finalReq dto.ClaudeRequest
+	require.NoError(t, common.Unmarshal(finalBody, &finalReq))
+	system := finalReq.ParseSystem()
+	require.Len(t, system, 2)
+	require.Contains(t, system[0].GetText(), "x-anthropic-billing-header")
+	require.Contains(t, system[0].GetText(), "cc_version="+getClaudeCodeVersion(info)+"."+computeBillingFingerprint(&finalReq, getClaudeCodeVersion(info)))
+	require.Contains(t, system[1].GetText(), "Claude Code")
+	requireClaudeCodeLegacyMetadata(t, finalReq.Metadata)
+}
+
 func TestSetupRequestHeaderAddsClaudeCodeFingerprintHeaders(t *testing.T) {
 	t.Parallel()
 
