@@ -7,6 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestFormatClaudeResponseInfo_MessageStart(t *testing.T) {
@@ -451,4 +452,24 @@ func TestNormalizeClaudeSamplingParameters_KeepsSamplingForOlderClaudeModels(t *
 	require.Same(t, &temperature, request.Temperature)
 	require.Same(t, &topP, request.TopP)
 	require.Same(t, &topK, request.TopK)
+}
+
+func TestNormalizeClaudeNonStreamMessageResponseDataAddsRequiredFields(t *testing.T) {
+	data := []byte(`{"id":"msg_test","type":"message","role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"pong"}],"usage":{"input_tokens":11,"output_tokens":3}}`)
+
+	normalized := normalizeClaudeNonStreamMessageResponseData(data)
+
+	require.Equal(t, "message", gjson.GetBytes(normalized, "type").String())
+	require.Equal(t, "end_turn", gjson.GetBytes(normalized, "stop_reason").String())
+	require.Equal(t, gjson.Null, gjson.GetBytes(normalized, "stop_sequence").Type)
+	require.EqualValues(t, 0, gjson.GetBytes(normalized, "usage.cache_creation_input_tokens").Int())
+	require.EqualValues(t, 0, gjson.GetBytes(normalized, "usage.cache_read_input_tokens").Int())
+}
+
+func TestNormalizeClaudeNonStreamMessageResponseDataSkipsStreamEvents(t *testing.T) {
+	data := []byte(`{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":3}}`)
+
+	normalized := normalizeClaudeNonStreamMessageResponseData(data)
+
+	require.Equal(t, string(data), string(normalized))
 }

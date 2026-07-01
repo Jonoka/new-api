@@ -101,6 +101,47 @@ func TestBuildClaudeUsageFromOpenAIUsageKeepsPromptTokensWhenNoCache(t *testing.
 	require.Equal(t, 32, usage.OutputTokens)
 }
 
+func TestResponseOpenAI2ClaudeNonStreamMessageShape(t *testing.T) {
+	message := dto.Message{Role: "assistant"}
+	message.SetStringContent("pong")
+	openAIResponse := &dto.OpenAITextResponse{
+		Id:    "chatcmpl-test",
+		Model: "claude-sonnet-4-20250514",
+		Choices: []dto.OpenAITextResponseChoice{
+			{
+				Index:        0,
+				Message:      message,
+				FinishReason: "stop",
+			},
+		},
+		Usage: dto.Usage{
+			PromptTokens:     11,
+			CompletionTokens: 3,
+			TotalTokens:      14,
+		},
+	}
+
+	claudeResponse := ResponseOpenAI2Claude(openAIResponse, &relaycommon.RelayInfo{
+		OriginModelName: "claude-sonnet-4-20250514",
+	})
+	body, err := common.Marshal(claudeResponse)
+	require.NoError(t, err)
+
+	require.Equal(t, "message", gjson.GetBytes(body, "type").String())
+	require.Equal(t, "assistant", gjson.GetBytes(body, "role").String())
+	require.Equal(t, "claude-sonnet-4-20250514", gjson.GetBytes(body, "model").String())
+	require.Equal(t, "text", gjson.GetBytes(body, "content.0.type").String())
+	require.Equal(t, "pong", gjson.GetBytes(body, "content.0.text").String())
+	require.Equal(t, "end_turn", gjson.GetBytes(body, "stop_reason").String())
+	require.Equal(t, gjson.Null, gjson.GetBytes(body, "stop_sequence").Type)
+	require.EqualValues(t, 11, gjson.GetBytes(body, "usage.input_tokens").Int())
+	require.EqualValues(t, 0, gjson.GetBytes(body, "usage.cache_creation_input_tokens").Int())
+	require.EqualValues(t, 0, gjson.GetBytes(body, "usage.cache_read_input_tokens").Int())
+	require.EqualValues(t, 3, gjson.GetBytes(body, "usage.output_tokens").Int())
+	require.False(t, gjson.GetBytes(body, "usage.claude_cache_creation_5_m_tokens").Exists())
+	require.False(t, gjson.GetBytes(body, "usage.claude_cache_creation_1_h_tokens").Exists())
+}
+
 func TestBuildClaudeUsageFromOpenAIUsageClampsNegativeInputTokens(t *testing.T) {
 	usage := buildClaudeUsageFromOpenAIUsage(&dto.Usage{
 		PromptTokens:     100,
