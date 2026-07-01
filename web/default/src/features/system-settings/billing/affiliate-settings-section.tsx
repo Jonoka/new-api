@@ -59,6 +59,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import {
   bindAdminAffiliateInviter,
+  grantAdminAffiliateAccess,
   unbindAdminAffiliateInviter,
   applyAdminAffiliateRisk,
   getAdminAffiliateInvitations,
@@ -78,6 +79,7 @@ import {
 } from '@/features/affiliate/api'
 import type {
   AdminBindAffiliateInviterResult,
+  AdminGrantAffiliateAccessResult,
   AdminUnbindAffiliateInviterResult,
   AffiliateAdminInvitation,
   AffiliateAdminRecord,
@@ -450,6 +452,14 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
   const [appActionLoadingId, setAppActionLoadingId] = useState<number | null>(
     null
   )
+  const [grantUserKeyword, setGrantUserKeyword] = useState('')
+  const [grantUserCandidates, setGrantUserCandidates] = useState<User[]>([])
+  const [selectedGrantUser, setSelectedGrantUser] = useState<User | null>(null)
+  const [grantUserSearching, setGrantUserSearching] = useState(false)
+  const [grantRemark, setGrantRemark] = useState('')
+  const [grantLoading, setGrantLoading] = useState(false)
+  const [grantResult, setGrantResult] =
+    useState<AdminGrantAffiliateAccessResult | null>(null)
   // Anti-fraud: Fraud alerts state
   const [fraudAlerts, setFraudAlerts] = useState<any[]>([])
   const [fraudStatus, setFraudStatus] = useState('')
@@ -715,6 +725,61 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
       toast.error(t('Operation failed'))
     } finally {
       setAppActionLoadingId(null)
+    }
+  }
+
+  const searchGrantUsers = async () => {
+    const keyword = grantUserKeyword.trim()
+    if (!keyword) {
+      toast.error(t('Enter a user keyword first'))
+      return
+    }
+    try {
+      setGrantUserSearching(true)
+      setSelectedGrantUser(null)
+      setGrantResult(null)
+      const res = await searchUsers({ keyword, p: 1, page_size: 10 })
+      if (res.success) {
+        setGrantUserCandidates(res.data?.items || [])
+      } else {
+        toast.error(res.message || t('Operation failed'))
+      }
+    } catch {
+      toast.error(t('Operation failed'))
+    } finally {
+      setGrantUserSearching(false)
+    }
+  }
+
+  const grantAffiliateAccess = async () => {
+    if (!selectedGrantUser) {
+      toast.error(t('Search and select target user first'))
+      return
+    }
+    if (
+      !window.confirm(
+        t('Manually grant affiliate access to selected user?')
+      )
+    ) {
+      return
+    }
+    try {
+      setGrantLoading(true)
+      const res = await grantAdminAffiliateAccess({
+        user_id: selectedGrantUser.id,
+        remark: grantRemark.trim(),
+      })
+      if (res.success) {
+        setGrantResult(res.data)
+        toast.success(t('Affiliate access granted'))
+        await loadApplications()
+      } else {
+        toast.error(res.message || t('Operation failed'))
+      }
+    } catch {
+      toast.error(t('Operation failed'))
+    } finally {
+      setGrantLoading(false)
     }
   }
 
@@ -2734,6 +2799,116 @@ export function AffiliateSettingsSection({ defaultValues }: Props) {
                 {t('Rejected')}
               </NativeSelectOption>
             </NativeSelect>
+          </div>
+          <div className='space-y-3 rounded-lg border p-4'>
+            <div className='space-y-1'>
+              <h4 className='text-sm font-medium'>
+                {t('Manual affiliate access')}
+              </h4>
+              <p className='text-muted-foreground text-sm'>
+                {t(
+                  'Grant affiliate access for users whose historical manual recharge does not meet automatic requirements.'
+                )}
+              </p>
+            </div>
+            <div className='grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]'>
+              <Input
+                value={grantUserKeyword}
+                onChange={(event) => {
+                  setGrantUserKeyword(event.target.value)
+                  setSelectedGrantUser(null)
+                  setGrantResult(null)
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    searchGrantUsers()
+                  }
+                }}
+                placeholder={t('User ID, username, email, or display name')}
+              />
+              <Input
+                value={grantRemark}
+                onChange={(event) => setGrantRemark(event.target.value)}
+                placeholder={t('Admin remark (optional)')}
+              />
+              <div className='flex gap-2'>
+                <Button
+                  type='button'
+                  variant='outline'
+                  onClick={searchGrantUsers}
+                  disabled={grantUserSearching}
+                >
+                  <Search className='size-4' />
+                  {grantUserSearching ? t('Searching...') : t('Search users')}
+                </Button>
+                <Button
+                  type='button'
+                  onClick={grantAffiliateAccess}
+                  disabled={grantLoading || !selectedGrantUser}
+                >
+                  {grantLoading ? t('Granting...') : t('Grant access')}
+                </Button>
+              </div>
+            </div>
+            {(grantUserCandidates.length > 0 || selectedGrantUser) && (
+              <div className='overflow-x-auto rounded-lg border'>
+                <Table className='min-w-[720px]'>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>ID</TableHead>
+                      <TableHead>{t('Username')}</TableHead>
+                      <TableHead>{t('Display name')}</TableHead>
+                      <TableHead>{t('Email')}</TableHead>
+                      <TableHead>{t('Group')}</TableHead>
+                      <TableHead className='text-right'>
+                        {t('Actions')}
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {grantUserCandidates.map((user) => {
+                      const selected = selectedGrantUser?.id === user.id
+                      return (
+                        <TableRow key={user.id}>
+                          <TableCell>#{user.id}</TableCell>
+                          <TableCell>{user.username || '-'}</TableCell>
+                          <TableCell>{user.display_name || '-'}</TableCell>
+                          <TableCell>{user.email || '-'}</TableCell>
+                          <TableCell>{user.group || '-'}</TableCell>
+                          <TableCell className='text-right'>
+                            <Button
+                              type='button'
+                              size='sm'
+                              variant={selected ? 'default' : 'outline'}
+                              onClick={() => setSelectedGrantUser(user)}
+                            >
+                              {selected ? t('Selected') : t('Select')}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+            {selectedGrantUser && (
+              <div className='bg-muted/40 rounded-lg border p-3 text-sm'>
+                <span className='font-medium'>
+                  {t('Selected target user')}:
+                </span>{' '}
+                #{selectedGrantUser.id}{' '}
+                {selectedGrantUser.display_name || selectedGrantUser.username}
+                {selectedGrantUser.email ? ` (${selectedGrantUser.email})` : ''}
+              </div>
+            )}
+            {grantResult && (
+              <div className='bg-muted/40 rounded-lg border p-3 text-sm'>
+                {t('Affiliate access granted')}: #{grantResult.user_id}{' '}
+                {grantResult.display_name || grantResult.username}
+              </div>
+            )}
           </div>
           <Table>
             <TableHeader>

@@ -225,6 +225,7 @@ func SetApiRouter(router *gin.Engine) {
 			affiliateAdminRoute.POST("/risk-users/:user_id/remove", controller.AdminRemoveAffiliateRisk)
 			affiliateAdminRoute.POST("/bind-inviter", controller.AdminBindAffiliateInviter)
 			affiliateAdminRoute.POST("/unbind-inviter", controller.AdminUnbindAffiliateInviter)
+			affiliateAdminRoute.POST("/grant-access", controller.AdminGrantAffiliateAccess)
 			affiliateAdminRoute.POST("/withdrawals/:id/approve", controller.AdminApproveAffiliateWithdrawal)
 			affiliateAdminRoute.POST("/withdrawals/:id/reject", controller.AdminRejectAffiliateWithdrawal)
 			affiliateAdminRoute.POST("/withdrawals/:id/paid", controller.AdminMarkAffiliateWithdrawalPaid)

@@ -83,13 +83,11 @@ const InvoiceRequestForm = ({
             onChange={(title) => patchInvoice({ title })}
             placeholder={t('发票抬头')}
           />
-          {(invoice.type || types[0]) === 'company' && (
-            <Input
-              value={invoice.tax_no}
-              onChange={(tax_no) => patchInvoice({ tax_no })}
-              placeholder={t('纳税人识别号')}
-            />
-          )}
+          <Input
+            value={invoice.tax_no}
+            onChange={(tax_no) => patchInvoice({ tax_no })}
+            placeholder={t('纳税人识别号')}
+          />
           <div className='grid grid-cols-1 sm:grid-cols-2 gap-2'>
             <Input
               value={invoice.email}

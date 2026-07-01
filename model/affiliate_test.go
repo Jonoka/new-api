@@ -1056,6 +1056,76 @@ func TestRevokeAffiliateApplicationAllowsReapply(t *testing.T) {
 	assert.Equal(t, 240, reapplied.UserId)
 }
 
+func TestGrantAffiliateAccessByUserBypassesInviterRechargeRequirement(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	affiliateSetting := setting.GetAffiliateSetting()
+	affiliateSetting.AgreementEnabled = true
+	affiliateSetting.AgreementText = "manual grant terms"
+	affiliateSetting.ReviewEnabled = true
+	affiliateSetting.InviterMinRechargeAmount = 100
+
+	require.NoError(t, DB.Create(&User{
+		Id:       243,
+		Username: "manual-grant-parent",
+		Email:    "manual-grant@example.com",
+		AffCode:  "aff243",
+		Status:   common.UserStatusEnabled,
+	}).Error)
+
+	require.Error(t, CreateAffiliateApplication(243, affiliateSetting.AgreementText))
+	assert.False(t, AffiliateUserCanInvite(243, affiliateSetting))
+
+	result, err := GrantAffiliateAccessByUser(243, "", 1, "后台手动充值补授权")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Updated)
+	assert.Equal(t, 243, result.UserId)
+	assert.True(t, AffiliateUserCanInvite(243, affiliateSetting))
+
+	var app AffiliateApplication
+	require.NoError(t, DB.Where("user_id = ?", 243).First(&app).Error)
+	assert.Equal(t, AffiliateAppStatusApproved, app.Status)
+	assert.Equal(t, 1, app.AdminId)
+	assert.Equal(t, "后台手动充值补授权", app.AdminRemark)
+	assert.Equal(t, HashAgreementText(affiliateSetting.AgreementText), app.AgreementHash)
+}
+
+func TestGrantAffiliateAccessByUserOverridesRejectedApplication(t *testing.T) {
+	truncateTables(t)
+	resetAffiliateSettingForTest(t)
+
+	affiliateSetting := setting.GetAffiliateSetting()
+	affiliateSetting.ReviewEnabled = true
+
+	require.NoError(t, DB.Create(&User{
+		Id:       244,
+		Username: "manual-grant-rejected",
+		Email:    "manual-grant-rejected@example.com",
+		AffCode:  "aff244",
+		Status:   common.UserStatusEnabled,
+	}).Error)
+	require.NoError(t, DB.Create(&AffiliateApplication{
+		UserId:         244,
+		Status:         AffiliateAppStatusRejected,
+		RejectedReason: "历史未满足条件",
+	}).Error)
+
+	result, err := GrantAffiliateAccessByUser(0, "manual-grant-rejected@example.com", 2, "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Updated)
+	assert.True(t, AffiliateUserCanInvite(244, affiliateSetting))
+
+	var app AffiliateApplication
+	require.NoError(t, DB.Where("user_id = ?", 244).First(&app).Error)
+	assert.Equal(t, AffiliateAppStatusApproved, app.Status)
+	assert.Equal(t, 2, app.AdminId)
+	assert.Equal(t, "管理员手动赋予返佣权限", app.AdminRemark)
+	assert.Empty(t, app.RejectedReason)
+}
+
 func TestUnbindUserInviterClearsRelationshipAndDecrementsCount(t *testing.T) {
 	truncateTables(t)
 	resetAffiliateSettingForTest(t)

@@ -161,19 +161,17 @@ export function InvoiceRequestForm({
             />
           </div>
 
-          {currentType === 'company' && (
-            <div className='grid gap-2'>
-              <Label>{t('Tax number')}</Label>
-              <Input
-                value={invoice.tax_no}
-                onChange={(event) =>
-                  patchInvoice({ tax_no: event.target.value })
-                }
-                disabled={disabled}
-                placeholder={t('Enter taxpayer identification number')}
-              />
-            </div>
-          )}
+          <div className='grid gap-2'>
+            <Label>{t('Tax number')}</Label>
+            <Input
+              value={invoice.tax_no}
+              onChange={(event) =>
+                patchInvoice({ tax_no: event.target.value })
+              }
+              disabled={disabled}
+              placeholder={t('Enter taxpayer identification number')}
+            />
+          </div>
 
           <div className='grid gap-3 sm:grid-cols-2'>
             <div className='grid gap-2'>

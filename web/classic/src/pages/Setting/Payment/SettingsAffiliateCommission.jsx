@@ -236,6 +236,13 @@ function ApplicationsPanel() {
   const [pageSize, setPageSize] = useState(ITEMS_PER_PAGE);
   const [total, setTotal] = useState(0);
   const [statusFilter, setStatusFilter] = useState('');
+  const [grantUserKeyword, setGrantUserKeyword] = useState('');
+  const [grantUserCandidates, setGrantUserCandidates] = useState([]);
+  const [selectedGrantUser, setSelectedGrantUser] = useState(null);
+  const [grantUserSearching, setGrantUserSearching] = useState(false);
+  const [grantRemark, setGrantRemark] = useState('');
+  const [grantLoading, setGrantLoading] = useState(false);
+  const [grantResult, setGrantResult] = useState(null);
 
   const loadApplications = async () => {
     setLoading(true);
@@ -344,6 +351,58 @@ function ApplicationsPanel() {
     });
   };
 
+  const searchGrantUsers = async () => {
+    const keyword = grantUserKeyword.trim();
+    if (!keyword) {
+      showWarning(t('请先输入用户关键词'));
+      return;
+    }
+    setGrantUserSearching(true);
+    setSelectedGrantUser(null);
+    setGrantResult(null);
+    try {
+      const res = await API.get('/api/user/search', {
+        params: { keyword, p: 1, page_size: 10 },
+      });
+      if (res.data.success) {
+        setGrantUserCandidates(res.data.data?.items || []);
+      } else {
+        showError(res.data.message);
+      }
+    } catch (error) {
+      showError(t('搜索用户失败'));
+    } finally {
+      setGrantUserSearching(false);
+    }
+  };
+
+  const grantAffiliateAccess = async () => {
+    if (!selectedGrantUser) {
+      showWarning(t('请先搜索并选择用户'));
+      return;
+    }
+    const ok = window.confirm(t('确认手动赋予该用户返佣权限？'));
+    if (!ok) return;
+    setGrantLoading(true);
+    try {
+      const res = await API.post('/api/affiliate/admin/grant-access', {
+        user_id: selectedGrantUser.id,
+        remark: grantRemark.trim(),
+      });
+      if (res.data.success) {
+        setGrantResult(res.data.data);
+        showSuccess(t('已赋予返佣权限'));
+        await loadApplications();
+      } else {
+        showError(res.data.message);
+      }
+    } catch (error) {
+      showError(t('赋予返佣权限失败'));
+    } finally {
+      setGrantLoading(false);
+    }
+  };
+
   const applicationStatusText = (status) => {
     const map = {
       pending: t('待审核'),
@@ -422,6 +481,47 @@ function ApplicationsPanel() {
     },
   ];
 
+  const grantUserColumns = [
+    { title: 'ID', dataIndex: 'id', width: 80, render: (value) => `#${value}` },
+    { title: t('用户名'), dataIndex: 'username', width: 140 },
+    {
+      title: t('显示名'),
+      dataIndex: 'display_name',
+      width: 160,
+      render: (value) => value || '-',
+    },
+    {
+      title: t('邮箱'),
+      dataIndex: 'email',
+      width: 220,
+      render: (value) => value || '-',
+    },
+    {
+      title: t('用户组'),
+      dataIndex: 'group',
+      width: 120,
+      render: (value) => value || '-',
+    },
+    {
+      title: t('操作'),
+      key: 'action',
+      width: 100,
+      render: (_, record) => {
+        const selected = selectedGrantUser?.id === record.id;
+        return (
+          <Button
+            size='small'
+            type={selected ? 'primary' : 'tertiary'}
+            theme={selected ? 'solid' : 'outline'}
+            onClick={() => setSelectedGrantUser(record)}
+          >
+            {selected ? t('已选择') : t('选择')}
+          </Button>
+        );
+      },
+    },
+  ];
+
   return (
     <Card>
       <Space vertical align='start' style={{ width: '100%' }}>
@@ -447,6 +547,75 @@ function ApplicationsPanel() {
             {t('刷新')}
           </Button>
         </Space>
+        <div style={SOFT_PANEL_STYLE} className='w-full'>
+          <Space vertical align='start' style={{ width: '100%' }}>
+            <SectionHeader
+              title={t('手动赋予返佣权限')}
+              description={t(
+                '用于后台手动充值等历史情况，直接让用户获得返佣邀请权限。',
+              )}
+            />
+            <Space wrap style={{ width: '100%' }}>
+              <Input
+                value={grantUserKeyword}
+                placeholder={t('用户 ID、用户名、邮箱或显示名')}
+                style={{ width: 280 }}
+                onChange={(value) => {
+                  setGrantUserKeyword(value);
+                  setSelectedGrantUser(null);
+                  setGrantResult(null);
+                }}
+                onEnterPress={searchGrantUsers}
+              />
+              <Input
+                value={grantRemark}
+                placeholder={t('管理员备注（可选）')}
+                style={{ width: 260 }}
+                onChange={setGrantRemark}
+              />
+              <Button
+                theme='outline'
+                loading={grantUserSearching}
+                onClick={searchGrantUsers}
+              >
+                {t('搜索用户')}
+              </Button>
+              <Button
+                type='primary'
+                loading={grantLoading}
+                disabled={!selectedGrantUser}
+                onClick={grantAffiliateAccess}
+              >
+                {t('赋予权限')}
+              </Button>
+            </Space>
+            {(grantUserCandidates.length > 0 || selectedGrantUser) && (
+              <Table
+                rowKey='id'
+                size='small'
+                columns={grantUserColumns}
+                dataSource={grantUserCandidates}
+                pagination={false}
+                empty={<Empty description={t('暂无匹配用户')} />}
+                scroll={{ x: 820 }}
+                className='w-full'
+              />
+            )}
+            {selectedGrantUser && (
+              <Text>
+                {t('已选择')}：#{selectedGrantUser.id}{' '}
+                {selectedGrantUser.display_name || selectedGrantUser.username}
+                {selectedGrantUser.email ? ` (${selectedGrantUser.email})` : ''}
+              </Text>
+            )}
+            {grantResult && (
+              <Text type='success'>
+                {t('已赋予返佣权限')}：#{grantResult.user_id}{' '}
+                {grantResult.display_name || grantResult.username}
+              </Text>
+            )}
+          </Space>
+        </div>
         <Table
           rowKey='id'
           loading={loading}

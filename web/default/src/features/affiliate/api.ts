@@ -22,6 +22,8 @@ import type {
   PageResponse,
   AdminBindAffiliateInviterRequest,
   AdminBindAffiliateInviterResult,
+  AdminGrantAffiliateAccessRequest,
+  AdminGrantAffiliateAccessResult,
   AdminUnbindAffiliateInviterRequest,
   AdminUnbindAffiliateInviterResult,
   AffiliateAdminInvitation,
@@ -245,6 +247,16 @@ export async function unbindAdminAffiliateInviter(
 ) {
   const res = await api.post<ApiResponse<AdminUnbindAffiliateInviterResult>>(
     '/api/affiliate/admin/unbind-inviter',
+    payload
+  )
+  return res.data
+}
+
+export async function grantAdminAffiliateAccess(
+  payload: AdminGrantAffiliateAccessRequest
+) {
+  const res = await api.post<ApiResponse<AdminGrantAffiliateAccessResult>>(
+    '/api/affiliate/admin/grant-access',
     payload
   )
   return res.data

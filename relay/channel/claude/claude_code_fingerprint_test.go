@@ -655,7 +655,7 @@ func TestSetupRequestHeaderAddsClaudeCodeFingerprintHeaders(t *testing.T) {
 	require.Equal(t, "2023-06-01", headers.Get("anthropic-version"))
 	require.Equal(t, "true", headers.Get("anthropic-dangerous-direct-browser-access"))
 	require.Equal(t, "js", headers.Get("X-Stainless-Lang"))
-	require.Equal(t, "0.72.0", headers.Get("X-Stainless-Package-Version"))
+	require.Equal(t, claudeCodeStainlessVersion, headers.Get("X-Stainless-Package-Version"))
 	require.NotEmpty(t, headers.Get("X-Stainless-OS"))
 	require.NotEmpty(t, headers.Get("X-Stainless-Arch"))
 	require.Equal(t, "node", headers.Get("X-Stainless-Runtime"))
@@ -663,13 +663,7 @@ func TestSetupRequestHeaderAddsClaudeCodeFingerprintHeaders(t *testing.T) {
 	require.Equal(t, "0", headers.Get("X-Stainless-Retry-Count"))
 	require.Equal(t, "600", headers.Get("X-Stainless-Timeout"))
 	require.NotEmpty(t, headers.Get("x-client-request-id"))
-	require.Contains(t, headers.Get("anthropic-beta"), "claude-code-20250219")
-	require.Contains(t, headers.Get("anthropic-beta"), "oauth-2025-04-20")
-	require.Contains(t, headers.Get("anthropic-beta"), "extended-cache-ttl-2025-04-11")
-	require.Contains(t, headers.Get("anthropic-beta"), "fine-grained-tool-streaming-2025-05-14")
-	require.NotContains(t, headers.Get("anthropic-beta"), "prompt-caching-scope-2026-01-05")
-	require.NotContains(t, headers.Get("anthropic-beta"), "effort-2025-11-24")
-	require.NotContains(t, headers.Get("anthropic-beta"), "context-management-2025-06-27")
+	require.Equal(t, claudeCodeAnthropicBeta, headers.Get("anthropic-beta"))
 }
 
 func TestSetupRequestHeaderAddsClaudeCodeFingerprintHeadersWhenTransportFingerprintEnabled(t *testing.T) {
