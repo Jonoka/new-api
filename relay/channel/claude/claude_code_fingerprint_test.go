@@ -27,7 +27,6 @@ func newClaudeFingerprintTestContext() *gin.Context {
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{}`))
 	ctx.Request.Header.Set("Content-Type", "application/json")
-	ctx.Request.Header.Set("User-Agent", "claude-cli/2.1.156 (Claude Code)")
 	return ctx
 }
 
@@ -60,7 +59,7 @@ func TestConvertClaudeRequestKeepsBodyUnchangedByDefault(t *testing.T) {
 	require.JSONEq(t, `{"user_id":"origin-user"}`, string(claudeReq.Metadata))
 }
 
-func TestConvertClaudeRequestAddsBodyMarkerForCompatibleClient(t *testing.T) {
+func TestConvertClaudeRequestAddsClaudeCodeFingerprintForCompatibleClient(t *testing.T) {
 	t.Parallel()
 
 	adaptor := &Adaptor{}
@@ -88,10 +87,10 @@ func TestConvertClaudeRequestAddsBodyMarkerForCompatibleClient(t *testing.T) {
 	require.Len(t, system, 2)
 	require.Contains(t, system[0].GetText(), "x-anthropic-billing-header")
 	require.Contains(t, system[1].GetText(), "Claude Code")
-	require.JSONEq(t, `{"user_id":"origin-user"}`, string(claudeReq.Metadata))
+	requireClaudeCodeLegacyMetadata(t, claudeReq.Metadata)
 }
 
-func TestConvertClaudeRequestBodyMarkerForCompatibleClientDoesNotInjectMetadata(t *testing.T) {
+func TestConvertClaudeRequestFingerprintForCompatibleClientInjectsMetadata(t *testing.T) {
 	t.Parallel()
 
 	adaptor := &Adaptor{}
@@ -119,7 +118,7 @@ func TestConvertClaudeRequestBodyMarkerForCompatibleClientDoesNotInjectMetadata(
 	require.Len(t, system, 2)
 	require.Contains(t, system[0].GetText(), "x-anthropic-billing-header")
 	require.Contains(t, system[1].GetText(), "Claude Code")
-	require.Empty(t, claudeReq.Metadata)
+	requireClaudeCodeLegacyMetadata(t, claudeReq.Metadata)
 }
 
 func TestConvertClaudeRequestAddsClaudeCodeSystem(t *testing.T) {
@@ -130,7 +129,9 @@ func TestConvertClaudeRequestAddsClaudeCodeSystem(t *testing.T) {
 		Model: "claude-sonnet-4-20250514",
 	}
 	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
 		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
 			ChannelOtherSettings: dto.ChannelOtherSettings{
 				ClaudeCodeFingerprintEnabled: true,
 			},
@@ -159,7 +160,9 @@ func TestConvertClaudeRequestNormalizesExistingClaudeCodeStringSystem(t *testing
 		System: "You are Claude Code, Anthropic's official CLI for Claude.",
 	}
 	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
 		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
 			ChannelOtherSettings: dto.ChannelOtherSettings{
 				ClaudeCodeFingerprintEnabled: true,
 			},
@@ -190,7 +193,9 @@ func TestConvertClaudeRequestNormalizesObjectSystemWithClaudeCodeMarker(t *testi
 		},
 	}
 	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
 		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
 			ChannelOtherSettings: dto.ChannelOtherSettings{
 				ClaudeCodeFingerprintEnabled: true,
 			},
@@ -224,7 +229,9 @@ func TestConvertClaudeRequestNormalizesContentStringSystemWithClaudeCodeMarker(t
 		},
 	}
 	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
 		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
 			ChannelOtherSettings: dto.ChannelOtherSettings{
 				ClaudeCodeFingerprintEnabled: true,
 			},
@@ -258,7 +265,9 @@ func TestConvertClaudeRequestPrependsClaudeCodeSystemWhenMarkerIsNotTextBlock(t 
 		},
 	}
 	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
 		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
 			ChannelOtherSettings: dto.ChannelOtherSettings{
 				ClaudeCodeFingerprintEnabled: true,
 			},
@@ -287,7 +296,9 @@ func TestConvertClaudeRequestRewritesInvalidMetadataUserID(t *testing.T) {
 		Metadata: []byte(`{"user_id":"hermes-user","trace":"keep"}`),
 	}
 	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
 		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
 			ChannelOtherSettings: dto.ChannelOtherSettings{
 				ClaudeCodeFingerprintEnabled: true,
 			},
@@ -313,7 +324,9 @@ func TestConvertClaudeRequestRewritesAccountMetadataForLegacySub2APICompatibilit
 		Metadata: []byte(`{"user_id":"user_0000000000000000000000000000000000000000000000000000000000000000_account_00000000-0000-0000-0000-000000000000_session_00000000-0000-0000-0000-000000000000","trace":"keep"}`),
 	}
 	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
 		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
 			ChannelOtherSettings: dto.ChannelOtherSettings{
 				ClaudeCodeFingerprintEnabled: true,
 			},
@@ -338,7 +351,9 @@ func TestConvertClaudeRequestAddsClaudeCodeFingerprintWhenTransportFingerprintEn
 		Model: "claude-sonnet-4-20250514",
 	}
 	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
 		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
 			ChannelOtherSettings: dto.ChannelOtherSettings{
 				ClaudeCodeTransportFingerprintEnabled: true,
 			},
@@ -368,7 +383,9 @@ func TestConvertOpenAIRequestAddsClaudeCodeFingerprint(t *testing.T) {
 		},
 	}
 	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
 		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
 			ChannelOtherSettings: dto.ChannelOtherSettings{
 				ClaudeCodeFingerprintEnabled: true,
 			},
@@ -387,7 +404,7 @@ func TestConvertOpenAIRequestAddsClaudeCodeFingerprint(t *testing.T) {
 	requireClaudeCodeLegacyMetadata(t, claudeReq.Metadata)
 }
 
-func TestConvertOpenAIRequestDoesNotApplyClaudeCodeBodyMarkerForCompatibleClient(t *testing.T) {
+func TestConvertOpenAIRequestAppliesClaudeCodeFingerprintForCompatibleClient(t *testing.T) {
 	t.Parallel()
 
 	adaptor := &Adaptor{}
@@ -398,7 +415,9 @@ func TestConvertOpenAIRequestDoesNotApplyClaudeCodeBodyMarkerForCompatibleClient
 		},
 	}
 	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
 		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
 			ChannelOtherSettings: dto.ChannelOtherSettings{
 				ClaudeCodeFingerprintEnabled: true,
 			},
@@ -409,8 +428,11 @@ func TestConvertOpenAIRequestDoesNotApplyClaudeCodeBodyMarkerForCompatibleClient
 	require.NoError(t, err)
 
 	claudeReq := converted.(*dto.ClaudeRequest)
-	require.Empty(t, claudeReq.ParseSystem())
-	require.Empty(t, claudeReq.Metadata)
+	system := claudeReq.ParseSystem()
+	require.Len(t, system, 2)
+	require.Contains(t, system[0].GetText(), "x-anthropic-billing-header")
+	require.Contains(t, system[1].GetText(), "Claude Code")
+	requireClaudeCodeLegacyMetadata(t, claudeReq.Metadata)
 }
 
 func TestClaudeCodeFingerprintMatchesSub2APIMessagesClientRestriction(t *testing.T) {
@@ -425,9 +447,11 @@ func TestClaudeCodeFingerprintMatchesSub2APIMessagesClientRestriction(t *testing
 		},
 	}
 	info := &relaycommon.RelayInfo{
+		RelayFormat:     types.RelayFormatClaude,
 		OriginModelName: "claude-sonnet-4-20250514",
 		ChannelMeta: &relaycommon.ChannelMeta{
-			ApiKey: "sk-test",
+			ApiType: constant.APITypeAnthropic,
+			ApiKey:  "sk-test",
 			ChannelOtherSettings: dto.ChannelOtherSettings{
 				ClaudeCodeFingerprintEnabled: true,
 			},
@@ -653,7 +677,9 @@ func TestConvertClaudeRequestReplacesEmptyStringSystemWithClaudeCodeSystem(t *te
 		System: "",
 	}
 	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
 		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
 			ChannelOtherSettings: dto.ChannelOtherSettings{
 				ClaudeCodeFingerprintEnabled: true,
 			},
@@ -680,7 +706,9 @@ func TestConvertClaudeRequestPrependsClaudeCodeSystemToStringSystem(t *testing.T
 		System: "existing string system",
 	}
 	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
 		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
 			ChannelOtherSettings: dto.ChannelOtherSettings{
 				ClaudeCodeFingerprintEnabled: true,
 			},
@@ -710,7 +738,9 @@ func TestConvertClaudeRequestPrependsClaudeCodeSystemWithoutOverwritingMetadataU
 		Metadata: []byte(`{"user_id":"` + existingClaudeCodeUserID + `","trace":"keep"}`),
 	}
 	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
 		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
 			ChannelOtherSettings: dto.ChannelOtherSettings{
 				ClaudeCodeFingerprintEnabled: true,
 			},
@@ -728,7 +758,7 @@ func TestConvertClaudeRequestPrependsClaudeCodeSystemWithoutOverwritingMetadataU
 	require.JSONEq(t, `{"user_id":"`+existingClaudeCodeUserID+`","trace":"keep"}`, string(claudeReq.Metadata))
 }
 
-func TestApplyClaudeCodeFinalBodyFingerprintKeepsCompatibleClientBody(t *testing.T) {
+func TestApplyClaudeCodeFinalBodyFingerprintRewritesCompatibleClientBody(t *testing.T) {
 	t.Parallel()
 
 	adaptor := &Adaptor{}
@@ -739,6 +769,7 @@ func TestApplyClaudeCodeFinalBodyFingerprintKeepsCompatibleClientBody(t *testing
 		},
 	}
 	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ApiType: constant.APITypeAnthropic,
 			ParamOverride: map[string]interface{}{
@@ -766,16 +797,19 @@ func TestApplyClaudeCodeFinalBodyFingerprintKeepsCompatibleClientBody(t *testing
 
 	finalBody, err := ApplyClaudeCodeFinalBodyFingerprint(info, mutatedBody)
 	require.NoError(t, err)
-	require.JSONEq(t, string(mutatedBody), string(finalBody))
-	require.Contains(t, string(finalBody), "broken system")
-	require.Contains(t, string(finalBody), "broken-user")
+	require.NotContains(t, string(finalBody), "broken system")
+	require.NotContains(t, string(finalBody), "broken-user")
+	require.Contains(t, string(finalBody), "Claude Code")
+	require.Contains(t, string(finalBody), "x-anthropic-billing-header")
+	require.NotContains(t, string(finalBody), "cch=00000;")
 
 	var finalReq dto.ClaudeRequest
 	require.NoError(t, common.Unmarshal(finalBody, &finalReq))
-	var finalBodyMap map[string]interface{}
-	require.NoError(t, common.Unmarshal(finalBody, &finalBodyMap))
-	require.Equal(t, "broken system", finalBodyMap["system"])
-	require.JSONEq(t, `{"user_id":"broken-user"}`, string(finalReq.Metadata))
+	system := finalReq.ParseSystem()
+	require.Len(t, system, 2)
+	require.Contains(t, system[0].GetText(), "x-anthropic-billing-header")
+	require.Contains(t, system[1].GetText(), "Claude Code")
+	requireClaudeCodeLegacyMetadata(t, finalReq.Metadata)
 }
 
 func TestSetupRequestHeaderAddsClaudeCodeFingerprintHeaders(t *testing.T) {
@@ -783,9 +817,11 @@ func TestSetupRequestHeaderAddsClaudeCodeFingerprintHeaders(t *testing.T) {
 
 	ctx := newClaudeFingerprintTestContext()
 	info := &relaycommon.RelayInfo{
+		RelayFormat:     types.RelayFormatClaude,
 		OriginModelName: "claude-sonnet-4-20250514",
 		ChannelMeta: &relaycommon.ChannelMeta{
-			ApiKey: "sk-test",
+			ApiType: constant.APITypeAnthropic,
+			ApiKey:  "sk-test",
 			ChannelOtherSettings: dto.ChannelOtherSettings{
 				ClaudeCodeFingerprintEnabled: true,
 			},
@@ -819,9 +855,11 @@ func TestSetupRequestHeaderAddsClaudeCodeFingerprintHeadersWhenTransportFingerpr
 
 	ctx := newClaudeFingerprintTestContext()
 	info := &relaycommon.RelayInfo{
+		RelayFormat:     types.RelayFormatClaude,
 		OriginModelName: "claude-sonnet-4-20250514",
 		ChannelMeta: &relaycommon.ChannelMeta{
-			ApiKey: "sk-test",
+			ApiType: constant.APITypeAnthropic,
+			ApiKey:  "sk-test",
 			ChannelOtherSettings: dto.ChannelOtherSettings{
 				ClaudeCodeTransportFingerprintEnabled: true,
 			},
@@ -1009,7 +1047,7 @@ func TestSetupRequestHeaderDetectsRealClaudeCodeBySessionHeader(t *testing.T) {
 	require.Equal(t, "session-123", headers.Get("X-Claude-Code-Session-Id"))
 }
 
-func TestSetupRequestHeaderDoesNotUseSyntheticFingerprintForNonClaudeCodeClientWithoutBodyPassThrough(t *testing.T) {
+func TestSetupRequestHeaderUsesSyntheticFingerprintForCompatibleClient(t *testing.T) {
 	t.Parallel()
 
 	ctx := newClaudeCompatibleClientTestContext()
@@ -1034,12 +1072,12 @@ func TestSetupRequestHeaderDoesNotUseSyntheticFingerprintForNonClaudeCodeClientW
 	require.NoError(t, err)
 
 	require.Equal(t, "sk-test", headers.Get("x-api-key"))
-	require.Empty(t, headers.Get("Authorization"))
-	require.Empty(t, headers.Get("User-Agent"))
-	require.Empty(t, headers.Get("X-App"))
-	require.Empty(t, headers.Get("X-Stainless-Lang"))
-	require.Empty(t, headers.Get("anthropic-beta"))
-	require.Empty(t, headers.Get("X-Client-Request-Id"))
+	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
+	require.Regexp(t, regexp.MustCompile(`(?i)^claude-cli/\d+\.\d+\.\d+ \(external, cli\)$`), headers.Get("User-Agent"))
+	require.Equal(t, "cli", headers.Get("X-App"))
+	require.Equal(t, "js", headers.Get("X-Stainless-Lang"))
+	require.Contains(t, headers.Get("anthropic-beta"), "claude-code-20250219")
+	require.NotEmpty(t, headers.Get("X-Client-Request-Id"))
 	require.Empty(t, headers.Get("X-Claude-Code-Session-Id"))
 }
 

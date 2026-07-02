@@ -329,14 +329,9 @@ const (
 var claudeCodeLegacySub2APIUserIDPattern = regexp.MustCompile(`^user_[a-fA-F0-9]{64}_account__session_[\w-]+$`)
 
 func shouldApplyClaudeCodeSyntheticFingerprint(c *gin.Context, info *relaycommon.RelayInfo) bool {
-	return shouldUseClaudeCodeFingerprint(info) && isRealClaudeCodeClient(c)
-}
-
-func shouldApplyClaudeCodeBodyMarker(c *gin.Context, info *relaycommon.RelayInfo) bool {
 	return shouldUseClaudeCodeFingerprint(info) &&
 		info != nil &&
 		info.ApiType == rootconstant.APITypeAnthropic &&
-		info.RelayFormat == types.RelayFormatClaude &&
 		!isRealClaudeCodeClient(c)
 }
 
@@ -347,9 +342,6 @@ func applyClaudeCodeRequestFingerprint(c *gin.Context, info *relaycommon.RelayIn
 	if shouldApplyClaudeCodeSyntheticFingerprint(c, info) {
 		ensureClaudeCodeSystem(request, info)
 		return ensureClaudeCodeMetadata(request)
-	}
-	if shouldApplyClaudeCodeBodyMarker(c, info) {
-		ensureClaudeCodeSystem(request, info)
 	}
 	return nil
 }
@@ -476,7 +468,31 @@ func SignBillingHeaderCCH(body []byte) []byte {
 // ApplyClaudeCodeFinalBodyFingerprint 在下游 body 修改后重新写入 Claude Code 指纹字段，
 // 并对最终序列化 body 签名。
 func ApplyClaudeCodeFinalBodyFingerprint(info *relaycommon.RelayInfo, body []byte) ([]byte, error) {
-	return body, nil
+	if !shouldFinalizeClaudeCodeSyntheticFingerprint(info) {
+		return body, nil
+	}
+	var request dto.ClaudeRequest
+	if err := common.Unmarshal(body, &request); err != nil {
+		return nil, err
+	}
+	ensureClaudeCodeSystem(&request, info)
+	if err := ensureClaudeCodeMetadata(&request); err != nil {
+		return nil, err
+	}
+	finalBody, err := common.Marshal(&request)
+	if err != nil {
+		return nil, err
+	}
+	return SignBillingHeaderCCH(finalBody), nil
+}
+
+func shouldFinalizeClaudeCodeSyntheticFingerprint(info *relaycommon.RelayInfo) bool {
+	return info != nil &&
+		info.ChannelMeta != nil &&
+		info.ApiType == rootconstant.APITypeAnthropic &&
+		info.GetFinalRequestRelayFormat() == types.RelayFormatClaude &&
+		(info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled ||
+			info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled)
 }
 
 func normalizeClaudeSystemBlocks(value any) []dto.ClaudeMediaMessage {

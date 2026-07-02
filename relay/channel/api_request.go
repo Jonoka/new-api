@@ -383,6 +383,9 @@ func sanitizeClaudeCodeHeadersForCompatibleClient(c *gin.Context, req *http.Requ
 	if info.ApiType != rootconstant.APITypeAnthropic {
 		return
 	}
+	if common.IsClaudeCodeFingerprintEnabled(info) {
+		return
+	}
 	if isRealClaudeCodeRequest(c) {
 		return
 	}
@@ -611,7 +614,14 @@ func shouldUseClaudeCodeTransport(c *gin.Context, info *common.RelayInfo) bool {
 	if info == nil || info.ChannelMeta == nil {
 		return false
 	}
-	return info.RelayFormat == types.RelayFormatClaude && isRealClaudeCodeRequest(c)
+	if info.RelayFormat != types.RelayFormatClaude {
+		return false
+	}
+	if isRealClaudeCodeRequest(c) {
+		return true
+	}
+	return info.ApiType == rootconstant.APITypeAnthropic &&
+		info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled
 }
 
 func selectRelayHTTPClient(c *gin.Context, info *common.RelayInfo) (*http.Client, error) {
