@@ -86,6 +86,8 @@ func TestConvertClaudeRequestAddsClaudeCodeFingerprintForCompatibleClient(t *tes
 	system := claudeReq.ParseSystem()
 	require.Len(t, system, 2)
 	require.Contains(t, system[0].GetText(), "x-anthropic-billing-header")
+	require.Contains(t, system[0].GetText(), "cc_version=2.8.2.")
+	require.Contains(t, system[0].GetText(), "cc_entrypoint=cli; cch=00000;")
 	require.Contains(t, system[1].GetText(), "Claude Code")
 	requireClaudeCodeLegacyMetadata(t, claudeReq.Metadata)
 }
@@ -514,6 +516,7 @@ func TestClaudeCodeFingerprintFinalOutboundRequestMatchesSub2APIRestrictions(t *
 	ctx := newClaudeFingerprintTestContext()
 	adaptor := &Adaptor{}
 	info := &relaycommon.RelayInfo{
+		RelayFormat:     types.RelayFormatClaude,
 		OriginModelName: "claude-sonnet-4-20250514",
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelType:    constant.ChannelTypeAnthropic,
@@ -536,6 +539,8 @@ func TestClaudeCodeFingerprintFinalOutboundRequestMatchesSub2APIRestrictions(t *
 	require.NoError(t, err)
 	bodyBytes, err := common.Marshal(converted)
 	require.NoError(t, err)
+	bodyBytes, err = ApplyClaudeCodeFinalBodyFingerprint(info, bodyBytes)
+	require.NoError(t, err)
 	resp, err := adaptor.DoRequest(ctx, info, bytes.NewReader(bodyBytes))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
@@ -556,12 +561,53 @@ func TestClaudeCodeFingerprintFinalOutboundRequestMatchesSub2APIRestrictions(t *
 	firstSystem, ok := systemEntries[0].(map[string]interface{})
 	require.True(t, ok)
 	require.Contains(t, firstSystem["text"], "x-anthropic-billing-header")
+	require.Contains(t, firstSystem["text"], "cc_version=2.8.2.")
+	require.Contains(t, firstSystem["text"], "cc_entrypoint=cli;")
+	require.Regexp(t, regexp.MustCompile(`cch=[0-9a-f]{5};`), firstSystem["text"])
+	require.NotContains(t, firstSystem["text"], "cch=00000;")
 
 	metadata, ok := body["metadata"].(map[string]interface{})
 	require.True(t, ok)
 	userID, ok := metadata["user_id"].(string)
 	require.True(t, ok)
 	require.Regexp(t, regexp.MustCompile(`^user_[a-fA-F0-9]{64}_account__session_[\w-]+$`), userID)
+}
+
+func TestClaudeCodeFingerprintUsesConfiguredEntrypoint(t *testing.T) {
+	t.Parallel()
+
+	ctx := newClaudeCompatibleClientTestContext()
+	adaptor := &Adaptor{}
+	info := &relaycommon.RelayInfo{
+		RelayFormat:     types.RelayFormatClaude,
+		OriginModelName: "claude-sonnet-4-20250514",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
+			ApiKey:  "sk-test",
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeFingerprintEnabled: true,
+				ClaudeCodeEntrypoint:         "sdk-cli",
+			},
+		},
+	}
+	req := &dto.ClaudeRequest{
+		Model: "claude-sonnet-4-20250514",
+		Messages: []dto.ClaudeMessage{
+			{Role: "user", Content: "configured entrypoint message"},
+		},
+	}
+
+	converted, err := adaptor.ConvertClaudeRequest(ctx, info, req)
+	require.NoError(t, err)
+	claudeReq := converted.(*dto.ClaudeRequest)
+	system := claudeReq.ParseSystem()
+	require.Len(t, system, 2)
+	require.Contains(t, system[0].GetText(), "cc_entrypoint=sdk-cli;")
+
+	headers := http.Header{}
+	require.NoError(t, adaptor.SetupRequestHeader(ctx, &headers, info))
+	require.Equal(t, "sdk-cli", headers.Get("X-App"))
+	require.Equal(t, "claude-cli/2.8.2 (external, sdk-cli)", headers.Get("User-Agent"))
 }
 
 func TestRealClaudeCodeHeadersPassThroughWhenChannelFingerprintDisabled(t *testing.T) {

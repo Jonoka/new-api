@@ -33,7 +33,8 @@ type Adaptor struct {
 const (
 	claudeCodeSystemText               = "You are Claude Code, Anthropic's official CLI for Claude."
 	claudeCodeAnthropicBeta            = "interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14,claude-code-20250219,oauth-2025-04-20,context-management-2025-06-27,extended-cache-ttl-2025-04-11,prompt-caching-scope-2026-01-05"
-	claudeCodeUserAgentFallbackVersion = "2.1.169"
+	claudeCodeUserAgentFallbackVersion = "2.8.2"
+	claudeCodeEntrypointDefault        = "cli"
 	claudeCodeStainlessVersion         = "0.94.0"
 	claudeCodeStainlessRuntime         = "node"
 	claudeCodeStainlessRuntimeVer      = "v24.13.0"
@@ -60,6 +61,20 @@ func getClaudeCodeVersion(info *relaycommon.RelayInfo) string {
 		return strings.TrimSpace(info.ChannelOtherSettings.ClaudeCodeVersion)
 	}
 	return claudeCodeUserAgentFallbackVersion
+}
+
+func getClaudeCodeEntrypoint(info *relaycommon.RelayInfo) string {
+	if info != nil && strings.TrimSpace(info.ChannelOtherSettings.ClaudeCodeEntrypoint) != "" {
+		entrypoint := strings.TrimSpace(info.ChannelOtherSettings.ClaudeCodeEntrypoint)
+		for _, r := range entrypoint {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+				continue
+			}
+			return claudeCodeEntrypointDefault
+		}
+		return entrypoint
+	}
+	return claudeCodeEntrypointDefault
 }
 
 func mapStainlessOS(goos string) string {
@@ -193,7 +208,8 @@ func applyClaudeCodeHeaderFingerprint(c *gin.Context, req *http.Header, info *re
 	if req == nil || !shouldApplyClaudeCodeSyntheticFingerprint(c, info) || shouldUseClaudeCodeOriginalPassThrough(c, info) {
 		return
 	}
-	req.Set("User-Agent", fmt.Sprintf("claude-cli/%s (external, cli)", getClaudeCodeVersion(info)))
+	entrypoint := getClaudeCodeEntrypoint(info)
+	req.Set("User-Agent", fmt.Sprintf("claude-cli/%s (external, %s)", getClaudeCodeVersion(info), entrypoint))
 	req.Set("X-Stainless-Lang", "js")
 	req.Set("X-Stainless-Package-Version", claudeCodeStainlessVersion)
 	req.Set("X-Stainless-OS", mapStainlessOS(runtime.GOOS))
@@ -202,7 +218,7 @@ func applyClaudeCodeHeaderFingerprint(c *gin.Context, req *http.Header, info *re
 	req.Set("X-Stainless-Runtime-Version", claudeCodeStainlessRuntimeVer)
 	req.Set("X-Stainless-Retry-Count", claudeCodeStainlessRetryCount)
 	req.Set("X-Stainless-Timeout", claudeCodeStainlessTimeoutSecs)
-	req.Set("X-App", "cli")
+	req.Set("X-App", entrypoint)
 	req.Set("anthropic-version", "2023-06-01")
 	req.Set("anthropic-beta", claudeCodeAnthropicBeta)
 	req.Set("anthropic-dangerous-direct-browser-access", "true")
@@ -369,7 +385,7 @@ func ensureClaudeCodeSystem(request *dto.ClaudeRequest, info *relaycommon.RelayI
 	version := getClaudeCodeVersion(info)
 
 	// Build billing attribution block (no cache_control)
-	billingText := buildBillingBlockText(request, version)
+	billingText := buildBillingBlockTextWithInfo(request, info, version)
 	billingBlock := dto.ClaudeMediaMessage{Type: "text"}
 	billingBlock.SetText(billingText)
 
@@ -392,11 +408,9 @@ func newTextSystemBlock(text string) dto.ClaudeMediaMessage {
 	return block
 }
 
-// buildBillingBlockText constructs the billing attribution header text
-// matching real Claude Code CLI format.
-func buildBillingBlockText(request *dto.ClaudeRequest, version string) string {
+func buildBillingBlockTextWithInfo(request *dto.ClaudeRequest, info *relaycommon.RelayInfo, version string) string {
 	fp := computeBillingFingerprint(request, version)
-	return fmt.Sprintf("x-anthropic-billing-header: cc_version=%s.%s; cc_entrypoint=cli; cch=00000;", version, fp)
+	return fmt.Sprintf("x-anthropic-billing-header: cc_version=%s.%s; cc_entrypoint=%s; cch=00000;", version, fp, getClaudeCodeEntrypoint(info))
 }
 
 // computeBillingFingerprint replicates the real Claude Code CLI fingerprint algorithm:
