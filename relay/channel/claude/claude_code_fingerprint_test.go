@@ -808,12 +808,51 @@ func TestSetupRequestHeaderPassesThroughRealClaudeCodeHeadersWithFingerprintBody
 	require.Equal(t, "session-123", headers.Get("X-Claude-Code-Session-Id"))
 }
 
-func TestSetupRequestHeaderStillUsesSyntheticFingerprintWithoutBodyPassThrough(t *testing.T) {
+func TestSetupRequestHeaderPassesThroughRealClaudeCodeHeadersWithFingerprintClientDetection(t *testing.T) {
 	t.Parallel()
 
 	ctx := newClaudeFingerprintTestContext()
 	ctx.Request.Header.Set("User-Agent", "claude-cli/2.1.156 (Claude Code)")
 	ctx.Request.Header.Set("X-App", "claude-code")
+	ctx.Request.Header.Set("Anthropic-Beta", "claude-code-20250219")
+	ctx.Request.Header.Set("Anthropic-Version", "2023-06-01")
+	ctx.Request.Header.Set("X-Stainless-Lang", "js")
+	ctx.Request.Header.Set("X-Client-Request-Id", "client-request-id")
+	ctx.Request.Header.Set("X-Claude-Code-Session-Id", "session-123")
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat:     types.RelayFormatClaude,
+		OriginModelName: "claude-sonnet-4-20250514",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
+			ApiKey:  "sk-test",
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeFingerprintEnabled: true,
+			},
+		},
+	}
+
+	headers := http.Header{}
+	err := (&Adaptor{}).SetupRequestHeader(ctx, &headers, info)
+	require.NoError(t, err)
+
+	require.Equal(t, "sk-test", headers.Get("x-api-key"))
+	require.Empty(t, headers.Get("Authorization"))
+	require.Equal(t, "claude-cli/2.1.156 (Claude Code)", headers.Get("User-Agent"))
+	require.Equal(t, "claude-code", headers.Get("X-App"))
+	require.Equal(t, "claude-code-20250219", headers.Get("Anthropic-Beta"))
+	require.Equal(t, "2023-06-01", headers.Get("Anthropic-Version"))
+	require.Equal(t, "js", headers.Get("X-Stainless-Lang"))
+	require.Equal(t, "client-request-id", headers.Get("X-Client-Request-Id"))
+	require.Equal(t, "session-123", headers.Get("X-Claude-Code-Session-Id"))
+}
+
+func TestSetupRequestHeaderStillUsesSyntheticFingerprintForNonClaudeCodeClientWithoutBodyPassThrough(t *testing.T) {
+	t.Parallel()
+
+	ctx := newClaudeFingerprintTestContext()
+	ctx.Request.Header.Set("User-Agent", "Hermes/1.0")
+	ctx.Request.Header.Set("X-App", "browser")
 	ctx.Request.Header.Set("X-Client-Request-Id", "client-request-id")
 	ctx.Request.Header.Set("X-Claude-Code-Session-Id", "session-123")
 	info := &relaycommon.RelayInfo{

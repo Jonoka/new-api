@@ -161,7 +161,7 @@ func shouldUseClaudeCodeFingerprint(info *relaycommon.RelayInfo) bool {
 			info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled)
 }
 
-func shouldUseClaudeCodeOriginalPassThrough(info *relaycommon.RelayInfo) bool {
+func shouldUseClaudeCodeOriginalPassThrough(c *gin.Context, info *relaycommon.RelayInfo) bool {
 	if info == nil ||
 		info.ChannelMeta == nil ||
 		info.ApiType != rootconstant.APITypeAnthropic ||
@@ -169,12 +169,21 @@ func shouldUseClaudeCodeOriginalPassThrough(info *relaycommon.RelayInfo) bool {
 		!shouldUseClaudeCodeFingerprint(info) {
 		return false
 	}
-	return model_setting.GetGlobalSettings().PassThroughRequestEnabled ||
-		info.ChannelSetting.PassThroughBodyEnabled
+	if model_setting.GetGlobalSettings().PassThroughRequestEnabled ||
+		info.ChannelSetting.PassThroughBodyEnabled {
+		return true
+	}
+	return isRealClaudeCodeClient(c)
 }
 
-func applyClaudeCodeHeaderFingerprint(req *http.Header, info *relaycommon.RelayInfo) {
-	if req == nil || !shouldUseClaudeCodeFingerprint(info) || shouldUseClaudeCodeOriginalPassThrough(info) {
+func isRealClaudeCodeClient(c *gin.Context) bool {
+	return c != nil &&
+		c.Request != nil &&
+		claudeCodeUserAgentPattern.MatchString(c.Request.Header.Get("User-Agent"))
+}
+
+func applyClaudeCodeHeaderFingerprint(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) {
+	if req == nil || !shouldUseClaudeCodeFingerprint(info) || shouldUseClaudeCodeOriginalPassThrough(c, info) {
 		return
 	}
 	req.Set("User-Agent", fmt.Sprintf("claude-cli/%s (external, cli)", getClaudeCodeVersion(info)))
@@ -217,7 +226,7 @@ func shouldPassThroughRealClaudeCodeHeaders(c *gin.Context, info *relaycommon.Re
 	if info.ApiType != rootconstant.APITypeAnthropic {
 		return false
 	}
-	if shouldUseClaudeCodeFingerprint(info) && !shouldUseClaudeCodeOriginalPassThrough(info) {
+	if shouldUseClaudeCodeFingerprint(info) && !shouldUseClaudeCodeOriginalPassThrough(c, info) {
 		return false
 	}
 	return claudeCodeUserAgentPattern.MatchString(c.Request.Header.Get("User-Agent"))
@@ -241,7 +250,7 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 	req.Set("anthropic-version", anthropicVersion)
 	applyRealClaudeCodeHeaderPassthrough(c, req, info)
 	CommonClaudeHeadersOperation(c, req, info)
-	applyClaudeCodeHeaderFingerprint(req, info)
+	applyClaudeCodeHeaderFingerprint(c, req, info)
 	return nil
 }
 

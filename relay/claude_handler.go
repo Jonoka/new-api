@@ -170,7 +170,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		}
 	}
 
-	passThroughRequestBody := shouldPassThroughRequestBody(info)
+	passThroughRequestBody := shouldPassThroughRequestBodyForContext(c, info)
 	if !passThroughRequestBody &&
 		!shouldUseClaudeCodeRequestFingerprint(info) &&
 		shouldClaudeUseOpenAIResponses(info, request) {

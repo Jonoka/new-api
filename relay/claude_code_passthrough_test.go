@@ -1,6 +1,8 @@
 package relay
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/QuantumNous/new-api/constant"
@@ -8,9 +10,19 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 
 	"github.com/stretchr/testify/require"
 )
+
+func newClaudeCodePassthroughTestContext(userAgent string) *gin.Context {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Set("User-Agent", userAgent)
+	return ctx
+}
 
 func TestShouldPassThroughRequestBodyRespectsPassThroughSettings(t *testing.T) {
 	originalGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
@@ -122,6 +134,48 @@ func TestClaudeCodeFingerprintDoesNotPassThroughWhenPassThroughDisabled(t *testi
 	}
 
 	require.False(t, shouldPassThroughRequestBody(info))
+}
+
+func TestClaudeCodeFingerprintAutoPassesThroughRealClaudeCodeClient(t *testing.T) {
+	originalGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
+	defer func() {
+		model_setting.GetGlobalSettings().PassThroughRequestEnabled = originalGlobal
+	}()
+	model_setting.GetGlobalSettings().PassThroughRequestEnabled = false
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeFingerprintEnabled: true,
+			},
+		},
+	}
+
+	ctx := newClaudeCodePassthroughTestContext("claude-cli/2.1.156 (Claude Code)")
+	require.True(t, shouldPassThroughRequestBodyForContext(ctx, info))
+}
+
+func TestClaudeCodeFingerprintDoesNotAutoPassThroughNonClaudeCodeClient(t *testing.T) {
+	originalGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
+	defer func() {
+		model_setting.GetGlobalSettings().PassThroughRequestEnabled = originalGlobal
+	}()
+	model_setting.GetGlobalSettings().PassThroughRequestEnabled = false
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeFingerprintEnabled: true,
+			},
+		},
+	}
+
+	ctx := newClaudeCodePassthroughTestContext("Hermes/1.0")
+	require.False(t, shouldPassThroughRequestBodyForContext(ctx, info))
 }
 
 func TestClaudeCodeFingerprintDoesNotPassThroughOpenAICompatibleBody(t *testing.T) {

@@ -69,7 +69,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 	}
 	adaptor.Init(info)
 
-	passThroughRequestBody := shouldPassThroughRequestBody(info)
+	passThroughRequestBody := shouldPassThroughRequestBodyForContext(c, info)
 	if info.RelayMode == relayconstant.RelayModeChatCompletions &&
 		!passThroughRequestBody &&
 		!shouldUseClaudeCodeRequestFingerprint(info) &&
