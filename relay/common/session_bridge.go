@@ -60,7 +60,11 @@ func buildOpenAISessionBridgeOverride(info *RelayInfo, jsonData []byte) map[stri
 	if !ok {
 		return nil
 	}
-	sessionID := normalizeOpenAIBridgeSessionID(info, raw["session_id"])
+	rawSessionID, exists := raw["session_id"]
+	if !exists {
+		return nil
+	}
+	sessionID := normalizeOpenAIBridgeSessionID(info, rawSessionID)
 	if sessionID == "" {
 		return nil
 	}
@@ -92,9 +96,12 @@ func resolveOpenAISessionSeedFromRequestHeaders(context map[string]interface{}) 
 		"x-codex-session-id",
 		"conversation_id",
 		"x-session-id",
-		"x-client-request-id",
 	} {
-		if value := strings.TrimSpace(fmt.Sprintf("%v", requestHeaders[key])); value != "" {
+		raw, ok := requestHeaders[key]
+		if !ok {
+			continue
+		}
+		if value := strings.TrimSpace(fmt.Sprintf("%v", raw)); value != "" {
 			return value
 		}
 	}
@@ -102,6 +109,9 @@ func resolveOpenAISessionSeedFromRequestHeaders(context map[string]interface{}) 
 }
 
 func normalizeOpenAIBridgeSessionID(info *RelayInfo, value interface{}) string {
+	if value == nil {
+		return ""
+	}
 	raw := strings.TrimSpace(fmt.Sprintf("%v", value))
 	if raw == "" {
 		return ""

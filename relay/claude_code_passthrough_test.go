@@ -52,7 +52,7 @@ func TestShouldPassThroughRequestBodyRespectsPassThroughSettings(t *testing.T) {
 	}))
 }
 
-func TestShouldPassThroughRequestBodyDoesNotPassThroughSyntheticClaudeCodeFingerprint(t *testing.T) {
+func TestShouldPassThroughRequestBodyAllowsConfiguredPassThroughWithClaudeCodeFingerprint(t *testing.T) {
 	originalGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
 	defer func() {
 		model_setting.GetGlobalSettings().PassThroughRequestEnabled = originalGlobal
@@ -72,10 +72,10 @@ func TestShouldPassThroughRequestBodyDoesNotPassThroughSyntheticClaudeCodeFinger
 		},
 	}
 
-	require.False(t, shouldPassThroughRequestBody(info))
+	require.True(t, shouldPassThroughRequestBody(info))
 }
 
-func TestShouldPassThroughRequestBodyDoesNotPassThroughSyntheticClaudeCodeTransportFingerprint(t *testing.T) {
+func TestShouldPassThroughRequestBodyAllowsConfiguredPassThroughWithClaudeCodeTransportFingerprint(t *testing.T) {
 	originalGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
 	defer func() {
 		model_setting.GetGlobalSettings().PassThroughRequestEnabled = originalGlobal
@@ -95,10 +95,10 @@ func TestShouldPassThroughRequestBodyDoesNotPassThroughSyntheticClaudeCodeTransp
 		},
 	}
 
-	require.False(t, shouldPassThroughRequestBody(info))
+	require.True(t, shouldPassThroughRequestBody(info))
 }
 
-func TestClaudeCodeFingerprintDoesNotPassThroughSyntheticBodyWhenGlobalPassthroughEnabled(t *testing.T) {
+func TestClaudeCodeFingerprintUsesGlobalPassthroughForCompatibleClient(t *testing.T) {
 	originalGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
 	defer func() {
 		model_setting.GetGlobalSettings().PassThroughRequestEnabled = originalGlobal
@@ -115,7 +115,7 @@ func TestClaudeCodeFingerprintDoesNotPassThroughSyntheticBodyWhenGlobalPassthrou
 		},
 	}
 
-	require.False(t, shouldPassThroughRequestBody(info))
+	require.True(t, shouldPassThroughRequestBody(info))
 }
 
 func TestClaudeCodeFingerprintDoesNotPassThroughSyntheticBodyWhenPassThroughDisabled(t *testing.T) {

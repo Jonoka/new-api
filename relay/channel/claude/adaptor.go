@@ -15,7 +15,6 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
-	rootconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -25,7 +24,6 @@ import (
 	"github.com/cespare/xxhash/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/tidwall/sjson"
 )
 
 type Adaptor struct {
@@ -95,7 +93,7 @@ func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dt
 }
 
 func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ClaudeRequest) (any, error) {
-	if err := applyClaudeCodeRequestFingerprint(info, request); err != nil {
+	if err := applyClaudeCodeRequestFingerprint(c, info, request); err != nil {
 		return nil, err
 	}
 	if info.ReasoningEffort == "" {
@@ -191,7 +189,7 @@ func isRealClaudeCodeClient(c *gin.Context) bool {
 }
 
 func applyClaudeCodeHeaderFingerprint(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) {
-	if req == nil || !shouldUseClaudeCodeFingerprint(info) || shouldUseClaudeCodeOriginalPassThrough(c, info) {
+	if req == nil || !shouldApplyClaudeCodeSyntheticFingerprint(c, info) || shouldUseClaudeCodeOriginalPassThrough(c, info) {
 		return
 	}
 	req.Set("User-Agent", fmt.Sprintf("claude-cli/%s (external, cli)", getClaudeCodeVersion(info)))
@@ -280,7 +278,7 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	if err != nil {
 		return nil, err
 	}
-	if err := applyClaudeCodeRequestFingerprint(info, claudeRequest); err != nil {
+	if err := applyClaudeCodeRequestFingerprint(c, info, claudeRequest); err != nil {
 		return nil, err
 	}
 	return claudeRequest, nil
@@ -329,8 +327,12 @@ const (
 
 var claudeCodeLegacySub2APIUserIDPattern = regexp.MustCompile(`^user_[a-fA-F0-9]{64}_account__session_[\w-]+$`)
 
-func applyClaudeCodeRequestFingerprint(info *relaycommon.RelayInfo, request *dto.ClaudeRequest) error {
-	if request == nil || !shouldUseClaudeCodeFingerprint(info) {
+func shouldApplyClaudeCodeSyntheticFingerprint(c *gin.Context, info *relaycommon.RelayInfo) bool {
+	return shouldUseClaudeCodeFingerprint(info) && isRealClaudeCodeClient(c)
+}
+
+func applyClaudeCodeRequestFingerprint(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ClaudeRequest) error {
+	if request == nil || !shouldApplyClaudeCodeSyntheticFingerprint(c, info) {
 		return nil
 	}
 	ensureClaudeCodeSystem(request, info)
@@ -459,33 +461,7 @@ func SignBillingHeaderCCH(body []byte) []byte {
 // ApplyClaudeCodeFinalBodyFingerprint 在下游 body 修改后重新写入 Claude Code 指纹字段，
 // 并对最终序列化 body 签名。
 func ApplyClaudeCodeFinalBodyFingerprint(info *relaycommon.RelayInfo, body []byte) ([]byte, error) {
-	if len(body) == 0 || info == nil || info.ApiType != rootconstant.APITypeAnthropic || !shouldUseClaudeCodeFingerprint(info) {
-		return body, nil
-	}
-
-	var request dto.ClaudeRequest
-	if err := common.Unmarshal(body, &request); err != nil {
-		return nil, err
-	}
-	if err := applyClaudeCodeRequestFingerprint(info, &request); err != nil {
-		return nil, err
-	}
-
-	systemBytes, err := common.Marshal(request.System)
-	if err != nil {
-		return nil, err
-	}
-	result, err := sjson.SetRawBytes(body, "system", systemBytes)
-	if err != nil {
-		return nil, err
-	}
-	if len(request.Metadata) > 0 {
-		result, err = sjson.SetRawBytes(result, "metadata", request.Metadata)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return SignBillingHeaderCCH(result), nil
+	return body, nil
 }
 
 func normalizeClaudeSystemBlocks(value any) []dto.ClaudeMediaMessage {

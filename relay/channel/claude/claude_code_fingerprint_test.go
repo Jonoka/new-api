@@ -27,6 +27,14 @@ func newClaudeFingerprintTestContext() *gin.Context {
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{}`))
 	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Request.Header.Set("User-Agent", "claude-cli/2.1.156 (Claude Code)")
+	return ctx
+}
+
+func newClaudeCompatibleClientTestContext() *gin.Context {
+	ctx := newClaudeFingerprintTestContext()
+	ctx.Request.Header.Set("User-Agent", "CherryStudio/1.0")
+	ctx.Request.Header.Set("X-App", "browser")
 	return ctx
 }
 
@@ -44,6 +52,32 @@ func TestConvertClaudeRequestKeepsBodyUnchangedByDefault(t *testing.T) {
 	}
 
 	converted, err := adaptor.ConvertClaudeRequest(newClaudeFingerprintTestContext(), info, req)
+	require.NoError(t, err)
+
+	claudeReq, ok := converted.(*dto.ClaudeRequest)
+	require.True(t, ok)
+	require.Equal(t, "original system", claudeReq.System)
+	require.JSONEq(t, `{"user_id":"origin-user"}`, string(claudeReq.Metadata))
+}
+
+func TestConvertClaudeRequestDoesNotApplyClaudeCodeFingerprintForCompatibleClient(t *testing.T) {
+	t.Parallel()
+
+	adaptor := &Adaptor{}
+	req := &dto.ClaudeRequest{
+		Model:    "claude-sonnet-4-20250514",
+		System:   "original system",
+		Metadata: []byte(`{"user_id":"origin-user"}`),
+	}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeFingerprintEnabled: true,
+			},
+		},
+	}
+
+	converted, err := adaptor.ConvertClaudeRequest(newClaudeCompatibleClientTestContext(), info, req)
 	require.NoError(t, err)
 
 	claudeReq, ok := converted.(*dto.ClaudeRequest)
@@ -315,6 +349,32 @@ func TestConvertOpenAIRequestAddsClaudeCodeFingerprint(t *testing.T) {
 	require.GreaterOrEqual(t, len(system), 2)
 	require.Contains(t, system[1].GetText(), "Claude Code")
 	requireClaudeCodeLegacyMetadata(t, claudeReq.Metadata)
+}
+
+func TestConvertOpenAIRequestDoesNotApplyClaudeCodeFingerprintForCompatibleClient(t *testing.T) {
+	t.Parallel()
+
+	adaptor := &Adaptor{}
+	req := &dto.GeneralOpenAIRequest{
+		Model: "claude-haiku-4-5-20251001",
+		Messages: []dto.Message{
+			{Role: "user", Content: "hi"},
+		},
+	}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeFingerprintEnabled: true,
+			},
+		},
+	}
+
+	converted, err := adaptor.ConvertOpenAIRequest(newClaudeCompatibleClientTestContext(), info, req)
+	require.NoError(t, err)
+
+	claudeReq := converted.(*dto.ClaudeRequest)
+	require.Empty(t, claudeReq.ParseSystem())
+	require.Empty(t, claudeReq.Metadata)
 }
 
 func TestClaudeCodeFingerprintMatchesSub2APIMessagesClientRestriction(t *testing.T) {
@@ -632,7 +692,7 @@ func TestConvertClaudeRequestPrependsClaudeCodeSystemWithoutOverwritingMetadataU
 	require.JSONEq(t, `{"user_id":"`+existingClaudeCodeUserID+`","trace":"keep"}`, string(claudeReq.Metadata))
 }
 
-func TestApplyClaudeCodeFinalBodyFingerprintRestoresMutatedFingerprintBody(t *testing.T) {
+func TestApplyClaudeCodeFinalBodyFingerprintKeepsCompatibleClientBody(t *testing.T) {
 	t.Parallel()
 
 	adaptor := &Adaptor{}
@@ -670,18 +730,16 @@ func TestApplyClaudeCodeFinalBodyFingerprintRestoresMutatedFingerprintBody(t *te
 
 	finalBody, err := ApplyClaudeCodeFinalBodyFingerprint(info, mutatedBody)
 	require.NoError(t, err)
-	require.NotContains(t, string(finalBody), "broken system")
-	require.NotContains(t, string(finalBody), "broken-user")
-	require.NotContains(t, string(finalBody), "cch=00000;")
+	require.JSONEq(t, string(mutatedBody), string(finalBody))
+	require.Contains(t, string(finalBody), "broken system")
+	require.Contains(t, string(finalBody), "broken-user")
 
 	var finalReq dto.ClaudeRequest
 	require.NoError(t, common.Unmarshal(finalBody, &finalReq))
-	system := finalReq.ParseSystem()
-	require.Len(t, system, 2)
-	require.Contains(t, system[0].GetText(), "x-anthropic-billing-header")
-	require.Contains(t, system[0].GetText(), "cc_version="+getClaudeCodeVersion(info)+"."+computeBillingFingerprint(&finalReq, getClaudeCodeVersion(info)))
-	require.Contains(t, system[1].GetText(), "Claude Code")
-	requireClaudeCodeLegacyMetadata(t, finalReq.Metadata)
+	var finalBodyMap map[string]interface{}
+	require.NoError(t, common.Unmarshal(finalBody, &finalBodyMap))
+	require.Equal(t, "broken system", finalBodyMap["system"])
+	require.JSONEq(t, `{"user_id":"broken-user"}`, string(finalReq.Metadata))
 }
 
 func TestSetupRequestHeaderAddsClaudeCodeFingerprintHeaders(t *testing.T) {
@@ -915,10 +973,10 @@ func TestSetupRequestHeaderDetectsRealClaudeCodeBySessionHeader(t *testing.T) {
 	require.Equal(t, "session-123", headers.Get("X-Claude-Code-Session-Id"))
 }
 
-func TestSetupRequestHeaderStillUsesSyntheticFingerprintForNonClaudeCodeClientWithoutBodyPassThrough(t *testing.T) {
+func TestSetupRequestHeaderDoesNotUseSyntheticFingerprintForNonClaudeCodeClientWithoutBodyPassThrough(t *testing.T) {
 	t.Parallel()
 
-	ctx := newClaudeFingerprintTestContext()
+	ctx := newClaudeCompatibleClientTestContext()
 	ctx.Request.Header.Set("User-Agent", "Hermes/1.0")
 	ctx.Request.Header.Set("X-App", "browser")
 	ctx.Request.Header.Set("X-Client-Request-Id", "client-request-id")
@@ -939,10 +997,13 @@ func TestSetupRequestHeaderStillUsesSyntheticFingerprintForNonClaudeCodeClientWi
 	err := (&Adaptor{}).SetupRequestHeader(ctx, &headers, info)
 	require.NoError(t, err)
 
-	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
-	require.Regexp(t, regexp.MustCompile(`(?i)^claude-cli/\d+\.\d+\.\d+ \(external, cli\)$`), headers.Get("User-Agent"))
-	require.Equal(t, "cli", headers.Get("X-App"))
-	require.NotEqual(t, "client-request-id", headers.Get("X-Client-Request-Id"))
+	require.Equal(t, "sk-test", headers.Get("x-api-key"))
+	require.Empty(t, headers.Get("Authorization"))
+	require.Empty(t, headers.Get("User-Agent"))
+	require.Empty(t, headers.Get("X-App"))
+	require.Empty(t, headers.Get("X-Stainless-Lang"))
+	require.Empty(t, headers.Get("anthropic-beta"))
+	require.Empty(t, headers.Get("X-Client-Request-Id"))
 	require.Empty(t, headers.Get("X-Claude-Code-Session-Id"))
 }
 

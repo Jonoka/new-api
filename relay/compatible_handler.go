@@ -72,7 +72,6 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 	passThroughRequestBody := shouldPassThroughRequestBodyForContext(c, info)
 	if info.RelayMode == relayconstant.RelayModeChatCompletions &&
 		!passThroughRequestBody &&
-		!shouldUseClaudeCodeRequestFingerprint(info) &&
 		service.ShouldChatCompletionsUseResponsesGlobal(info.ChannelId, info.ChannelType, info.OriginModelName) {
 		applySystemPromptIfNeeded(c, info, request)
 		usage, newApiErr := chatCompletionsViaResponses(c, info, adaptor, request)

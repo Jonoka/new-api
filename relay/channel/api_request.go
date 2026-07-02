@@ -171,9 +171,6 @@ func isRealClaudeCodeRequest(c *gin.Context) bool {
 }
 
 func shouldProtectClaudeCodeHeaders(info *common.RelayInfo, c *gin.Context) bool {
-	if common.IsClaudeCodeFingerprintEnabled(info) {
-		return true
-	}
 	return info != nil &&
 		info.RelayFormat == types.RelayFormatClaude &&
 		isRealClaudeCodeRequest(c)
@@ -537,21 +534,15 @@ func DoRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	return doRequest(c, req, info)
 }
 
-func shouldUseClaudeCodeTransportFingerprint(info *common.RelayInfo) bool {
-	return info != nil &&
-		info.ChannelMeta != nil &&
-		info.ApiType == rootconstant.APITypeAnthropic &&
-		info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled
+func shouldUseClaudeCodeTransportFingerprint(*common.RelayInfo) bool {
+	return false
 }
 
 func shouldUseClaudeCodeTransport(c *gin.Context, info *common.RelayInfo) bool {
 	if info == nil || info.ChannelMeta == nil {
 		return false
 	}
-	if info.RelayFormat == types.RelayFormatClaude && isRealClaudeCodeRequest(c) {
-		return true
-	}
-	return shouldUseClaudeCodeTransportFingerprint(info)
+	return info.RelayFormat == types.RelayFormatClaude && isRealClaudeCodeRequest(c)
 }
 
 func selectRelayHTTPClient(c *gin.Context, info *common.RelayInfo) (*http.Client, error) {

@@ -144,7 +144,7 @@ func TestProcessHeaderOverride_PassthroughSkipsAcceptEncoding(t *testing.T) {
 	require.False(t, hasAcceptEncoding)
 }
 
-func TestProcessHeaderOverride_ClaudeCodeFingerprintSkipsPassiveProtectedHeaders(t *testing.T) {
+func TestProcessHeaderOverride_ClaudeCodeFingerprintKeepsCompatibleClientHeaders(t *testing.T) {
 	t.Parallel()
 
 	gin.SetMode(gin.TestMode)
@@ -175,12 +175,12 @@ func TestProcessHeaderOverride_ClaudeCodeFingerprintSkipsPassiveProtectedHeaders
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
 	require.Equal(t, "trace-123", headers["x-trace-id"])
-	require.NotContains(t, headers, "user-agent")
-	require.NotContains(t, headers, "anthropic-beta")
-	require.NotContains(t, headers, "x-app")
-	require.NotContains(t, headers, "x-stainless-lang")
-	require.NotContains(t, headers, "x-client-request-id")
-	require.NotContains(t, headers, "x-claude-code-session-id")
+	require.Equal(t, "CherryStudio/1.0", headers["user-agent"])
+	require.Equal(t, "client-beta", headers["anthropic-beta"])
+	require.Equal(t, "browser", headers["x-app"])
+	require.Equal(t, "python", headers["x-stainless-lang"])
+	require.Equal(t, "client-request-id", headers["x-client-request-id"])
+	require.Equal(t, "client-session-id", headers["x-claude-code-session-id"])
 }
 
 func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.T) {
@@ -237,7 +237,7 @@ func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.
 	require.Empty(t, upstreamReq.Header.Get("X-Codex-Beta-Features"))
 }
 
-func TestProcessHeaderOverride_ClaudeCodeFingerprintSkipsPassHeadersProtectedHeaders(t *testing.T) {
+func TestProcessHeaderOverride_ClaudeCodeFingerprintPassHeadersKeepsCompatibleClientHeaders(t *testing.T) {
 	t.Parallel()
 
 	gin.SetMode(gin.TestMode)
@@ -283,25 +283,25 @@ func TestProcessHeaderOverride_ClaudeCodeFingerprintSkipsPassHeadersProtectedHea
 	require.NoError(t, err)
 	require.True(t, info.UseRuntimeHeadersOverride)
 	require.Equal(t, "trace-123", info.RuntimeHeadersOverride["x-trace-id"])
-	require.NotContains(t, info.RuntimeHeadersOverride, "user-agent")
-	require.NotContains(t, info.RuntimeHeadersOverride, "anthropic-beta")
-	require.NotContains(t, info.RuntimeHeadersOverride, "x-app")
-	require.NotContains(t, info.RuntimeHeadersOverride, "x-stainless-lang")
-	require.NotContains(t, info.RuntimeHeadersOverride, "x-client-request-id")
-	require.NotContains(t, info.RuntimeHeadersOverride, "x-claude-code-session-id")
+	require.Equal(t, "CherryStudio/1.0", info.RuntimeHeadersOverride["user-agent"])
+	require.Equal(t, "client-beta", info.RuntimeHeadersOverride["anthropic-beta"])
+	require.Equal(t, "browser", info.RuntimeHeadersOverride["x-app"])
+	require.Equal(t, "python", info.RuntimeHeadersOverride["x-stainless-lang"])
+	require.Equal(t, "client-request-id", info.RuntimeHeadersOverride["x-client-request-id"])
+	require.Equal(t, "client-session-id", info.RuntimeHeadersOverride["x-claude-code-session-id"])
 
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
 	require.Equal(t, "trace-123", headers["x-trace-id"])
-	require.NotContains(t, headers, "user-agent")
-	require.NotContains(t, headers, "anthropic-beta")
-	require.NotContains(t, headers, "x-app")
-	require.NotContains(t, headers, "x-stainless-lang")
-	require.NotContains(t, headers, "x-client-request-id")
-	require.NotContains(t, headers, "x-claude-code-session-id")
+	require.Equal(t, "CherryStudio/1.0", headers["user-agent"])
+	require.Equal(t, "client-beta", headers["anthropic-beta"])
+	require.Equal(t, "browser", headers["x-app"])
+	require.Equal(t, "python", headers["x-stainless-lang"])
+	require.Equal(t, "client-request-id", headers["x-client-request-id"])
+	require.Equal(t, "client-session-id", headers["x-claude-code-session-id"])
 }
 
-func TestProcessHeaderOverride_ClaudeCodeFingerprintSkipsExplicitProtectedHeaders(t *testing.T) {
+func TestProcessHeaderOverride_ClaudeCodeFingerprintKeepsCompatibleClientExplicitHeaders(t *testing.T) {
 	t.Parallel()
 
 	gin.SetMode(gin.TestMode)
@@ -331,12 +331,12 @@ func TestProcessHeaderOverride_ClaudeCodeFingerprintSkipsExplicitProtectedHeader
 
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
-	require.NotContains(t, headers, "user-agent")
-	require.NotContains(t, headers, "anthropic-beta")
-	require.NotContains(t, headers, "x-app")
-	require.NotContains(t, headers, "x-stainless-lang")
-	require.NotContains(t, headers, "x-client-request-id")
-	require.NotContains(t, headers, "x-claude-code-session-id")
+	require.Equal(t, "custom-agent", headers["user-agent"])
+	require.Equal(t, "custom-beta", headers["anthropic-beta"])
+	require.Equal(t, "custom-app", headers["x-app"])
+	require.Equal(t, "custom-lang", headers["x-stainless-lang"])
+	require.Equal(t, "custom-request-id", headers["x-client-request-id"])
+	require.Equal(t, "custom-session-id", headers["x-claude-code-session-id"])
 	require.Equal(t, "custom-value", headers["x-custom-header"])
 }
 
@@ -670,14 +670,14 @@ func TestShouldUseClaudeCodeTransportFingerprint(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "anthropic with switch uses claude code transport",
+			name: "anthropic with switch keeps normal transport for compatible clients",
 			info: &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
 				ApiType: constant.APITypeAnthropic,
 				ChannelOtherSettings: dto.ChannelOtherSettings{
 					ClaudeCodeTransportFingerprintEnabled: true,
 				},
 			}},
-			want: true,
+			want: false,
 		},
 	}
 
@@ -728,7 +728,7 @@ func TestShouldUseClaudeCodeTransportForRealClaudeCodeSessionHeader(t *testing.T
 	require.True(t, shouldUseClaudeCodeTransport(ctx, info))
 }
 
-func TestSelectRelayHTTPClientUsesClaudeCodeTransportFingerprint(t *testing.T) {
+func TestSelectRelayHTTPClientIgnoresClaudeCodeTransportFingerprintForCompatibleClient(t *testing.T) {
 	service.InitHttpClient()
 
 	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
@@ -741,16 +741,10 @@ func TestSelectRelayHTTPClientUsesClaudeCodeTransportFingerprint(t *testing.T) {
 	client, err := selectRelayHTTPClient(nil, info)
 	require.NoError(t, err)
 	require.NotNil(t, client)
-	require.NotSame(t, service.GetHttpClient(), client)
-
-	transport, ok := client.Transport.(*http.Transport)
-	require.True(t, ok)
-	require.False(t, transport.ForceAttemptHTTP2)
-	require.NotNil(t, transport.DialTLSContext)
-	require.Nil(t, transport.TLSClientConfig)
+	require.Same(t, service.GetHttpClient(), client)
 }
 
-func TestSelectRelayHTTPClientKeepsProxyWithClaudeCodeTransportFingerprint(t *testing.T) {
+func TestSelectRelayHTTPClientUsesNormalProxyWithClaudeCodeTransportFingerprintForCompatibleClient(t *testing.T) {
 	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
 		ApiType: constant.APITypeAnthropic,
 		ChannelSetting: dto.ChannelSettings{
@@ -768,7 +762,4 @@ func TestSelectRelayHTTPClientKeepsProxyWithClaudeCodeTransportFingerprint(t *te
 	transport, ok := client.Transport.(*http.Transport)
 	require.True(t, ok)
 	require.NotNil(t, transport.Proxy)
-	require.False(t, transport.ForceAttemptHTTP2)
-	require.NotNil(t, transport.DialTLSContext)
-	require.Nil(t, transport.TLSClientConfig)
 }

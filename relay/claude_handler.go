@@ -171,9 +171,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	}
 
 	passThroughRequestBody := shouldPassThroughRequestBodyForContext(c, info)
-	if !passThroughRequestBody &&
-		!shouldUseClaudeCodeRequestFingerprint(info) &&
-		shouldClaudeUseOpenAIResponses(info, request) {
+	if !passThroughRequestBody && shouldClaudeUseOpenAIResponses(info, request) {
 		openAIRequest, convErr := service.ClaudeToOpenAIRequest(*request, info)
 		if convErr != nil {
 			return types.NewError(convErr, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())

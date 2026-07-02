@@ -13,40 +13,25 @@ import (
 
 var claudeCodeRequestUserAgentPattern = regexp.MustCompile(`(?i)^claude-cli/\d+\.\d+\.\d+`)
 
-func shouldUseClaudeCodeRequestFingerprint(info *relaycommon.RelayInfo) bool {
-	return info != nil &&
-		info.ChannelMeta != nil &&
-		info.ApiType == constant.APITypeAnthropic &&
-		(info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled ||
-			info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled)
-}
-
 func shouldPassThroughRequestBody(info *relaycommon.RelayInfo) bool {
 	return shouldPassThroughRequestBodyForContext(nil, info)
 }
 
 func shouldPassThroughRequestBodyForContext(c *gin.Context, info *relaycommon.RelayInfo) bool {
-	passThroughEnabled := isRequestBodyPassThroughSettingEnabled(info)
 	if shouldPassThroughRealClaudeCodeRequest(c, info) {
 		return true
 	}
-	if shouldUseClaudeCodeRequestFingerprint(info) {
-		return shouldPassThroughClaudeCodeOriginalRequest(c, info, passThroughEnabled)
+	if shouldConvertRequestBodyBeforeAnthropicUpstream(info) {
+		return false
 	}
-	return passThroughEnabled
+	return isRequestBodyPassThroughSettingEnabled(info)
 }
 
-func shouldPassThroughClaudeCodeOriginalRequest(c *gin.Context, info *relaycommon.RelayInfo, passThroughEnabled bool) bool {
-	if !isClaudeNativeRequest(info) {
-		return false
-	}
-	if isRealClaudeCodeRequest(c) {
-		return true
-	}
-	if shouldUseClaudeCodeRequestFingerprint(info) {
-		return false
-	}
-	return passThroughEnabled
+func shouldConvertRequestBodyBeforeAnthropicUpstream(info *relaycommon.RelayInfo) bool {
+	return info != nil &&
+		info.ChannelMeta != nil &&
+		info.ApiType == constant.APITypeAnthropic &&
+		info.RelayFormat != types.RelayFormatClaude
 }
 
 func shouldPassThroughRealClaudeCodeRequest(c *gin.Context, info *relaycommon.RelayInfo) bool {
