@@ -162,24 +162,42 @@ func shouldUseClaudeCodeFingerprint(info *relaycommon.RelayInfo) bool {
 }
 
 func shouldUseClaudeCodeOriginalPassThrough(c *gin.Context, info *relaycommon.RelayInfo) bool {
-	if info == nil ||
-		info.ChannelMeta == nil ||
-		info.ApiType != rootconstant.APITypeAnthropic ||
-		info.RelayFormat != types.RelayFormatClaude ||
-		!shouldUseClaudeCodeFingerprint(info) {
+	if info == nil || info.ChannelMeta == nil || info.RelayFormat != types.RelayFormatClaude {
+		return false
+	}
+	if isRealClaudeCodeClient(c) {
+		return true
+	}
+	if info.ApiType != rootconstant.APITypeAnthropic || !shouldUseClaudeCodeFingerprint(info) {
 		return false
 	}
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled ||
 		info.ChannelSetting.PassThroughBodyEnabled {
 		return true
 	}
-	return isRealClaudeCodeClient(c)
+	return false
 }
 
 func isRealClaudeCodeClient(c *gin.Context) bool {
-	return c != nil &&
-		c.Request != nil &&
-		claudeCodeUserAgentPattern.MatchString(c.Request.Header.Get("User-Agent"))
+	if c == nil || c.Request == nil {
+		return false
+	}
+	userAgent := c.Request.Header.Get("User-Agent")
+	if claudeCodeUserAgentPattern.MatchString(userAgent) {
+		return true
+	}
+	xApp := c.Request.Header.Get("X-App")
+	if strings.EqualFold(xApp, "claude-code") {
+		return true
+	}
+	if strings.EqualFold(xApp, "cli") &&
+		c.Request.Header.Get("X-Stainless-Package-Version") != "" &&
+		strings.EqualFold(c.Request.Header.Get("X-Stainless-Lang"), "js") {
+		return true
+	}
+	return c.Request.Header.Get("X-Claude-Code-Session-Id") != "" &&
+		strings.TrimSpace(userAgent) == "" &&
+		strings.TrimSpace(xApp) == ""
 }
 
 func applyClaudeCodeHeaderFingerprint(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) {
@@ -213,7 +231,11 @@ func applyRealClaudeCodeHeaderPassthrough(c *gin.Context, req *http.Header, info
 		passIncomingHeader(c.Request.Header, req, name)
 	}
 	for name := range c.Request.Header {
-		if strings.HasPrefix(strings.ToLower(name), "x-stainless-") {
+		lowerName := strings.ToLower(name)
+		if strings.HasPrefix(lowerName, "anthropic-") ||
+			strings.HasPrefix(lowerName, "x-stainless-") ||
+			strings.HasPrefix(lowerName, "x-claude-") ||
+			strings.HasPrefix(lowerName, "x-client-") {
 			passIncomingHeader(c.Request.Header, req, name)
 		}
 	}
@@ -223,13 +245,13 @@ func shouldPassThroughRealClaudeCodeHeaders(c *gin.Context, info *relaycommon.Re
 	if c == nil || c.Request == nil || info == nil || info.ChannelMeta == nil {
 		return false
 	}
-	if info.ApiType != rootconstant.APITypeAnthropic {
+	if info.RelayFormat != types.RelayFormatClaude {
 		return false
 	}
 	if shouldUseClaudeCodeFingerprint(info) && !shouldUseClaudeCodeOriginalPassThrough(c, info) {
 		return false
 	}
-	return claudeCodeUserAgentPattern.MatchString(c.Request.Header.Get("User-Agent"))
+	return isRealClaudeCodeClient(c)
 }
 
 func passIncomingHeader(src http.Header, dst *http.Header, name string) {
@@ -248,7 +270,13 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 		anthropicVersion = "2023-06-01"
 	}
 	req.Set("anthropic-version", anthropicVersion)
-	applyRealClaudeCodeHeaderPassthrough(c, req, info)
+	if shouldUseClaudeCodeOriginalPassThrough(c, info) {
+		applyRealClaudeCodeHeaderPassthrough(c, req, info)
+		if req.Get("anthropic-version") == "" {
+			req.Set("anthropic-version", "2023-06-01")
+		}
+		return nil
+	}
 	CommonClaudeHeadersOperation(c, req, info)
 	applyClaudeCodeHeaderFingerprint(c, req, info)
 	return nil

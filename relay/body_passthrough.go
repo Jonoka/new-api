@@ -2,6 +2,7 @@ package relay
 
 import (
 	"regexp"
+	"strings"
 
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -26,6 +27,9 @@ func shouldPassThroughRequestBody(info *relaycommon.RelayInfo) bool {
 
 func shouldPassThroughRequestBodyForContext(c *gin.Context, info *relaycommon.RelayInfo) bool {
 	passThroughEnabled := isRequestBodyPassThroughSettingEnabled(info)
+	if shouldPassThroughRealClaudeCodeRequest(c, info) {
+		return true
+	}
 	if shouldUseClaudeCodeRequestFingerprint(info) {
 		return shouldPassThroughClaudeCodeOriginalRequest(c, info, passThroughEnabled)
 	}
@@ -33,7 +37,7 @@ func shouldPassThroughRequestBodyForContext(c *gin.Context, info *relaycommon.Re
 }
 
 func shouldPassThroughClaudeCodeOriginalRequest(c *gin.Context, info *relaycommon.RelayInfo, passThroughEnabled bool) bool {
-	if info == nil || info.RelayFormat != types.RelayFormatClaude {
+	if !isClaudeNativeRequest(info) {
 		return false
 	}
 	if passThroughEnabled {
@@ -42,10 +46,35 @@ func shouldPassThroughClaudeCodeOriginalRequest(c *gin.Context, info *relaycommo
 	return isRealClaudeCodeRequest(c)
 }
 
+func shouldPassThroughRealClaudeCodeRequest(c *gin.Context, info *relaycommon.RelayInfo) bool {
+	return isClaudeNativeRequest(info) && isRealClaudeCodeRequest(c)
+}
+
+func isClaudeNativeRequest(info *relaycommon.RelayInfo) bool {
+	return info != nil &&
+		info.RelayFormat == types.RelayFormatClaude
+}
+
 func isRealClaudeCodeRequest(c *gin.Context) bool {
-	return c != nil &&
-		c.Request != nil &&
-		claudeCodeRequestUserAgentPattern.MatchString(c.Request.Header.Get("User-Agent"))
+	if c == nil || c.Request == nil {
+		return false
+	}
+	userAgent := c.Request.Header.Get("User-Agent")
+	if claudeCodeRequestUserAgentPattern.MatchString(userAgent) {
+		return true
+	}
+	xApp := c.Request.Header.Get("X-App")
+	if strings.EqualFold(xApp, "claude-code") {
+		return true
+	}
+	if strings.EqualFold(xApp, "cli") &&
+		c.Request.Header.Get("X-Stainless-Package-Version") != "" &&
+		strings.EqualFold(c.Request.Header.Get("X-Stainless-Lang"), "js") {
+		return true
+	}
+	return c.Request.Header.Get("X-Claude-Code-Session-Id") != "" &&
+		strings.TrimSpace(userAgent) == "" &&
+		strings.TrimSpace(xApp) == ""
 }
 
 func isRequestBodyPassThroughSettingEnabled(info *relaycommon.RelayInfo) bool {

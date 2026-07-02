@@ -97,6 +97,8 @@ var passthroughSkipHeaderNamesLower = map[string]struct{}{
 
 var headerPassthroughRegexCache sync.Map // map[string]*regexp.Regexp
 
+var claudeCodeRequestUserAgentPattern = regexp.MustCompile(`(?i)^claude-cli/\d+\.\d+\.\d+`)
+
 func getHeaderPassthroughRegex(pattern string) (*regexp.Regexp, error) {
 	pattern = strings.TrimSpace(pattern)
 	if pattern == "" {
@@ -144,6 +146,37 @@ func shouldSkipPassthroughHeader(name string) bool {
 		return true
 	}
 	return false
+}
+
+func isRealClaudeCodeRequest(c *gin.Context) bool {
+	if c == nil || c.Request == nil {
+		return false
+	}
+	userAgent := c.Request.Header.Get("User-Agent")
+	if claudeCodeRequestUserAgentPattern.MatchString(userAgent) {
+		return true
+	}
+	xApp := c.Request.Header.Get("X-App")
+	if strings.EqualFold(xApp, "claude-code") {
+		return true
+	}
+	if strings.EqualFold(xApp, "cli") &&
+		c.Request.Header.Get("X-Stainless-Package-Version") != "" &&
+		strings.EqualFold(c.Request.Header.Get("X-Stainless-Lang"), "js") {
+		return true
+	}
+	return c.Request.Header.Get("X-Claude-Code-Session-Id") != "" &&
+		strings.TrimSpace(userAgent) == "" &&
+		strings.TrimSpace(xApp) == ""
+}
+
+func shouldProtectClaudeCodeHeaders(info *common.RelayInfo, c *gin.Context) bool {
+	if common.IsClaudeCodeFingerprintEnabled(info) {
+		return true
+	}
+	return info != nil &&
+		info.RelayFormat == types.RelayFormatClaude &&
+		isRealClaudeCodeRequest(c)
 }
 
 func applyHeaderOverridePlaceholders(template string, c *gin.Context, apiKey string) (string, bool, error) {
@@ -240,7 +273,7 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 			if shouldSkipPassthroughHeader(name) {
 				continue
 			}
-			if common.IsClaudeCodeFingerprintEnabled(info) && common.IsClaudeCodeProtectedHeader(name) {
+			if shouldProtectClaudeCodeHeaders(info, c) && common.IsClaudeCodeProtectedHeader(name) {
 				continue
 			}
 			if !passAll {
@@ -271,7 +304,7 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 		if key == "" {
 			continue
 		}
-		if common.IsClaudeCodeFingerprintEnabled(info) && common.IsClaudeCodeProtectedHeader(key) {
+		if shouldProtectClaudeCodeHeaders(info, c) && common.IsClaudeCodeProtectedHeader(key) {
 			continue
 		}
 
@@ -511,8 +544,18 @@ func shouldUseClaudeCodeTransportFingerprint(info *common.RelayInfo) bool {
 		info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled
 }
 
-func selectRelayHTTPClient(info *common.RelayInfo) (*http.Client, error) {
-	if shouldUseClaudeCodeTransportFingerprint(info) {
+func shouldUseClaudeCodeTransport(c *gin.Context, info *common.RelayInfo) bool {
+	if info == nil || info.ChannelMeta == nil {
+		return false
+	}
+	if info.RelayFormat == types.RelayFormatClaude && isRealClaudeCodeRequest(c) {
+		return true
+	}
+	return shouldUseClaudeCodeTransportFingerprint(info)
+}
+
+func selectRelayHTTPClient(c *gin.Context, info *common.RelayInfo) (*http.Client, error) {
+	if shouldUseClaudeCodeTransport(c, info) {
 		return service.NewClaudeCodeTransportHttpClient(info.ChannelSetting.Proxy)
 	}
 	if info != nil && info.ChannelSetting.Proxy != "" {
@@ -526,7 +569,7 @@ func selectRelayHTTPClient(info *common.RelayInfo) (*http.Client, error) {
 }
 
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
-	client, err := selectRelayHTTPClient(info)
+	client, err := selectRelayHTTPClient(c, info)
 	if err != nil {
 		return nil, err
 	}

@@ -486,6 +486,7 @@ func TestRealClaudeCodeHeadersPassThroughWhenChannelFingerprintDisabled(t *testi
 	userID := "user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_account__session_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 	adaptor := &Adaptor{}
 	info := &relaycommon.RelayInfo{
+		RelayFormat:     types.RelayFormatClaude,
 		OriginModelName: "claude-sonnet-4-6",
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelType:    constant.ChannelTypeAnthropic,
@@ -847,6 +848,73 @@ func TestSetupRequestHeaderPassesThroughRealClaudeCodeHeadersWithFingerprintClie
 	require.Equal(t, "session-123", headers.Get("X-Claude-Code-Session-Id"))
 }
 
+func TestSetupRequestHeaderPassesThroughRealClaudeCodeHeadersForNonAnthropicClaudeRequest(t *testing.T) {
+	t.Parallel()
+
+	ctx := newClaudeFingerprintTestContext()
+	ctx.Request.Header.Set("User-Agent", "claude-cli/2.1.156 (Claude Code)")
+	ctx.Request.Header.Set("X-App", "claude-code")
+	ctx.Request.Header.Set("Anthropic-Beta", "claude-code-20250219")
+	ctx.Request.Header.Set("Anthropic-Version", "2023-06-01")
+	ctx.Request.Header.Set("X-Stainless-Lang", "js")
+	ctx.Request.Header.Set("X-Stainless-Package-Version", "0.72.0")
+	ctx.Request.Header.Set("X-Client-Request-Id", "client-request-id")
+	ctx.Request.Header.Set("X-Claude-Code-Session-Id", "session-123")
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat:     types.RelayFormatClaude,
+		OriginModelName: "claude-sonnet-4-20250514",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeOpenAI,
+			ApiKey:  "sk-test",
+		},
+	}
+
+	headers := http.Header{}
+	err := (&Adaptor{}).SetupRequestHeader(ctx, &headers, info)
+	require.NoError(t, err)
+
+	require.Equal(t, "sk-test", headers.Get("x-api-key"))
+	require.Empty(t, headers.Get("Authorization"))
+	require.Equal(t, "claude-cli/2.1.156 (Claude Code)", headers.Get("User-Agent"))
+	require.NotContains(t, headers.Get("User-Agent"), "external, cli")
+	require.Equal(t, "claude-code", headers.Get("X-App"))
+	require.Equal(t, "claude-code-20250219", headers.Get("Anthropic-Beta"))
+	require.Equal(t, "2023-06-01", headers.Get("Anthropic-Version"))
+	require.Equal(t, "js", headers.Get("X-Stainless-Lang"))
+	require.Equal(t, "0.72.0", headers.Get("X-Stainless-Package-Version"))
+	require.Equal(t, "client-request-id", headers.Get("X-Client-Request-Id"))
+	require.Equal(t, "session-123", headers.Get("X-Claude-Code-Session-Id"))
+}
+
+func TestSetupRequestHeaderDetectsRealClaudeCodeBySessionHeader(t *testing.T) {
+	t.Parallel()
+
+	ctx := newClaudeFingerprintTestContext()
+	ctx.Request.Header.Set("X-Claude-Code-Session-Id", "session-123")
+	ctx.Request.Header.Set("Anthropic-Beta", "claude-code-20250219")
+	ctx.Request.Header.Set("X-Stainless-Lang", "js")
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat:     types.RelayFormatClaude,
+		OriginModelName: "claude-sonnet-4-20250514",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeOpenAI,
+			ApiKey:  "sk-test",
+		},
+	}
+
+	headers := http.Header{}
+	err := (&Adaptor{}).SetupRequestHeader(ctx, &headers, info)
+	require.NoError(t, err)
+
+	require.Equal(t, "sk-test", headers.Get("x-api-key"))
+	require.Empty(t, headers.Get("Authorization"))
+	require.Equal(t, "claude-code-20250219", headers.Get("Anthropic-Beta"))
+	require.Equal(t, "js", headers.Get("X-Stainless-Lang"))
+	require.Equal(t, "session-123", headers.Get("X-Claude-Code-Session-Id"))
+}
+
 func TestSetupRequestHeaderStillUsesSyntheticFingerprintForNonClaudeCodeClientWithoutBodyPassThrough(t *testing.T) {
 	t.Parallel()
 
@@ -905,7 +973,7 @@ func TestSetupRequestHeaderDoesNotPassThroughNonClaudeCodeClientHeaders(t *testi
 	require.Equal(t, "2023-06-01", headers.Get("anthropic-version"))
 }
 
-func TestRealClaudeCodeHeaderPassthroughKeepsModelHeaderSettings(t *testing.T) {
+func TestRealClaudeCodeHeaderPassthroughSkipsModelHeaderSettings(t *testing.T) {
 	claudeSettings := model_setting.GetClaudeSettings()
 	originalHeaders := claudeSettings.HeadersSettings
 	claudeSettings.HeadersSettings = map[string]map[string][]string{
@@ -922,6 +990,7 @@ func TestRealClaudeCodeHeaderPassthroughKeepsModelHeaderSettings(t *testing.T) {
 	ctx.Request.Header.Set("X-App", "claude-code")
 	ctx.Request.Header.Set("Anthropic-Beta", "claude-code-20250219")
 	info := &relaycommon.RelayInfo{
+		RelayFormat:     types.RelayFormatClaude,
 		OriginModelName: "claude-sonnet-4-6",
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ApiType: constant.APITypeAnthropic,
@@ -933,10 +1002,7 @@ func TestRealClaudeCodeHeaderPassthroughKeepsModelHeaderSettings(t *testing.T) {
 	err := (&Adaptor{}).SetupRequestHeader(ctx, &headers, info)
 	require.NoError(t, err)
 
-	require.ElementsMatch(t,
-		[]string{"claude-code-20250219", "context-1m-2025-08-07"},
-		strings.Split(headers.Get("anthropic-beta"), ","),
-	)
+	require.Equal(t, "claude-code-20250219", headers.Get("anthropic-beta"))
 	require.Equal(t, "claude-cli/2.1.156 (Claude Code)", headers.Get("User-Agent"))
 	require.Equal(t, "claude-code", headers.Get("X-App"))
 }

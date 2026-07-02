@@ -20,7 +20,9 @@ func newClaudeCodePassthroughTestContext(userAgent string) *gin.Context {
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
-	ctx.Request.Header.Set("User-Agent", userAgent)
+	if userAgent != "" {
+		ctx.Request.Header.Set("User-Agent", userAgent)
+	}
 	return ctx
 }
 
@@ -154,6 +156,43 @@ func TestClaudeCodeFingerprintAutoPassesThroughRealClaudeCodeClient(t *testing.T
 	}
 
 	ctx := newClaudeCodePassthroughTestContext("claude-cli/2.1.156 (Claude Code)")
+	require.True(t, shouldPassThroughRequestBodyForContext(ctx, info))
+}
+
+func TestRealClaudeCodeClientAutoPassesThroughNonAnthropicClaudeRequest(t *testing.T) {
+	originalGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
+	defer func() {
+		model_setting.GetGlobalSettings().PassThroughRequestEnabled = originalGlobal
+	}()
+	model_setting.GetGlobalSettings().PassThroughRequestEnabled = false
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeOpenAI,
+		},
+	}
+
+	ctx := newClaudeCodePassthroughTestContext("claude-cli/2.1.156 (Claude Code)")
+	require.True(t, shouldPassThroughRequestBodyForContext(ctx, info))
+}
+
+func TestRealClaudeCodeClientAutoPassesThroughBySessionHeader(t *testing.T) {
+	originalGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
+	defer func() {
+		model_setting.GetGlobalSettings().PassThroughRequestEnabled = originalGlobal
+	}()
+	model_setting.GetGlobalSettings().PassThroughRequestEnabled = false
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeOpenAI,
+		},
+	}
+
+	ctx := newClaudeCodePassthroughTestContext("")
+	ctx.Request.Header.Set("X-Claude-Code-Session-Id", "session-123")
 	require.True(t, shouldPassThroughRequestBodyForContext(ctx, info))
 }
 

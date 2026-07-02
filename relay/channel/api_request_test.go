@@ -340,6 +340,54 @@ func TestProcessHeaderOverride_ClaudeCodeFingerprintSkipsExplicitProtectedHeader
 	require.Equal(t, "custom-value", headers["x-custom-header"])
 }
 
+func TestProcessHeaderOverride_RealClaudeCodeSkipsProtectedHeadersWithoutFingerprintSetting(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Set("User-Agent", "claude-cli/2.1.156 (Claude Code)")
+	ctx.Request.Header.Set("Anthropic-Beta", "client-beta")
+	ctx.Request.Header.Set("X-App", "claude-code")
+	ctx.Request.Header.Set("X-Stainless-Lang", "js")
+	ctx.Request.Header.Set("X-Stainless-Package-Version", "0.72.0")
+	ctx.Request.Header.Set("X-Client-Request-Id", "client-request-id")
+	ctx.Request.Header.Set("X-Claude-Code-Session-Id", "client-session-id")
+	ctx.Request.Header.Set("X-Trace-Id", "trace-123")
+
+	info := &relaycommon.RelayInfo{
+		IsChannelTest: false,
+		RelayFormat:   types.RelayFormatClaude,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeOpenAI,
+			HeadersOverride: map[string]any{
+				"*":                           "",
+				"User-Agent":                  "custom-agent",
+				"Anthropic-Beta":              "custom-beta",
+				"X-App":                       "custom-app",
+				"X-Stainless-Lang":            "custom-lang",
+				"X-Stainless-Package-Version": "custom-package",
+				"X-Client-Request-Id":         "custom-request-id",
+				"X-Claude-Code-Session-Id":    "custom-session-id",
+				"X-Custom-Header":             "custom-value",
+			},
+		},
+	}
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	require.Equal(t, "trace-123", headers["x-trace-id"])
+	require.Equal(t, "custom-value", headers["x-custom-header"])
+	require.NotContains(t, headers, "user-agent")
+	require.NotContains(t, headers, "anthropic-beta")
+	require.NotContains(t, headers, "x-app")
+	require.NotContains(t, headers, "x-stainless-lang")
+	require.NotContains(t, headers, "x-stainless-package-version")
+	require.NotContains(t, headers, "x-client-request-id")
+	require.NotContains(t, headers, "x-claude-code-session-id")
+}
+
 func TestApplyHeaderOverrideKeepsUserHeadersHighestPriority(t *testing.T) {
 	t.Parallel()
 
@@ -642,6 +690,44 @@ func TestShouldUseClaudeCodeTransportFingerprint(t *testing.T) {
 	}
 }
 
+func TestShouldUseClaudeCodeTransportForRealClaudeCodeRequest(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Set("User-Agent", "claude-cli/2.1.156 (Claude Code)")
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeOpenAI,
+		},
+	}
+
+	require.True(t, shouldUseClaudeCodeTransport(ctx, info))
+}
+
+func TestShouldUseClaudeCodeTransportForRealClaudeCodeSessionHeader(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Set("X-Claude-Code-Session-Id", "session-123")
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeOpenAI,
+		},
+	}
+
+	require.True(t, shouldUseClaudeCodeTransport(ctx, info))
+}
+
 func TestSelectRelayHTTPClientUsesClaudeCodeTransportFingerprint(t *testing.T) {
 	service.InitHttpClient()
 
@@ -652,7 +738,7 @@ func TestSelectRelayHTTPClientUsesClaudeCodeTransportFingerprint(t *testing.T) {
 		},
 	}}
 
-	client, err := selectRelayHTTPClient(info)
+	client, err := selectRelayHTTPClient(nil, info)
 	require.NoError(t, err)
 	require.NotNil(t, client)
 	require.NotSame(t, service.GetHttpClient(), client)
@@ -675,7 +761,7 @@ func TestSelectRelayHTTPClientKeepsProxyWithClaudeCodeTransportFingerprint(t *te
 		},
 	}}
 
-	client, err := selectRelayHTTPClient(info)
+	client, err := selectRelayHTTPClient(nil, info)
 	require.NoError(t, err)
 	require.NotNil(t, client)
 
