@@ -21,10 +21,23 @@ func shouldPassThroughRequestBodyForContext(c *gin.Context, info *relaycommon.Re
 	if shouldPassThroughRealClaudeCodeRequest(c, info) {
 		return true
 	}
+	if shouldSynthesizeClaudeCodeBodyForCompatibleClient(c, info) {
+		return false
+	}
 	if shouldConvertRequestBodyBeforeAnthropicUpstream(info) {
 		return false
 	}
 	return isRequestBodyPassThroughSettingEnabled(info)
+}
+
+func shouldSynthesizeClaudeCodeBodyForCompatibleClient(c *gin.Context, info *relaycommon.RelayInfo) bool {
+	return info != nil &&
+		info.ChannelMeta != nil &&
+		info.ApiType == constant.APITypeAnthropic &&
+		info.RelayFormat == types.RelayFormatClaude &&
+		(info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled ||
+			info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled) &&
+		!isRealClaudeCodeRequest(c)
 }
 
 func shouldConvertRequestBodyBeforeAnthropicUpstream(info *relaycommon.RelayInfo) bool {

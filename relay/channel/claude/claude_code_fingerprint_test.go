@@ -60,7 +60,7 @@ func TestConvertClaudeRequestKeepsBodyUnchangedByDefault(t *testing.T) {
 	require.JSONEq(t, `{"user_id":"origin-user"}`, string(claudeReq.Metadata))
 }
 
-func TestConvertClaudeRequestDoesNotApplyClaudeCodeFingerprintForCompatibleClient(t *testing.T) {
+func TestConvertClaudeRequestAddsBodyMarkerForCompatibleClient(t *testing.T) {
 	t.Parallel()
 
 	adaptor := &Adaptor{}
@@ -70,7 +70,9 @@ func TestConvertClaudeRequestDoesNotApplyClaudeCodeFingerprintForCompatibleClien
 		Metadata: []byte(`{"user_id":"origin-user"}`),
 	}
 	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
 		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
 			ChannelOtherSettings: dto.ChannelOtherSettings{
 				ClaudeCodeFingerprintEnabled: true,
 			},
@@ -82,8 +84,42 @@ func TestConvertClaudeRequestDoesNotApplyClaudeCodeFingerprintForCompatibleClien
 
 	claudeReq, ok := converted.(*dto.ClaudeRequest)
 	require.True(t, ok)
-	require.Equal(t, "original system", claudeReq.System)
+	system := claudeReq.ParseSystem()
+	require.Len(t, system, 2)
+	require.Contains(t, system[0].GetText(), "x-anthropic-billing-header")
+	require.Contains(t, system[1].GetText(), "Claude Code")
 	require.JSONEq(t, `{"user_id":"origin-user"}`, string(claudeReq.Metadata))
+}
+
+func TestConvertClaudeRequestBodyMarkerForCompatibleClientDoesNotInjectMetadata(t *testing.T) {
+	t.Parallel()
+
+	adaptor := &Adaptor{}
+	req := &dto.ClaudeRequest{
+		Model: "claude-sonnet-4-20250514",
+		Messages: []dto.ClaudeMessage{
+			{Role: "user", Content: "hi"},
+		},
+	}
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeFingerprintEnabled: true,
+			},
+		},
+	}
+
+	converted, err := adaptor.ConvertClaudeRequest(newClaudeCompatibleClientTestContext(), info, req)
+	require.NoError(t, err)
+
+	claudeReq := converted.(*dto.ClaudeRequest)
+	system := claudeReq.ParseSystem()
+	require.Len(t, system, 2)
+	require.Contains(t, system[0].GetText(), "x-anthropic-billing-header")
+	require.Contains(t, system[1].GetText(), "Claude Code")
+	require.Empty(t, claudeReq.Metadata)
 }
 
 func TestConvertClaudeRequestAddsClaudeCodeSystem(t *testing.T) {
@@ -351,7 +387,7 @@ func TestConvertOpenAIRequestAddsClaudeCodeFingerprint(t *testing.T) {
 	requireClaudeCodeLegacyMetadata(t, claudeReq.Metadata)
 }
 
-func TestConvertOpenAIRequestDoesNotApplyClaudeCodeFingerprintForCompatibleClient(t *testing.T) {
+func TestConvertOpenAIRequestDoesNotApplyClaudeCodeBodyMarkerForCompatibleClient(t *testing.T) {
 	t.Parallel()
 
 	adaptor := &Adaptor{}

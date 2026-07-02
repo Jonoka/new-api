@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	rootconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -331,12 +332,26 @@ func shouldApplyClaudeCodeSyntheticFingerprint(c *gin.Context, info *relaycommon
 	return shouldUseClaudeCodeFingerprint(info) && isRealClaudeCodeClient(c)
 }
 
+func shouldApplyClaudeCodeBodyMarker(c *gin.Context, info *relaycommon.RelayInfo) bool {
+	return shouldUseClaudeCodeFingerprint(info) &&
+		info != nil &&
+		info.ApiType == rootconstant.APITypeAnthropic &&
+		info.RelayFormat == types.RelayFormatClaude &&
+		!isRealClaudeCodeClient(c)
+}
+
 func applyClaudeCodeRequestFingerprint(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ClaudeRequest) error {
-	if request == nil || !shouldApplyClaudeCodeSyntheticFingerprint(c, info) {
+	if request == nil {
 		return nil
 	}
-	ensureClaudeCodeSystem(request, info)
-	return ensureClaudeCodeMetadata(request)
+	if shouldApplyClaudeCodeSyntheticFingerprint(c, info) {
+		ensureClaudeCodeSystem(request, info)
+		return ensureClaudeCodeMetadata(request)
+	}
+	if shouldApplyClaudeCodeBodyMarker(c, info) {
+		ensureClaudeCodeSystem(request, info)
+	}
+	return nil
 }
 
 func ensureClaudeCodeMetadata(request *dto.ClaudeRequest) error {
