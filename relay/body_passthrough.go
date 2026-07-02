@@ -40,10 +40,10 @@ func shouldPassThroughClaudeCodeOriginalRequest(c *gin.Context, info *relaycommo
 	if !isClaudeNativeRequest(info) {
 		return false
 	}
-	if passThroughEnabled {
+	if shouldUseClaudeCodeRequestFingerprint(info) {
 		return true
 	}
-	return isRealClaudeCodeRequest(c)
+	return passThroughEnabled || isRealClaudeCodeRequest(c)
 }
 
 func shouldPassThroughRealClaudeCodeRequest(c *gin.Context, info *relaycommon.RelayInfo) bool {

@@ -165,17 +165,7 @@ func shouldUseClaudeCodeOriginalPassThrough(c *gin.Context, info *relaycommon.Re
 	if info == nil || info.ChannelMeta == nil || info.RelayFormat != types.RelayFormatClaude {
 		return false
 	}
-	if isRealClaudeCodeClient(c) {
-		return true
-	}
-	if info.ApiType != rootconstant.APITypeAnthropic || !shouldUseClaudeCodeFingerprint(info) {
-		return false
-	}
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled ||
-		info.ChannelSetting.PassThroughBodyEnabled {
-		return true
-	}
-	return false
+	return isRealClaudeCodeClient(c)
 }
 
 func isRealClaudeCodeClient(c *gin.Context) bool {
