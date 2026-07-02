@@ -7,6 +7,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/model_setting"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/stretchr/testify/require"
 )
@@ -37,7 +38,7 @@ func TestShouldPassThroughRequestBodyRespectsPassThroughSettings(t *testing.T) {
 	}))
 }
 
-func TestShouldPassThroughRequestBodyDisabledWithClaudeCodeFingerprint(t *testing.T) {
+func TestShouldPassThroughRequestBodyAllowsClaudeCodeFingerprintWithClaudePassThrough(t *testing.T) {
 	originalGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
 	defer func() {
 		model_setting.GetGlobalSettings().PassThroughRequestEnabled = originalGlobal
@@ -45,6 +46,7 @@ func TestShouldPassThroughRequestBodyDisabledWithClaudeCodeFingerprint(t *testin
 	model_setting.GetGlobalSettings().PassThroughRequestEnabled = true
 
 	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ApiType: constant.APITypeAnthropic,
 			ChannelSetting: dto.ChannelSettings{
@@ -56,10 +58,10 @@ func TestShouldPassThroughRequestBodyDisabledWithClaudeCodeFingerprint(t *testin
 		},
 	}
 
-	require.False(t, shouldPassThroughRequestBody(info))
+	require.True(t, shouldPassThroughRequestBody(info))
 }
 
-func TestShouldPassThroughRequestBodyDisabledWithClaudeCodeTransportFingerprint(t *testing.T) {
+func TestShouldPassThroughRequestBodyAllowsClaudeCodeTransportFingerprintWithClaudePassThrough(t *testing.T) {
 	originalGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
 	defer func() {
 		model_setting.GetGlobalSettings().PassThroughRequestEnabled = originalGlobal
@@ -67,6 +69,7 @@ func TestShouldPassThroughRequestBodyDisabledWithClaudeCodeTransportFingerprint(
 	model_setting.GetGlobalSettings().PassThroughRequestEnabled = true
 
 	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ApiType: constant.APITypeAnthropic,
 			ChannelSetting: dto.ChannelSettings{
@@ -78,10 +81,10 @@ func TestShouldPassThroughRequestBodyDisabledWithClaudeCodeTransportFingerprint(
 		},
 	}
 
-	require.False(t, shouldPassThroughRequestBody(info))
+	require.True(t, shouldPassThroughRequestBody(info))
 }
 
-func TestClaudeCodeFingerprintDisablesPassthroughWhenGlobalPassthroughEnabled(t *testing.T) {
+func TestClaudeCodeFingerprintAllowsClaudePassThroughWhenGlobalPassthroughEnabled(t *testing.T) {
 	originalGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
 	defer func() {
 		model_setting.GetGlobalSettings().PassThroughRequestEnabled = originalGlobal
@@ -89,6 +92,47 @@ func TestClaudeCodeFingerprintDisablesPassthroughWhenGlobalPassthroughEnabled(t 
 	model_setting.GetGlobalSettings().PassThroughRequestEnabled = true
 
 	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeFingerprintEnabled: true,
+			},
+		},
+	}
+
+	require.True(t, shouldPassThroughRequestBody(info))
+}
+
+func TestClaudeCodeFingerprintDoesNotPassThroughWhenPassThroughDisabled(t *testing.T) {
+	originalGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
+	defer func() {
+		model_setting.GetGlobalSettings().PassThroughRequestEnabled = originalGlobal
+	}()
+	model_setting.GetGlobalSettings().PassThroughRequestEnabled = false
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeFingerprintEnabled: true,
+			},
+		},
+	}
+
+	require.False(t, shouldPassThroughRequestBody(info))
+}
+
+func TestClaudeCodeFingerprintDoesNotPassThroughOpenAICompatibleBody(t *testing.T) {
+	originalGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
+	defer func() {
+		model_setting.GetGlobalSettings().PassThroughRequestEnabled = originalGlobal
+	}()
+	model_setting.GetGlobalSettings().PassThroughRequestEnabled = true
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatOpenAI,
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ApiType: constant.APITypeAnthropic,
 			ChannelOtherSettings: dto.ChannelOtherSettings{

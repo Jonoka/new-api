@@ -4,6 +4,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/model_setting"
+	"github.com/QuantumNous/new-api/types"
 )
 
 func shouldUseClaudeCodeRequestFingerprint(info *relaycommon.RelayInfo) bool {
@@ -15,9 +16,14 @@ func shouldUseClaudeCodeRequestFingerprint(info *relaycommon.RelayInfo) bool {
 }
 
 func shouldPassThroughRequestBody(info *relaycommon.RelayInfo) bool {
+	passThroughEnabled := isRequestBodyPassThroughSettingEnabled(info)
 	if shouldUseClaudeCodeRequestFingerprint(info) {
-		return false
+		return passThroughEnabled && info.RelayFormat == types.RelayFormatClaude
 	}
+	return passThroughEnabled
+}
+
+func isRequestBodyPassThroughSettingEnabled(info *relaycommon.RelayInfo) bool {
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled {
 		return true
 	}

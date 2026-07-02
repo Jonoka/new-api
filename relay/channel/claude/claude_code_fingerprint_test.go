@@ -15,6 +15,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -746,6 +747,96 @@ func TestSetupRequestHeaderAddsClaudeCodeFingerprintHeadersWhenTransportFingerpr
 	require.Contains(t, headers.Get("anthropic-beta"), "oauth-2025-04-20")
 	require.Contains(t, headers.Get("anthropic-beta"), "extended-cache-ttl-2025-04-11")
 	require.Contains(t, headers.Get("anthropic-beta"), "fine-grained-tool-streaming-2025-05-14")
+}
+
+func TestSetupRequestHeaderPassesThroughRealClaudeCodeHeadersWithFingerprintBodyPassThrough(t *testing.T) {
+	t.Parallel()
+
+	ctx := newClaudeFingerprintTestContext()
+	ctx.Request.Header.Set("User-Agent", "claude-cli/2.1.156 (Claude Code)")
+	ctx.Request.Header.Set("X-App", "claude-code")
+	ctx.Request.Header.Set("Anthropic-Beta", "claude-code-20250219")
+	ctx.Request.Header.Set("Anthropic-Version", "2023-06-01")
+	ctx.Request.Header.Set("Anthropic-Dangerous-Direct-Browser-Access", "true")
+	ctx.Request.Header.Set("X-Stainless-Lang", "js")
+	ctx.Request.Header.Set("X-Stainless-Package-Version", "0.72.0")
+	ctx.Request.Header.Set("X-Stainless-OS", "Windows")
+	ctx.Request.Header.Set("X-Stainless-Arch", "x64")
+	ctx.Request.Header.Set("X-Stainless-Runtime", "node")
+	ctx.Request.Header.Set("X-Stainless-Runtime-Version", "v24.13.0")
+	ctx.Request.Header.Set("X-Stainless-Retry-Count", "0")
+	ctx.Request.Header.Set("X-Stainless-Timeout", "600")
+	ctx.Request.Header.Set("X-Client-Request-Id", "client-request-id")
+	ctx.Request.Header.Set("X-Claude-Code-Session-Id", "session-123")
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat:     types.RelayFormatClaude,
+		OriginModelName: "claude-sonnet-4-20250514",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
+			ApiKey:  "sk-test",
+			ChannelSetting: dto.ChannelSettings{
+				PassThroughBodyEnabled: true,
+			},
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeFingerprintEnabled: true,
+			},
+		},
+	}
+
+	headers := http.Header{}
+	err := (&Adaptor{}).SetupRequestHeader(ctx, &headers, info)
+	require.NoError(t, err)
+
+	require.Equal(t, "sk-test", headers.Get("x-api-key"))
+	require.Empty(t, headers.Get("Authorization"))
+	require.Equal(t, "claude-cli/2.1.156 (Claude Code)", headers.Get("User-Agent"))
+	require.NotContains(t, headers.Get("User-Agent"), "external, cli")
+	require.Equal(t, "claude-code", headers.Get("X-App"))
+	require.Equal(t, "claude-code-20250219", headers.Get("Anthropic-Beta"))
+	require.Equal(t, "2023-06-01", headers.Get("Anthropic-Version"))
+	require.Equal(t, "true", headers.Get("Anthropic-Dangerous-Direct-Browser-Access"))
+	require.Equal(t, "js", headers.Get("X-Stainless-Lang"))
+	require.Equal(t, "0.72.0", headers.Get("X-Stainless-Package-Version"))
+	require.Equal(t, "Windows", headers.Get("X-Stainless-OS"))
+	require.Equal(t, "x64", headers.Get("X-Stainless-Arch"))
+	require.Equal(t, "node", headers.Get("X-Stainless-Runtime"))
+	require.Equal(t, "v24.13.0", headers.Get("X-Stainless-Runtime-Version"))
+	require.Equal(t, "0", headers.Get("X-Stainless-Retry-Count"))
+	require.Equal(t, "600", headers.Get("X-Stainless-Timeout"))
+	require.Equal(t, "client-request-id", headers.Get("X-Client-Request-Id"))
+	require.Equal(t, "session-123", headers.Get("X-Claude-Code-Session-Id"))
+}
+
+func TestSetupRequestHeaderStillUsesSyntheticFingerprintWithoutBodyPassThrough(t *testing.T) {
+	t.Parallel()
+
+	ctx := newClaudeFingerprintTestContext()
+	ctx.Request.Header.Set("User-Agent", "claude-cli/2.1.156 (Claude Code)")
+	ctx.Request.Header.Set("X-App", "claude-code")
+	ctx.Request.Header.Set("X-Client-Request-Id", "client-request-id")
+	ctx.Request.Header.Set("X-Claude-Code-Session-Id", "session-123")
+	info := &relaycommon.RelayInfo{
+		RelayFormat:     types.RelayFormatClaude,
+		OriginModelName: "claude-sonnet-4-20250514",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
+			ApiKey:  "sk-test",
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeFingerprintEnabled: true,
+			},
+		},
+	}
+
+	headers := http.Header{}
+	err := (&Adaptor{}).SetupRequestHeader(ctx, &headers, info)
+	require.NoError(t, err)
+
+	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
+	require.Regexp(t, regexp.MustCompile(`(?i)^claude-cli/\d+\.\d+\.\d+ \(external, cli\)$`), headers.Get("User-Agent"))
+	require.Equal(t, "cli", headers.Get("X-App"))
+	require.NotEqual(t, "client-request-id", headers.Get("X-Client-Request-Id"))
+	require.Empty(t, headers.Get("X-Claude-Code-Session-Id"))
 }
 
 func TestSetupRequestHeaderDoesNotPassThroughNonClaudeCodeClientHeaders(t *testing.T) {

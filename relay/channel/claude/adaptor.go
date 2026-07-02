@@ -161,8 +161,20 @@ func shouldUseClaudeCodeFingerprint(info *relaycommon.RelayInfo) bool {
 			info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled)
 }
 
+func shouldUseClaudeCodeOriginalPassThrough(info *relaycommon.RelayInfo) bool {
+	if info == nil ||
+		info.ChannelMeta == nil ||
+		info.ApiType != rootconstant.APITypeAnthropic ||
+		info.RelayFormat != types.RelayFormatClaude ||
+		!shouldUseClaudeCodeFingerprint(info) {
+		return false
+	}
+	return model_setting.GetGlobalSettings().PassThroughRequestEnabled ||
+		info.ChannelSetting.PassThroughBodyEnabled
+}
+
 func applyClaudeCodeHeaderFingerprint(req *http.Header, info *relaycommon.RelayInfo) {
-	if req == nil || !shouldUseClaudeCodeFingerprint(info) {
+	if req == nil || !shouldUseClaudeCodeFingerprint(info) || shouldUseClaudeCodeOriginalPassThrough(info) {
 		return
 	}
 	req.Set("User-Agent", fmt.Sprintf("claude-cli/%s (external, cli)", getClaudeCodeVersion(info)))
@@ -202,7 +214,10 @@ func shouldPassThroughRealClaudeCodeHeaders(c *gin.Context, info *relaycommon.Re
 	if c == nil || c.Request == nil || info == nil || info.ChannelMeta == nil {
 		return false
 	}
-	if info.ApiType != rootconstant.APITypeAnthropic || shouldUseClaudeCodeFingerprint(info) {
+	if info.ApiType != rootconstant.APITypeAnthropic {
+		return false
+	}
+	if shouldUseClaudeCodeFingerprint(info) && !shouldUseClaudeCodeOriginalPassThrough(info) {
 		return false
 	}
 	return claudeCodeUserAgentPattern.MatchString(c.Request.Header.Get("User-Agent"))
