@@ -1,6 +1,8 @@
 package extension
 
 import (
+	"archive/zip"
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -85,6 +87,66 @@ func TestManagerScanReportsInvalidManifest(t *testing.T) {
 	}
 }
 
+func TestManagerInstallArchive(t *testing.T) {
+	rootDir := t.TempDir()
+	archive := buildModuleArchive(t, "", "uploaded")
+
+	manager := NewManager(rootDir)
+	module, err := manager.InstallArchive(bytes.NewReader(archive), int64(len(archive)))
+	if err != nil {
+		t.Fatalf("install module archive: %v", err)
+	}
+	if module.ID != "uploaded" {
+		t.Fatalf("expected uploaded module, got %q", module.ID)
+	}
+	if !regularFileExists(filepath.Join(rootDir, "uploaded", "manifest.json")) {
+		t.Fatal("installed manifest was not written")
+	}
+
+	modules := manager.List(common.RoleRootUser, true)
+	if len(modules) != 1 || modules[0].ID != "uploaded" {
+		t.Fatalf("expected installed module in registry, got %#v", modules)
+	}
+}
+
+func TestManagerInstallArchiveWithTopLevelDirectory(t *testing.T) {
+	rootDir := t.TempDir()
+	archive := buildModuleArchive(t, "package", "nested")
+
+	manager := NewManager(rootDir)
+	module, err := manager.InstallArchive(bytes.NewReader(archive), int64(len(archive)))
+	if err != nil {
+		t.Fatalf("install nested module archive: %v", err)
+	}
+	if module.ID != "nested" {
+		t.Fatalf("expected nested module, got %q", module.ID)
+	}
+	if !regularFileExists(filepath.Join(rootDir, "nested", "manifest.json")) {
+		t.Fatal("nested archive was not installed by manifest id")
+	}
+}
+
+func TestManagerInstallArchiveRejectsZipSlip(t *testing.T) {
+	rootDir := t.TempDir()
+	var buffer bytes.Buffer
+	writer := zip.NewWriter(&buffer)
+	file, err := writer.Create("../manifest.json")
+	if err != nil {
+		t.Fatalf("create archive entry: %v", err)
+	}
+	if _, err := file.Write([]byte(`{}`)); err != nil {
+		t.Fatalf("write archive entry: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close archive: %v", err)
+	}
+
+	manager := NewManager(rootDir)
+	if _, err := manager.InstallArchive(bytes.NewReader(buffer.Bytes()), int64(buffer.Len())); err == nil {
+		t.Fatal("zip-slip archive should be rejected")
+	}
+}
+
 func writeManifest(t *testing.T, rootDir, id string, manifest Manifest) {
 	t.Helper()
 	moduleDir := filepath.Join(rootDir, id)
@@ -98,4 +160,42 @@ func writeManifest(t *testing.T, rootDir, id string, manifest Manifest) {
 	if err := os.WriteFile(filepath.Join(moduleDir, "manifest.json"), data, 0644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
+}
+
+func buildModuleArchive(t *testing.T, prefix, id string) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	writer := zip.NewWriter(&buffer)
+	manifest := Manifest{
+		ID:      id,
+		Name:    "Uploaded",
+		Version: "1.0.0",
+		Runtime: Runtime{
+			BaseURL: "http://127.0.0.1:39001",
+		},
+		UI: UIContribution{
+			Nav:   []NavItem{{Title: "Uploaded", Page: "index"}},
+			Pages: []Page{{Key: "index", Path: "/ui", Embed: true}},
+		},
+	}
+	data, err := common.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+
+	path := "manifest.json"
+	if prefix != "" {
+		path = filepath.ToSlash(filepath.Join(prefix, path))
+	}
+	file, err := writer.Create(path)
+	if err != nil {
+		t.Fatalf("create manifest entry: %v", err)
+	}
+	if _, err := file.Write(data); err != nil {
+		t.Fatalf("write manifest entry: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close archive: %v", err)
+	}
+	return buffer.Bytes()
 }

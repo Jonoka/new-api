@@ -168,6 +168,7 @@ export function getLucideIcon(key, selected = false) {
       return <CalendarClock {...commonProps} color={iconColor} />;
     case 'setting':
       return <Settings {...commonProps} color={iconColor} />;
+    case 'extension_group':
     case 'extension_admin':
       return <Puzzle {...commonProps} color={iconColor} />;
     default:

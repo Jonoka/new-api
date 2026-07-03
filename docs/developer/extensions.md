@@ -9,7 +9,7 @@
 - 外部进程崩溃不会拖垮主程序。
 - 模块可以用 Go、Node.js、Python、PHP 或任何能提供 HTTP 服务的语言开发。
 
-## 放置模块
+## 安装模块
 
 默认模块目录是 `data/modules`。可以通过环境变量覆盖：
 
@@ -30,12 +30,31 @@ data/modules/
 
 `state.json` 由主程序维护，用来记录启用状态。不要手工编辑它，除非你知道当前线上状态。
 
+也可以用 root 账号进入 **扩展模块 -> 模块管理**，点击 **上传模块** 直接上传 zip 模块包。zip 支持两种结构：
+
+```text
+auto-register.zip
+├── manifest.json
+└── server.mjs
+```
+
+或：
+
+```text
+auto-register.zip
+└── auto-register/
+    ├── manifest.json
+    └── server.mjs
+```
+
+上传后主程序会读取 `manifest.json`，并按 `manifest.id` 安装到 `data/modules/<module-id>`。
+
 ## 热加载流程
 
-1. 把模块目录放到 `data/modules/<module-id>`。
+1. 上传 zip 模块包，或把模块目录放到 `data/modules/<module-id>`。
 2. 启动模块自己的 HTTP 服务。
-3. 用 root 账号进入 **Extensions**。
-4. 点击 **Refresh**。
+3. 用 root 账号进入 **扩展模块 -> 模块管理**。
+4. 如果是手动放目录，点击 **刷新**。
 5. 开启模块开关。
 
 刷新和启停都会立即生效，不需要重启主程序。
@@ -184,7 +203,7 @@ node server.mjs
 data/modules/echo/
 ```
 
-进入 **Extensions**，点击 **Refresh**，启用 `Echo Extension`。
+进入 **扩展模块 -> 模块管理**，点击 **刷新**，启用 `Echo Extension`。
 
 ## 安全边界
 

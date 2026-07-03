@@ -233,12 +233,6 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         to: '/setting',
         className: isRoot() ? '' : 'tableHiddle',
       },
-      {
-        text: t('扩展模块'),
-        itemKey: 'extension_admin',
-        to: '/extensions',
-        className: isRoot() ? '' : 'tableHiddle',
-      },
     ];
 
     // 根据配置过滤项目
@@ -259,14 +253,29 @@ const SiderBar = ({ onNavigate = () => {} }) => {
     }));
   }, [extensionItems]);
 
-  const consoleExtensionMenuItems = useMemo(
-    () => extensionMenuItems.filter((item) => item.section === 'console'),
-    [extensionMenuItems],
-  );
+  const extensionSubItems = useMemo(() => {
+    const items = [
+      {
+        text: t('模块管理'),
+        itemKey: 'extension_admin',
+        to: '/extensions',
+        className:
+          isRoot() && isModuleVisible('admin', 'extension_admin')
+            ? ''
+            : 'tableHiddle',
+      },
+      ...extensionMenuItems,
+    ];
+    return items.filter((item) => item.className !== 'tableHiddle');
+  }, [extensionMenuItems, isRoot(), isModuleVisible, t]);
 
-  const adminExtensionMenuItems = useMemo(
-    () => extensionMenuItems.filter((item) => item.section !== 'console'),
-    [extensionMenuItems],
+  const extensionGroupItem = useMemo(
+    () => ({
+      text: t('扩展模块'),
+      itemKey: 'extension_group',
+      items: extensionSubItems,
+    }),
+    [extensionSubItems, t],
   );
 
   const chatMenuItems = useMemo(() => {
@@ -421,6 +430,14 @@ const SiderBar = ({ onNavigate = () => {} }) => {
     // 如果找到匹配的键，更新选中的键
     if (matchingKey) {
       setSelectedKeys([matchingKey]);
+      if (
+        (matchingKey === 'extension_admin' ||
+          String(matchingKey).startsWith('extension:'))
+      ) {
+        setOpenedKeys((keys) =>
+          keys.includes('extension_group') ? keys : [...keys, 'extension_group'],
+        );
+      }
     }
   }, [location.pathname, routerMapState, extensionMenuItems]);
 
@@ -584,9 +601,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           )}
 
           {/* 控制台区域 */}
-          {isModuleVisible('console') &&
-            (hasSectionVisibleModules('console') ||
-              consoleExtensionMenuItems.length > 0) && (
+          {isModuleVisible('console') && hasSectionVisibleModules('console') && (
             <>
               <Divider className='sidebar-divider' />
               <div>
@@ -594,7 +609,6 @@ const SiderBar = ({ onNavigate = () => {} }) => {
                   <div className='sidebar-group-label'>{t('控制台')}</div>
                 )}
                 {workspaceItems.map((item) => renderNavItem(item))}
-                {consoleExtensionMenuItems.map((item) => renderNavItem(item))}
               </div>
             </>
           )}
@@ -615,8 +629,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           {/* 管理员区域 - 只在管理员时显示且配置允许时显示 */}
           {isAdmin() &&
             isModuleVisible('admin') &&
-            (hasSectionVisibleModules('admin') ||
-              adminExtensionMenuItems.length > 0) && (
+            adminItems.length > 0 && (
             <>
               <Divider className='sidebar-divider' />
               <div>
@@ -624,7 +637,15 @@ const SiderBar = ({ onNavigate = () => {} }) => {
                   <div className='sidebar-group-label'>{t('管理员')}</div>
                 )}
                 {adminItems.map((item) => renderNavItem(item))}
-                {adminExtensionMenuItems.map((item) => renderNavItem(item))}
+              </div>
+            </>
+          )}
+
+          {extensionSubItems.length > 0 && (
+            <>
+              <Divider className='sidebar-divider' />
+              <div>
+                {renderSubItem(extensionGroupItem)}
               </div>
             </>
           )}

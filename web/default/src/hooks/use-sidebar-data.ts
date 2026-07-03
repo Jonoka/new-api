@@ -79,6 +79,42 @@ export function useSidebarData(): SidebarData {
   const CanvasIcon = getCustomNavIcon(canvasSettings.canvasIcon) ?? Brush
   const customItems = parseCustomNavItems(sidebarModules.customItems)
 
+  const enabledExtensionNavItems =
+    extensionData?.modules
+      ?.filter((module) => module.enabled)
+      .flatMap((module) =>
+        (module.ui?.nav ?? []).map((navItem, index) => ({
+          module,
+          navItem,
+          index,
+        }))
+      )
+      .sort((a, b) => {
+        const left = a.navItem.order ?? a.index
+        const right = b.navItem.order ?? b.index
+        if (left !== right) return left - right
+        return a.module.id.localeCompare(b.module.id)
+      }) ?? []
+
+  const extensionMenuItems = [
+    ...(user && user.role >= ROLE.SUPER_ADMIN
+      ? [
+          {
+            title: t('Module Management'),
+            url: '/extensions',
+            icon: Settings,
+            configUrls: ['/extensions'],
+          },
+        ]
+      : []),
+    ...enabledExtensionNavItems.map(({ module, navItem }) => ({
+      title: navItem.title,
+      url: `/extensions/${module.id}/${navItem.page}`,
+      icon: getCustomNavIcon(navItem.icon) ?? Puzzle,
+      configUrls: [`extension:${module.id}:${navItem.page}`],
+    })),
+  ]
+
   const sidebarData: SidebarData = {
     navGroups: [
       {
@@ -211,16 +247,6 @@ export function useSidebarData(): SidebarData {
             url: '/game-management',
             icon: Gamepad2,
           },
-          ...(user && user.role >= ROLE.SUPER_ADMIN
-            ? [
-                {
-                  title: t('Extensions'),
-                  url: '/extensions',
-                  configUrls: ['/extensions'],
-                  icon: Puzzle,
-                },
-              ]
-            : []),
           {
             title: t('System Settings'),
             url: '/system-settings/site',
@@ -230,6 +256,20 @@ export function useSidebarData(): SidebarData {
         ],
       },
     ],
+  }
+
+  if (extensionMenuItems.length > 0) {
+    sidebarData.navGroups.push({
+      id: 'extensions',
+      title: t('Modules'),
+      items: [
+        {
+          title: t('Extension Modules'),
+          icon: Puzzle,
+          items: extensionMenuItems,
+        },
+      ],
+    })
   }
 
   customItems.forEach((item) => {
@@ -246,37 +286,6 @@ export function useSidebarData(): SidebarData {
       configUrls: [getSidebarCustomModuleKey(item.id)],
     })
   })
-
-  extensionData?.modules
-    ?.filter((module) => module.enabled)
-    .flatMap((module) =>
-      (module.ui?.nav ?? []).map((navItem, index) => ({
-        module,
-        navItem,
-        index,
-      }))
-    )
-    .sort((a, b) => {
-      const left = a.navItem.order ?? a.index
-      const right = b.navItem.order ?? b.index
-      if (left !== right) return left - right
-      return a.module.id.localeCompare(b.module.id)
-    })
-    .forEach(({ module, navItem }) => {
-      const section =
-        navItem.section === 'console' ? 'general' : navItem.section
-      const group =
-        sidebarData.navGroups.find((navGroup) => navGroup.id === section) ??
-        sidebarData.navGroups.find((navGroup) => navGroup.id === 'admin')
-      if (!group) return
-
-      group.items.push({
-        title: navItem.title,
-        url: `/extensions/${module.id}/${navItem.page}`,
-        icon: getCustomNavIcon(navItem.icon) ?? Puzzle,
-        configUrls: [`extension:${module.id}:${navItem.page}`],
-      })
-    })
 
   return sidebarData
 }

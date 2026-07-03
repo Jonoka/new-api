@@ -310,14 +310,17 @@ function isNavItemVisible(
   // Handle collapsible type (with sub-items)
   if ('items' in item && item.items) {
     // If has sub-items, show this collapsible item if at least one sub-item is visible
-    return item.items.some((subItem) =>
-      isModuleEnabled(
-        subItem.url as string,
-        adminConfig,
-        userConfig,
-        permissionConfig
+    return item.items.some((subItem) => {
+      const configUrls = subItem.configUrls ?? [subItem.url]
+      return configUrls.some((url) =>
+        isModuleEnabled(
+          url as string,
+          adminConfig,
+          userConfig,
+          permissionConfig
+        )
       )
-    )
+    })
   }
 
   return true
@@ -336,14 +339,17 @@ function filterNavItems(
     .map((item) => {
       // If collapsible item, also filter its sub-items
       if ('items' in item && item.items) {
-        const filteredSubItems = item.items.filter((subItem) =>
-          isModuleEnabled(
-            subItem.url as string,
-            adminConfig,
-            userConfig,
-            permissionConfig
+        const filteredSubItems = item.items.filter((subItem) => {
+          const configUrls = subItem.configUrls ?? [subItem.url]
+          return configUrls.some((url) =>
+            isModuleEnabled(
+              url as string,
+              adminConfig,
+              userConfig,
+              permissionConfig
+            )
           )
-        )
+        })
 
         return {
           ...item,

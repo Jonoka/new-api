@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -12,7 +12,7 @@ import {
   Tag,
   Typography,
 } from '@douyinfe/semi-ui';
-import { ExternalLink, Puzzle, RefreshCw } from 'lucide-react';
+import { ExternalLink, Puzzle, RefreshCw, Upload } from 'lucide-react';
 import { API, isRoot, showError, showSuccess } from '../../helpers';
 
 const { Text, Title } = Typography;
@@ -36,9 +36,11 @@ export default function Extensions() {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [modules, setModules] = useState([]);
   const [rootDir, setRootDir] = useState('data/modules');
   const [pendingId, setPendingId] = useState('');
+  const fileInputRef = useRef(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -79,6 +81,35 @@ export default function Extensions() {
       showError(error.message || t('刷新失败'));
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const uploadModule = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.zip')) {
+      showError(t('请上传 zip 模块包'));
+      event.target.value = '';
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+    setUploading(true);
+    try {
+      const res = await API.post('/api/extension-admin/upload', formData);
+      if (res?.data?.success) {
+        showSuccess(t('模块已上传'));
+        await loadData();
+        notifyClassicSidebar();
+      } else {
+        showError(res?.data?.message || t('上传失败'));
+      }
+    } catch (error) {
+      showError(error.message || t('上传失败'));
+    } finally {
+      setUploading(false);
+      event.target.value = '';
     }
   };
 
@@ -241,20 +272,37 @@ export default function Extensions() {
       >
         <div>
           <Title heading={3} style={{ margin: 0 }}>
-            {t('扩展模块')}
+            {t('模块管理')}
           </Title>
           <Text type='secondary'>
-            {t('把模块放入模块目录，刷新后即可启用，无需重启主程序。')}
+            {t('上传 zip 模块包，或把模块放入模块目录，刷新后即可启用，无需重启主程序。')}
           </Text>
         </div>
-        <Button
-          theme='outline'
-          loading={refreshing}
-          icon={<RefreshCw size={16} />}
-          onClick={refreshModules}
-        >
-          {t('刷新')}
-        </Button>
+        <Space>
+          <input
+            ref={fileInputRef}
+            type='file'
+            accept='.zip,application/zip'
+            style={{ display: 'none' }}
+            onChange={uploadModule}
+          />
+          <Button
+            theme='outline'
+            loading={uploading}
+            icon={<Upload size={16} />}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {t('上传模块')}
+          </Button>
+          <Button
+            theme='outline'
+            loading={refreshing}
+            icon={<RefreshCw size={16} />}
+            onClick={refreshModules}
+          >
+            {t('刷新')}
+          </Button>
+        </Space>
       </div>
 
       <Card

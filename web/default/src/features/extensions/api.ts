@@ -26,6 +26,17 @@ export async function refreshExtensions() {
   return res.data
 }
 
+export async function uploadExtension(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  const res = await api.post<ExtensionListResponse>(
+    '/api/extension-admin/upload',
+    formData,
+    { skipBusinessError: true }
+  )
+  return res.data
+}
+
 export async function setExtensionEnabled(id: string, enabled: boolean) {
   const res = await api.put<{
     success: boolean

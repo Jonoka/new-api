@@ -1,7 +1,7 @@
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { ExternalLink, Puzzle, RefreshCw } from 'lucide-react'
+import { ExternalLink, Puzzle, RefreshCw, Upload } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
@@ -31,6 +31,7 @@ import {
   getExtensionAdminList,
   refreshExtensions,
   setExtensionEnabled,
+  uploadExtension,
 } from './api'
 import type { ExtensionModule } from './types'
 
@@ -42,6 +43,7 @@ export function Extensions() {
   const queryClient = useQueryClient()
   const user = useAuthStore((state) => state.auth.user)
   const isRoot = Boolean(user && user.role >= ROLE.SUPER_ADMIN)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: EXTENSIONS_ADMIN_QUERY_KEY,
@@ -57,6 +59,9 @@ export function Extensions() {
         return
       }
       await queryClient.invalidateQueries({ queryKey: EXTENSIONS_QUERY_KEY })
+      await queryClient.invalidateQueries({
+        queryKey: EXTENSIONS_ADMIN_QUERY_KEY,
+      })
       toast.success(t('Extensions refreshed'))
     },
   })
@@ -70,9 +75,36 @@ export function Extensions() {
         return
       }
       await queryClient.invalidateQueries({ queryKey: EXTENSIONS_QUERY_KEY })
+      await queryClient.invalidateQueries({
+        queryKey: EXTENSIONS_ADMIN_QUERY_KEY,
+      })
       toast.success(t('Extension updated'))
     },
   })
+
+  const uploadMutation = useMutation({
+    mutationFn: uploadExtension,
+    onSuccess: async (res) => {
+      if (!res.success) {
+        toast.error(res.message || t('Failed to upload module'))
+        return
+      }
+      await queryClient.invalidateQueries({ queryKey: EXTENSIONS_QUERY_KEY })
+      await queryClient.invalidateQueries({
+        queryKey: EXTENSIONS_ADMIN_QUERY_KEY,
+      })
+      toast.success(t('Module uploaded'))
+    },
+  })
+
+  const handleUploadFile = (file: File | undefined) => {
+    if (!file) return
+    if (!file.name.toLowerCase().endsWith('.zip')) {
+      toast.error(t('Please upload a zip module archive'))
+      return
+    }
+    uploadMutation.mutate(file)
+  }
 
   const modules = data?.modules ?? []
   const root = data?.root ?? 'data/modules'
@@ -95,20 +127,40 @@ export function Extensions() {
       <div className='flex flex-col gap-3 md:flex-row md:items-center md:justify-between'>
         <div className='min-w-0'>
           <h1 className='text-2xl font-semibold tracking-normal'>
-            {t('Extensions')}
+            {t('Module Management')}
           </h1>
           <p className='text-muted-foreground mt-1 text-sm'>
-            {t('Drop modules into the modules directory, then refresh here.')}
+            {t('Upload a zip module archive or drop modules into the modules directory, then refresh here.')}
           </p>
         </div>
-        <Button
-          variant='outline'
-          onClick={() => refreshMutation.mutate()}
-          disabled={refreshMutation.isPending}
-        >
-          <RefreshCw className='size-4' />
-          {t('Refresh')}
-        </Button>
+        <div className='flex flex-wrap gap-2'>
+          <input
+            ref={fileInputRef}
+            type='file'
+            accept='.zip,application/zip'
+            className='hidden'
+            onChange={(event) => {
+              handleUploadFile(event.target.files?.[0])
+              event.target.value = ''
+            }}
+          />
+          <Button
+            variant='outline'
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadMutation.isPending}
+          >
+            <Upload className='size-4' />
+            {uploadMutation.isPending ? t('Uploading...') : t('Upload Module')}
+          </Button>
+          <Button
+            variant='outline'
+            onClick={() => refreshMutation.mutate()}
+            disabled={refreshMutation.isPending}
+          >
+            <RefreshCw className='size-4' />
+            {t('Refresh')}
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -126,7 +178,7 @@ export function Extensions() {
               <Puzzle className='text-muted-foreground size-8' />
               <EmptyTitle>{t('No extensions found')}</EmptyTitle>
               <EmptyDescription>
-                {t('Create a module folder with a manifest.json file.')}
+                {t('Upload a module zip archive or create a module folder with a manifest.json file.')}
               </EmptyDescription>
             </Empty>
           ) : (
