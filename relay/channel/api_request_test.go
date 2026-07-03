@@ -873,7 +873,7 @@ func TestShouldUseClaudeCodeTransportForRealClaudeCodeSessionHeader(t *testing.T
 	require.True(t, shouldUseClaudeCodeTransport(ctx, info))
 }
 
-func TestShouldUseClaudeCodeTransportForCompatibleClientWhenTransportFingerprintEnabled(t *testing.T) {
+func TestShouldNotUseClaudeCodeTransportForCompatibleClientWhenOnlyTransportFingerprintEnabled(t *testing.T) {
 	t.Parallel()
 
 	gin.SetMode(gin.TestMode)
@@ -890,10 +890,55 @@ func TestShouldUseClaudeCodeTransportForCompatibleClientWhenTransportFingerprint
 	}}
 	info.RelayFormat = types.RelayFormatClaude
 
+	require.False(t, shouldUseClaudeCodeTransport(ctx, info))
+}
+
+func TestShouldUseClaudeCodeTransportForCompatibleClientWhenFullFingerprintEnabled(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Set("User-Agent", "CherryStudio/1.0")
+
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
+		ApiType: constant.APITypeAnthropic,
+		ChannelOtherSettings: dto.ChannelOtherSettings{
+			ClaudeCodeFingerprintEnabled:          true,
+			ClaudeCodeTransportFingerprintEnabled: true,
+		},
+	}}
+	info.RelayFormat = types.RelayFormatClaude
+
 	require.True(t, shouldUseClaudeCodeTransport(ctx, info))
 }
 
-func TestSelectRelayHTTPClientUsesClaudeCodeTransportFingerprintForCompatibleClient(t *testing.T) {
+func TestShouldNotUseClaudeCodeTransportForCompatibleClientWhenFullFingerprintPassThroughEnabled(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Set("User-Agent", "CherryStudio/1.0")
+
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
+		ApiType: constant.APITypeAnthropic,
+		ChannelSetting: dto.ChannelSettings{
+			PassThroughBodyEnabled: true,
+		},
+		ChannelOtherSettings: dto.ChannelOtherSettings{
+			ClaudeCodeFingerprintEnabled:          true,
+			ClaudeCodeTransportFingerprintEnabled: true,
+		},
+	}}
+	info.RelayFormat = types.RelayFormatClaude
+
+	require.False(t, shouldUseClaudeCodeTransport(ctx, info))
+}
+
+func TestSelectRelayHTTPClientUsesClaudeCodeTransportFingerprintForFullCompatibleClientFingerprint(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -906,6 +951,7 @@ func TestSelectRelayHTTPClientUsesClaudeCodeTransportFingerprintForCompatibleCli
 			Proxy: "http://127.0.0.1:18080",
 		},
 		ChannelOtherSettings: dto.ChannelOtherSettings{
+			ClaudeCodeFingerprintEnabled:          true,
 			ClaudeCodeTransportFingerprintEnabled: true,
 		},
 	}}

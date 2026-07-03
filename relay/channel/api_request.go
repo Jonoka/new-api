@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -620,8 +621,21 @@ func shouldUseClaudeCodeTransport(c *gin.Context, info *common.RelayInfo) bool {
 	if isRealClaudeCodeRequest(c) {
 		return true
 	}
-	return info.ApiType == rootconstant.APITypeAnthropic &&
-		info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled
+	if info.ApiType != rootconstant.APITypeAnthropic ||
+		!info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled {
+		return false
+	}
+	return info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled &&
+		!isRequestBodyPassThroughEnabled(info)
+}
+
+func isRequestBodyPassThroughEnabled(info *common.RelayInfo) bool {
+	if model_setting.GetGlobalSettings().PassThroughRequestEnabled {
+		return true
+	}
+	return info != nil &&
+		info.ChannelMeta != nil &&
+		info.ChannelSetting.PassThroughBodyEnabled
 }
 
 func selectRelayHTTPClient(c *gin.Context, info *common.RelayInfo) (*http.Client, error) {
