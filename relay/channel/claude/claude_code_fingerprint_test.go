@@ -87,7 +87,8 @@ func TestConvertClaudeRequestAddsClaudeCodeFingerprintForCompatibleClient(t *tes
 	require.Len(t, system, 2)
 	require.Contains(t, system[0].GetText(), "x-anthropic-billing-header")
 	require.Contains(t, system[0].GetText(), "cc_version=2.8.2.")
-	require.Contains(t, system[0].GetText(), "cc_entrypoint=cli; cch=00000;")
+	require.Contains(t, system[0].GetText(), "cc_entrypoint=cli;")
+	require.NotContains(t, system[0].GetText(), "cch=")
 	require.Contains(t, system[1].GetText(), "Claude Code")
 	requireClaudeCodeLegacyMetadata(t, claudeReq.Metadata)
 }
@@ -563,8 +564,7 @@ func TestClaudeCodeFingerprintFinalOutboundRequestMatchesSub2APIRestrictions(t *
 	require.Contains(t, firstSystem["text"], "x-anthropic-billing-header")
 	require.Contains(t, firstSystem["text"], "cc_version=2.8.2.")
 	require.Contains(t, firstSystem["text"], "cc_entrypoint=cli;")
-	require.Contains(t, firstSystem["text"], "cch=8f434;")
-	require.NotContains(t, firstSystem["text"], "cch=00000;")
+	require.NotContains(t, firstSystem["text"], "cch=")
 
 	metadata, ok := body["metadata"].(map[string]interface{})
 	require.True(t, ok)
@@ -847,19 +847,19 @@ func TestApplyClaudeCodeFinalBodyFingerprintRewritesCompatibleClientBody(t *test
 	require.NotContains(t, string(finalBody), "broken-user")
 	require.Contains(t, string(finalBody), "Claude Code")
 	require.Contains(t, string(finalBody), "x-anthropic-billing-header")
-	require.NotContains(t, string(finalBody), "cch=00000;")
+	require.NotContains(t, string(finalBody), "cch=")
 
 	var finalReq dto.ClaudeRequest
 	require.NoError(t, common.Unmarshal(finalBody, &finalReq))
 	system := finalReq.ParseSystem()
 	require.Len(t, system, 2)
 	require.Contains(t, system[0].GetText(), "x-anthropic-billing-header")
-	require.Contains(t, system[0].GetText(), "cch=d87f7;")
+	require.NotContains(t, system[0].GetText(), "cch=")
 	require.Contains(t, system[1].GetText(), "Claude Code")
 	requireClaudeCodeLegacyMetadata(t, finalReq.Metadata)
 }
 
-func TestApplyClaudeCodeFinalBodyFingerprintUsesFirstUserTextForCCH(t *testing.T) {
+func TestApplyClaudeCodeFinalBodyFingerprintDoesNotForgeCCH(t *testing.T) {
 	t.Parallel()
 
 	info := &relaycommon.RelayInfo{
@@ -901,8 +901,7 @@ func TestApplyClaudeCodeFinalBodyFingerprintUsesFirstUserTextForCCH(t *testing.T
 	require.Len(t, system, 2)
 	require.Contains(t, system[0].GetText(), "cc_version=2.8.2.dbd;")
 	require.Contains(t, system[0].GetText(), "cc_entrypoint=cli;")
-	require.Contains(t, system[0].GetText(), "cch=a3204;")
-	require.NotContains(t, system[0].GetText(), "cch=00000;")
+	require.NotContains(t, system[0].GetText(), "cch=")
 	require.Contains(t, system[1].GetText(), "Claude Code")
 	requireClaudeCodeLegacyMetadata(t, finalReq.Metadata)
 }

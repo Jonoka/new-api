@@ -1,7 +1,6 @@
 package claude
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -408,7 +407,7 @@ func newTextSystemBlock(text string) dto.ClaudeMediaMessage {
 
 func buildBillingBlockTextWithInfo(request *dto.ClaudeRequest, info *relaycommon.RelayInfo, version string) string {
 	fp := computeBillingFingerprint(request, version)
-	return fmt.Sprintf("x-anthropic-billing-header: cc_version=%s.%s; cc_entrypoint=%s; cch=00000;", version, fp, getClaudeCodeEntrypoint(info))
+	return fmt.Sprintf("x-anthropic-billing-header: cc_version=%s.%s; cc_entrypoint=%s;", version, fp, getClaudeCodeEntrypoint(info))
 }
 
 // computeBillingFingerprint replicates the real Claude Code CLI fingerprint algorithm:
@@ -428,11 +427,6 @@ func computeBillingFingerprint(request *dto.ClaudeRequest, version string) strin
 	}
 	sum := sha256.Sum256([]byte(billingFingerprintSalt + string(chars) + version))
 	return hex.EncodeToString(sum[:])[:3]
-}
-
-func computeBillingCCH(request *dto.ClaudeRequest) string {
-	sum := sha256.Sum256([]byte(extractFirstUserText(request)))
-	return hex.EncodeToString(sum[:])[:5]
 }
 
 // extractFirstUserText extracts the text content from the first user message.
@@ -465,23 +459,8 @@ func extractFirstUserText(request *dto.ClaudeRequest) string {
 	return ""
 }
 
-// SignBillingHeaderCCH replaces the cch=00000 placeholder in the serialized body
-// with the Claude Code attestation token computed from the final request.
-func SignBillingHeaderCCH(body []byte, request *dto.ClaudeRequest) []byte {
-	placeholder := []byte("cch=00000;")
-	idx := bytes.Index(body, placeholder)
-	if idx < 0 {
-		return body
-	}
-	cch := fmt.Sprintf("cch=%s;", computeBillingCCH(request))
-	result := make([]byte, len(body))
-	copy(result, body)
-	copy(result[idx:], []byte(cch))
-	return result
-}
-
 // ApplyClaudeCodeFinalBodyFingerprint 在下游 body 修改后重新写入 Claude Code 指纹字段，
-// 并对最终序列化 body 签名。
+// 确保最终出站 body 的 attribution 与最终消息一致。
 func ApplyClaudeCodeFinalBodyFingerprint(info *relaycommon.RelayInfo, body []byte) ([]byte, error) {
 	if !shouldFinalizeClaudeCodeSyntheticFingerprint(info) {
 		return body, nil
@@ -498,7 +477,7 @@ func ApplyClaudeCodeFinalBodyFingerprint(info *relaycommon.RelayInfo, body []byt
 	if err != nil {
 		return nil, err
 	}
-	return SignBillingHeaderCCH(finalBody, &request), nil
+	return finalBody, nil
 }
 
 func shouldFinalizeClaudeCodeSyntheticFingerprint(info *relaycommon.RelayInfo) bool {
