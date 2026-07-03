@@ -35,8 +35,7 @@ func shouldSynthesizeClaudeCodeBodyForCompatibleClient(c *gin.Context, info *rel
 		info.ChannelMeta != nil &&
 		info.ApiType == constant.APITypeAnthropic &&
 		info.RelayFormat == types.RelayFormatClaude &&
-		(info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled ||
-			info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled) &&
+		info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled &&
 		!isRealClaudeCodeRequest(c)
 }
 

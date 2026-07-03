@@ -346,12 +346,16 @@ func TestConvertClaudeRequestRewritesAccountMetadataForLegacySub2APICompatibilit
 	require.Equal(t, "keep", metadata["trace"])
 }
 
-func TestConvertClaudeRequestAddsClaudeCodeFingerprintWhenTransportFingerprintEnabled(t *testing.T) {
+func TestConvertClaudeRequestDoesNotAddBodyFingerprintWhenOnlyTransportFingerprintEnabled(t *testing.T) {
 	t.Parallel()
 
 	adaptor := &Adaptor{}
 	req := &dto.ClaudeRequest{
-		Model: "claude-sonnet-4-20250514",
+		Model:  "claude-sonnet-4-20250514",
+		System: "original system",
+		Messages: []dto.ClaudeMessage{
+			{Role: "user", Content: "hi"},
+		},
 	}
 	info := &relaycommon.RelayInfo{
 		RelayFormat: types.RelayFormatClaude,
@@ -367,12 +371,13 @@ func TestConvertClaudeRequestAddsClaudeCodeFingerprintWhenTransportFingerprintEn
 	require.NoError(t, err)
 
 	claudeReq := converted.(*dto.ClaudeRequest)
-	system := claudeReq.ParseSystem()
-	require.Len(t, system, 2)
-	require.Contains(t, system[0].GetText(), "x-anthropic-billing-header")
-	require.GreaterOrEqual(t, len(system), 2)
-	require.Contains(t, system[1].GetText(), "Claude Code")
-	requireClaudeCodeLegacyMetadata(t, claudeReq.Metadata)
+	require.Equal(t, "original system", claudeReq.System)
+	require.Empty(t, claudeReq.Metadata)
+	bodyBytes, err := common.Marshal(claudeReq)
+	require.NoError(t, err)
+	finalBody, err := ApplyClaudeCodeFinalBodyFingerprint(info, bodyBytes)
+	require.NoError(t, err)
+	require.JSONEq(t, string(bodyBytes), string(finalBody))
 }
 
 func TestConvertOpenAIRequestAddsClaudeCodeFingerprint(t *testing.T) {

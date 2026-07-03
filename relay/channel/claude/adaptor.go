@@ -172,6 +172,10 @@ func shouldUseClaudeCodeFingerprint(info *relaycommon.RelayInfo) bool {
 			info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled)
 }
 
+func shouldUseClaudeCodeBodyFingerprint(info *relaycommon.RelayInfo) bool {
+	return info != nil && info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled
+}
+
 func shouldUseClaudeCodeOriginalPassThrough(c *gin.Context, info *relaycommon.RelayInfo) bool {
 	if info == nil || info.ChannelMeta == nil || info.RelayFormat != types.RelayFormatClaude {
 		return false
@@ -202,7 +206,7 @@ func isRealClaudeCodeClient(c *gin.Context) bool {
 }
 
 func applyClaudeCodeHeaderFingerprint(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) {
-	if req == nil || !shouldApplyClaudeCodeSyntheticFingerprint(c, info) || shouldUseClaudeCodeOriginalPassThrough(c, info) {
+	if req == nil || !shouldApplyClaudeCodeSyntheticHeaderFingerprint(c, info) || shouldUseClaudeCodeOriginalPassThrough(c, info) {
 		return
 	}
 	entrypoint := getClaudeCodeEntrypoint(info)
@@ -341,8 +345,15 @@ const (
 
 var claudeCodeLegacySub2APIUserIDPattern = regexp.MustCompile(`^user_[a-fA-F0-9]{64}_account__session_[\w-]+$`)
 
-func shouldApplyClaudeCodeSyntheticFingerprint(c *gin.Context, info *relaycommon.RelayInfo) bool {
+func shouldApplyClaudeCodeSyntheticHeaderFingerprint(c *gin.Context, info *relaycommon.RelayInfo) bool {
 	return shouldUseClaudeCodeFingerprint(info) &&
+		info != nil &&
+		info.ApiType == rootconstant.APITypeAnthropic &&
+		!isRealClaudeCodeClient(c)
+}
+
+func shouldApplyClaudeCodeSyntheticFingerprint(c *gin.Context, info *relaycommon.RelayInfo) bool {
+	return shouldUseClaudeCodeBodyFingerprint(info) &&
 		info != nil &&
 		info.ApiType == rootconstant.APITypeAnthropic &&
 		!isRealClaudeCodeClient(c)
@@ -485,8 +496,7 @@ func shouldFinalizeClaudeCodeSyntheticFingerprint(info *relaycommon.RelayInfo) b
 		info.ChannelMeta != nil &&
 		info.ApiType == rootconstant.APITypeAnthropic &&
 		info.GetFinalRequestRelayFormat() == types.RelayFormatClaude &&
-		(info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled ||
-			info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled)
+		info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled
 }
 
 func normalizeClaudeSystemBlocks(value any) []dto.ClaudeMediaMessage {

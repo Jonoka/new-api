@@ -75,7 +75,7 @@ func TestShouldPassThroughRequestBodyDisablesPassThroughToSynthesizeClaudeCodeBo
 	require.False(t, shouldPassThroughRequestBody(info))
 }
 
-func TestShouldPassThroughRequestBodyDisablesPassThroughToSynthesizeClaudeCodeTransportBodyMarker(t *testing.T) {
+func TestShouldPassThroughRequestBodyKeepsPassThroughForTransportOnlyFingerprint(t *testing.T) {
 	originalGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
 	defer func() {
 		model_setting.GetGlobalSettings().PassThroughRequestEnabled = originalGlobal
@@ -95,7 +95,7 @@ func TestShouldPassThroughRequestBodyDisablesPassThroughToSynthesizeClaudeCodeTr
 		},
 	}
 
-	require.False(t, shouldPassThroughRequestBody(info))
+	require.True(t, shouldPassThroughRequestBody(info))
 }
 
 func TestClaudeCodeFingerprintIgnoresGlobalPassthroughForCompatibleClientBodyMarker(t *testing.T) {
