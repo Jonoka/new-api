@@ -32,6 +32,10 @@ const extensionPageUrl = (moduleId, pagePath) => {
 const readModules = (res) => res?.data?.data?.modules || [];
 const readRoot = (res) => res?.data?.data?.root || 'data/modules';
 
+const pageShellStyle = {
+  padding: '64px 24px 24px',
+};
+
 export default function Extensions() {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
@@ -251,7 +255,7 @@ export default function Extensions() {
 
   if (!isRoot()) {
     return (
-      <div style={{ padding: 24 }}>
+      <div style={pageShellStyle}>
         <Card>
           <Empty description={t('只有 root 用户可以管理扩展模块')} />
         </Card>
@@ -260,13 +264,14 @@ export default function Extensions() {
   }
 
   return (
-    <div style={{ padding: 24 }}>
+    <div style={pageShellStyle}>
       <div
         style={{
           display: 'flex',
           justifyContent: 'space-between',
           gap: 16,
-          alignItems: 'flex-start',
+          alignItems: 'center',
+          flexWrap: 'wrap',
           marginBottom: 16,
         }}
       >
@@ -278,7 +283,7 @@ export default function Extensions() {
             {t('上传 zip 模块包，或把模块放入模块目录，刷新后即可启用，无需重启主程序。')}
           </Text>
         </div>
-        <Space>
+        <Space wrap>
           <input
             ref={fileInputRef}
             type='file'
