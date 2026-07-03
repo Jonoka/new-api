@@ -49,6 +49,45 @@ auto-register.zip
 
 上传后主程序会读取 `manifest.json`，并按 `manifest.id` 安装到 `data/modules/<module-id>`。
 
+## 制作轻量模块
+
+扩展模块默认按轻量 HTTP 模块设计。主程序已经提供登录态、角色过滤、侧边栏入口、iframe 嵌入、代理转发和用户上下文请求头，模块不需要重复实现这些能力。
+
+推荐原则：
+
+- 优先调用主程序已有 API，不在模块里复制用户、渠道、账单、权限等通用逻辑。
+- UI 优先使用原生 HTML/CSS/JS 或很小的依赖，不默认引入 React/Vite/Next 等完整工程。
+- 模块包只保留运行必需文件，不携带 `node_modules`、`dist`、`build`、日志、数据库和历史压缩包。
+- 高权限操作使用单独服务账号 Access Token，密钥放环境变量或外部配置，不写入 `manifest.json`。
+
+项目内提供了模块制作 skill：
+
+```text
+.agents/skills/newapi-extension-module-workflow/
+```
+
+创建新模块时可以参考其中的轻量 HTTP 模板：
+
+```text
+.agents/skills/newapi-extension-module-workflow/assets/http-module-template/
+```
+
+## 轻量化打包
+
+在仓库根目录执行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-extension-lite.ps1 -ModuleDir "examples/extensions/echo"
+```
+
+默认输出：
+
+```text
+artifacts/extensions/<module-id>-<version>.zip
+```
+
+这个 zip 可以直接在 **扩展模块 -> 模块管理** 里上传。脚本会把 `manifest.json` 放在 zip 根目录，并默认排除重型目录和临时文件。
+
 ## 热加载流程
 
 1. 上传 zip 模块包，或把模块目录放到 `data/modules/<module-id>`。

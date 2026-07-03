@@ -27,6 +27,7 @@ tiktoken_cache
 .cache
 plans
 worktrees/
+artifacts/
 .claude
 .cursor
 
