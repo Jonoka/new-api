@@ -474,6 +474,20 @@ func ApplyClaudeCodeFinalBodyFingerprint(info *relaycommon.RelayInfo, body []byt
 	if !shouldFinalizeClaudeCodeSyntheticFingerprint(info) {
 		return body, nil
 	}
+	return applyClaudeCodeBodyFingerprint(info, body)
+}
+
+// ApplyClaudeCodePassthroughBodyFingerprint adds the minimum Claude Code body
+// attribution needed by upstream Claude Code channels while preserving the rest
+// of the original pass-through request body.
+func ApplyClaudeCodePassthroughBodyFingerprint(info *relaycommon.RelayInfo, body []byte) ([]byte, error) {
+	if !shouldApplyClaudeCodePassthroughBodyFingerprint(info) {
+		return body, nil
+	}
+	return applyClaudeCodeBodyFingerprint(info, body)
+}
+
+func applyClaudeCodeBodyFingerprint(info *relaycommon.RelayInfo, body []byte) ([]byte, error) {
 	var request dto.ClaudeRequest
 	if err := common.Unmarshal(body, &request); err != nil {
 		return nil, err
@@ -487,6 +501,15 @@ func ApplyClaudeCodeFinalBodyFingerprint(info *relaycommon.RelayInfo, body []byt
 		return nil, err
 	}
 	return finalBody, nil
+}
+
+func shouldApplyClaudeCodePassthroughBodyFingerprint(info *relaycommon.RelayInfo) bool {
+	return info != nil &&
+		info.ChannelMeta != nil &&
+		info.ApiType == rootconstant.APITypeAnthropic &&
+		info.GetFinalRequestRelayFormat() == types.RelayFormatClaude &&
+		(info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled ||
+			info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled)
 }
 
 func shouldFinalizeClaudeCodeSyntheticFingerprint(info *relaycommon.RelayInfo) bool {

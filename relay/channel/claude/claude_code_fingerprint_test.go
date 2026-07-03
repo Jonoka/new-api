@@ -911,6 +911,39 @@ func TestApplyClaudeCodeFinalBodyFingerprintDoesNotForgeCCH(t *testing.T) {
 	requireClaudeCodeLegacyMetadata(t, finalReq.Metadata)
 }
 
+func TestApplyClaudeCodePassthroughBodyFingerprintAddsRootSystem(t *testing.T) {
+	t.Parallel()
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeTransportFingerprintEnabled: true,
+			},
+		},
+	}
+	body := []byte(`{
+		"model":"claude-opus-4-8",
+		"max_tokens":32000,
+		"messages":[{"role":"user","content":[{"type":"text","text":"123321"}]}],
+		"stream":true
+	}`)
+
+	finalBody, err := ApplyClaudeCodePassthroughBodyFingerprint(info, body)
+	require.NoError(t, err)
+
+	var finalReq dto.ClaudeRequest
+	require.NoError(t, common.Unmarshal(finalBody, &finalReq))
+	system := finalReq.ParseSystem()
+	require.Len(t, system, 2)
+	require.Contains(t, system[0].GetText(), "cc_version=2.8.2.dbd;")
+	require.Contains(t, system[0].GetText(), "cc_entrypoint=cli;")
+	require.NotContains(t, system[0].GetText(), "cch=")
+	require.Contains(t, system[1].GetText(), "Claude Code")
+	requireClaudeCodeLegacyMetadata(t, finalReq.Metadata)
+}
+
 func TestSetupRequestHeaderAddsClaudeCodeFingerprintHeaders(t *testing.T) {
 	t.Parallel()
 

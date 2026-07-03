@@ -93,17 +93,24 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 	var requestBody io.Reader
 
 	if passThroughRequestBody {
-		storage, err := common.GetBodyStorage(c)
+		body, size, closer, err := buildClaudeCodeAwarePassthroughBody(c, info)
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
 		if common.DebugEnabled {
-			if debugBytes, bErr := storage.Bytes(); bErr == nil {
+			if storage, bErr := common.GetBodyStorage(c); bErr == nil {
+				debugBytes, bErr := storage.Bytes()
+				if bErr != nil {
+					debugBytes = nil
+				}
 				logger.LogDebug(c, "requestBody: %s", debugBytes)
 			}
 		}
-		info.UpstreamRequestBodySize = storage.Size()
-		requestBody = common.ReaderOnly(storage)
+		if closer != nil {
+			defer closer.Close()
+		}
+		info.UpstreamRequestBodySize = size
+		requestBody = body
 	} else {
 		convertedRequest, err := adaptor.ConvertOpenAIRequest(c, info, request)
 		if err != nil {
