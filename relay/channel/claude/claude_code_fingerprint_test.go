@@ -563,7 +563,7 @@ func TestClaudeCodeFingerprintFinalOutboundRequestMatchesSub2APIRestrictions(t *
 	require.Contains(t, firstSystem["text"], "x-anthropic-billing-header")
 	require.Contains(t, firstSystem["text"], "cc_version=2.8.2.")
 	require.Contains(t, firstSystem["text"], "cc_entrypoint=cli;")
-	require.Regexp(t, regexp.MustCompile(`cch=[0-9a-f]{5};`), firstSystem["text"])
+	require.Contains(t, firstSystem["text"], "cch=8f434;")
 	require.NotContains(t, firstSystem["text"], "cch=00000;")
 
 	metadata, ok := body["metadata"].(map[string]interface{})
@@ -854,6 +854,55 @@ func TestApplyClaudeCodeFinalBodyFingerprintRewritesCompatibleClientBody(t *test
 	system := finalReq.ParseSystem()
 	require.Len(t, system, 2)
 	require.Contains(t, system[0].GetText(), "x-anthropic-billing-header")
+	require.Contains(t, system[0].GetText(), "cch=d87f7;")
+	require.Contains(t, system[1].GetText(), "Claude Code")
+	requireClaudeCodeLegacyMetadata(t, finalReq.Metadata)
+}
+
+func TestApplyClaudeCodeFinalBodyFingerprintUsesFirstUserTextForCCH(t *testing.T) {
+	t.Parallel()
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeFingerprintEnabled: true,
+			},
+		},
+	}
+	maxTokens := uint(32000)
+	stream := true
+	request := &dto.ClaudeRequest{
+		Model:     "claude-opus-4-8",
+		MaxTokens: &maxTokens,
+		Stream:    &stream,
+		Messages: []dto.ClaudeMessage{
+			{
+				Role: "user",
+				Content: []interface{}{
+					map[string]interface{}{
+						"type": "text",
+						"text": "123321",
+					},
+				},
+			},
+		},
+	}
+
+	bodyBytes, err := common.Marshal(request)
+	require.NoError(t, err)
+	finalBody, err := ApplyClaudeCodeFinalBodyFingerprint(info, bodyBytes)
+	require.NoError(t, err)
+
+	var finalReq dto.ClaudeRequest
+	require.NoError(t, common.Unmarshal(finalBody, &finalReq))
+	system := finalReq.ParseSystem()
+	require.Len(t, system, 2)
+	require.Contains(t, system[0].GetText(), "cc_version=2.8.2.dbd;")
+	require.Contains(t, system[0].GetText(), "cc_entrypoint=cli;")
+	require.Contains(t, system[0].GetText(), "cch=a3204;")
+	require.NotContains(t, system[0].GetText(), "cch=00000;")
 	require.Contains(t, system[1].GetText(), "Claude Code")
 	requireClaudeCodeLegacyMetadata(t, finalReq.Metadata)
 }

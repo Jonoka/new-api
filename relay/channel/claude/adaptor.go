@@ -22,7 +22,6 @@ import (
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/types"
 
-	"github.com/cespare/xxhash/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -41,7 +40,6 @@ const (
 	claudeCodeStainlessRetryCount      = "0"
 	claudeCodeStainlessTimeoutSecs     = "600"
 	billingFingerprintSalt             = "59cf53e54c78"
-	cchSeed                            = uint64(0x6E52736AC806831E)
 )
 
 var claudeCodeUserAgentPattern = regexp.MustCompile(`(?i)^claude-cli/\d+\.\d+\.\d+`)
@@ -432,6 +430,11 @@ func computeBillingFingerprint(request *dto.ClaudeRequest, version string) strin
 	return hex.EncodeToString(sum[:])[:3]
 }
 
+func computeBillingCCH(request *dto.ClaudeRequest) string {
+	sum := sha256.Sum256([]byte(extractFirstUserText(request)))
+	return hex.EncodeToString(sum[:])[:5]
+}
+
 // extractFirstUserText extracts the text content from the first user message.
 func extractFirstUserText(request *dto.ClaudeRequest) string {
 	if request == nil {
@@ -463,16 +466,14 @@ func extractFirstUserText(request *dto.ClaudeRequest) string {
 }
 
 // SignBillingHeaderCCH replaces the cch=00000 placeholder in the serialized body
-// with an xxHash64-based signature. Must be called after Marshal.
-func SignBillingHeaderCCH(body []byte) []byte {
+// with the Claude Code attestation token computed from the final request.
+func SignBillingHeaderCCH(body []byte, request *dto.ClaudeRequest) []byte {
 	placeholder := []byte("cch=00000;")
 	idx := bytes.Index(body, placeholder)
 	if idx < 0 {
 		return body
 	}
-	h := xxhash.NewWithSeed(cchSeed)
-	_, _ = h.Write(body)
-	cch := fmt.Sprintf("cch=%05x;", h.Sum64()&0xFFFFF)
+	cch := fmt.Sprintf("cch=%s;", computeBillingCCH(request))
 	result := make([]byte, len(body))
 	copy(result, body)
 	copy(result[idx:], []byte(cch))
@@ -497,7 +498,7 @@ func ApplyClaudeCodeFinalBodyFingerprint(info *relaycommon.RelayInfo, body []byt
 	if err != nil {
 		return nil, err
 	}
-	return SignBillingHeaderCCH(finalBody), nil
+	return SignBillingHeaderCCH(finalBody, &request), nil
 }
 
 func shouldFinalizeClaudeCodeSyntheticFingerprint(info *relaycommon.RelayInfo) bool {
