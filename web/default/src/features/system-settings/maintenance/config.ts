@@ -106,6 +106,7 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
     setting: true,
     subscription: true,
     invoice_admin: true,
+    extension_admin: true,
     game: true,
   },
   customItems: [],

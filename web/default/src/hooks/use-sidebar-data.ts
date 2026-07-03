@@ -16,12 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQuery } from '@tanstack/react-query'
 import {
   Activity,
   Box,
   Brush,
   CreditCard,
   ExternalLink,
+  Puzzle,
   Gamepad2,
   FileText,
   FlaskConical,
@@ -39,6 +41,7 @@ import {
   Wallet,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useAuthStore } from '@/stores/auth-store'
 import { getCanvasSettingsFromSidebarModules } from '@/lib/canvas-settings'
 import {
   getCustomNavIcon,
@@ -46,8 +49,10 @@ import {
   parseCustomNavItems,
 } from '@/lib/custom-nav'
 import { parseSidebarModulesFromStatus } from '@/lib/nav-modules'
+import { ROLE } from '@/lib/roles'
 import { useStatus } from '@/hooks/use-status'
 import { type SidebarData } from '@/components/layout/types'
+import { getExtensions } from '@/features/extensions/api'
 
 /**
  * Root navigation groups for the application sidebar.
@@ -58,6 +63,13 @@ import { type SidebarData } from '@/components/layout/types'
 export function useSidebarData(): SidebarData {
   const { t } = useTranslation()
   const { status } = useStatus()
+  const user = useAuthStore((state) => state.auth.user)
+  const { data: extensionData } = useQuery({
+    queryKey: ['extensions'],
+    queryFn: () => getExtensions(),
+    enabled: Boolean(user),
+    staleTime: 30_000,
+  })
   const sidebarModules = parseSidebarModulesFromStatus(
     status as Record<string, unknown> | null
   )
@@ -199,6 +211,16 @@ export function useSidebarData(): SidebarData {
             url: '/game-management',
             icon: Gamepad2,
           },
+          ...(user && user.role >= ROLE.SUPER_ADMIN
+            ? [
+                {
+                  title: t('Extensions'),
+                  url: '/extensions',
+                  configUrls: ['/extensions'],
+                  icon: Puzzle,
+                },
+              ]
+            : []),
           {
             title: t('System Settings'),
             url: '/system-settings/site',
@@ -224,6 +246,37 @@ export function useSidebarData(): SidebarData {
       configUrls: [getSidebarCustomModuleKey(item.id)],
     })
   })
+
+  extensionData?.modules
+    ?.filter((module) => module.enabled)
+    .flatMap((module) =>
+      (module.ui?.nav ?? []).map((navItem, index) => ({
+        module,
+        navItem,
+        index,
+      }))
+    )
+    .sort((a, b) => {
+      const left = a.navItem.order ?? a.index
+      const right = b.navItem.order ?? b.index
+      if (left !== right) return left - right
+      return a.module.id.localeCompare(b.module.id)
+    })
+    .forEach(({ module, navItem }) => {
+      const section =
+        navItem.section === 'console' ? 'general' : navItem.section
+      const group =
+        sidebarData.navGroups.find((navGroup) => navGroup.id === section) ??
+        sidebarData.navGroups.find((navGroup) => navGroup.id === 'admin')
+      if (!group) return
+
+      group.items.push({
+        title: navItem.title,
+        url: `/extensions/${module.id}/${navItem.page}`,
+        icon: getCustomNavIcon(navItem.icon) ?? Puzzle,
+        configUrls: [`extension:${module.id}:${navItem.page}`],
+      })
+    })
 
   return sidebarData
 }

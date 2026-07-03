@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/controller"
+	"github.com/QuantumNous/new-api/extension"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
@@ -339,6 +340,12 @@ func InitResources() error {
 	if err != nil {
 		common.SysError("failed to load custom OAuth providers: " + err.Error())
 		// Don't return error, custom OAuth is not critical
+	}
+
+	if err = extension.Init(); err != nil {
+		common.SysError("failed to initialize extensions: " + err.Error())
+	} else {
+		common.SysLog("extensions initialized from: " + extension.DefaultManager.RootDir())
 	}
 
 	return nil

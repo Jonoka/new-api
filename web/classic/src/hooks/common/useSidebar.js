@@ -59,6 +59,7 @@ export const DEFAULT_ADMIN_CONFIG = {
     game_management: true,
     invoice_admin: true,
     affiliate_admin: true,
+    extension_admin: true,
     setting: true,
   },
 };

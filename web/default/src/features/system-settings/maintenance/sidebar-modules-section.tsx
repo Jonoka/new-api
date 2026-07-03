@@ -187,6 +187,10 @@ export function SidebarModulesSection({
         title: t('Invoice Management'),
         description: t('Review invoice requests and issued invoice files.'),
       },
+      extension_admin: {
+        title: t('Extensions'),
+        description: t('Manage extension modules and enable or disable them.'),
+      },
       game: {
         title: t('Game Management'),
         description: t('Create prediction rounds and settle player rewards.'),

@@ -35,6 +35,7 @@ import {
   Link as LinkIcon,
   ListTodo,
   MessageSquare,
+  Puzzle,
   Radio,
   Settings,
   Sparkles,
@@ -95,6 +96,7 @@ const CUSTOM_NAV_ICONS = {
   Link: LinkIcon,
   ListTodo,
   MessageSquare,
+  Puzzle,
   Radio,
   Settings,
   Sparkles,
@@ -127,7 +129,9 @@ function normalizeId(value: unknown, fallback: string): string {
   return normalized || fallback
 }
 
-function normalizeUrl(value: unknown): { url: string; external: boolean } | null {
+function normalizeUrl(
+  value: unknown
+): { url: string; external: boolean } | null {
   if (typeof value !== 'string') return null
   const raw = value.trim()
   if (!raw) return null

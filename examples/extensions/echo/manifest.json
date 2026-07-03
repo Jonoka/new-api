@@ -1,0 +1,33 @@
+{
+  "id": "echo",
+  "name": "Echo Extension",
+  "version": "0.1.0",
+  "description": "Minimal extension example for testing proxy and embedded UI.",
+  "runtime": {
+    "type": "http",
+    "base_url": "http://127.0.0.1:39001",
+    "health_path": "/health"
+  },
+  "ui": {
+    "nav": [
+      {
+        "title": "Echo",
+        "page": "index",
+        "icon": "Puzzle",
+        "section": "admin",
+        "order": 100
+      }
+    ],
+    "pages": [
+      {
+        "key": "index",
+        "title": "Echo",
+        "path": "/ui",
+        "embed": true
+      }
+    ]
+  },
+  "permissions": {
+    "roles": ["root"]
+  }
+}

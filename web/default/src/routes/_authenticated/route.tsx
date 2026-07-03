@@ -35,6 +35,7 @@ const ADMIN_ROUTE_PREFIXES = [
   '/subscriptions',
   '/game-management',
   '/invoice-management',
+  '/extensions',
 ]
 
 function isAdminRoute(pathname: string): boolean {

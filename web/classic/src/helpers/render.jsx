@@ -84,6 +84,7 @@ import {
   CalendarClock,
   Trophy,
   ReceiptText,
+  Puzzle,
 } from 'lucide-react';
 import {
   SiAtlassian,
@@ -167,7 +168,12 @@ export function getLucideIcon(key, selected = false) {
       return <CalendarClock {...commonProps} color={iconColor} />;
     case 'setting':
       return <Settings {...commonProps} color={iconColor} />;
+    case 'extension_admin':
+      return <Puzzle {...commonProps} color={iconColor} />;
     default:
+      if (String(key).startsWith('extension:')) {
+        return <Puzzle {...commonProps} color={iconColor} />;
+      }
       return <CircleUser {...commonProps} color={iconColor} />;
   }
 }

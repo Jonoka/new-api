@@ -113,12 +113,13 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 
 	// 控制台区域 - 所有用户都可以访问
 	defaultConfig["console"] = map[string]any{
-		"enabled":    true,
-		"detail":     true,
-		"token":      true,
-		"log":        true,
-		"midjourney": true,
-		"task":       true,
+		"enabled":     true,
+		"detail":      true,
+		"token":       true,
+		"log":         true,
+		"midjourney":  true,
+		"task":        true,
+		"game_center": true,
 	}
 
 	// 个人中心区域 - 所有用户都可以访问
@@ -126,6 +127,7 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 		"enabled":   true,
 		"topup":     true,
 		"affiliate": true,
+		"invoice":   true,
 		"personal":  true,
 	}
 
@@ -136,9 +138,14 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 			"enabled":         true,
 			"channel":         true,
 			"models":          true,
+			"deployment":      true,
 			"redemption":      true,
+			"subscription":    true,
+			"game_management": true,
 			"user":            true,
+			"invoice_admin":   true,
 			"affiliate_admin": false,
+			"extension_admin": false,
 			"setting":         false, // 管理员不能访问系统设置
 		}
 	} else if userRole == common.RoleRootUser {
@@ -147,9 +154,14 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 			"enabled":         true,
 			"channel":         true,
 			"models":          true,
+			"deployment":      true,
 			"redemption":      true,
+			"subscription":    true,
+			"game_management": true,
 			"user":            true,
+			"invoice_admin":   true,
 			"affiliate_admin": true,
+			"extension_admin": true,
 			"setting":         true,
 		}
 	}

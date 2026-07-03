@@ -25,7 +25,7 @@ import { ChevronLeft } from 'lucide-react';
 import { useSidebarCollapsed } from '../../hooks/common/useSidebarCollapsed';
 import { useSidebar } from '../../hooks/common/useSidebar';
 import { useMinimumLoadingTime } from '../../hooks/common/useMinimumLoadingTime';
-import { isAdmin, isRoot, showError } from '../../helpers';
+import { API, isAdmin, isRoot, showError } from '../../helpers';
 import SkeletonWrapper from './components/SkeletonWrapper';
 
 import { Nav, Divider, Button } from '@douyinfe/semi-ui';
@@ -53,10 +53,13 @@ const routerMap = {
   models: '/console/models',
   deployment: '/console/deployment',
   game_management: '/console/game-management',
+  extension_admin: '/console/extensions',
   playground: '/console/playground',
   canvas: '/console/canvas',
   personal: '/console/personal',
 };
+
+export const CLASSIC_EXTENSION_REFRESH_EVENT = 'classic-extension-refresh';
 
 const SiderBar = ({ onNavigate = () => {} }) => {
   const { t } = useTranslation();
@@ -71,6 +74,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
 
   const [selectedKeys, setSelectedKeys] = useState(['home']);
   const [chatItems, setChatItems] = useState([]);
+  const [extensionItems, setExtensionItems] = useState([]);
   const [openedKeys, setOpenedKeys] = useState([]);
   const location = useLocation();
   const [routerMapState, setRouterMapState] = useState(routerMap);
@@ -229,6 +233,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         to: '/setting',
         className: isRoot() ? '' : 'tableHiddle',
       },
+      {
+        text: t('扩展模块'),
+        itemKey: 'extension_admin',
+        to: '/extensions',
+        className: isRoot() ? '' : 'tableHiddle',
+      },
     ];
 
     // 根据配置过滤项目
@@ -239,6 +249,25 @@ const SiderBar = ({ onNavigate = () => {} }) => {
 
     return filteredItems;
   }, [isAdmin(), isRoot(), t, isModuleVisible]);
+
+  const extensionMenuItems = useMemo(() => {
+    return extensionItems.map((item) => ({
+      ...item,
+      text: item.title,
+      itemKey: item.itemKey,
+      to: item.to,
+    }));
+  }, [extensionItems]);
+
+  const consoleExtensionMenuItems = useMemo(
+    () => extensionMenuItems.filter((item) => item.section === 'console'),
+    [extensionMenuItems],
+  );
+
+  const adminExtensionMenuItems = useMemo(
+    () => extensionMenuItems.filter((item) => item.section !== 'console'),
+    [extensionMenuItems],
+  );
 
   const chatMenuItems = useMemo(() => {
     const items = [
@@ -320,6 +349,53 @@ const SiderBar = ({ onNavigate = () => {} }) => {
     }
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const loadExtensions = async () => {
+      try {
+        const res = await API.get('/api/extensions/');
+        if (!res?.data?.success) return;
+        const modules = res.data.data?.modules || [];
+        const items = modules
+          .filter((module) => module.enabled)
+          .flatMap((module) =>
+            (module.ui?.nav || []).map((navItem, index) => ({
+              title: navItem.title,
+              itemKey: `extension:${module.id}:${navItem.page}`,
+              to: `/console/extensions/${encodeURIComponent(module.id)}/${encodeURIComponent(navItem.page)}`,
+              section:
+                navItem.section === 'console'
+                  ? 'console'
+                  : navItem.section || 'admin',
+              order: navItem.order ?? index,
+              moduleId: module.id,
+            })),
+          )
+          .sort((a, b) => {
+            if (a.order !== b.order) return a.order - b.order;
+            return a.moduleId.localeCompare(b.moduleId);
+          });
+        if (!cancelled) {
+          setExtensionItems(items);
+        }
+      } catch {
+        if (!cancelled) {
+          setExtensionItems([]);
+        }
+      }
+    };
+
+    loadExtensions();
+    window.addEventListener(CLASSIC_EXTENSION_REFRESH_EVENT, loadExtensions);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(
+        CLASSIC_EXTENSION_REFRESH_EVENT,
+        loadExtensions,
+      );
+    };
+  }, []);
+
   // 根据当前路径设置选中的菜单项
   useEffect(() => {
     const currentPath = location.pathname;
@@ -337,11 +413,16 @@ const SiderBar = ({ onNavigate = () => {} }) => {
       }
     }
 
+    if (!matchingKey && currentPath.startsWith('/console/extensions/')) {
+      matchingKey = extensionMenuItems.find((item) => item.to === currentPath)
+        ?.itemKey;
+    }
+
     // 如果找到匹配的键，更新选中的键
     if (matchingKey) {
       setSelectedKeys([matchingKey]);
     }
-  }, [location.pathname, routerMapState]);
+  }, [location.pathname, routerMapState, extensionMenuItems]);
 
   // 监控折叠状态变化以更新 body class
   useEffect(() => {
@@ -460,7 +541,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           selectedStyle='sidebar-nav-item-selected'
           renderWrapper={({ itemElement, props }) => {
             const to =
-              routerMapState[props.itemKey] || routerMap[props.itemKey];
+              routerMapState[props.itemKey] ||
+              routerMap[props.itemKey] ||
+              [...extensionMenuItems].find(
+                (item) => item.itemKey === props.itemKey,
+              )?.to;
 
             // 如果没有路由，直接返回元素
             if (!to) return itemElement;
@@ -499,7 +584,9 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           )}
 
           {/* 控制台区域 */}
-          {hasSectionVisibleModules('console') && (
+          {isModuleVisible('console') &&
+            (hasSectionVisibleModules('console') ||
+              consoleExtensionMenuItems.length > 0) && (
             <>
               <Divider className='sidebar-divider' />
               <div>
@@ -507,6 +594,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
                   <div className='sidebar-group-label'>{t('控制台')}</div>
                 )}
                 {workspaceItems.map((item) => renderNavItem(item))}
+                {consoleExtensionMenuItems.map((item) => renderNavItem(item))}
               </div>
             </>
           )}
@@ -525,7 +613,10 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           )}
 
           {/* 管理员区域 - 只在管理员时显示且配置允许时显示 */}
-          {isAdmin() && hasSectionVisibleModules('admin') && (
+          {isAdmin() &&
+            isModuleVisible('admin') &&
+            (hasSectionVisibleModules('admin') ||
+              adminExtensionMenuItems.length > 0) && (
             <>
               <Divider className='sidebar-divider' />
               <div>
@@ -533,6 +624,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
                   <div className='sidebar-group-label'>{t('管理员')}</div>
                 )}
                 {adminItems.map((item) => renderNavItem(item))}
+                {adminExtensionMenuItems.map((item) => renderNavItem(item))}
               </div>
             </>
           )}

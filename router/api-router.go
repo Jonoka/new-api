@@ -39,6 +39,20 @@ func SetApiRouter(router *gin.Engine) {
 			perfMetricsRoute.GET("/summary", controller.GetPerfMetricsSummary)
 			perfMetricsRoute.GET("", controller.GetPerfMetrics)
 		}
+		extensionRoute := apiRouter.Group("/extensions")
+		extensionRoute.Use(middleware.UserSessionAuth())
+		{
+			extensionRoute.GET("/", controller.ListExtensions)
+			extensionRoute.GET("/host/me", controller.GetExtensionHostContext)
+			extensionRoute.Any("/:id/proxy/*path", controller.ProxyExtension)
+		}
+		extensionAdminRoute := apiRouter.Group("/extension-admin")
+		extensionAdminRoute.Use(middleware.RootAuth())
+		{
+			extensionAdminRoute.GET("/", controller.ListExtensions)
+			extensionAdminRoute.POST("/refresh", controller.RefreshExtensions)
+			extensionAdminRoute.PUT("/:id/enabled", controller.SetExtensionEnabled)
+		}
 		apiRouter.GET("/rankings", middleware.HeaderNavModuleAuth("rankings"), controller.GetRankings)
 		apiRouter.GET("/verification", middleware.EmailVerificationRateLimit(), middleware.TurnstileCheck(), controller.SendEmailVerification)
 		apiRouter.GET("/reset_password", middleware.CriticalRateLimit(), middleware.TurnstileCheck(), controller.SendPasswordResetEmail)

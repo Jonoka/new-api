@@ -63,6 +63,7 @@ func getSidebarModulesAdminStatusValue(raw string) string {
 			"enabled":   true,
 			"topup":     true,
 			"affiliate": true,
+			"invoice":   true,
 			"personal":  true,
 		},
 		"admin": map[string]any{
@@ -74,7 +75,9 @@ func getSidebarModulesAdminStatusValue(raw string) string {
 			"user":            true,
 			"subscription":    true,
 			"game_management": true,
+			"invoice_admin":   true,
 			"affiliate_admin": true,
+			"extension_admin": true,
 			"setting":         true,
 		},
 	}

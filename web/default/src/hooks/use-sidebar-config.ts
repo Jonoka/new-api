@@ -81,6 +81,7 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     setting: true,
     subscription: true,
     invoice_admin: true,
+    extension_admin: true,
     game: true,
   },
 }
@@ -138,6 +139,7 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/redemption-codes': { section: 'admin', module: 'redemption' },
   '/subscriptions': { section: 'admin', module: 'subscription' },
   '/invoice-management': { section: 'admin', module: 'invoice_admin' },
+  '/extensions': { section: 'admin', module: 'extension_admin' },
   '/system-settings/billing/affiliate': {
     section: 'admin',
     module: 'affiliate_admin',

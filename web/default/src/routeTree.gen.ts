@@ -50,6 +50,7 @@ import { Route as AuthenticatedInvoicesIndexRouteImport } from './routes/_authen
 import { Route as AuthenticatedInvoiceManagementIndexRouteImport } from './routes/_authenticated/invoice-management/index'
 import { Route as AuthenticatedGameManagementIndexRouteImport } from './routes/_authenticated/game-management/index'
 import { Route as AuthenticatedGameCenterIndexRouteImport } from './routes/_authenticated/game-center/index'
+import { Route as AuthenticatedExtensionsIndexRouteImport } from './routes/_authenticated/extensions/index'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
 import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
 import { Route as AuthenticatedCanvasIndexRouteImport } from './routes/_authenticated/canvas/index'
@@ -76,6 +77,7 @@ import { Route as AuthenticatedSystemSettingsContentSectionRouteImport } from '.
 import { Route as AuthenticatedSystemSettingsBillingSectionRouteImport } from './routes/_authenticated/system-settings/billing/$section'
 import { Route as AuthenticatedSystemSettingsAuthSectionRouteImport } from './routes/_authenticated/system-settings/auth/$section'
 import { Route as AuthenticatedGameCenterPredictionPredictionIdRouteImport } from './routes/_authenticated/game-center/prediction/$predictionId'
+import { Route as AuthenticatedExtensionsModuleIdPageKeyIndexRouteImport } from './routes/_authenticated/extensions/$moduleId/$pageKey/index'
 
 const UserAgreementRoute = UserAgreementRouteImport.update({
   id: '/user-agreement',
@@ -293,6 +295,12 @@ const AuthenticatedGameCenterIndexRoute =
     path: '/game-center/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedExtensionsIndexRoute =
+  AuthenticatedExtensionsIndexRouteImport.update({
+    id: '/extensions/',
+    path: '/extensions/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedDashboardIndexRoute =
   AuthenticatedDashboardIndexRouteImport.update({
     id: '/dashboard/',
@@ -447,6 +455,12 @@ const AuthenticatedGameCenterPredictionPredictionIdRoute =
     path: '/game-center/prediction/$predictionId',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedExtensionsModuleIdPageKeyIndexRoute =
+  AuthenticatedExtensionsModuleIdPageKeyIndexRouteImport.update({
+    id: '/extensions/$moduleId/$pageKey/',
+    path: '/extensions/$moduleId/$pageKey/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -483,6 +497,7 @@ export interface FileRoutesByFullPath {
   '/canvas/': typeof AuthenticatedCanvasIndexRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
+  '/extensions/': typeof AuthenticatedExtensionsIndexRoute
   '/game-center/': typeof AuthenticatedGameCenterIndexRoute
   '/game-management/': typeof AuthenticatedGameManagementIndexRoute
   '/invoice-management/': typeof AuthenticatedInvoiceManagementIndexRoute
@@ -514,6 +529,7 @@ export interface FileRoutesByFullPath {
   '/system-settings/operations/': typeof AuthenticatedSystemSettingsOperationsIndexRoute
   '/system-settings/security/': typeof AuthenticatedSystemSettingsSecurityIndexRoute
   '/system-settings/site/': typeof AuthenticatedSystemSettingsSiteIndexRoute
+  '/extensions/$moduleId/$pageKey/': typeof AuthenticatedExtensionsModuleIdPageKeyIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -549,6 +565,7 @@ export interface FileRoutesByTo {
   '/canvas': typeof AuthenticatedCanvasIndexRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
+  '/extensions': typeof AuthenticatedExtensionsIndexRoute
   '/game-center': typeof AuthenticatedGameCenterIndexRoute
   '/game-management': typeof AuthenticatedGameManagementIndexRoute
   '/invoice-management': typeof AuthenticatedInvoiceManagementIndexRoute
@@ -580,6 +597,7 @@ export interface FileRoutesByTo {
   '/system-settings/operations': typeof AuthenticatedSystemSettingsOperationsIndexRoute
   '/system-settings/security': typeof AuthenticatedSystemSettingsSecurityIndexRoute
   '/system-settings/site': typeof AuthenticatedSystemSettingsSiteIndexRoute
+  '/extensions/$moduleId/$pageKey': typeof AuthenticatedExtensionsModuleIdPageKeyIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -619,6 +637,7 @@ export interface FileRoutesById {
   '/_authenticated/canvas/': typeof AuthenticatedCanvasIndexRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
+  '/_authenticated/extensions/': typeof AuthenticatedExtensionsIndexRoute
   '/_authenticated/game-center/': typeof AuthenticatedGameCenterIndexRoute
   '/_authenticated/game-management/': typeof AuthenticatedGameManagementIndexRoute
   '/_authenticated/invoice-management/': typeof AuthenticatedInvoiceManagementIndexRoute
@@ -650,6 +669,7 @@ export interface FileRoutesById {
   '/_authenticated/system-settings/operations/': typeof AuthenticatedSystemSettingsOperationsIndexRoute
   '/_authenticated/system-settings/security/': typeof AuthenticatedSystemSettingsSecurityIndexRoute
   '/_authenticated/system-settings/site/': typeof AuthenticatedSystemSettingsSiteIndexRoute
+  '/_authenticated/extensions/$moduleId/$pageKey/': typeof AuthenticatedExtensionsModuleIdPageKeyIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -688,6 +708,7 @@ export interface FileRouteTypes {
     | '/canvas/'
     | '/channels/'
     | '/dashboard/'
+    | '/extensions/'
     | '/game-center/'
     | '/game-management/'
     | '/invoice-management/'
@@ -719,6 +740,7 @@ export interface FileRouteTypes {
     | '/system-settings/operations/'
     | '/system-settings/security/'
     | '/system-settings/site/'
+    | '/extensions/$moduleId/$pageKey/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -754,6 +776,7 @@ export interface FileRouteTypes {
     | '/canvas'
     | '/channels'
     | '/dashboard'
+    | '/extensions'
     | '/game-center'
     | '/game-management'
     | '/invoice-management'
@@ -785,6 +808,7 @@ export interface FileRouteTypes {
     | '/system-settings/operations'
     | '/system-settings/security'
     | '/system-settings/site'
+    | '/extensions/$moduleId/$pageKey'
   id:
     | '__root__'
     | '/'
@@ -823,6 +847,7 @@ export interface FileRouteTypes {
     | '/_authenticated/canvas/'
     | '/_authenticated/channels/'
     | '/_authenticated/dashboard/'
+    | '/_authenticated/extensions/'
     | '/_authenticated/game-center/'
     | '/_authenticated/game-management/'
     | '/_authenticated/invoice-management/'
@@ -854,6 +879,7 @@ export interface FileRouteTypes {
     | '/_authenticated/system-settings/operations/'
     | '/_authenticated/system-settings/security/'
     | '/_authenticated/system-settings/site/'
+    | '/_authenticated/extensions/$moduleId/$pageKey/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -1166,6 +1192,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedGameCenterIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/extensions/': {
+      id: '/_authenticated/extensions/'
+      path: '/extensions'
+      fullPath: '/extensions/'
+      preLoaderRoute: typeof AuthenticatedExtensionsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/dashboard/': {
       id: '/_authenticated/dashboard/'
       path: '/dashboard'
@@ -1348,6 +1381,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedGameCenterPredictionPredictionIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/extensions/$moduleId/$pageKey/': {
+      id: '/_authenticated/extensions/$moduleId/$pageKey/'
+      path: '/extensions/$moduleId/$pageKey'
+      fullPath: '/extensions/$moduleId/$pageKey/'
+      preLoaderRoute: typeof AuthenticatedExtensionsModuleIdPageKeyIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
   }
 }
 
@@ -1449,6 +1489,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedCanvasIndexRoute: typeof AuthenticatedCanvasIndexRoute
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
+  AuthenticatedExtensionsIndexRoute: typeof AuthenticatedExtensionsIndexRoute
   AuthenticatedGameCenterIndexRoute: typeof AuthenticatedGameCenterIndexRoute
   AuthenticatedGameManagementIndexRoute: typeof AuthenticatedGameManagementIndexRoute
   AuthenticatedInvoiceManagementIndexRoute: typeof AuthenticatedInvoiceManagementIndexRoute
@@ -1463,6 +1504,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedUsersIndexRoute: typeof AuthenticatedUsersIndexRoute
   AuthenticatedWalletIndexRoute: typeof AuthenticatedWalletIndexRoute
   AuthenticatedGameCenterPredictionPredictionIdRoute: typeof AuthenticatedGameCenterPredictionPredictionIdRoute
+  AuthenticatedExtensionsModuleIdPageKeyIndexRoute: typeof AuthenticatedExtensionsModuleIdPageKeyIndexRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
@@ -1478,6 +1520,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedCanvasIndexRoute: AuthenticatedCanvasIndexRoute,
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
+  AuthenticatedExtensionsIndexRoute: AuthenticatedExtensionsIndexRoute,
   AuthenticatedGameCenterIndexRoute: AuthenticatedGameCenterIndexRoute,
   AuthenticatedGameManagementIndexRoute: AuthenticatedGameManagementIndexRoute,
   AuthenticatedInvoiceManagementIndexRoute:
@@ -1495,6 +1538,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedWalletIndexRoute: AuthenticatedWalletIndexRoute,
   AuthenticatedGameCenterPredictionPredictionIdRoute:
     AuthenticatedGameCenterPredictionPredictionIdRoute,
+  AuthenticatedExtensionsModuleIdPageKeyIndexRoute:
+    AuthenticatedExtensionsModuleIdPageKeyIndexRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =

@@ -51,6 +51,7 @@ import Canvas from './pages/Canvas';
 import Subscription from './pages/Subscription';
 import GameCenter from './pages/GameCenter';
 import GameManagement from './pages/GameManagement';
+import Extensions, { ExtensionModulePage } from './pages/Extensions';
 import OAuth2Callback from './components/auth/OAuth2Callback';
 import PersonalSetting from './components/settings/PersonalSetting';
 import Setup from './pages/Setup';
@@ -151,6 +152,22 @@ function App() {
             <AdminRoute>
               <GameManagement />
             </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/extensions'
+          element={
+            <RootRoute>
+              <Extensions />
+            </RootRoute>
+          }
+        />
+        <Route
+          path='/console/extensions/:moduleId/:pageKey'
+          element={
+            <PrivateRoute>
+              <ExtensionModulePage />
+            </PrivateRoute>
           }
         />
         <Route

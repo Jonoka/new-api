@@ -109,9 +109,12 @@ export default function SettingsSidebarModulesUser() {
         models: isSidebarModuleAllowed('admin', 'models'),
         deployment: isSidebarModuleAllowed('admin', 'deployment'),
         redemption: isSidebarModuleAllowed('admin', 'redemption'),
+        subscription: isSidebarModuleAllowed('admin', 'subscription'),
         game_management: isSidebarModuleAllowed('admin', 'game_management'),
         user: isSidebarModuleAllowed('admin', 'user'),
+        invoice_admin: isSidebarModuleAllowed('admin', 'invoice_admin'),
         affiliate_admin: isSidebarModuleAllowed('admin', 'affiliate_admin'),
+        extension_admin: isSidebarModuleAllowed('admin', 'extension_admin'),
         setting: isSidebarModuleAllowed('admin', 'setting'),
       };
     }
@@ -370,15 +373,30 @@ export default function SettingsSidebarModulesUser() {
           description: t('兑换码和优惠码管理'),
         },
         {
+          key: 'subscription',
+          title: t('订阅管理'),
+          description: t('订阅套餐管理'),
+        },
+        {
           key: 'game_management',
           title: t('游戏管理'),
           description: t('预测局创建与结算'),
         },
         { key: 'user', title: t('用户管理'), description: t('用户账户管理') },
         {
+          key: 'invoice_admin',
+          title: t('发票管理'),
+          description: t('审核和处理发票工单'),
+        },
+        {
           key: 'affiliate_admin',
           title: t('返佣分成设置'),
           description: t('返佣配置与提现审核'),
+        },
+        {
+          key: 'extension_admin',
+          title: t('扩展模块'),
+          description: t('扩展模块管理与启停'),
         },
         {
           key: 'setting',

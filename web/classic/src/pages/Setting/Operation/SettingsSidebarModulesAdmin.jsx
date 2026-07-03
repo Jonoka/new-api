@@ -74,6 +74,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       game_management: true,
       invoice_admin: true,
       affiliate_admin: true,
+      extension_admin: true,
       setting: true,
     },
   });
@@ -142,6 +143,7 @@ export default function SettingsSidebarModulesAdmin(props) {
         game_management: true,
         invoice_admin: true,
         affiliate_admin: true,
+        extension_admin: true,
         setting: true,
       },
     };
@@ -221,6 +223,7 @@ export default function SettingsSidebarModulesAdmin(props) {
             game_management: true,
             invoice_admin: true,
             affiliate_admin: true,
+            extension_admin: true,
             setting: true,
           },
         };
@@ -330,6 +333,11 @@ export default function SettingsSidebarModulesAdmin(props) {
           key: 'affiliate_admin',
           title: t('返佣分成设置'),
           description: t('返佣配置与提现审核'),
+        },
+        {
+          key: 'extension_admin',
+          title: t('扩展模块'),
+          description: t('扩展模块管理与启停'),
         },
         {
           key: 'setting',
