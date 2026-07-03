@@ -949,7 +949,7 @@ func TestSetupRequestHeaderAddsClaudeCodeFingerprintHeaders(t *testing.T) {
 	require.Equal(t, claudeCodeAnthropicBeta, headers.Get("anthropic-beta"))
 }
 
-func TestSetupRequestHeaderAddsClaudeCodeFingerprintHeadersWhenTransportFingerprintEnabled(t *testing.T) {
+func TestSetupRequestHeaderDoesNotAddClaudeCodeFingerprintHeadersWhenTransportFingerprintEnabled(t *testing.T) {
 	t.Parallel()
 
 	ctx := newClaudeFingerprintTestContext()
@@ -970,15 +970,21 @@ func TestSetupRequestHeaderAddsClaudeCodeFingerprintHeadersWhenTransportFingerpr
 	require.NoError(t, err)
 
 	require.Equal(t, "sk-test", headers.Get("x-api-key"))
-	require.Equal(t, "Bearer sk-test", headers.Get("Authorization"))
-	require.Regexp(t, regexp.MustCompile(`(?i)^claude-cli/\d+\.\d+\.\d+ \(external, cli\)$`), headers.Get("User-Agent"))
-	require.Equal(t, "cli", headers.Get("X-App"))
 	require.Equal(t, "2023-06-01", headers.Get("anthropic-version"))
-	require.Equal(t, "true", headers.Get("anthropic-dangerous-direct-browser-access"))
-	require.Contains(t, headers.Get("anthropic-beta"), "claude-code-20250219")
-	require.Contains(t, headers.Get("anthropic-beta"), "oauth-2025-04-20")
-	require.Contains(t, headers.Get("anthropic-beta"), "extended-cache-ttl-2025-04-11")
-	require.Contains(t, headers.Get("anthropic-beta"), "fine-grained-tool-streaming-2025-05-14")
+	require.Empty(t, headers.Get("Authorization"))
+	require.Empty(t, headers.Get("User-Agent"))
+	require.Empty(t, headers.Get("X-App"))
+	require.Empty(t, headers.Get("anthropic-dangerous-direct-browser-access"))
+	require.Empty(t, headers.Get("anthropic-beta"))
+	require.Empty(t, headers.Get("X-Stainless-Lang"))
+	require.Empty(t, headers.Get("X-Stainless-Package-Version"))
+	require.Empty(t, headers.Get("X-Stainless-OS"))
+	require.Empty(t, headers.Get("X-Stainless-Arch"))
+	require.Empty(t, headers.Get("X-Stainless-Runtime"))
+	require.Empty(t, headers.Get("X-Stainless-Runtime-Version"))
+	require.Empty(t, headers.Get("X-Stainless-Retry-Count"))
+	require.Empty(t, headers.Get("X-Stainless-Timeout"))
+	require.Empty(t, headers.Get("x-client-request-id"))
 }
 
 func TestSetupRequestHeaderPassesThroughRealClaudeCodeHeadersWithFingerprintBodyPassThrough(t *testing.T) {

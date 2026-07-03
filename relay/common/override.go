@@ -54,8 +54,7 @@ func IsClaudeCodeFingerprintEnabled(info *RelayInfo) bool {
 	return info != nil &&
 		info.ChannelMeta != nil &&
 		info.ApiType == rootconstant.APITypeAnthropic &&
-		(info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled ||
-			info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled)
+		info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled
 }
 
 func IsClaudeCodeProtectedHeader(name string) bool {

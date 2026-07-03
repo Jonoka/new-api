@@ -478,6 +478,44 @@ func TestSanitizeClaudeCodeHeadersKeepsSyntheticFingerprintWhenEnabled(t *testin
 	require.Equal(t, "0.94.0", upstreamReq.Header.Get("X-Stainless-Package-Version"))
 }
 
+func TestSanitizeClaudeCodeHeadersRemovesMarkersWhenOnlyTransportFingerprintEnabled(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Set("User-Agent", "CherryStudio/1.0")
+	ctx.Request.Header.Set("X-App", "browser")
+
+	upstreamReq := httptest.NewRequest(http.MethodPost, "https://example.com/v1/messages", nil)
+	upstreamReq.Header.Set("anthropic-beta", "claude-code-20250219,context-1m-2025-08-07")
+	upstreamReq.Header.Set("User-Agent", "claude-cli/2.1.169 (external, cli)")
+	upstreamReq.Header.Set("X-App", "cli")
+	upstreamReq.Header.Set("Anthropic-Dangerous-Direct-Browser-Access", "true")
+	upstreamReq.Header.Set("X-Stainless-Lang", "js")
+	upstreamReq.Header.Set("X-Stainless-Package-Version", "0.94.0")
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeTransportFingerprintEnabled: true,
+			},
+		},
+	}
+
+	sanitizeClaudeCodeHeadersForCompatibleClient(ctx, upstreamReq, info)
+
+	require.Equal(t, "context-1m-2025-08-07", upstreamReq.Header.Get("anthropic-beta"))
+	require.Empty(t, upstreamReq.Header.Get("User-Agent"))
+	require.Empty(t, upstreamReq.Header.Get("X-App"))
+	require.Empty(t, upstreamReq.Header.Get("Anthropic-Dangerous-Direct-Browser-Access"))
+	require.Empty(t, upstreamReq.Header.Get("X-Stainless-Lang"))
+	require.Empty(t, upstreamReq.Header.Get("X-Stainless-Package-Version"))
+}
+
 func TestSanitizeClaudeCodeHeadersKeepsRealClaudeCodeRequest(t *testing.T) {
 	t.Parallel()
 

@@ -167,9 +167,7 @@ func CommonClaudeHeadersOperation(c *gin.Context, req *http.Header, info *relayc
 }
 
 func shouldUseClaudeCodeFingerprint(info *relaycommon.RelayInfo) bool {
-	return info != nil &&
-		(info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled ||
-			info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled)
+	return shouldUseClaudeCodeBodyFingerprint(info)
 }
 
 func shouldUseClaudeCodeBodyFingerprint(info *relaycommon.RelayInfo) bool {
