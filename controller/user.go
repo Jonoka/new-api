@@ -925,6 +925,9 @@ func ManageUser(c *gin.Context) {
 		}
 		// 删除用户后，强制清理 Redis 中所有该用户令牌的缓存，
 		// 避免已缓存的令牌在 TTL 过期前仍能通过 TokenAuth 校验。
+		if err := model.InvalidateUserCache(user.Id); err != nil {
+			common.SysLog(fmt.Sprintf("failed to invalidate user cache for user %d: %s", user.Id, err.Error()))
+		}
 		if err := model.InvalidateUserTokensCache(user.Id); err != nil {
 			common.SysLog(fmt.Sprintf("failed to invalidate tokens cache for user %d: %s", user.Id, err.Error()))
 		}
@@ -1005,7 +1008,7 @@ func ManageUser(c *gin.Context) {
 	// 避免在 Redis TTL 过期前仍使用旧状态（尤其是禁用后仍可发起请求的问题）。
 	// InvalidateUserCache 会让下一次 GetUserCache 从数据库重新加载，
 	// InvalidateUserTokensCache 则确保令牌侧的缓存也同步刷新。
-	if req.Action == "disable" || req.Action == "promote" || req.Action == "demote" {
+	if req.Action == "enable" || req.Action == "disable" || req.Action == "promote" || req.Action == "demote" {
 		if err := model.InvalidateUserCache(user.Id); err != nil {
 			common.SysLog(fmt.Sprintf("failed to invalidate user cache for user %d: %s", user.Id, err.Error()))
 		}

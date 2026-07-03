@@ -43,10 +43,12 @@ func TestStatus(c *gin.Context) {
 func getSidebarModulesAdminStatusValue(raw string) string {
 	defaultConfig := map[string]any{
 		"chat": map[string]any{
-			"enabled":    true,
-			"playground": true,
-			"canvas":     true,
-			"chat":       true,
+			"enabled":      true,
+			"playground":   true,
+			"canvas":       true,
+			"chat":         true,
+			"canvasOrigin": "https://canvas.maolaoapi.com",
+			"canvasIcon":   "Brush",
 		},
 		"console": map[string]any{
 			"enabled":     true,

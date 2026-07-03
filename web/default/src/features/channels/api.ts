@@ -504,6 +504,8 @@ export async function fetchModels(data: {
   base_url: string
   type: number
   key: string
+  setting?: string
+  header_override?: string
 }): Promise<FetchModelsResponse> {
   const res = await api.post(
     '/api/channel/fetch_models',

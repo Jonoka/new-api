@@ -39,6 +39,7 @@ import {
   Wallet,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { getCanvasSettingsFromSidebarModules } from '@/lib/canvas-settings'
 import {
   getCustomNavIcon,
   getSidebarCustomModuleKey,
@@ -60,6 +61,10 @@ export function useSidebarData(): SidebarData {
   const sidebarModules = parseSidebarModulesFromStatus(
     status as Record<string, unknown> | null
   )
+  const canvasSettings = getCanvasSettingsFromSidebarModules(
+    (status as Record<string, unknown> | null)?.SidebarModulesAdmin
+  )
+  const CanvasIcon = getCustomNavIcon(canvasSettings.canvasIcon) ?? Brush
   const customItems = parseCustomNavItems(sidebarModules.customItems)
 
   const sidebarData: SidebarData = {
@@ -76,7 +81,7 @@ export function useSidebarData(): SidebarData {
           {
             title: t('Infinite Canvas'),
             url: '/canvas',
-            icon: Brush,
+            icon: CanvasIcon,
           },
           {
             title: t('Chat'),

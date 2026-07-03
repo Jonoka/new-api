@@ -142,6 +142,7 @@ import {
   hasModelConfigChanged,
   findMissingModelsInMapping,
   validateModelMappingJson,
+  buildSettingJSON,
 } from '../../lib'
 import {
   collectInvalidStatusCodeEntries,
@@ -789,6 +790,8 @@ export function ChannelMutateDrawer({
       type: form.getValues('type'),
       key: form.getValues('key'),
       base_url: form.getValues('base_url') || '',
+      setting: buildSettingJSON(form.getValues()),
+      header_override: form.getValues('header_override') || '',
     })
     if (response.success && response.data) {
       return response.data

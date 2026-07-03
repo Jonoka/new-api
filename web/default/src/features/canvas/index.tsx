@@ -3,6 +3,9 @@ import { useQuery } from '@tanstack/react-query'
 import { ArrowUpRight, Brush } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { getCanvasSettingsFromSidebarModules } from '@/lib/canvas-settings'
+import { getCustomNavIcon } from '@/lib/custom-nav'
+import { useStatus } from '@/hooks/use-status'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -13,11 +16,20 @@ import {
 } from '@/components/ui/card'
 import { GroupSelector } from '@/components/model-group-selector'
 import { getUserGroups } from '@/features/playground/api'
-import { buildCanvasLaunchUrl, CANVAS_APP_ORIGIN } from './lib'
+import { buildCanvasLaunchUrl } from './lib'
 
 export function CanvasLauncher() {
   const { t } = useTranslation()
+  const { status } = useStatus()
   const [selectedGroup, setSelectedGroup] = useState('')
+  const canvasSettings = useMemo(
+    () =>
+      getCanvasSettingsFromSidebarModules(
+        (status as Record<string, unknown> | null)?.SidebarModulesAdmin
+      ),
+    [status]
+  )
+  const CanvasIcon = getCustomNavIcon(canvasSettings.canvasIcon) ?? Brush
 
   const { data: groups = [], isLoading } = useQuery({
     queryKey: ['canvas-groups'],
@@ -46,11 +58,11 @@ export function CanvasLauncher() {
   const launchUrl = useMemo(() => {
     if (!selectedGroup || typeof window === 'undefined') return ''
     return buildCanvasLaunchUrl({
-      canvasOrigin: CANVAS_APP_ORIGIN,
+      canvasOrigin: canvasSettings.canvasOrigin,
       newApiOrigin: window.location.origin,
       group: selectedGroup,
     })
-  }, [selectedGroup])
+  }, [canvasSettings.canvasOrigin, selectedGroup])
 
   const handleOpenCanvas = () => {
     if (!launchUrl) return
@@ -62,7 +74,7 @@ export function CanvasLauncher() {
       <Card className='w-full max-w-xl'>
         <CardHeader>
           <div className='bg-muted mb-2 flex h-10 w-10 items-center justify-center rounded-lg'>
-            <Brush className='h-5 w-5' aria-hidden='true' />
+            <CanvasIcon className='h-5 w-5' aria-hidden='true' />
           </div>
           <CardTitle>{t('Infinite Canvas')}</CardTitle>
           <CardDescription>

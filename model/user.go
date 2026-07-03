@@ -60,6 +60,7 @@ func (user *User) ToBaseUser() *UserBase {
 		Group:    user.Group,
 		Quota:    user.Quota,
 		Status:   user.Status,
+		Role:     user.Role,
 		Username: user.Username,
 		Setting:  user.Setting,
 		Email:    user.Email,
@@ -503,6 +504,9 @@ func (user *User) Update(updatePassword bool) error {
 	if err = DB.Model(user).Updates(newUser).Error; err != nil {
 		return err
 	}
+	if err = DB.First(user, user.Id).Error; err != nil {
+		return err
+	}
 
 	// Update cache
 	return updateUserCache(*user)
@@ -530,6 +534,9 @@ func (user *User) Edit(updatePassword bool) error {
 
 	DB.First(&user, user.Id)
 	if err = DB.Model(user).Updates(updates).Error; err != nil {
+		return err
+	}
+	if err = DB.First(user, user.Id).Error; err != nil {
 		return err
 	}
 

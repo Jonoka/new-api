@@ -19,6 +19,12 @@ For commercial licensing, please contact support@quantumnous.com
 import { useMemo } from 'react'
 import { useAuthStore } from '@/stores/auth-store'
 import {
+  DEFAULT_CANVAS_APP_ORIGIN,
+  DEFAULT_CANVAS_ICON,
+  normalizeCanvasIcon,
+  normalizeCanvasOrigin,
+} from '@/lib/canvas-settings'
+import {
   getSidebarCustomModuleKey,
   parseCustomNavItems,
 } from '@/lib/custom-nav'
@@ -27,7 +33,7 @@ import type { NavGroup, NavItem } from '@/components/layout/types'
 
 type SidebarSectionConfig = {
   enabled: boolean
-  [key: string]: boolean
+  [key: string]: boolean | string
 }
 
 type SidebarModulesAdminConfig = Record<string, SidebarSectionConfig>
@@ -46,6 +52,8 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     playground: true,
     canvas: true,
     chat: true,
+    canvasOrigin: DEFAULT_CANVAS_APP_ORIGIN,
+    canvasIcon: DEFAULT_CANVAS_ICON,
   },
   console: {
     enabled: true,
@@ -157,6 +165,10 @@ function parseSidebarConfig(
     const parsed = JSON.parse(value) as SidebarModulesAdminConfig & {
       customItems?: unknown
     }
+    if (parsed.chat) {
+      parsed.chat.canvasOrigin = normalizeCanvasOrigin(parsed.chat.canvasOrigin)
+      parsed.chat.canvasIcon = normalizeCanvasIcon(parsed.chat.canvasIcon)
+    }
     const merged = mergeWithDefaultSidebarModules(parsed)
     const customItems = parseCustomNavItems(parsed.customItems)
     if (customItems.length > 0) {
@@ -187,6 +199,14 @@ function parseUserSidebarConfig(
   try {
     const parsed = JSON.parse(value) as SidebarModulesAdminConfig
     if (!parsed || typeof parsed !== 'object') return null
+    Object.values(parsed).forEach((section) => {
+      if (!section || typeof section !== 'object') return
+      Object.entries(section).forEach(([key, value]) => {
+        if (key !== 'enabled' && typeof value !== 'boolean') {
+          delete section[key]
+        }
+      })
+    })
     return parsed
   } catch {
     return null

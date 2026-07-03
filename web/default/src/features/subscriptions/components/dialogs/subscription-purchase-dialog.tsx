@@ -810,7 +810,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
                           {getPaymentIcon(
                             option.value,
                             'h-4 w-4 shrink-0',
-                            option.icon,
+                            'icon' in option ? option.icon : undefined,
                             option.label
                           )}
                           <span className='truncate'>{option.label}</span>

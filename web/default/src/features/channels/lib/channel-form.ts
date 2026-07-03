@@ -571,7 +571,7 @@ export function transformChannelToFormDefaults(
 /**
  * Build the setting JSON string from form extra settings
  */
-function buildSettingJSON(formData: ChannelFormValues): string {
+export function buildSettingJSON(formData: ChannelFormValues): string {
   const settingObj = {
     force_format: formData.force_format || false,
     thinking_to_content: formData.thinking_to_content || false,

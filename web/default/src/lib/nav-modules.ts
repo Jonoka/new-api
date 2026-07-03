@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { getStatus } from '@/lib/api'
+import { normalizeCanvasIcon, normalizeCanvasOrigin } from './canvas-settings'
 import {
   getSidebarCustomModuleKey,
   type CustomMenuItemConfig,
@@ -39,7 +40,7 @@ export type HeaderNavModules = {
 
 type SidebarSectionConfig = {
   enabled: boolean
-  [key: string]: boolean
+  [key: string]: boolean | string
 }
 
 export type SidebarModules = Record<
@@ -177,6 +178,14 @@ function parseSidebarModules(raw: unknown): SidebarModules {
     }
     Object.entries(record).forEach(([moduleKey, moduleValue]) => {
       if (moduleKey === 'enabled') return
+      if (sectionKey === 'chat' && moduleKey === 'canvasOrigin') {
+        section.canvasOrigin = normalizeCanvasOrigin(moduleValue)
+        return
+      }
+      if (sectionKey === 'chat' && moduleKey === 'canvasIcon') {
+        section.canvasIcon = normalizeCanvasIcon(moduleValue)
+        return
+      }
       section[moduleKey] = parseHeaderNavBoolean(moduleValue, true)
     })
     result[sectionKey] = section
@@ -253,9 +262,7 @@ export function isSidebarModuleEnabled(
   try {
     const parsed = parseSidebarModules(raw)
     if (section === '__custom') {
-      const customSection = parsed.custom as
-        | Record<string, boolean>
-        | undefined
+      const customSection = parsed.custom as Record<string, boolean> | undefined
       const customKey = getSidebarCustomModuleKey(module)
       if (customSection?.[customKey] === false) return false
       return true

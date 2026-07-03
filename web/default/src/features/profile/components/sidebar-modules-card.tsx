@@ -61,6 +61,39 @@ const createDefaultConfig = (sectionDefs: SectionDef[]): SidebarModulesConfig =>
     return defaults
   }, {})
 
+const normalizeUserSidebarConfig = (
+  raw: unknown,
+  fallback: SidebarModulesConfig
+): SidebarModulesConfig => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fallback
+
+  return Object.entries(raw as Record<string, unknown>).reduce(
+    (acc, [sectionKey, sectionValue]) => {
+      if (
+        !sectionValue ||
+        typeof sectionValue !== 'object' ||
+        Array.isArray(sectionValue)
+      ) {
+        return acc
+      }
+
+      const section: SidebarModuleConfig = {
+        ...(acc[sectionKey] ?? { enabled: true }),
+      }
+      Object.entries(sectionValue as Record<string, unknown>).forEach(
+        ([moduleKey, moduleValue]) => {
+          if (typeof moduleValue === 'boolean') {
+            section[moduleKey] = moduleValue
+          }
+        }
+      )
+      acc[sectionKey] = section
+      return acc
+    },
+    { ...fallback }
+  )
+}
+
 export function SidebarModulesCard() {
   const { t } = useTranslation()
   const [loading, setLoading] = useState(false)
@@ -195,7 +228,7 @@ export function SidebarModulesCard() {
       if (res.data.success && res.data.data?.sidebar_modules) {
         const raw = res.data.data.sidebar_modules
         const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
-        setConfig(parsed)
+        setConfig(normalizeUserSidebarConfig(parsed, defaultConfig))
       } else {
         setConfig(defaultConfig)
       }
