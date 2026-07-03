@@ -265,18 +265,32 @@ export function BillingHistoryDialog({
 
                         {/* 操作 */}
                         {record.status === 'pending' && (
-                          <div className='mt-4 flex justify-end'>
+                          <div className='mt-4 flex justify-end gap-2'>
                             {isAdmin ? (
-                              <Button
-                                size='sm'
-                                variant='outline'
-                                onClick={() =>
-                                  setConfirmTradeNo(record.trade_no)
-                                }
-                                disabled={completing}
-                              >
-                                {t('Complete Order')}
-                              </Button>
+                              <>
+                                <Button
+                                  size='sm'
+                                  variant='outline'
+                                  onClick={() =>
+                                    setConfirmTradeNo(record.trade_no)
+                                  }
+                                  disabled={completing}
+                                >
+                                  {t('Complete Order')}
+                                </Button>
+                                <Button
+                                  size='sm'
+                                  variant='outline'
+                                  onClick={() =>
+                                    handleRetryPayment(record.trade_no)
+                                  }
+                                  disabled={retryingTradeNo === record.trade_no}
+                                >
+                                  {retryingTradeNo === record.trade_no
+                                    ? t('Processing...')
+                                    : t('Retry Payment')}
+                                </Button>
+                              </>
                             ) : (
                               <Button
                                 size='sm'

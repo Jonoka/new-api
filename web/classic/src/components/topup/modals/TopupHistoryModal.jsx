@@ -320,6 +320,7 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
         }
         if (userIsAdmin) {
           return (
+            <div className='flex items-center gap-2'>
               <Button
                 key="complete"
                 size='small'
@@ -329,6 +330,17 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
               >
                 {t('补单')}
               </Button>
+              <Button
+                key="retry"
+                size='small'
+                type='primary'
+                theme='outline'
+                loading={retryingTradeNo === record.trade_no}
+                onClick={() => retryPayment(record.trade_no)}
+              >
+                {t('重新支付')}
+              </Button>
+            </div>
           );
         }
         return (
