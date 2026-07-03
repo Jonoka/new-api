@@ -97,6 +97,7 @@ export default function SettingsSidebarModulesUser() {
         enabled: true,
         topup: isSidebarModuleAllowed('personal', 'topup'),
         affiliate: isSidebarModuleAllowed('personal', 'affiliate'),
+        invoice: isSidebarModuleAllowed('personal', 'invoice'),
         personal: isSidebarModuleAllowed('personal', 'personal'),
       };
     }
@@ -349,6 +350,11 @@ export default function SettingsSidebarModulesUser() {
           description: t('邀请返佣与提现管理'),
         },
         {
+          key: 'invoice',
+          title: t('发票中心'),
+          description: t('发票申请与记录'),
+        },
+        {
           key: 'personal',
           title: t('个人设置'),
           description: t('个人信息设置'),
@@ -395,7 +401,7 @@ export default function SettingsSidebarModulesUser() {
         },
         {
           key: 'extension_admin',
-          title: t('扩展模块'),
+          title: t('模块管理'),
           description: t('扩展模块管理与启停'),
         },
         {

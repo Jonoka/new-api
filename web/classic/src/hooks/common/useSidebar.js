@@ -19,7 +19,12 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { useState, useEffect, useMemo, useContext, useRef } from 'react';
 import { StatusContext } from '../../context/Status';
-import { API } from '../../helpers';
+import {
+  API,
+  CANVAS_APP_ORIGIN,
+  DEFAULT_CANVAS_ICON,
+  parseCustomNavItems,
+} from '../../helpers';
 
 // 创建一个全局事件系统来同步所有useSidebar实例
 const sidebarEventTarget = new EventTarget();
@@ -31,6 +36,8 @@ export const DEFAULT_ADMIN_CONFIG = {
     playground: true,
     canvas: true,
     chat: true,
+    canvasOrigin: CANVAS_APP_ORIGIN,
+    canvasIcon: DEFAULT_CANVAS_ICON,
   },
   console: {
     enabled: true,
@@ -62,16 +69,46 @@ export const DEFAULT_ADMIN_CONFIG = {
     extension_admin: true,
     setting: true,
   },
+  customItems: [],
 };
 
 const deepClone = (value) => JSON.parse(JSON.stringify(value));
+
+const isSectionConfig = (value) =>
+  Boolean(value && typeof value === 'object' && !Array.isArray(value));
+
+const buildDefaultUserConfig = (adminConfig) => {
+  const defaultUserConfig = {};
+
+  Object.keys(adminConfig).forEach((sectionKey) => {
+    const adminSection = adminConfig[sectionKey];
+    if (!isSectionConfig(adminSection) || !adminSection.enabled) return;
+
+    defaultUserConfig[sectionKey] = { enabled: true };
+    // 用户个人设置只保存布尔模块开关，域名/图标等配置字段不进入用户覆盖层。
+    Object.keys(adminSection).forEach((moduleKey) => {
+      if (moduleKey !== 'enabled' && adminSection[moduleKey] === true) {
+        defaultUserConfig[sectionKey][moduleKey] = true;
+      }
+    });
+  });
+
+  return defaultUserConfig;
+};
 
 export const mergeAdminConfig = (savedConfig) => {
   const merged = deepClone(DEFAULT_ADMIN_CONFIG);
   if (!savedConfig || typeof savedConfig !== 'object') return merged;
 
   for (const [sectionKey, sectionConfig] of Object.entries(savedConfig)) {
-    if (!sectionConfig || typeof sectionConfig !== 'object') continue;
+    if (sectionKey === 'customItems') {
+      merged.customItems = parseCustomNavItems(sectionConfig, {
+        includeDisabled: true,
+      });
+      continue;
+    }
+
+    if (!isSectionConfig(sectionConfig)) continue;
 
     if (!merged[sectionKey]) {
       merged[sectionKey] = { ...sectionConfig };
@@ -134,36 +171,12 @@ export const useSidebar = () => {
       } else {
         // 当用户没有配置时，生成一个基于管理员配置的默认用户配置
         // 这样可以确保权限控制正确生效
-        const defaultUserConfig = {};
-        Object.keys(adminConfig).forEach((sectionKey) => {
-          if (adminConfig[sectionKey]?.enabled) {
-            defaultUserConfig[sectionKey] = { enabled: true };
-            // 为每个管理员允许的模块设置默认值为true
-            Object.keys(adminConfig[sectionKey]).forEach((moduleKey) => {
-              if (
-                moduleKey !== 'enabled' &&
-                adminConfig[sectionKey][moduleKey]
-              ) {
-                defaultUserConfig[sectionKey][moduleKey] = true;
-              }
-            });
-          }
-        });
+        const defaultUserConfig = buildDefaultUserConfig(adminConfig);
         setUserConfig(defaultUserConfig);
       }
     } catch (error) {
       // 出错时也生成默认配置，而不是设置为空对象
-      const defaultUserConfig = {};
-      Object.keys(adminConfig).forEach((sectionKey) => {
-        if (adminConfig[sectionKey]?.enabled) {
-          defaultUserConfig[sectionKey] = { enabled: true };
-          Object.keys(adminConfig[sectionKey]).forEach((moduleKey) => {
-            if (moduleKey !== 'enabled' && adminConfig[sectionKey][moduleKey]) {
-              defaultUserConfig[sectionKey][moduleKey] = true;
-            }
-          });
-        }
-      });
+      const defaultUserConfig = buildDefaultUserConfig(adminConfig);
       setUserConfig(defaultUserConfig);
     } finally {
       if (shouldShowLoader) {
@@ -238,6 +251,8 @@ export const useSidebar = () => {
       const adminSection = adminConfig[sectionKey];
       const userSection = userConfig[sectionKey];
 
+      if (!isSectionConfig(adminSection)) return;
+
       // 如果管理员禁用了整个区域，则该区域不显示
       if (!adminSection?.enabled) {
         result[sectionKey] = { enabled: false };
@@ -252,6 +267,7 @@ export const useSidebar = () => {
       // 功能级别：只有管理员和用户都允许的功能才显示
       Object.keys(adminSection).forEach((moduleKey) => {
         if (moduleKey === 'enabled') return;
+        if (typeof adminSection[moduleKey] !== 'boolean') return;
 
         const adminAllowed = adminSection[moduleKey];
         // 当userSection存在时检查模块状态，否则默认为true
@@ -279,7 +295,7 @@ export const useSidebar = () => {
   // 检查区域是否有任何可见的功能
   const hasSectionVisibleModules = (sectionKey) => {
     const section = finalConfig[sectionKey];
-    if (!section?.enabled) return false;
+    if (!isSectionConfig(section) || !section.enabled) return false;
 
     return Object.keys(section).some(
       (key) => key !== 'enabled' && section[key] === true,
@@ -289,7 +305,7 @@ export const useSidebar = () => {
   // 获取区域的可见功能列表
   const getVisibleModules = (sectionKey) => {
     const section = finalConfig[sectionKey];
-    if (!section?.enabled) return [];
+    if (!isSectionConfig(section) || !section.enabled) return [];
 
     return Object.keys(section).filter(
       (key) => key !== 'enabled' && section[key] === true,

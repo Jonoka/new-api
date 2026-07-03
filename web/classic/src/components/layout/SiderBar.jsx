@@ -26,6 +26,11 @@ import { useSidebarCollapsed } from '../../hooks/common/useSidebarCollapsed';
 import { useSidebar } from '../../hooks/common/useSidebar';
 import { useMinimumLoadingTime } from '../../hooks/common/useMinimumLoadingTime';
 import { API, isAdmin, isRoot, showError } from '../../helpers';
+import {
+  getCustomNavIcon,
+  getSidebarCustomModuleKey,
+  parseCustomNavItems,
+} from '../../helpers/customNav';
 import SkeletonWrapper from './components/SkeletonWrapper';
 
 import { Nav, Divider, Button } from '@douyinfe/semi-ui';
@@ -66,8 +71,8 @@ const SiderBar = ({ onNavigate = () => {} }) => {
   const [collapsed, toggleCollapsed] = useSidebarCollapsed();
   const {
     isModuleVisible,
-    hasSectionVisibleModules,
     loading: sidebarLoading,
+    adminConfig,
   } = useSidebar();
 
   const showSkeleton = useMinimumLoadingTime(sidebarLoading, 200);
@@ -78,6 +83,22 @@ const SiderBar = ({ onNavigate = () => {} }) => {
   const [openedKeys, setOpenedKeys] = useState([]);
   const location = useLocation();
   const [routerMapState, setRouterMapState] = useState(routerMap);
+
+  const customMenuItems = useMemo(() => {
+    return parseCustomNavItems(adminConfig?.customItems).map((item) => ({
+      ...item,
+      text: item.title,
+      itemKey: getSidebarCustomModuleKey(item.id),
+      to: item.url,
+      section: item.section || 'chat',
+      iconName: item.icon,
+    }));
+  }, [adminConfig?.customItems]);
+
+  const getCustomItemsForSection = (section) =>
+    isModuleVisible(section)
+      ? customMenuItems.filter((item) => item.section === section)
+      : [];
 
   const workspaceItems = useMemo(() => {
     const items = [
@@ -129,13 +150,14 @@ const SiderBar = ({ onNavigate = () => {} }) => {
       return configVisible;
     });
 
-    return filteredItems;
+    return [...filteredItems, ...getCustomItemsForSection('console')];
   }, [
     localStorage.getItem('enable_data_export'),
     localStorage.getItem('enable_drawing'),
     localStorage.getItem('enable_task'),
     t,
     isModuleVisible,
+    customMenuItems,
   ]);
 
   const financeItems = useMemo(() => {
@@ -168,8 +190,8 @@ const SiderBar = ({ onNavigate = () => {} }) => {
       return configVisible;
     });
 
-    return filteredItems;
-  }, [t, isModuleVisible]);
+    return [...filteredItems, ...getCustomItemsForSection('personal')];
+  }, [t, isModuleVisible, customMenuItems]);
 
   const adminItems = useMemo(() => {
     const items = [
@@ -241,8 +263,8 @@ const SiderBar = ({ onNavigate = () => {} }) => {
       return configVisible;
     });
 
-    return filteredItems;
-  }, [isAdmin(), isRoot(), t, isModuleVisible]);
+    return [...filteredItems, ...getCustomItemsForSection('admin')];
+  }, [isAdmin(), isRoot(), t, isModuleVisible, customMenuItems]);
 
   const extensionMenuItems = useMemo(() => {
     return extensionItems.map((item) => ({
@@ -289,6 +311,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('无限画布'),
         itemKey: 'canvas',
         to: '/canvas',
+        iconName: adminConfig?.chat?.canvasIcon,
       },
       {
         text: t('聊天'),
@@ -303,8 +326,14 @@ const SiderBar = ({ onNavigate = () => {} }) => {
       return configVisible;
     });
 
-    return filteredItems;
-  }, [chatItems, t, isModuleVisible]);
+    return [...filteredItems, ...getCustomItemsForSection('chat')];
+  }, [
+    chatItems,
+    t,
+    isModuleVisible,
+    customMenuItems,
+    adminConfig?.chat?.canvasIcon,
+  ]);
 
   // 更新路由映射，添加聊天路由
   const updateRouterMapWithChats = (chats) => {
@@ -423,23 +452,32 @@ const SiderBar = ({ onNavigate = () => {} }) => {
     }
 
     if (!matchingKey && currentPath.startsWith('/console/extensions/')) {
-      matchingKey = extensionMenuItems.find((item) => item.to === currentPath)
-        ?.itemKey;
+      matchingKey = extensionMenuItems.find(
+        (item) => item.to === currentPath,
+      )?.itemKey;
+    }
+
+    if (!matchingKey) {
+      matchingKey = customMenuItems.find(
+        (item) => !item.external && item.to === currentPath,
+      )?.itemKey;
     }
 
     // 如果找到匹配的键，更新选中的键
     if (matchingKey) {
       setSelectedKeys([matchingKey]);
       if (
-        (matchingKey === 'extension_admin' ||
-          String(matchingKey).startsWith('extension:'))
+        matchingKey === 'extension_admin' ||
+        String(matchingKey).startsWith('extension:')
       ) {
         setOpenedKeys((keys) =>
-          keys.includes('extension_group') ? keys : [...keys, 'extension_group'],
+          keys.includes('extension_group')
+            ? keys
+            : [...keys, 'extension_group'],
         );
       }
     }
-  }, [location.pathname, routerMapState, extensionMenuItems]);
+  }, [location.pathname, routerMapState, extensionMenuItems, customMenuItems]);
 
   // 监控折叠状态变化以更新 body class
   useEffect(() => {
@@ -475,7 +513,9 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         }
         icon={
           <div className='sidebar-icon-container flex-shrink-0'>
-            {getLucideIcon(item.itemKey, isSelected)}
+            {item.iconName
+              ? getCustomNavIcon(item.iconName, isSelected)
+              : getLucideIcon(item.itemKey, isSelected)}
           </div>
         }
         className={item.className}
@@ -562,10 +602,29 @@ const SiderBar = ({ onNavigate = () => {} }) => {
               routerMap[props.itemKey] ||
               [...extensionMenuItems].find(
                 (item) => item.itemKey === props.itemKey,
-              )?.to;
+              )?.to ||
+              customMenuItems.find((item) => item.itemKey === props.itemKey)
+                ?.to;
+            const customItem = customMenuItems.find(
+              (item) => item.itemKey === props.itemKey,
+            );
 
             // 如果没有路由，直接返回元素
             if (!to) return itemElement;
+
+            if (customItem?.external || customItem?.openInNewTab) {
+              return (
+                <a
+                  style={{ textDecoration: 'none' }}
+                  href={to}
+                  target='_blank'
+                  rel='noopener noreferrer'
+                  onClick={onNavigate}
+                >
+                  {itemElement}
+                </a>
+              );
+            }
 
             return (
               <Link
@@ -591,7 +650,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           }}
         >
           {/* 聊天区域 */}
-          {hasSectionVisibleModules('chat') && (
+          {chatMenuItems.length > 0 && (
             <div className='sidebar-section'>
               {!collapsed && (
                 <div className='sidebar-group-label'>{t('聊天')}</div>
@@ -601,7 +660,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           )}
 
           {/* 控制台区域 */}
-          {isModuleVisible('console') && hasSectionVisibleModules('console') && (
+          {isModuleVisible('console') && workspaceItems.length > 0 && (
             <>
               <Divider className='sidebar-divider' />
               <div>
@@ -614,7 +673,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           )}
 
           {/* 个人中心区域 */}
-          {hasSectionVisibleModules('personal') && (
+          {financeItems.length > 0 && (
             <>
               <Divider className='sidebar-divider' />
               <div>
@@ -627,9 +686,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           )}
 
           {/* 管理员区域 - 只在管理员时显示且配置允许时显示 */}
-          {isAdmin() &&
-            isModuleVisible('admin') &&
-            adminItems.length > 0 && (
+          {isAdmin() && isModuleVisible('admin') && adminItems.length > 0 && (
             <>
               <Divider className='sidebar-divider' />
               <div>
@@ -644,9 +701,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           {extensionSubItems.length > 0 && (
             <>
               <Divider className='sidebar-divider' />
-              <div>
-                {renderSubItem(extensionGroupItem)}
-              </div>
+              <div>{renderSubItem(extensionGroupItem)}</div>
             </>
           )}
         </Nav>

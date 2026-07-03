@@ -1,15 +1,17 @@
 import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Card, Select, Typography } from '@douyinfe/semi-ui';
-import { ArrowUpRight, Brush } from 'lucide-react';
+import { ArrowUpRight } from 'lucide-react';
 import {
   API,
   buildCanvasLaunchUrl,
-  CANVAS_APP_ORIGIN,
+  getCanvasSettingsFromSidebarModules,
+  getCustomNavIconComponent,
   processGroupsData,
   showError,
 } from '../../helpers';
 import { UserContext } from '../../context/User';
+import { StatusContext } from '../../context/Status';
 import { API_ENDPOINTS } from '../../constants/playground.constants';
 
 const capabilityGroups = [
@@ -29,6 +31,7 @@ const groupStateAccessors = {
 const Canvas = () => {
   const { t } = useTranslation();
   const [userState] = useContext(UserContext);
+  const [statusState] = useContext(StatusContext);
   const [groups, setGroups] = useState([]);
   const [defaultGroup, setDefaultGroup] = useState('');
   const [textGroup, setTextGroup] = useState('');
@@ -46,6 +49,14 @@ const Canvas = () => {
     videoGroup,
     setVideoGroup,
   };
+  const canvasSettings = useMemo(
+    () =>
+      getCanvasSettingsFromSidebarModules(
+        statusState?.status?.SidebarModulesAdmin,
+      ),
+    [statusState?.status?.SidebarModulesAdmin],
+  );
+  const CanvasIcon = getCustomNavIconComponent(canvasSettings.canvasIcon);
 
   useEffect(() => {
     const loadGroups = async () => {
@@ -83,7 +94,7 @@ const Canvas = () => {
     if (!defaultGroup || typeof window === 'undefined') return '';
 
     return buildCanvasLaunchUrl({
-      canvasOrigin: CANVAS_APP_ORIGIN,
+      canvasOrigin: canvasSettings.canvasOrigin,
       newApiOrigin: window.location.origin,
       group: defaultGroup,
       textGroup,
@@ -91,7 +102,14 @@ const Canvas = () => {
       audioGroup,
       videoGroup,
     });
-  }, [audioGroup, defaultGroup, imageGroup, textGroup, videoGroup]);
+  }, [
+    audioGroup,
+    canvasSettings.canvasOrigin,
+    defaultGroup,
+    imageGroup,
+    textGroup,
+    videoGroup,
+  ]);
 
   const openCanvas = () => {
     if (!launchUrl) return;
@@ -102,7 +120,7 @@ const Canvas = () => {
     <div className='flex min-h-[calc(100vh-64px)] items-center justify-center p-4 md:p-8'>
       <Card className='w-full max-w-xl !rounded-2xl shadow-sm'>
         <div className='mb-6 flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-600'>
-          <Brush size={22} />
+          {CanvasIcon ? <CanvasIcon size={22} /> : null}
         </div>
 
         <Typography.Title heading={3} className='!mb-2'>
