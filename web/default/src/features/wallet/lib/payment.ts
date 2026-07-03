@@ -69,6 +69,71 @@ export function submitPaymentForm(
 }
 
 /**
+ * 拒绝不可导航协议（如 javascript:、data:）和相对地址。
+ */
+export function isSafeHttpPaymentUrl(value: string): boolean {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return false
+  }
+  try {
+    const u = new URL(trimmed)
+    return u.protocol === 'http:' || u.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 打开钱包支付接口返回的跳转或表单支付载荷。
+ */
+export function openPaymentResponse(response: {
+  data?: unknown
+  url?: string
+}): boolean {
+  const data = response.data
+  if (data && typeof data === 'object') {
+    if (
+      'pay_link' in data &&
+      typeof (data as { pay_link?: unknown }).pay_link === 'string'
+    ) {
+      const url = (data as { pay_link: string }).pay_link
+      if (!isSafeHttpPaymentUrl(url)) return false
+      window.open(url, '_blank')
+      return true
+    }
+
+    if (
+      'payment_url' in data &&
+      typeof (data as { payment_url?: unknown }).payment_url === 'string'
+    ) {
+      const url = (data as { payment_url: string }).payment_url
+      if (!isSafeHttpPaymentUrl(url)) return false
+      window.open(url, '_blank')
+      return true
+    }
+
+    if (
+      'checkout_url' in data &&
+      typeof (data as { checkout_url?: unknown }).checkout_url === 'string'
+    ) {
+      const url = (data as { checkout_url: string }).checkout_url
+      if (!isSafeHttpPaymentUrl(url)) return false
+      window.location.href = url
+      return true
+    }
+  }
+
+  if (response.url && data && typeof data === 'object') {
+    if (!isSafeHttpPaymentUrl(response.url)) return false
+    submitPaymentForm(response.url, data as Record<string, unknown>)
+    return true
+  }
+
+  return false
+}
+
+/**
  * Check if payment method is Stripe
  */
 export function isStripePayment(paymentType: string): boolean {

@@ -2,9 +2,11 @@ package controller
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
 	"github.com/shopspring/decimal"
+	"github.com/waffo-com/waffo-go/types/order"
 )
 
 func GetTopUpInfo(c *gin.Context) {
@@ -184,6 +187,10 @@ type AmountRequest struct {
 	Invoice   model.InvoiceRequest `json:"invoice"`
 }
 
+type RetryTopUpPaymentRequest struct {
+	TradeNo string `json:"trade_no"`
+}
+
 func GetEpayClient() *epay.Client {
 	if operation_setting.PayAddress == "" || operation_setting.EpayId == "" || operation_setting.EpayKey == "" {
 		return nil
@@ -267,6 +274,365 @@ func freeTopUpResponse(topUp *model.TopUp, quotaToAdd int, discount *model.Promo
 		"message":   "success",
 		"data":      data,
 		"completed": true,
+	}
+}
+
+func ensureRetryableTopUpForUser(c *gin.Context, tradeNo string) (*model.TopUp, bool) {
+	if tradeNo == "" {
+		common.ApiErrorMsg(c, "未提供订单号")
+		return nil, false
+	}
+	topUp := model.GetTopUpByTradeNo(tradeNo)
+	if topUp == nil || topUp.UserId != c.GetInt("id") {
+		common.ApiErrorMsg(c, "充值订单不存在")
+		return nil, false
+	}
+	if topUp.Status != common.TopUpStatusPending {
+		common.ApiErrorMsg(c, "订单状态不是待支付，无法重新支付")
+		return nil, false
+	}
+	if topUp.Money < 0.01 {
+		common.ApiErrorMsg(c, "0 元订单无需重新支付")
+		return nil, false
+	}
+	return topUp, true
+}
+
+func retryStripeGatewayPayMoney(topUp *model.TopUp) float64 {
+	if topUp == nil {
+		return 0
+	}
+	payMoney := topUp.ActualMoney
+	if payMoney <= 0 {
+		payMoney = topUp.Money
+	}
+	if topUp.InvoiceRequired && topUp.InvoiceFeeAmount > 0 {
+		payMoney = decimal.NewFromFloat(payMoney).
+			Add(decimal.NewFromFloat(model.AmountCNYToPaymentCurrency(topUp.InvoiceFeeAmount, model.PaymentProviderStripe))).
+			Round(2).
+			InexactFloat64()
+	}
+	return payMoney
+}
+
+func retryEpayTopUpPayment(c *gin.Context, topUp *model.TopUp) {
+	if !operation_setting.ContainsPayMethod(topUp.PaymentMethod) {
+		common.ApiErrorMsg(c, "支付方式不存在")
+		return
+	}
+	client := GetEpayClient()
+	if client == nil {
+		common.ApiErrorMsg(c, "当前管理员未配置支付信息")
+		return
+	}
+	callBackAddress := service.GetCallbackAddress()
+	returnUrl, _ := url.Parse(paymentReturnPath("/console/log"))
+	notifyUrl, _ := url.Parse(callBackAddress + "/api/user/epay/notify")
+	uri, params, err := client.Purchase(&epay.PurchaseArgs{
+		Type:           topUp.PaymentMethod,
+		ServiceTradeNo: topUp.TradeNo,
+		Name:           fmt.Sprintf("TUC%d", topUp.Amount),
+		Money:          strconv.FormatFloat(topUp.Money, 'f', 2, 64),
+		Device:         epay.PC,
+		NotifyUrl:      notifyUrl,
+		ReturnUrl:      returnUrl,
+	})
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 重新拉起支付失败 user_id=%d trade_no=%s payment_method=%s error=%q", topUp.UserId, topUp.TradeNo, topUp.PaymentMethod, err.Error()))
+		common.ApiErrorMsg(c, "拉起支付失败")
+		return
+	}
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 重新拉起支付成功 user_id=%d trade_no=%s payment_method=%s money=%.2f uri=%q", topUp.UserId, topUp.TradeNo, topUp.PaymentMethod, topUp.Money, uri))
+	c.JSON(http.StatusOK, gin.H{"message": "success", "data": params, "url": uri})
+}
+
+func retryStripeTopUpPayment(c *gin.Context, topUp *model.TopUp) {
+	user, err := model.GetUserById(topUp.UserId, false)
+	if err != nil || user == nil {
+		common.ApiErrorMsg(c, "用户不存在")
+		return
+	}
+	payMoney := retryStripeGatewayPayMoney(topUp)
+	payLink, err := genStripeLink(topUp.TradeNo, user.StripeCustomer, user.Email, topUp.Amount, payMoney, "", "")
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Stripe 重新创建 Checkout Session 失败 user_id=%d trade_no=%s error=%q", topUp.UserId, topUp.TradeNo, err.Error()))
+		common.ApiErrorMsg(c, "拉起支付失败")
+		return
+	}
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Stripe 重新拉起支付成功 user_id=%d trade_no=%s pay_money=%.2f", topUp.UserId, topUp.TradeNo, payMoney))
+	c.JSON(http.StatusOK, gin.H{
+		"message": "success",
+		"data": gin.H{
+			"pay_link": payLink,
+		},
+	})
+}
+
+func retryCreemTopUpPayment(c *gin.Context, _ *model.TopUp) {
+	common.ApiErrorMsg(c, "Creem 固定产品订单暂不支持重新支付，请重新选择产品下单")
+}
+
+func retryWaffoTopUpPayment(c *gin.Context, topUp *model.TopUp) {
+	if !setting.WaffoEnabled {
+		common.ApiErrorMsg(c, "Waffo 支付未启用")
+		return
+	}
+	user, err := model.GetUserById(topUp.UserId, false)
+	if err != nil || user == nil {
+		common.ApiErrorMsg(c, "用户不存在")
+		return
+	}
+	sdk, err := getWaffoSDK()
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Waffo 重新支付 SDK 初始化失败 user_id=%d trade_no=%s error=%q", topUp.UserId, topUp.TradeNo, err.Error()))
+		common.ApiErrorMsg(c, "支付配置错误")
+		return
+	}
+
+	callbackAddr := service.GetCallbackAddress()
+	notifyUrl := callbackAddr + "/api/waffo/webhook"
+	if setting.WaffoNotifyUrl != "" {
+		notifyUrl = setting.WaffoNotifyUrl
+	}
+	returnUrl := paymentReturnPath("/console/topup?show_history=true")
+	if setting.WaffoReturnUrl != "" {
+		returnUrl = setting.WaffoReturnUrl
+	}
+
+	currency := getWaffoCurrency()
+	createParams := &order.CreateOrderParams{
+		PaymentRequestID: topUp.TradeNo,
+		MerchantOrderID:  topUp.TradeNo,
+		OrderAmount:      formatWaffoAmount(topUp.Money, currency),
+		OrderCurrency:    currency,
+		OrderDescription: fmt.Sprintf("Recharge %d credits", topUp.Amount),
+		OrderRequestedAt: time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+		NotifyURL:        notifyUrl,
+		MerchantInfo: &order.MerchantInfo{
+			MerchantID: setting.WaffoMerchantId,
+		},
+		UserInfo: &order.UserInfo{
+			UserID:       strconv.Itoa(user.Id),
+			UserEmail:    getWaffoUserEmail(user),
+			UserTerminal: "WEB",
+		},
+		PaymentInfo: &order.PaymentInfo{
+			ProductName: "ONE_TIME_PAYMENT",
+		},
+		SuccessRedirectURL: returnUrl,
+		FailedRedirectURL:  returnUrl,
+	}
+	resp, err := sdk.Order().Create(c.Request.Context(), createParams, nil)
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Waffo 重新创建订单失败 user_id=%d trade_no=%s error=%q", topUp.UserId, topUp.TradeNo, err.Error()))
+		common.ApiErrorMsg(c, "拉起支付失败")
+		return
+	}
+	if !resp.IsSuccess() {
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Waffo 重新创建订单业务失败 user_id=%d trade_no=%s code=%s message=%q response=%q", topUp.UserId, topUp.TradeNo, resp.Code, resp.Message, common.GetJsonString(resp)))
+		common.ApiErrorMsg(c, "拉起支付失败")
+		return
+	}
+	orderData := resp.GetData()
+	paymentUrl := orderData.FetchRedirectURL()
+	if paymentUrl == "" {
+		paymentUrl = orderData.OrderAction
+	}
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Waffo 重新拉起支付成功 user_id=%d trade_no=%s money=%.2f", topUp.UserId, topUp.TradeNo, topUp.Money))
+	c.JSON(http.StatusOK, gin.H{
+		"message": "success",
+		"data": gin.H{
+			"payment_url": paymentUrl,
+			"order_id":    topUp.TradeNo,
+		},
+	})
+}
+
+func retryWaffoPancakeTopUpPayment(c *gin.Context, topUp *model.TopUp) {
+	if !isWaffoPancakeTopUpEnabled() {
+		common.ApiErrorMsg(c, "Waffo Pancake 配置不完整")
+		return
+	}
+	user, err := model.GetUserById(topUp.UserId, false)
+	if err != nil || user == nil {
+		common.ApiErrorMsg(c, "用户不存在")
+		return
+	}
+	expiresInSeconds := 45 * 60
+	session, err := service.CreateWaffoPancakeCheckoutSession(c.Request.Context(), &service.WaffoPancakeCreateSessionParams{
+		ProductID:     setting.WaffoPancakeProductID,
+		BuyerIdentity: getWaffoPancakeBuyerIdentity(user),
+		PriceSnapshot: &service.WaffoPancakePriceSnapshot{
+			Amount:      formatWaffoPancakeAmount(topUp.Money),
+			TaxCategory: "saas",
+		},
+		BuyerEmail:              getWaffoPancakeBuyerEmail(user),
+		ExpiresInSeconds:        &expiresInSeconds,
+		OrderMerchantExternalID: topUp.TradeNo,
+	})
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Waffo Pancake 重新创建结账会话失败 user_id=%d trade_no=%s error=%q", topUp.UserId, topUp.TradeNo, err.Error()))
+		common.ApiErrorMsg(c, "拉起支付失败")
+		return
+	}
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Waffo Pancake 重新拉起支付成功 user_id=%d trade_no=%s session_id=%s money=%.2f", topUp.UserId, topUp.TradeNo, session.SessionID, topUp.Money))
+	c.JSON(http.StatusOK, gin.H{
+		"message": "success",
+		"data": gin.H{
+			"checkout_url":     session.CheckoutURL,
+			"session_id":       session.SessionID,
+			"expires_at":       session.ExpiresAt,
+			"order_id":         topUp.TradeNo,
+			"token":            session.Token,
+			"token_expires_at": session.TokenExpiresAt,
+		},
+	})
+}
+
+func retryBepusdtTopUpPayment(c *gin.Context, topUp *model.TopUp) {
+	chains := setting.GetBepusdtChains()
+	if len(chains) == 0 {
+		common.ApiErrorMsg(c, "管理员未配置 USDT 链")
+		return
+	}
+	callBackAddress := service.GetCallbackAddress()
+	notifyUrl := callBackAddress + "/api/bepusdt/notify"
+	redirectUrl := paymentReturnPath("/console/log")
+	tradeType := chains[0].TradeType
+	paymentUrl, err := createBepusdtTransaction(c, topUp.TradeNo, topUp.Money, tradeType, notifyUrl, redirectUrl)
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Bepusdt 重新拉起支付失败 user_id=%d trade_no=%s trade_type=%s money=%.2f error=%q", topUp.UserId, topUp.TradeNo, tradeType, topUp.Money, err.Error()))
+		common.ApiErrorMsg(c, fmt.Sprintf("拉起支付失败: %s", err.Error()))
+		return
+	}
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Bepusdt 重新拉起支付成功 user_id=%d trade_no=%s trade_type=%s money=%.2f CNY", topUp.UserId, topUp.TradeNo, tradeType, topUp.Money))
+	c.JSON(http.StatusOK, gin.H{
+		"message": "success",
+		"data": gin.H{
+			"payment_url": paymentUrl,
+			"trade_no":    topUp.TradeNo,
+		},
+	})
+}
+
+func retryOkpayTopUpPayment(c *gin.Context, topUp *model.TopUp) {
+	callBackAddress := service.GetCallbackAddress()
+	callbackUrl := callBackAddress + "/api/okpay/notify"
+	redirectUrl := paymentReturnPath("/console/log")
+	paymentAmount := getOkpayPaymentAmountFromFiat(topUp.Money)
+	dPayMoney := decimal.NewFromFloat(paymentAmount.CoinAmount)
+	payload := map[string]string{
+		"unique_id":    topUp.TradeNo,
+		"amount":       dPayMoney.StringFixed(8),
+		"return_url":   redirectUrl,
+		"callback_url": callbackUrl,
+		"coin":         paymentAmount.Coin,
+		"name":         fmt.Sprintf("TopUp-%s", topUp.TradeNo),
+		"id":           setting.OkpayMerchantId,
+	}
+	payload["sign"] = generateOkpaySignature(payload, setting.OkpayMerchantToken)
+
+	gatewayUrl := strings.TrimRight(setting.OkpayGatewayUrl, "/") + "/payLink"
+	formValues := url.Values{}
+	for k, v := range payload {
+		formValues.Set(k, v)
+	}
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.PostForm(gatewayUrl, formValues)
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay 重新请求失败 user_id=%d trade_no=%s error=%q", topUp.UserId, topUp.TradeNo, err.Error()))
+		common.ApiErrorMsg(c, "拉起支付失败")
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay 重新读取响应失败 user_id=%d trade_no=%s error=%q", topUp.UserId, topUp.TradeNo, err.Error()))
+		common.ApiErrorMsg(c, "拉起支付失败")
+		return
+	}
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay 重新支付 API 响应 trade_no=%s status_code=%d body=%q", topUp.TradeNo, resp.StatusCode, string(body)))
+	if resp.StatusCode/100 != 2 {
+		common.ApiErrorMsg(c, "拉起支付失败")
+		return
+	}
+	var raw map[string]interface{}
+	if err := common.Unmarshal(body, &raw); err != nil {
+		common.ApiErrorMsg(c, "解析支付响应失败")
+		return
+	}
+	payUrl := ""
+	if data, ok := raw["data"].(map[string]interface{}); ok {
+		if u, ok := data["pay_url"].(string); ok {
+			payUrl = strings.TrimSpace(u)
+		}
+	}
+	if payUrl == "" {
+		if items, ok := raw["data"].([]interface{}); ok && len(items) > 0 {
+			if first, ok := items[0].(map[string]interface{}); ok {
+				if u, ok := first["pay_url"].(string); ok {
+					payUrl = strings.TrimSpace(u)
+				}
+			}
+		}
+	}
+	if payUrl == "" {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay 重新支付未返回 pay_url trade_no=%s body=%q", topUp.TradeNo, string(body)))
+		common.ApiErrorMsg(c, "拉起支付失败")
+		return
+	}
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay 重新拉起支付成功 user_id=%d trade_no=%s fiat_money=%.2f CNY coin_amount=%s coin=%s", topUp.UserId, topUp.TradeNo, topUp.Money, payload["amount"], paymentAmount.Coin))
+	c.JSON(http.StatusOK, gin.H{
+		"message": "success",
+		"data": gin.H{
+			"payment_url":      payUrl,
+			"trade_no":         topUp.TradeNo,
+			"amount":           payload["amount"],
+			"amount_text":      fmt.Sprintf("%s %s", payload["amount"], paymentAmount.Coin),
+			"coin":             paymentAmount.Coin,
+			"fiat_amount":      strconv.FormatFloat(paymentAmount.FiatAmount, 'f', 2, 64),
+			"fiat_currency":    "CNY",
+			"rate":             strconv.FormatFloat(paymentAmount.Rate, 'f', -1, 64),
+			"rate_source":      paymentAmount.RateSource,
+			"auto_rate_failed": paymentAmount.AutoRateFailed,
+		},
+	})
+}
+
+func RetryTopUpPayment(c *gin.Context) {
+	var req RetryTopUpPaymentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	tradeNo := strings.TrimSpace(req.TradeNo)
+	if tradeNo != "" {
+		LockOrder(tradeNo)
+		defer UnlockOrder(tradeNo)
+	}
+	topUp, ok := ensureRetryableTopUpForUser(c, tradeNo)
+	if !ok {
+		return
+	}
+
+	switch topUp.PaymentProvider {
+	case model.PaymentProviderEpay, "":
+		retryEpayTopUpPayment(c, topUp)
+	case model.PaymentProviderStripe:
+		retryStripeTopUpPayment(c, topUp)
+	case model.PaymentProviderCreem:
+		retryCreemTopUpPayment(c, topUp)
+	case model.PaymentProviderWaffo:
+		retryWaffoTopUpPayment(c, topUp)
+	case model.PaymentProviderWaffoPancake:
+		retryWaffoPancakeTopUpPayment(c, topUp)
+	case model.PaymentProviderBepusdt:
+		retryBepusdtTopUpPayment(c, topUp)
+	case model.PaymentProviderOkpay:
+		retryOkpayTopUpPayment(c, topUp)
+	default:
+		common.ApiErrorMsg(c, "不支持的支付渠道")
 	}
 }
 

@@ -78,11 +78,13 @@ export function BillingHistoryDialog({
     keyword,
     loading,
     completing,
+    retryingTradeNo,
     isAdmin,
     handlePageChange,
     handlePageSizeChange,
     handleSearch,
     handleCompleteOrder,
+    handleRetryPayment,
   } = useBillingHistory()
 
   const [confirmTradeNo, setConfirmTradeNo] = useState<string | null>(null)
@@ -261,17 +263,34 @@ export function BillingHistoryDialog({
                           </div>
                         </div>
 
-                        {/* Admin Actions */}
-                        {isAdmin && record.status === 'pending' && (
+                        {/* 操作 */}
+                        {record.status === 'pending' && (
                           <div className='mt-4 flex justify-end'>
-                            <Button
-                              size='sm'
-                              variant='outline'
-                              onClick={() => setConfirmTradeNo(record.trade_no)}
-                              disabled={completing}
-                            >
-                              {t('Complete Order')}
-                            </Button>
+                            {isAdmin ? (
+                              <Button
+                                size='sm'
+                                variant='outline'
+                                onClick={() =>
+                                  setConfirmTradeNo(record.trade_no)
+                                }
+                                disabled={completing}
+                              >
+                                {t('Complete Order')}
+                              </Button>
+                            ) : (
+                              <Button
+                                size='sm'
+                                variant='outline'
+                                onClick={() =>
+                                  handleRetryPayment(record.trade_no)
+                                }
+                                disabled={retryingTradeNo === record.trade_no}
+                              >
+                                {retryingTradeNo === record.trade_no
+                                  ? t('Processing...')
+                                  : t('Retry Payment')}
+                              </Button>
+                            )}
                           </div>
                         )}
                       </div>

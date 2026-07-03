@@ -24,8 +24,10 @@ import {
   getUserBillingHistory,
   getAllBillingHistory,
   completeOrder,
+  retryTopupPayment,
   isApiSuccess,
 } from '../api'
+import { openPaymentResponse } from '../lib'
 import type { TopupRecord } from '../types'
 
 // ============================================================================
@@ -50,6 +52,7 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
   const [keyword, setKeyword] = useState('')
   const [loading, setLoading] = useState(false)
   const [completing, setCompleting] = useState(false)
+  const [retryingTradeNo, setRetryingTradeNo] = useState<string | null>(null)
 
   /**
    * Fetch billing history
@@ -117,6 +120,37 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
   )
 
   /**
+   * 当前用户重新拉起待支付订单
+   */
+  const handleRetryPayment = useCallback(
+    async (tradeNo: string) => {
+      setRetryingTradeNo(tradeNo)
+      try {
+        const response = await retryTopupPayment({ trade_no: tradeNo })
+        if (!isApiSuccess(response)) {
+          toast.error(response.message || i18next.t('Payment request failed'))
+          return false
+        }
+        if (!openPaymentResponse(response)) {
+          toast.error(i18next.t('Payment request failed'))
+          return false
+        }
+        toast.success(i18next.t('Redirecting to payment page...'))
+        await fetchBillingHistory()
+        return true
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error('Failed to retry topup payment:', error)
+        toast.error(i18next.t('Payment request failed'))
+        return false
+      } finally {
+        setRetryingTradeNo(null)
+      }
+    },
+    [fetchBillingHistory]
+  )
+
+  /**
    * Change page
    */
   const handlePageChange = useCallback((newPage: number) => {
@@ -152,11 +186,13 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
     keyword,
     loading,
     completing,
+    retryingTradeNo,
     isAdmin,
     handlePageChange,
     handlePageSizeChange,
     handleSearch,
     handleCompleteOrder,
+    handleRetryPayment,
     refresh: fetchBillingHistory,
   }
 }

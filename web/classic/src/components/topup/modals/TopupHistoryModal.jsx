@@ -39,6 +39,72 @@ import { isAdmin } from '../../../helpers/utils';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 const { Text } = Typography;
 
+function isSafariBrowser() {
+  return (
+    navigator.userAgent.indexOf('Safari') > -1 &&
+    navigator.userAgent.indexOf('Chrome') < 1
+  );
+}
+
+function isSafeHttpPaymentUrl(value) {
+  const trimmed = (value || '').trim();
+  if (!trimmed) {
+    return false;
+  }
+  try {
+    const u = new URL(trimmed);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function submitPaymentForm(url, params) {
+  const form = document.createElement('form');
+  form.action = url;
+  form.method = 'POST';
+  if (!isSafariBrowser()) {
+    form.target = '_blank';
+  }
+  for (const key in params) {
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = key;
+    input.value = params[key];
+    form.appendChild(input);
+  }
+  document.body.appendChild(form);
+  form.submit();
+  document.body.removeChild(form);
+}
+
+function openPaymentResponse(response) {
+  const data = response?.data?.data;
+  const formUrl = response?.data?.url;
+  if (data && typeof data === 'object') {
+    const directUrl = data.pay_link || data.payment_url || data.checkout_url;
+    if (directUrl) {
+      if (!isSafeHttpPaymentUrl(directUrl)) {
+        return false;
+      }
+      if (data.checkout_url) {
+        window.location.href = directUrl;
+      } else {
+        window.open(directUrl, '_blank');
+      }
+      return true;
+    }
+  }
+  if (formUrl && data && typeof data === 'object') {
+    if (!isSafeHttpPaymentUrl(formUrl)) {
+      return false;
+    }
+    submitPaymentForm(formUrl, data);
+    return true;
+  }
+  return false;
+}
+
 // 状态映射配置
 const STATUS_CONFIG = {
   success: { type: 'success', key: '成功' },
@@ -63,6 +129,7 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [keyword, setKeyword] = useState('');
+  const [retryingTradeNo, setRetryingTradeNo] = useState(null);
   const isMobile = useIsMobile();
 
   const loadTopups = async (currentPage, currentPageSize) => {
@@ -132,6 +199,33 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
       content: t('是否将该订单标记为成功并为用户入账？'),
       onOk: () => handleAdminComplete(tradeNo),
     });
+  };
+
+  const retryPayment = async (tradeNo) => {
+    setRetryingTradeNo(tradeNo);
+    try {
+      const res = await API.post('/api/user/topup/retry', {
+        trade_no: tradeNo,
+      });
+      const { success, message, data } = res.data;
+      if (!success && message !== 'success') {
+        Toast.error({ content: message || t('支付请求失败') });
+        return;
+      }
+      if (!openPaymentResponse(res)) {
+        Toast.error({
+          content:
+            typeof data === 'string' && data ? data : t('支付请求失败'),
+        });
+        return;
+      }
+      Toast.success({ content: t('正在跳转到支付页面...') });
+      await loadTopups(page, pageSize);
+    } catch (e) {
+      Toast.error({ content: t('支付请求失败') });
+    } finally {
+      setRetryingTradeNo(null);
+    }
   };
 
   // 渲染状态徽章
@@ -217,15 +311,15 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
       },
     ];
 
-    // 管理员才显示操作列
-    if (userIsAdmin) {
-      baseColumns.push({
-        title: t('操作'),
-        key: 'action',
-        render: (_, record) => {
-          const actions = [];
-          if (record.status === 'pending') {
-            actions.push(
+    baseColumns.push({
+      title: t('操作'),
+      key: 'action',
+      render: (_, record) => {
+        if (record.status !== 'pending') {
+          return null;
+        }
+        if (userIsAdmin) {
+          return (
               <Button
                 key="complete"
                 size='small'
@@ -235,12 +329,22 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
               >
                 {t('补单')}
               </Button>
-            );
-          }
-          return actions.length > 0 ? <>{actions}</> : null;
-        },
-      });
-    }
+          );
+        }
+        return (
+          <Button
+            key="retry"
+            size='small'
+            type='primary'
+            theme='outline'
+            loading={retryingTradeNo === record.trade_no}
+            onClick={() => retryPayment(record.trade_no)}
+          >
+            {t('重新支付')}
+          </Button>
+        );
+      },
+    });
 
     baseColumns.push({
       title: t('创建时间'),
@@ -250,7 +354,7 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
     });
 
     return baseColumns;
-  }, [t, userIsAdmin]);
+  }, [t, userIsAdmin, retryingTradeNo]);
 
   return (
     <Modal

@@ -84,6 +84,17 @@ export type OkpayPaymentResponse = ApiResponse<{
   payment_url: string
   trade_no: string
 }>
+export type RetryTopupPaymentResponse = ApiResponse<
+  | Record<string, unknown>
+  | {
+      pay_link?: string
+      checkout_url?: string
+      payment_url?: string
+      trade_no?: string
+    }
+> & {
+  url?: string
+}
 
 /**
  * Creem product configuration
@@ -332,7 +343,7 @@ export interface UserWalletData {
 /**
  * Topup record status
  */
-export type TopupStatus = 'success' | 'pending' | 'expired'
+export type TopupStatus = 'success' | 'pending' | 'failed' | 'expired'
 
 /**
  * Topup billing record
@@ -370,5 +381,12 @@ export interface BillingHistoryResponse {
  * Complete order request (admin only)
  */
 export interface CompleteOrderRequest {
+  trade_no: string
+}
+
+/**
+ * 重新拉起待支付充值订单请求
+ */
+export interface RetryTopupPaymentRequest {
   trade_no: string
 }
