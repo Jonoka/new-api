@@ -3,12 +3,15 @@ package extension
 import (
 	"errors"
 	"net/url"
+	"path/filepath"
 	"strings"
 )
 
 const (
-	RuntimeTypeHTTP = "http"
-	DefaultRootDir  = "data/modules"
+	RuntimeTypeHTTP   = "http"
+	RuntimeTypeStatic = "static"
+	DefaultRootDir    = "data/modules"
+	DefaultStaticDir  = "public"
 )
 
 type Manifest struct {
@@ -30,8 +33,9 @@ type HostCompat struct {
 
 type Runtime struct {
 	Type       string `json:"type"`
-	BaseURL    string `json:"base_url"`
+	BaseURL    string `json:"base_url,omitempty"`
 	HealthPath string `json:"health_path,omitempty"`
+	StaticDir  string `json:"static_dir,omitempty"`
 }
 
 type UIContribution struct {
@@ -82,6 +86,7 @@ type PublicModule struct {
 type PublicRuntime struct {
 	Type       string `json:"type"`
 	HealthPath string `json:"health_path,omitempty"`
+	StaticDir  string `json:"static_dir,omitempty"`
 }
 
 func (m *Manifest) Validate() error {
@@ -99,15 +104,28 @@ func (m *Manifest) Validate() error {
 	if m.Runtime.Type == "" {
 		m.Runtime.Type = RuntimeTypeHTTP
 	}
-	if m.Runtime.Type != RuntimeTypeHTTP {
-		return errors.New("only http runtime is supported")
-	}
-	parsed, err := url.Parse(strings.TrimSpace(m.Runtime.BaseURL))
-	if err != nil || parsed == nil || parsed.Host == "" {
-		return errors.New("runtime.base_url is invalid")
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return errors.New("runtime.base_url only supports http or https")
+
+	switch m.Runtime.Type {
+	case RuntimeTypeHTTP:
+		parsed, err := url.Parse(strings.TrimSpace(m.Runtime.BaseURL))
+		if err != nil || parsed == nil || parsed.Host == "" {
+			return errors.New("runtime.base_url is invalid")
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return errors.New("runtime.base_url only supports http or https")
+		}
+	case RuntimeTypeStatic:
+		staticDir := strings.TrimSpace(m.Runtime.StaticDir)
+		if staticDir == "" {
+			staticDir = DefaultStaticDir
+		}
+		staticDir = filepath.Clean(filepath.FromSlash(staticDir))
+		if filepath.IsAbs(staticDir) || staticDir == "." || staticDir == ".." || strings.HasPrefix(staticDir, ".."+string(filepath.Separator)) {
+			return errors.New("runtime.static_dir is invalid")
+		}
+		m.Runtime.StaticDir = filepath.ToSlash(staticDir)
+	default:
+		return errors.New("only http and static runtimes are supported")
 	}
 	for _, page := range m.UI.Pages {
 		if strings.TrimSpace(page.Key) == "" {
@@ -139,6 +157,7 @@ func (m Module) Public(includeAdminFields bool) PublicModule {
 		Runtime: PublicRuntime{
 			Type:       m.Runtime.Type,
 			HealthPath: m.Runtime.HealthPath,
+			StaticDir:  m.Runtime.StaticDir,
 		},
 		UI:          m.UI,
 		Permissions: m.Permissions,

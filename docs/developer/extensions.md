@@ -2,12 +2,17 @@
 
 扩展模块适合放临时性、独立演进的功能，例如自动注册入库、批量同步、外部后台页面、一次性运维工具。模块可以调用主程序已有 API，也可以把自己的页面嵌入后台，不需要为了每个小功能重新发布主程序。
 
-第一版扩展系统采用外部 HTTP 模块，而不是 Go `plugin`：
+扩展系统支持两类运行时：
+
+- `static`：主程序直接托管模块目录里的静态文件，适合纯页面、工具面板、调用主程序 API 的轻量模块。
+- `http`：模块自己提供 HTTP 服务，适合后台任务、长连接、队列处理或需要独立运行时的模块。
+
+扩展系统不使用 Go `plugin`：
 
 - Windows 不支持 Go `plugin`。
 - Go `plugin` 不能可靠热卸载。
 - 外部进程崩溃不会拖垮主程序。
-- 模块可以用 Go、Node.js、Python、PHP 或任何能提供 HTTP 服务的语言开发。
+- HTTP 模块可以用 Go、Node.js、Python、PHP 或任何能提供 HTTP 服务的语言开发。
 
 ## 安装模块
 
@@ -24,8 +29,8 @@ data/modules/
 ├── state.json
 └── auto-register/
     ├── manifest.json
-    ├── server.mjs
-    └── data/
+    └── public/
+        └── index.html
 ```
 
 `state.json` 由主程序维护，用来记录启用状态。不要手工编辑它，除非你知道当前线上状态。
@@ -35,7 +40,8 @@ data/modules/
 ```text
 auto-register.zip
 ├── manifest.json
-└── server.mjs
+└── public/
+    └── index.html
 ```
 
 或：
@@ -44,14 +50,15 @@ auto-register.zip
 auto-register.zip
 └── auto-register/
     ├── manifest.json
-    └── server.mjs
+    └── public/
+        └── index.html
 ```
 
 上传后主程序会读取 `manifest.json`，并按 `manifest.id` 安装到 `data/modules/<module-id>`。
 
 ## 制作轻量模块
 
-扩展模块默认按轻量 HTTP 模块设计。主程序已经提供登录态、角色过滤、侧边栏入口、iframe 嵌入、代理转发和用户上下文请求头，模块不需要重复实现这些能力。
+扩展模块默认优先按 `static` 轻量模块设计。主程序已经提供登录态、角色过滤、侧边栏入口、iframe 嵌入、代理转发和用户上下文接口，模块不需要重复实现这些能力。
 
 推荐原则：
 
@@ -66,7 +73,7 @@ auto-register.zip
 .agents/skills/newapi-extension-module-workflow/
 ```
 
-创建新模块时可以参考其中的轻量 HTTP 模板：
+创建新模块时可以参考其中的轻量模板：
 
 ```text
 .agents/skills/newapi-extension-module-workflow/assets/http-module-template/
@@ -91,7 +98,7 @@ artifacts/extensions/<module-id>-<version>.zip
 ## 热加载流程
 
 1. 上传 zip 模块包，或把模块目录放到 `data/modules/<module-id>`。
-2. 启动模块自己的 HTTP 服务。
+2. 如果是 `http` 模块，启动模块自己的 HTTP 服务；`static` 模块不需要单独启动。
 3. 用 root 账号进入 **扩展模块 -> 模块管理**。
 4. 如果是手动放目录，点击 **刷新**。
 5. 开启模块开关。
@@ -112,9 +119,9 @@ artifacts/extensions/<module-id>-<version>.zip
     "min": "v1.0.0-rc.10.1.10.144"
   },
   "runtime": {
-    "type": "http",
-    "base_url": "http://127.0.0.1:39001",
-    "health_path": "/health"
+    "type": "static",
+    "static_dir": "public",
+    "health_path": "/"
   },
   "ui": {
     "nav": [
@@ -146,9 +153,10 @@ artifacts/extensions/<module-id>-<version>.zip
 - `id`：模块唯一 ID。建议只用字母、数字、短横线。
 - `name`：后台显示名称。
 - `version`：模块版本。
-- `runtime.type`：当前只支持 `http`。
-- `runtime.base_url`：模块服务地址。只支持 `http` 和 `https`。
-- `runtime.health_path`：健康检查路径，当前用于展示和约定，后续可接入自动检查。
+- `runtime.type`：支持 `static` 和 `http`。
+- `runtime.static_dir`：`static` 模块的静态目录，默认 `public`。
+- `runtime.base_url`：`http` 模块服务地址，只支持 `http` 和 `https`。
+- `runtime.health_path`：健康检查路径，默认版前端会对 `http` 模块做可达性检查。
 - `ui.nav`：写入主程序侧边栏的入口。
 - `ui.pages`：模块页面定义。
 - `permissions.roles`：允许访问的角色。可选值：`user`、`admin`、`root`。
@@ -180,7 +188,13 @@ artifacts/extensions/<module-id>-<version>.zip
 /extensions/<module-id>/index
 ```
 
-实际请求会被代理到：
+`static` 模块实际请求会映射到：
+
+```text
+data/modules/<module-id>/public/index.html
+```
+
+`http` 模块实际请求会被代理到：
 
 ```text
 <runtime.base_url>/ui
@@ -190,7 +204,7 @@ artifacts/extensions/<module-id>-<version>.zip
 
 ## 模块接收用户上下文
 
-主程序代理请求时会注入这些请求头：
+主程序代理 `http` 模块请求时会注入这些请求头：
 
 ```text
 X-NewAPI-Module-ID: auto-register
@@ -227,7 +241,13 @@ GET /api/extensions/host/me
 
 这个接口会返回当前登录用户、角色、分组和主程序版本。
 
-## 最小 Node.js 示例
+## 示例模块
+
+`examples/extensions/host-context-probe` 提供了一个最小静态模块。打包后可以直接上传，不需要单独启动服务。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-extension-lite.ps1 -ModuleDir "examples/extensions/host-context-probe"
+```
 
 `examples/extensions/echo` 提供了一个最小模块：
 

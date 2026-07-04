@@ -53,6 +53,7 @@ func SetApiRouter(router *gin.Engine) {
 			extensionAdminRoute.POST("/refresh", controller.RefreshExtensions)
 			extensionAdminRoute.POST("/upload", controller.UploadExtension)
 			extensionAdminRoute.PUT("/:id/enabled", controller.SetExtensionEnabled)
+			extensionAdminRoute.DELETE("/:id", controller.UninstallExtension)
 		}
 		apiRouter.GET("/rankings", middleware.HeaderNavModuleAuth("rankings"), controller.GetRankings)
 		apiRouter.GET("/verification", middleware.EmailVerificationRateLimit(), middleware.TurnstileCheck(), controller.SendEmailVerification)

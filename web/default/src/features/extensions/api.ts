@@ -50,6 +50,14 @@ export async function setExtensionEnabled(id: string, enabled: boolean) {
   return res.data
 }
 
+export async function uninstallExtension(id: string) {
+  const res = await api.delete<ExtensionListResponse>(
+    `/api/extension-admin/${encodeURIComponent(id)}`,
+    { skipBusinessError: true }
+  )
+  return res.data
+}
+
 export function getExtensionPageUrl(moduleId: string, pagePath: string) {
   const normalizedPath = pagePath.startsWith('/') ? pagePath : `/${pagePath}`
   return `/api/extensions/${encodeURIComponent(moduleId)}/proxy${normalizedPath}`

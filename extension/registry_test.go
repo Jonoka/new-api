@@ -3,6 +3,8 @@ package extension
 import (
 	"archive/zip"
 	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -57,6 +59,94 @@ func TestManagerScanAndEnableModule(t *testing.T) {
 	rootModules := manager.List(common.RoleRootUser, false)
 	if len(rootModules) != 1 || rootModules[0].Runtime.Type != RuntimeTypeHTTP {
 		t.Fatalf("expected enabled http module, got %#v", rootModules)
+	}
+}
+
+func TestManagerScanAndEnableStaticModule(t *testing.T) {
+	rootDir := t.TempDir()
+	moduleDir := writeManifest(t, rootDir, "static-demo", Manifest{
+		ID:      "static-demo",
+		Name:    "Static Demo",
+		Version: "0.1.0",
+		Runtime: Runtime{
+			Type:      RuntimeTypeStatic,
+			StaticDir: "public",
+		},
+		UI: UIContribution{
+			Nav: []NavItem{{Title: "Static Demo", Page: "index"}},
+			Pages: []Page{{
+				Key:   "index",
+				Path:  "/",
+				Embed: true,
+			}},
+		},
+		Permissions: PermissionConfig{Roles: []string{"root"}},
+	})
+	publicDir := filepath.Join(moduleDir, "public")
+	if err := os.MkdirAll(publicDir, 0755); err != nil {
+		t.Fatalf("make static dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(publicDir, "index.html"), []byte("static index"), 0644); err != nil {
+		t.Fatalf("write static index: %v", err)
+	}
+
+	manager := NewManager(rootDir)
+	if err := manager.Scan(); err != nil {
+		t.Fatalf("scan static module: %v", err)
+	}
+
+	module, err := manager.SetEnabled("static-demo", true)
+	if err != nil {
+		t.Fatalf("enable static module: %v", err)
+	}
+	if module.Runtime.Type != RuntimeTypeStatic {
+		t.Fatalf("expected static runtime, got %q", module.Runtime.Type)
+	}
+}
+
+func TestStaticProxyServesIndexAndRejectsTraversal(t *testing.T) {
+	rootDir := t.TempDir()
+	moduleDir := writeManifest(t, rootDir, "static-demo", Manifest{
+		ID:      "static-demo",
+		Name:    "Static Demo",
+		Version: "0.1.0",
+		Runtime: Runtime{
+			Type:      RuntimeTypeStatic,
+			StaticDir: "public",
+		},
+		UI: UIContribution{
+			Pages: []Page{{Key: "index", Path: "/", Embed: true}},
+		},
+		Permissions: PermissionConfig{Roles: []string{"root"}},
+	})
+	publicDir := filepath.Join(moduleDir, "public")
+	if err := os.MkdirAll(publicDir, 0755); err != nil {
+		t.Fatalf("make static dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(publicDir, "index.html"), []byte("static index"), 0644); err != nil {
+		t.Fatalf("write static index: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(moduleDir, "secret.txt"), []byte("secret"), 0644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+
+	manager := NewManager(rootDir)
+	if err := manager.Scan(); err != nil {
+		t.Fatalf("scan static module: %v", err)
+	}
+	if _, err := manager.SetEnabled("static-demo", true); err != nil {
+		t.Fatalf("enable static module: %v", err)
+	}
+
+	handler, err := manager.ProxyHandler("static-demo", `..\secret.txt`, common.RoleRootUser, ProxyContext{})
+	if err != nil {
+		t.Fatalf("create static proxy handler: %v", err)
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/extensions/static-demo/proxy/../secret.txt", nil)
+	handler.ServeHTTP(recorder, request)
+	if body := recorder.Body.String(); body != "static index" {
+		t.Fatalf("expected traversal to fall back to index, got %q", body)
 	}
 }
 
@@ -126,6 +216,46 @@ func TestManagerInstallArchiveWithTopLevelDirectory(t *testing.T) {
 	}
 }
 
+func TestManagerUninstallModuleRemovesDirectoryAndState(t *testing.T) {
+	rootDir := t.TempDir()
+	writeManifest(t, rootDir, "uploaded", Manifest{
+		ID:      "uploaded",
+		Name:    "Uploaded",
+		Version: "1.0.0",
+		Runtime: Runtime{
+			BaseURL: "http://127.0.0.1:39001",
+		},
+		UI: UIContribution{
+			Pages: []Page{{Key: "index", Path: "/ui", Embed: true}},
+		},
+	})
+
+	manager := NewManager(rootDir)
+	if err := manager.Scan(); err != nil {
+		t.Fatalf("scan module: %v", err)
+	}
+	if _, err := manager.SetEnabled("uploaded", true); err != nil {
+		t.Fatalf("enable module: %v", err)
+	}
+	if err := manager.Uninstall("uploaded"); err != nil {
+		t.Fatalf("uninstall module: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(rootDir, "uploaded")); !os.IsNotExist(err) {
+		t.Fatalf("module directory should be removed, got err=%v", err)
+	}
+	if modules := manager.List(common.RoleRootUser, true); len(modules) != 0 {
+		t.Fatalf("expected no modules after uninstall, got %#v", modules)
+	}
+
+	reloaded := NewManager(rootDir)
+	if err := reloaded.Scan(); err != nil {
+		t.Fatalf("rescan after uninstall: %v", err)
+	}
+	if len(reloaded.state.Modules) != 0 {
+		t.Fatalf("module state should be removed, got %#v", reloaded.state.Modules)
+	}
+}
+
 func TestManagerInstallArchiveRejectsZipSlip(t *testing.T) {
 	rootDir := t.TempDir()
 	var buffer bytes.Buffer
@@ -147,7 +277,7 @@ func TestManagerInstallArchiveRejectsZipSlip(t *testing.T) {
 	}
 }
 
-func writeManifest(t *testing.T, rootDir, id string, manifest Manifest) {
+func writeManifest(t *testing.T, rootDir, id string, manifest Manifest) string {
 	t.Helper()
 	moduleDir := filepath.Join(rootDir, id)
 	if err := os.MkdirAll(moduleDir, 0755); err != nil {
@@ -160,6 +290,7 @@ func writeManifest(t *testing.T, rootDir, id string, manifest Manifest) {
 	if err := os.WriteFile(filepath.Join(moduleDir, "manifest.json"), data, 0644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
+	return moduleDir
 }
 
 func buildModuleArchive(t *testing.T, prefix, id string) []byte {

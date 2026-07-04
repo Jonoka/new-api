@@ -78,8 +78,36 @@ if ($null -eq $manifest.name -or [string]::IsNullOrWhiteSpace([string]$manifest.
 if ($null -eq $manifest.version -or [string]::IsNullOrWhiteSpace([string]$manifest.version)) {
     throw "manifest.json 缺少 version"
 }
-if ($null -eq $manifest.runtime -or [string]::IsNullOrWhiteSpace([string]$manifest.runtime.base_url)) {
+if ($null -eq $manifest.runtime) {
+    throw "manifest.json 缺少 runtime"
+}
+$runtimeType = [string]$manifest.runtime.type
+if ([string]::IsNullOrWhiteSpace($runtimeType)) {
+    $runtimeType = "http"
+}
+if ($runtimeType -eq "http" -and [string]::IsNullOrWhiteSpace([string]$manifest.runtime.base_url)) {
     throw "manifest.json 缺少 runtime.base_url"
+}
+if ($runtimeType -eq "static") {
+    $staticDir = [string]$manifest.runtime.static_dir
+    if ([string]::IsNullOrWhiteSpace($staticDir)) {
+        $staticDir = "public"
+    }
+    $normalizedStaticDir = $staticDir.Replace('\', '/').Trim('/')
+    if ([string]::IsNullOrWhiteSpace($normalizedStaticDir) -or
+        [System.IO.Path]::IsPathRooted($staticDir) -or
+        $normalizedStaticDir -eq "." -or
+        $normalizedStaticDir -eq ".." -or
+        $normalizedStaticDir.StartsWith("../") -or
+        $normalizedStaticDir.Contains("/../")) {
+        throw "manifest.json 指定的 runtime.static_dir 不安全：$staticDir"
+    }
+    $staticPath = Join-Path $modulePath $staticDir
+    if (-not (Test-Path -Path $staticPath -PathType Container)) {
+        throw "manifest.json 指定的 runtime.static_dir 不存在：$staticDir"
+    }
+} elseif ($runtimeType -ne "http") {
+    throw "manifest.json runtime.type 仅支持 http 或 static：$runtimeType"
 }
 
 $moduleId = [string]$manifest.id

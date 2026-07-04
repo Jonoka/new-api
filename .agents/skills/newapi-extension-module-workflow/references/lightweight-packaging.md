@@ -30,15 +30,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-extension-li
 
 ## 产物结构
 
-轻量包根目录应类似：
+轻量静态包根目录应类似：
 
 ```text
-echo-0.1.0.zip
+host-context-probe-0.1.0.zip
 ├── manifest.json
-└── server.mjs
+└── public/
+    └── index.html
 ```
 
-也可以包含少量静态资源：
+HTTP 模块可以包含服务入口：
 
 ```text
 auto-register-0.1.0.zip
@@ -52,4 +53,5 @@ auto-register-0.1.0.zip
 
 - 上传失败并提示找不到 `manifest.json`：检查 zip 根目录是否直接包含 `manifest.json`，或是否只有一个顶层目录包含它。
 - 包体过大：先用解压工具查看是否误带 `node_modules`、截图、数据库、历史包。
-- 页面打不开：检查模块服务是否已启动，`runtime.base_url` 是否正确，`ui.pages[].path` 是否以 `/` 开头。
+- 静态页面打不开：检查 `runtime.static_dir` 是否存在，入口文件是否在该目录内。
+- HTTP 页面打不开：检查模块服务是否已启动，`runtime.base_url` 是否正确，`ui.pages[].path` 是否以 `/` 开头。

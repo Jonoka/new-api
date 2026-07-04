@@ -1,12 +1,13 @@
-import { useMemo, useRef } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { ExternalLink, Puzzle, RefreshCw, Upload } from 'lucide-react'
+import { ExternalLink, Puzzle, RefreshCw, Trash2, Upload } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
 import { getCustomNavIcon } from '@/lib/custom-nav'
 import { ROLE } from '@/lib/roles'
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -31,6 +32,7 @@ import {
   getExtensionAdminList,
   refreshExtensions,
   setExtensionEnabled,
+  uninstallExtension,
   uploadExtension,
 } from './api'
 import type { ExtensionModule } from './types'
@@ -44,6 +46,7 @@ export function Extensions() {
   const user = useAuthStore((state) => state.auth.user)
   const isRoot = Boolean(user && user.role >= ROLE.SUPER_ADMIN)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<ExtensionModule | null>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: EXTENSIONS_ADMIN_QUERY_KEY,
@@ -94,6 +97,22 @@ export function Extensions() {
         queryKey: EXTENSIONS_ADMIN_QUERY_KEY,
       })
       toast.success(t('Module uploaded'))
+    },
+  })
+
+  const uninstallMutation = useMutation({
+    mutationFn: uninstallExtension,
+    onSuccess: async (res) => {
+      if (!res.success) {
+        toast.error(res.message || t('Failed to uninstall module'))
+        return
+      }
+      setDeleteTarget(null)
+      await queryClient.invalidateQueries({ queryKey: EXTENSIONS_QUERY_KEY })
+      await queryClient.invalidateQueries({
+        queryKey: EXTENSIONS_ADMIN_QUERY_KEY,
+      })
+      toast.success(t('Module uninstalled'))
     },
   })
 
@@ -190,10 +209,44 @@ export function Extensions() {
                   : ''
               }
               onToggle={(id, enabled) => toggleMutation.mutate({ id, enabled })}
+              onUninstall={(module) => setDeleteTarget(module)}
+              uninstallingId={
+                uninstallMutation.isPending
+                  ? String(uninstallMutation.variables || '')
+                  : ''
+              }
             />
           )}
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => {
+          if (!open && !uninstallMutation.isPending) {
+            setDeleteTarget(null)
+          }
+        }}
+        title={t('Uninstall module')}
+        desc={
+          <span>
+            {t('This will delete the module files and remove its enabled state.')}
+            {deleteTarget ? (
+              <>
+                {' '}
+                <span className='font-medium'>{deleteTarget.name}</span>
+              </>
+            ) : null}
+          </span>
+        }
+        confirmText={t('Uninstall')}
+        destructive
+        isLoading={uninstallMutation.isPending}
+        handleConfirm={() => {
+          if (!deleteTarget) return
+          uninstallMutation.mutate(deleteTarget.id)
+        }}
+      />
     </div>
   )
 }
@@ -202,10 +255,14 @@ function ExtensionsTable({
   modules,
   pendingId,
   onToggle,
+  onUninstall,
+  uninstallingId,
 }: {
   modules: ExtensionModule[]
   pendingId: string
   onToggle: (id: string, enabled: boolean) => void
+  onUninstall: (module: ExtensionModule) => void
+  uninstallingId: string
 }) {
   const { t } = useTranslation()
 
@@ -217,6 +274,7 @@ function ExtensionsTable({
           <TableHead>{t('Permissions')}</TableHead>
           <TableHead>{t('Pages')}</TableHead>
           <TableHead className='w-24'>{t('Enabled')}</TableHead>
+          <TableHead className='w-28 text-right'>{t('Actions')}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -296,6 +354,17 @@ function ExtensionsTable({
                   onCheckedChange={(checked) => onToggle(module.id, checked)}
                   aria-label={t('Toggle extension')}
                 />
+              </TableCell>
+              <TableCell className='text-right'>
+                <Button
+                  size='sm'
+                  variant='destructive'
+                  disabled={uninstallingId === module.id}
+                  onClick={() => onUninstall(module)}
+                >
+                  <Trash2 className='size-3.5' />
+                  {t('Uninstall')}
+                </Button>
               </TableCell>
             </TableRow>
           )

@@ -28,16 +28,19 @@ description: 在 new-api 项目中流程化创建、改造、排错和轻量化�
    - 使用 `rg --files examples data modules . | rg "manifest\.json$"`。
    - 模块根目录必须直接包含 `manifest.json`。
 3. 对齐宿主边界：
-   - 运行时当前只支持 HTTP 模块。
-   - 主程序负责：登录态、角色过滤、侧边栏入口、iframe 嵌入、代理转发、用户上下文请求头。
-   - 模块负责：自己的 HTTP 服务、少量业务逻辑、必要的 UI 页面。
+   - 运行时支持 `static` 和 `http`。
+   - `static` 模块由主程序托管模块目录里的静态文件，适合纯页面和调用主程序 API 的轻量工具。
+   - `http` 模块由模块自己的 HTTP 服务承载，适合后台任务、队列、长连接或独立运行时逻辑。
+   - 主程序负责：登录态、角色过滤、侧边栏入口、iframe 嵌入、代理转发和用户上下文接口。
+   - 模块负责：少量业务逻辑和必要的 UI 页面。
 
 ## 步骤 2：实现模块
 
-1. 新模块优先从 `assets/http-module-template/` 创建骨架。
+1. 新模块优先做 `static` 轻量模块；确实需要独立服务时再从 `assets/http-module-template/` 创建 HTTP 骨架。
 2. `manifest.json` 必须和模块服务一致：
    - `id` 稳定唯一，只用字母、数字、短横线、下划线。
-   - `runtime.base_url` 指向模块 HTTP 服务。
+   - `runtime.type=static` 时设置 `runtime.static_dir`，默认 `public`。
+   - `runtime.type=http` 时 `runtime.base_url` 指向模块 HTTP 服务。
    - `ui.nav[].page` 必须能在 `ui.pages[].key` 找到。
    - `ui.pages[].path` 必须以 `/` 开头。
    - `permissions.roles` 明确最小角色范围。
@@ -79,7 +82,7 @@ artifacts/extensions/<moduleId>-<version>.zip
 1. 确认 zip 存在：`artifacts/extensions/<moduleId>-<version>.zip`。
 2. 解包结构必须满足：
    - 根目录有 `manifest.json`。
-   - 有模块运行所需入口文件，例如 `server.mjs`。
+   - 有模块运行所需入口文件，例如 `public/index.html` 或 `server.mjs`。
    - 不包含 `node_modules/`、`dist/`、`.git/` 等重型目录。
 3. 若包体超过 1 MiB，先检查是否误打进依赖、构建产物、截图、日志或数据库。
 

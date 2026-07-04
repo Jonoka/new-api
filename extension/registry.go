@@ -198,6 +198,31 @@ func (m *Manager) SetEnabled(id string, enabled bool) (Module, error) {
 	return module, nil
 }
 
+func (m *Manager) Uninstall(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	module, ok := m.modules[id]
+	if !ok {
+		return errors.New("module not found")
+	}
+	targetDir, err := safeModuleTargetDir(m.rootDir, id)
+	if err != nil {
+		return err
+	}
+	if module.Path != "" && !sameCleanPath(module.Path, targetDir) {
+		return errors.New("module path does not match module id")
+	}
+	if err := os.RemoveAll(targetDir); err != nil {
+		return err
+	}
+	delete(m.modules, id)
+	if m.state.Modules != nil {
+		delete(m.state.Modules, id)
+	}
+	return m.saveStateLocked()
+}
+
 func (m *Manager) InstallArchive(readerAt io.ReaderAt, size int64) (Module, error) {
 	if readerAt == nil {
 		return Module{}, errors.New("module archive is required")

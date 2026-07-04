@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   Empty,
+  Popconfirm,
   Space,
   Spin,
   Switch,
@@ -12,7 +13,7 @@ import {
   Tag,
   Typography,
 } from '@douyinfe/semi-ui';
-import { ExternalLink, Puzzle, RefreshCw, Upload } from 'lucide-react';
+import { ExternalLink, Puzzle, RefreshCw, Trash2, Upload } from 'lucide-react';
 import { API, isRoot, showError, showSuccess } from '../../helpers';
 
 const { Text, Title } = Typography;
@@ -138,6 +139,26 @@ export default function Extensions() {
     }
   };
 
+  const uninstallModule = async (module) => {
+    setPendingId(module.id);
+    try {
+      const res = await API.delete(
+        `/api/extension-admin/${encodeURIComponent(module.id)}`,
+      );
+      if (res?.data?.success) {
+        showSuccess(t('模块已卸载'));
+        await loadData();
+        notifyClassicSidebar();
+      } else {
+        showError(res?.data?.message || t('卸载失败'));
+      }
+    } catch (error) {
+      showError(error.message || t('卸载失败'));
+    } finally {
+      setPendingId('');
+    }
+  };
+
   const columns = useMemo(
     () => [
       {
@@ -247,6 +268,31 @@ export default function Extensions() {
             loading={pendingId === record.id}
             onChange={(checked) => setEnabled(record, checked)}
           />
+        ),
+      },
+      {
+        title: t('操作'),
+        width: 120,
+        align: 'right',
+        render: (_, record) => (
+          <Popconfirm
+            title={t('确认卸载模块？')}
+            content={t('这将删除模块文件并移除启用状态，此操作不可撤销。')}
+            okText={t('卸载')}
+            cancelText={t('取消')}
+            onConfirm={() => uninstallModule(record)}
+          >
+            <Button
+              size='small'
+              type='danger'
+              theme='outline'
+              disabled={pendingId === record.id}
+              loading={pendingId === record.id}
+              icon={<Trash2 size={14} />}
+            >
+              {t('卸载')}
+            </Button>
+          </Popconfirm>
         ),
       },
     ],

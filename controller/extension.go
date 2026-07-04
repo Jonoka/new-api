@@ -90,6 +90,17 @@ func SetExtensionEnabled(c *gin.Context) {
 	common.ApiSuccess(c, module.Public(true))
 }
 
+func UninstallExtension(c *gin.Context) {
+	if err := extension.DefaultManager.Uninstall(c.Param("id")); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"root":    extension.DefaultManager.RootDir(),
+		"modules": extension.DefaultManager.List(c.GetInt("role"), true),
+	})
+}
+
 func ProxyExtension(c *gin.Context) {
 	proxy, err := extension.DefaultManager.ProxyHandler(
 		c.Param("id"),

@@ -6,6 +6,7 @@ export type ExtensionHostCompat = {
 export type ExtensionRuntime = {
   type?: string
   health_path?: string
+  static_dir?: string
 }
 
 export type ExtensionNavItem = {
