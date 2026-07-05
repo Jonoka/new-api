@@ -326,6 +326,7 @@ func canvasImageTaskContentPath(taskID string, index int) string {
 func readCanvasImageTaskContent(task *model.Task, index int) ([]byte, string, error) {
 	var payload struct {
 		Data []struct {
+			URL     string `json:"url,omitempty"`
 			B64JSON string `json:"b64_json,omitempty"`
 		} `json:"data"`
 	}
@@ -335,7 +336,11 @@ func readCanvasImageTaskContent(task *model.Task, index int) ([]byte, string, er
 	if index < 0 || index >= len(payload.Data) {
 		return nil, "", fmt.Errorf("image index out of range")
 	}
-	return decodeCanvasImageData(payload.Data[index].B64JSON)
+	item := payload.Data[index]
+	if strings.HasPrefix(strings.TrimSpace(item.URL), "data:") {
+		return decodeCanvasImageData(item.URL)
+	}
+	return decodeCanvasImageData(item.B64JSON)
 }
 
 func decodeCanvasImageData(value string) ([]byte, string, error) {
