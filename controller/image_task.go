@@ -246,6 +246,15 @@ func buildRelayImageTaskResponse(task *model.Task) gin.H {
 		response["error"] = gin.H{"message": task.FailReason}
 		response["msg"] = task.FailReason
 	}
+	if task.Platform == constant.TaskPlatformCanvasImage && task.Status == model.TaskStatusSuccess && len(bytes.TrimSpace(task.Data)) > 0 {
+		for key, value := range buildRelayCanvasImageTaskResult(task) {
+			response[key] = value
+		}
+		response["id"] = task.TaskID
+		response["task_id"] = task.TaskID
+		response["status"] = status
+		return response
+	}
 	if task.Status == model.TaskStatusSuccess && len(bytes.TrimSpace(task.Data)) > 0 {
 		var payload gin.H
 		if err := common.Unmarshal(task.Data, &payload); err == nil {
@@ -258,6 +267,43 @@ func buildRelayImageTaskResponse(task *model.Task) gin.H {
 		}
 	}
 	return response
+}
+
+func buildRelayCanvasImageTaskResult(task *model.Task) gin.H {
+	var payload struct {
+		Created any `json:"created,omitempty"`
+		Data    []struct {
+			URL           string `json:"url,omitempty"`
+			B64JSON       string `json:"b64_json,omitempty"`
+			RevisedPrompt string `json:"revised_prompt,omitempty"`
+		} `json:"data"`
+	}
+	if err := common.Unmarshal(task.Data, &payload); err != nil {
+		return gin.H{"data": []gin.H{}}
+	}
+	items := make([]gin.H, 0, len(payload.Data))
+	for index, item := range payload.Data {
+		next := gin.H{}
+		switch {
+		case strings.HasPrefix(strings.TrimSpace(item.URL), "data:"):
+			next["url"] = canvasImageTaskContentPath(task.TaskID, index)
+		case strings.TrimSpace(item.URL) != "":
+			next["url"] = item.URL
+		case strings.TrimSpace(item.B64JSON) != "":
+			next["url"] = canvasImageTaskContentPath(task.TaskID, index)
+		default:
+			continue
+		}
+		if strings.TrimSpace(item.RevisedPrompt) != "" {
+			next["revised_prompt"] = item.RevisedPrompt
+		}
+		items = append(items, next)
+	}
+	result := gin.H{"data": items}
+	if payload.Created != nil {
+		result["created"] = payload.Created
+	}
+	return result
 }
 
 type imageTaskResponseCapture struct {

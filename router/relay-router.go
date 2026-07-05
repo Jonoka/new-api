@@ -82,7 +82,7 @@ func SetRelayRouter(router *gin.Engine) {
 			controller.Relay(c, types.RelayFormatOpenAI)
 		})
 		canvasRelayRouter.POST("/images/generations", func(c *gin.Context) {
-			controller.RelayImageTaskSubmit(c)
+			controller.CanvasImageTaskSubmit(c)
 		})
 		canvasRelayRouter.GET("/images/generations/:task_id", controller.RelayImageTaskFetch)
 		canvasRelayRouter.POST("/images/edits", func(c *gin.Context) {
