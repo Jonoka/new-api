@@ -208,6 +208,58 @@ func normalizeImageTaskProgress(progress any) string {
 	}
 }
 
+func RelayImageTaskFetch(c *gin.Context) {
+	taskID := strings.TrimSpace(c.Param("task_id"))
+	task, exists, err := model.GetByTaskId(c.GetInt("id"), taskID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "failed to load image task"}})
+		return
+	}
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"message": "task not found"}})
+		return
+	}
+	c.JSON(http.StatusOK, buildRelayImageTaskResponse(task))
+}
+
+func buildRelayImageTaskResponse(task *model.Task) gin.H {
+	status := strings.ToLower(strings.TrimSpace(string(task.Status)))
+	switch status {
+	case "success":
+		status = "succeeded"
+	case "failure":
+		status = "failed"
+	case "submitted", "queued", "not_start", "not-start":
+		status = "queued"
+	case "in_progress", "in-progress", "processing":
+		status = "processing"
+	case "":
+		status = "queued"
+	}
+	response := gin.H{
+		"id":       task.TaskID,
+		"task_id":  task.TaskID,
+		"status":   status,
+		"progress": task.Progress,
+	}
+	if task.Status == model.TaskStatusFailure {
+		response["error"] = gin.H{"message": task.FailReason}
+		response["msg"] = task.FailReason
+	}
+	if task.Status == model.TaskStatusSuccess && len(bytes.TrimSpace(task.Data)) > 0 {
+		var payload gin.H
+		if err := common.Unmarshal(task.Data, &payload); err == nil {
+			for key, value := range payload {
+				response[key] = value
+			}
+			response["id"] = task.TaskID
+			response["task_id"] = task.TaskID
+			response["status"] = status
+		}
+	}
+	return response
+}
+
 type imageTaskResponseCapture struct {
 	gin.ResponseWriter
 	buf bytes.Buffer

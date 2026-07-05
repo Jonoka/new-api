@@ -183,6 +183,24 @@ func TestExecuteCanvasImageRelayRoutesEditTasks(t *testing.T) {
 	require.JSONEq(t, `{"ok":true,"path":"/canvas/v1/images/edits","imageCount":1}`, recorder.Body.String())
 }
 
+func TestRelayImageTaskResponseFlattensSuccessfulImageData(t *testing.T) {
+	task := &model.Task{
+		TaskID:   "task_openai_image",
+		Status:   model.TaskStatusSuccess,
+		Progress: "100%",
+		Data:     []byte(`{"id":"upstream_task","status":"succeeded","data":[{"url":"https://example.com/result.png"}]}`),
+	}
+
+	response := buildRelayImageTaskResponse(task)
+
+	require.Equal(t, "task_openai_image", response["id"])
+	require.Equal(t, "task_openai_image", response["task_id"])
+	require.Equal(t, "succeeded", response["status"])
+	items, ok := response["data"].([]any)
+	require.True(t, ok)
+	require.Len(t, items, 1)
+}
+
 func TestNormalizeCanvasImageTaskActionAcceptsShortEditAction(t *testing.T) {
 	require.Equal(t, canvasImageTaskActionEdits, normalizeCanvasImageTaskAction("edits"))
 	require.Equal(t, canvasImageTaskActionEdits, normalizeCanvasImageTaskAction("images/edits"))

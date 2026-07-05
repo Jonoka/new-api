@@ -440,6 +440,15 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
+	if shouldForceGPTImage2HighTierAsync(info, request) {
+		async := true
+		waitForResult := false
+		request.Async = &async
+		request.WaitForResult = &waitForResult
+	} else if shouldDefaultGPTImage2RequestToSync(info, request) {
+		async := false
+		request.Async = &async
+	}
 	switch info.RelayMode {
 	case relayconstant.RelayModeImagesEdits:
 		if isJSONRequest(c) {
@@ -450,6 +459,15 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		writer := multipart.NewWriter(&requestBody)
 
 		writer.WriteField("model", request.Model)
+		if request.Quality != "" {
+			writer.WriteField("quality", request.Quality)
+		}
+		if request.Async != nil {
+			writer.WriteField("async", fmt.Sprintf("%t", *request.Async))
+		}
+		if request.WaitForResult != nil {
+			writer.WriteField("wait_for_result", fmt.Sprintf("%t", *request.WaitForResult))
+		}
 		// 使用已解析的 multipart 表单，避免重复解析
 		mf := c.Request.MultipartForm
 		if mf == nil {
@@ -462,7 +480,7 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		// 写入所有非文件字段
 		if mf != nil {
 			for key, values := range mf.Value {
-				if key == "model" {
+				if key == "model" || key == "quality" || key == "async" || key == "wait_for_result" {
 					continue
 				}
 				for _, value := range values {
@@ -568,6 +586,36 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 	default:
 		return request, nil
 	}
+}
+
+func shouldDefaultGPTImage2RequestToSync(info *relaycommon.RelayInfo, request dto.ImageRequest) bool {
+	if info == nil || (info.RelayMode != relayconstant.RelayModeImagesGenerations && info.RelayMode != relayconstant.RelayModeImagesEdits) || request.Async != nil {
+		return false
+	}
+	modelName := strings.ToLower(strings.TrimSpace(firstNonEmptyString(info.UpstreamModelName, info.OriginModelName, request.Model)))
+	return modelName == "gpt-image-2"
+}
+
+func shouldForceGPTImage2HighTierAsync(info *relaycommon.RelayInfo, request dto.ImageRequest) bool {
+	if info == nil || info.RelayMode != relayconstant.RelayModeImagesGenerations {
+		return false
+	}
+	modelName := strings.ToLower(strings.TrimSpace(firstNonEmptyString(info.UpstreamModelName, info.OriginModelName, request.Model)))
+	if modelName != "gpt-image-2" {
+		return false
+	}
+	quality := strings.ToLower(strings.TrimSpace(request.Quality))
+	size := strings.ToLower(strings.TrimSpace(request.Size))
+	return quality == "4k" || quality == "high" || quality == "ultra" || strings.Contains(size, "3840") || strings.Contains(size, "4096")
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func isJSONRequest(c *gin.Context) bool {
