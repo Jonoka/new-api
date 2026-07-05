@@ -38,6 +38,29 @@ func TestConvertImageRequestDefaultsGPTImage2ToSync(t *testing.T) {
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(body, &got))
 	assert.Equal(t, false, got["async"])
+	assert.NotContains(t, got, "wait_for_result")
+}
+
+func TestConvertImageRequestForcesGPTImage2HighTierToAsyncTask(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	adaptor := &Adaptor{}
+	converted, err := adaptor.ConvertImageRequest(c, &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeImagesGenerations,
+		OriginModelName: "gpt-image-2",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType:           constant.APITypeOpenAI,
+			UpstreamModelName: "gpt-image-2",
+		},
+	}, dto.ImageRequest{Model: "gpt-image-2", Prompt: "test", Size: "3840x2160", Quality: "high"})
+
+	require.NoError(t, err)
+	body, err := json.Marshal(converted)
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(body, &got))
+	assert.Equal(t, true, got["async"])
+	assert.Equal(t, false, got["wait_for_result"])
 }
 
 func TestConvertImageRequestPreservesExplicitGPTImage2Async(t *testing.T) {
@@ -210,11 +233,11 @@ func TestChannel25ImageEditRoutesToGenerations(t *testing.T) {
 	url, err := adaptor.GetRequestURL(&relaycommon.RelayInfo{
 		RelayMode:      relayconstant.RelayModeImagesEdits,
 		RequestURLPath: "/v1/images/edits",
-		ChannelBaseUrl: "https://img-api.xn--1ys141f4ks.com",
-		ChannelType:    constant.ChannelTypeOpenAI,
 		ChannelMeta: &relaycommon.ChannelMeta{
-			ChannelId: 25,
-			ApiType:   constant.APITypeOpenAI,
+			ChannelId:      25,
+			ChannelType:    constant.ChannelTypeOpenAI,
+			ChannelBaseUrl: "https://img-api.xn--1ys141f4ks.com",
+			ApiType:        constant.APITypeOpenAI,
 		},
 	})
 
@@ -231,10 +254,10 @@ func TestConvertChannel25GeminiImageRequestAddsGoogleImageConfig(t *testing.T) {
 	converted, err := adaptor.ConvertImageRequest(c, &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeImagesGenerations,
 		RequestURLPath:  "/v1/images/generations",
-		ChannelBaseUrl:  "https://img-api.xn--1ys141f4ks.com",
 		OriginModelName: "gemini_3.1_flash_image_preview_4K",
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelId:         25,
+			ChannelBaseUrl:    "https://img-api.xn--1ys141f4ks.com",
 			ApiType:           constant.APITypeOpenAI,
 			UpstreamModelName: "gemini_3.1_flash_image_preview_4K",
 		},
@@ -263,7 +286,7 @@ func TestConvertChannel25ImageEditMultipartUsesDataURLImage(t *testing.T) {
 	require.NoError(t, writer.WriteField("prompt", "edit test"))
 	part, err := writer.CreateFormFile("image", "input.png")
 	require.NoError(t, err)
-	_, _ = part.Write([]byte("png"))
+	_, _ = part.Write([]byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a})
 	require.NoError(t, writer.Close())
 
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -274,10 +297,10 @@ func TestConvertChannel25ImageEditMultipartUsesDataURLImage(t *testing.T) {
 	converted, err := adaptor.ConvertImageRequest(c, &relaycommon.RelayInfo{
 		RelayMode:       relayconstant.RelayModeImagesEdits,
 		RequestURLPath:  "/v1/images/edits",
-		ChannelBaseUrl:  "https://img-api.xn--1ys141f4ks.com",
 		OriginModelName: "gpt-image-2",
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelId:         25,
+			ChannelBaseUrl:    "https://img-api.xn--1ys141f4ks.com",
 			ApiType:           constant.APITypeOpenAI,
 			UpstreamModelName: "gpt-image-2",
 		},

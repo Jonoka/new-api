@@ -22,6 +22,7 @@ type ImageRequest struct {
 	Quality           string          `json:"quality,omitempty"`
 	ResponseFormat    string          `json:"response_format,omitempty"`
 	Async             *bool           `json:"async,omitempty"`
+	WaitForResult     *bool           `json:"wait_for_result,omitempty"`
 	Style             json.RawMessage `json:"style,omitempty"`
 	User              json.RawMessage `json:"user,omitempty"`
 	ExtraFields       json.RawMessage `json:"extra_fields,omitempty"`

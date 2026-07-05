@@ -2,6 +2,7 @@ package openai
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -429,7 +430,12 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
-	if shouldDefaultOpenAIImageRequestToSync(info, request) {
+	if shouldForceGPTImage2HighTierAsync(info, request) {
+		async := true
+		waitForResult := false
+		request.Async = &async
+		request.WaitForResult = &waitForResult
+	} else if shouldDefaultOpenAIImageRequestToSync(info, request) {
 		async := false
 		request.Async = &async
 	}
@@ -584,6 +590,19 @@ func shouldDefaultOpenAIImageRequestToSync(info *relaycommon.RelayInfo, request 
 	}
 	modelName := strings.ToLower(strings.TrimSpace(firstNonEmpty(info.UpstreamModelName, info.OriginModelName, request.Model)))
 	return modelName == "gpt-image-2"
+}
+
+func shouldForceGPTImage2HighTierAsync(info *relaycommon.RelayInfo, request dto.ImageRequest) bool {
+	if info == nil || info.RelayMode != relayconstant.RelayModeImagesGenerations {
+		return false
+	}
+	modelName := strings.ToLower(strings.TrimSpace(firstNonEmpty(info.UpstreamModelName, info.OriginModelName, request.Model)))
+	if modelName != "gpt-image-2" {
+		return false
+	}
+	quality := strings.ToLower(strings.TrimSpace(dto.MapOpenAIImageQualityToGPT2APITier(request.Quality)))
+	size := strings.ToLower(strings.TrimSpace(request.Size))
+	return quality == "4k" || quality == "high" || strings.Contains(size, "3840") || strings.Contains(size, "4096")
 }
 
 func shouldUseChannel25ImageMapping(info *relaycommon.RelayInfo) bool {
@@ -787,7 +806,7 @@ func logChannel23ImageUpstreamParams(c *gin.Context, info *relaycommon.RelayInfo
 	if request.Async != nil {
 		async = fmt.Sprintf("%t", *request.Async)
 	}
-	logger.LogInfo(c.Request.Context(), fmt.Sprintf(
+	logger.LogInfo(requestContext(c), fmt.Sprintf(
 		"channel=23 upstream image params: path=%s model=%s quality=%s size=%s async=%s",
 		info.RequestURLPath,
 		request.Model,
@@ -795,6 +814,13 @@ func logChannel23ImageUpstreamParams(c *gin.Context, info *relaycommon.RelayInfo
 		request.Size,
 		async,
 	))
+}
+
+func requestContext(c *gin.Context) context.Context {
+	if c != nil && c.Request != nil {
+		return c.Request.Context()
+	}
+	return context.Background()
 }
 
 func firstNonEmpty(values ...string) string {
