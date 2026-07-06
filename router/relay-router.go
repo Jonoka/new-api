@@ -69,14 +69,17 @@ func SetRelayRouter(router *gin.Engine) {
 	canvasRouter := router.Group("/canvas/v1")
 	canvasRouter.Use(middleware.RouteTag("relay"))
 	canvasRouter.Use(middleware.SystemPerformanceCheck())
-	canvasRouter.Use(middleware.UserSessionAuth(), controller.CanvasPrepareRequest)
+	canvasRouter.Use(middleware.UserSessionAuth())
 	{
-		canvasRouter.GET("/models", controller.CanvasListModels)
 		canvasRouter.GET("/images/tasks/:task_id", controller.CanvasImageTaskFetch)
 		canvasRouter.GET("/images/tasks/:task_id/content/:index", controller.CanvasImageTaskContent)
-		canvasRouter.POST("/images/tasks", controller.CanvasImageTaskSubmit)
 
-		canvasRelayRouter := canvasRouter.Group("")
+		canvasPreparedRouter := canvasRouter.Group("")
+		canvasPreparedRouter.Use(controller.CanvasPrepareRequest)
+		canvasPreparedRouter.GET("/models", controller.CanvasListModels)
+		canvasPreparedRouter.POST("/images/tasks", controller.CanvasImageTaskSubmit)
+
+		canvasRelayRouter := canvasPreparedRouter.Group("")
 		canvasRelayRouter.Use(middleware.Distribute(), middleware.ModelRequestRateLimit())
 		canvasRelayRouter.POST("/chat/completions", func(c *gin.Context) {
 			controller.Relay(c, types.RelayFormatOpenAI)
