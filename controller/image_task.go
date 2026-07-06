@@ -2,10 +2,15 @@ package controller
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -286,11 +291,11 @@ func buildRelayCanvasImageTaskResult(task *model.Task) gin.H {
 		next := gin.H{}
 		switch {
 		case strings.HasPrefix(strings.TrimSpace(item.URL), "data:"):
-			next["url"] = canvasImageTaskContentPath(task.TaskID, index)
+			next["url"] = signedCanvasImageTaskContentPath(task, index)
 		case strings.TrimSpace(item.URL) != "":
 			next["url"] = item.URL
 		case strings.TrimSpace(item.B64JSON) != "":
-			next["url"] = canvasImageTaskContentPath(task.TaskID, index)
+			next["url"] = signedCanvasImageTaskContentPath(task, index)
 		default:
 			continue
 		}
@@ -304,6 +309,39 @@ func buildRelayCanvasImageTaskResult(task *model.Task) gin.H {
 		result["created"] = payload.Created
 	}
 	return result
+}
+
+func signedCanvasImageTaskContentPath(task *model.Task, index int) string {
+	if task == nil {
+		return canvasImageTaskContentPath("", index)
+	}
+	expires := time.Now().Add(30 * time.Minute).Unix()
+	path := canvasImageTaskContentPath(task.TaskID, index)
+	return fmt.Sprintf("%s?user_id=%d&expires=%d&token=%s", path, task.UserId, expires, signCanvasImageTaskContentToken(task.TaskID, task.UserId, index, expires))
+}
+
+func validateCanvasImageTaskContentToken(c *gin.Context, taskID string, index int) (int, bool) {
+	expires, err := strconv.ParseInt(strings.TrimSpace(c.Query("expires")), 10, 64)
+	if err != nil || expires < time.Now().Unix() {
+		return 0, false
+	}
+	userID, err := strconv.Atoi(strings.TrimSpace(c.Query("user_id")))
+	if err != nil || userID <= 0 {
+		return 0, false
+	}
+	token := strings.TrimSpace(c.Query("token"))
+	if token == "" {
+		return 0, false
+	}
+	expected := signCanvasImageTaskContentToken(taskID, userID, index, expires)
+	return userID, hmac.Equal([]byte(token), []byte(expected))
+}
+
+func signCanvasImageTaskContentToken(taskID string, userID int, index int, expires int64) string {
+	payload := fmt.Sprintf("%s:%d:%d:%d", taskID, userID, index, expires)
+	mac := hmac.New(sha256.New, []byte(common.SessionSecret))
+	_, _ = mac.Write([]byte(payload))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 type imageTaskResponseCapture struct {

@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -100,7 +102,9 @@ func TestCanvasImageTaskContentReturnsStoredBase64Image(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Set("id", 1)
 	ctx.Params = gin.Params{{Key: "task_id", Value: "task_image"}, {Key: "index", Value: "0"}}
-	ctx.Request = httptest.NewRequest("GET", "/canvas/v1/images/tasks/task_image/content/0?group=vip", nil)
+	expires := time.Now().Add(time.Hour).Unix()
+	token := signCanvasImageTaskContentToken("task_image", 1, 0, expires)
+	ctx.Request = httptest.NewRequest("GET", fmt.Sprintf("/canvas/v1/images/tasks/task_image/content/0?user_id=1&expires=%d&token=%s", expires, token), nil)
 
 	CanvasImageTaskContent(ctx)
 
@@ -200,6 +204,27 @@ func TestRelayImageTaskResponseFlattensSuccessfulImageData(t *testing.T) {
 	items, ok := response["data"].([]any)
 	require.True(t, ok)
 	require.Len(t, items, 1)
+}
+
+func TestRelayImageTaskResponseSignsCanvasImageContentURL(t *testing.T) {
+	task := &model.Task{
+		TaskID:   "task_canvas_image",
+		UserId:   7,
+		Platform: "canvas_image",
+		Status:   model.TaskStatusSuccess,
+		Progress: "100%",
+		Data:     []byte(`{"data":[{"url":"data:image/png;base64,abc"}]}`),
+	}
+
+	response := buildRelayImageTaskResponse(task)
+	items, ok := response["data"].([]gin.H)
+	require.True(t, ok)
+	require.Len(t, items, 1)
+	urlValue, _ := items[0]["url"].(string)
+	require.Contains(t, urlValue, "/canvas/v1/images/tasks/task_canvas_image/content/0")
+	require.Contains(t, urlValue, "user_id=7")
+	require.Contains(t, urlValue, "expires=")
+	require.Contains(t, urlValue, "token=")
 }
 
 func TestNormalizeCanvasImageTaskActionAcceptsShortEditAction(t *testing.T) {

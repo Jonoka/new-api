@@ -69,10 +69,10 @@ func SetRelayRouter(router *gin.Engine) {
 	canvasRouter := router.Group("/canvas/v1")
 	canvasRouter.Use(middleware.RouteTag("relay"))
 	canvasRouter.Use(middleware.SystemPerformanceCheck())
+	canvasRouter.GET("/images/tasks/:task_id/content/:index", controller.CanvasImageTaskContent)
 	canvasRouter.Use(middleware.UserSessionAuth())
 	{
 		canvasRouter.GET("/images/tasks/:task_id", controller.CanvasImageTaskFetch)
-		canvasRouter.GET("/images/tasks/:task_id/content/:index", controller.CanvasImageTaskContent)
 
 		canvasPreparedRouter := canvasRouter.Group("")
 		canvasPreparedRouter.Use(controller.CanvasPrepareRequest)

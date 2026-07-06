@@ -102,7 +102,13 @@ func CanvasImageTaskContent(c *gin.Context) {
 		return
 	}
 
-	task, exists, err := model.GetByTaskId(c.GetInt("id"), taskID)
+	userID, ok := validateCanvasImageTaskContentToken(c, taskID, index)
+	if !ok {
+		abortCanvasRequest(c, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	task, exists, err := model.GetByTaskId(userID, taskID)
 	if err != nil {
 		abortCanvasRequest(c, http.StatusInternalServerError, "failed to load image task")
 		return
