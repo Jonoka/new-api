@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -16,6 +17,9 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -160,18 +164,19 @@ func runCanvasImageTaskRelay(relayReq canvasImageTaskRelayRequest) {
 	task.Progress = "10%"
 	_ = task.Update()
 
-	recorder, channelID := executeCanvasImageRelay(relayReq)
-	finishCanvasImageTask(task, channelID, recorder)
+	recorder, channelID, relayInfo := executeCanvasImageRelay(relayReq)
+	finishCanvasImageTask(task, channelID, recorder, relayInfo)
 }
 
-func executeCanvasImageRelay(relayReq canvasImageTaskRelayRequest) (*httptest.ResponseRecorder, int) {
+func executeCanvasImageRelay(relayReq canvasImageTaskRelayRequest) (*httptest.ResponseRecorder, int, *relaycommon.RelayInfo) {
 	return executeCanvasImageRelayWithHandler(relayReq, nil)
 }
 
-func executeCanvasImageRelayWithHandler(relayReq canvasImageTaskRelayRequest, handler gin.HandlerFunc) (*httptest.ResponseRecorder, int) {
+func executeCanvasImageRelayWithHandler(relayReq canvasImageTaskRelayRequest, handler gin.HandlerFunc) (*httptest.ResponseRecorder, int, *relaycommon.RelayInfo) {
 	recorder := httptest.NewRecorder()
 	engine := gin.New()
 	channelID := 0
+	var relayInfo *relaycommon.RelayInfo
 	action := normalizeCanvasImageTaskAction(relayReq.Action)
 	targetPath := "/canvas/v1/" + action
 
@@ -181,6 +186,11 @@ func executeCanvasImageRelayWithHandler(relayReq canvasImageTaskRelayRequest, ha
 		}
 		c.Next()
 		channelID = common.GetContextKeyInt(c, constant.ContextKeyChannelId)
+		if value, ok := c.Get("relay_info"); ok {
+			if info, ok := value.(*relaycommon.RelayInfo); ok {
+				relayInfo = info
+			}
+		}
 	})
 	engine.Use(middleware.BodyStorageCleanup())
 	if handler != nil {
@@ -203,7 +213,7 @@ func executeCanvasImageRelayWithHandler(relayReq canvasImageTaskRelayRequest, ha
 	request.ContentLength = int64(len(relayReq.Body))
 	engine.ServeHTTP(recorder, request)
 
-	return recorder, channelID
+	return recorder, channelID, relayInfo
 }
 
 func normalizeCanvasImageTaskAction(action string) string {
@@ -215,7 +225,7 @@ func normalizeCanvasImageTaskAction(action string) string {
 	}
 }
 
-func finishCanvasImageTask(task *model.Task, channelID int, recorder *httptest.ResponseRecorder) {
+func finishCanvasImageTask(task *model.Task, channelID int, recorder *httptest.ResponseRecorder, relayInfo *relaycommon.RelayInfo) {
 	now := time.Now().Unix()
 	task.FinishTime = now
 	task.UpdatedAt = now
@@ -223,6 +233,7 @@ func finishCanvasImageTask(task *model.Task, channelID int, recorder *httptest.R
 	if channelID > 0 {
 		task.ChannelId = channelID
 	}
+	applyCanvasImageTaskBillingSnapshot(task, relayInfo)
 
 	body := bytes.TrimSpace(recorder.Body.Bytes())
 	if recorder.Code >= http.StatusOK && recorder.Code < http.StatusMultipleChoices && len(body) > 0 {
@@ -230,10 +241,124 @@ func finishCanvasImageTask(task *model.Task, channelID int, recorder *httptest.R
 		task.Data = json.RawMessage(append([]byte(nil), body...))
 		task.FailReason = ""
 		_ = task.Update()
+		recalculateCanvasImageTaskQuota(task, body, relayInfo)
 		return
 	}
 
 	failCanvasImageTask(task, extractCanvasImageRelayError(body), body)
+}
+
+func applyCanvasImageTaskBillingSnapshot(task *model.Task, relayInfo *relaycommon.RelayInfo) {
+	if task == nil || relayInfo == nil {
+		return
+	}
+	task.PrivateData.BillingSource = relayInfo.BillingSource
+	task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
+	task.PrivateData.TokenId = relayInfo.TokenId
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		ModelPrice:      relayInfo.PriceData.ModelPrice,
+		GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
+		ModelRatio:      relayInfo.PriceData.ModelRatio,
+		OtherRatios:     relayInfo.PriceData.OtherRatios,
+		OriginModelName: relayInfo.OriginModelName,
+		PerCallBilling:  relayInfo.PriceData.UsePrice || relayInfo.TieredBillingSnapshot != nil,
+	}
+	task.PrivateData.TieredBillingSnapshot = relayInfo.TieredBillingSnapshot
+	if relayInfo.PriceData.Quota > 0 {
+		task.Quota = relayInfo.PriceData.Quota
+	}
+	if relayInfo.FinalPreConsumedQuota > 0 {
+		task.Quota = relayInfo.FinalPreConsumedQuota
+	}
+	if relayInfo.OriginModelName != "" {
+		task.Properties.OriginModelName = relayInfo.OriginModelName
+	}
+	if relayInfo.UpstreamModelName != "" {
+		task.Properties.UpstreamModelName = relayInfo.UpstreamModelName
+	}
+}
+
+func recalculateCanvasImageTaskQuota(task *model.Task, body []byte, relayInfo *relaycommon.RelayInfo) {
+	if task == nil || task.Quota <= 0 || task.PrivateData.TieredBillingSnapshot == nil || len(bytes.TrimSpace(body)) == 0 {
+		return
+	}
+	var originalInput *billingexpr.RequestInput
+	if relayInfo != nil {
+		originalInput = relayInfo.BillingRequestInput
+	}
+	actualInput, actual, ok := buildCanvasImageActualBillingInput(task.PrivateData.TieredBillingSnapshot, body, originalInput)
+	if !ok {
+		return
+	}
+	result, err := billingexpr.ComputeTieredQuotaWithRequest(task.PrivateData.TieredBillingSnapshot, billingexpr.TokenParams{
+		P:   float64(task.PrivateData.TieredBillingSnapshot.EstimatedPromptTokens),
+		C:   float64(task.PrivateData.TieredBillingSnapshot.EstimatedCompletionTokens),
+		Len: float64(task.PrivateData.TieredBillingSnapshot.EstimatedPromptTokens),
+	}, actualInput)
+	if err != nil || result.ActualQuotaAfterGroup <= 0 {
+		common.SysError(fmt.Sprintf("canvas image task actual tiered billing failed: task_id=%s err=%v", task.TaskID, err))
+		return
+	}
+	reason := fmt.Sprintf("image实际结果重算：requested_tier=%s, actual_tier=%s, actual_size=%s, actual_quality=%s, n=%d",
+		task.PrivateData.TieredBillingSnapshot.EstimatedTier, result.MatchedTier, actual.Size, actual.Quality, actual.N)
+	service.RecalculateTaskQuota(context.Background(), task, result.ActualQuotaAfterGroup, reason)
+	_ = task.Update()
+}
+
+type canvasImageActualBillingMeta struct {
+	Size    string
+	Quality string
+	N       int
+}
+
+func buildCanvasImageActualBillingInput(snap *billingexpr.BillingSnapshot, body []byte, originalInput *billingexpr.RequestInput) (billingexpr.RequestInput, canvasImageActualBillingMeta, bool) {
+	if snap == nil {
+		return billingexpr.RequestInput{}, canvasImageActualBillingMeta{}, false
+	}
+	var payload struct {
+		Size    string `json:"size"`
+		Quality string `json:"quality"`
+		N       int    `json:"n"`
+		Data    []any  `json:"data"`
+	}
+	if err := common.Unmarshal(body, &payload); err != nil {
+		return billingexpr.RequestInput{}, canvasImageActualBillingMeta{}, false
+	}
+	actual := canvasImageActualBillingMeta{
+		Size:    strings.TrimSpace(payload.Size),
+		Quality: strings.TrimSpace(payload.Quality),
+		N:       payload.N,
+	}
+	if actual.N <= 0 {
+		if len(payload.Data) > 0 {
+			actual.N = len(payload.Data)
+		} else {
+			actual.N = 1
+		}
+	}
+	if actual.Size == "" && actual.Quality == "" {
+		return billingexpr.RequestInput{}, canvasImageActualBillingMeta{}, false
+	}
+	requestBody := map[string]any{}
+	var headers map[string]string
+	if originalInput != nil {
+		headers = originalInput.Headers
+		if len(bytes.TrimSpace(originalInput.Body)) > 0 {
+			_ = common.Unmarshal(originalInput.Body, &requestBody)
+		}
+	}
+	requestBody["n"] = actual.N
+	if actual.Size != "" {
+		requestBody["size"] = actual.Size
+	}
+	if actual.Quality != "" {
+		requestBody["quality"] = actual.Quality
+	}
+	bodyBytes, err := json.Marshal(requestBody)
+	if err != nil {
+		return billingexpr.RequestInput{}, canvasImageActualBillingMeta{}, false
+	}
+	return billingexpr.RequestInput{Headers: headers, Body: bodyBytes}, actual, true
 }
 
 func failCanvasImageTask(task *model.Task, reason string, body []byte) {

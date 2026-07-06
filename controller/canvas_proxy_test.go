@@ -13,6 +13,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -141,7 +142,7 @@ func TestFinishCanvasImageTaskStoresSuccessfulRelayResponse(t *testing.T) {
 	task := &model.Task{TaskID: "task_ok", UserId: 1, Status: model.TaskStatusInProgress}
 	require.NoError(t, task.Insert())
 
-	finishCanvasImageTask(task, 12, recorder)
+	finishCanvasImageTask(task, 12, recorder, nil)
 
 	reloaded, exists, err := model.GetByTaskId(1, "task_ok")
 	require.NoError(t, err)
@@ -171,7 +172,7 @@ func TestExecuteCanvasImageRelayRoutesEditTasks(t *testing.T) {
 		Header: http.Header{"Content-Type": []string{writer.FormDataContentType()}},
 	}
 
-	recorder, _ := executeCanvasImageRelayWithHandler(relayReq, func(c *gin.Context) {
+	recorder, _, _ := executeCanvasImageRelayWithHandler(relayReq, func(c *gin.Context) {
 		imageCount := 0
 		if form, err := c.MultipartForm(); err == nil && form != nil {
 			imageCount = len(form.File["image"])
@@ -205,6 +206,32 @@ func TestNormalizeCanvasImageTaskActionAcceptsShortEditAction(t *testing.T) {
 	require.Equal(t, canvasImageTaskActionEdits, normalizeCanvasImageTaskAction("edits"))
 	require.Equal(t, canvasImageTaskActionEdits, normalizeCanvasImageTaskAction("images/edits"))
 	require.Equal(t, canvasImageTaskActionGenerations, normalizeCanvasImageTaskAction(""))
+}
+
+func TestBuildCanvasImageActualBillingInputUsesReturnedSizeQuality(t *testing.T) {
+	expr := `param("quality") == "high" || has(param("size"), "3840") ? tier("4k", 300000 * param("n")) : tier("standard", 100000 * param("n"))`
+	snap := &billingexpr.BillingSnapshot{
+		BillingMode:               "tiered_expr",
+		ExprString:                expr,
+		ExprHash:                  billingexpr.ExprHashString(expr),
+		GroupRatio:                1,
+		EstimatedPromptTokens:     1,
+		EstimatedCompletionTokens: 0,
+		EstimatedTier:             "4k",
+		QuotaPerUnit:              common.QuotaPerUnit,
+		ExprVersion:               1,
+	}
+
+	input, actual, ok := buildCanvasImageActualBillingInput(snap, []byte(`{"size":"1536x1024","quality":"medium","data":[{"url":"data:image/png;base64,abc"}]}`), &billingexpr.RequestInput{Body: []byte(`{"size":"3840x2160","quality":"high","n":1,"response_format":"url"}`)})
+	require.True(t, ok)
+	require.Equal(t, "1536x1024", actual.Size)
+	require.Equal(t, "medium", actual.Quality)
+	require.Equal(t, 1, actual.N)
+
+	result, err := billingexpr.ComputeTieredQuotaWithRequest(snap, billingexpr.TokenParams{P: 1, Len: 1}, input)
+	require.NoError(t, err)
+	require.Equal(t, "standard", result.MatchedTier)
+	require.Equal(t, 50000, result.ActualQuotaAfterGroup)
 }
 
 func setupCanvasImageTaskTestDB(t *testing.T) {

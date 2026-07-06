@@ -133,6 +133,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
 	}
+	c.Set("relay_info", relayInfo)
 
 	needCountToken := constant.CountToken
 	var meta *types.TokenCountMeta
