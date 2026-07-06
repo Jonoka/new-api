@@ -179,9 +179,9 @@ function App() {
         <Route
           path='/console/canvas'
           element={
-            <AdminRoute>
+            <PrivateRoute>
               <Canvas />
-            </AdminRoute>
+            </PrivateRoute>
           }
         />
         <Route

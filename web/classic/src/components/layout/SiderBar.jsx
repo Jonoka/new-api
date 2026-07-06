@@ -238,7 +238,6 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('无限画布'),
         itemKey: 'canvas',
         to: '/canvas',
-        className: isAdmin() ? '' : 'tableHiddle',
       },
       {
         text: t('聊天'),
