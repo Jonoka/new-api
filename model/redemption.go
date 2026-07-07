@@ -136,7 +136,7 @@ func Redeem(key string, userId int) (quota int, err error) {
 	}
 	common.RandomSleep()
 	err = DB.Transaction(func(tx *gorm.DB) error {
-		err := tx.Set("gorm:query_option", "FOR UPDATE").Where(keyCol+" = ?", key).First(redemption).Error
+		err := lockForUpdate(tx).Where(keyCol+" = ?", key).First(redemption).Error
 		if err != nil {
 			return errors.New("无效的兑换码")
 		}
@@ -161,10 +161,6 @@ func Redeem(key string, userId int) (quota int, err error) {
 		if existingUsage > 0 {
 			return errors.New("该兑换码已兑换过")
 		}
-		err = tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota)).Error
-		if err != nil {
-			return err
-		}
 		now := common.GetTimestamp()
 		if err := tx.Create(&RedemptionUsage{
 			RedemptionId: redemption.Id,
@@ -173,18 +169,37 @@ func Redeem(key string, userId int) (quota int, err error) {
 		}).Error; err != nil {
 			return err
 		}
+		newStatus := common.RedemptionCodeStatusEnabled
+		if redemption.RedeemedCount+1 >= redemption.MaxRedeemCount {
+			newStatus = common.RedemptionCodeStatusUsed
+		}
+		result := tx.Model(&Redemption{}).
+			Where("id = ? AND status = ? AND redeemed_count < ?", redemption.Id, common.RedemptionCodeStatusEnabled, redemption.MaxRedeemCount).
+			Updates(map[string]interface{}{
+				"redeemed_time":  now,
+				"redeemed_count": gorm.Expr("redeemed_count + ?", 1),
+				"status":         newStatus,
+				"used_user_id":   userId,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("该兑换码已达兑换次数上限")
+		}
+		err = tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota)).Error
+		if err != nil {
+			return err
+		}
 		sourceId := fmt.Sprintf("redemption-%d-user-%d", redemption.Id, userId)
 		if err := createAffiliateRewardsForPaymentTx(tx, userId, AffiliateSourceRedemption, sourceId, redemption.Quota); err != nil {
 			return err
 		}
 		redemption.RedeemedTime = now
 		redemption.RedeemedCount++
-		if redemption.RedeemedCount >= redemption.MaxRedeemCount {
-			redemption.Status = common.RedemptionCodeStatusUsed
-		}
+		redemption.Status = newStatus
 		redemption.UsedUserId = userId
-		err = tx.Save(redemption).Error
-		return err
+		return nil
 	})
 	if err != nil {
 		common.SysError("redemption failed: " + err.Error())

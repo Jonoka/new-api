@@ -284,7 +284,7 @@ func getAffiliateBalanceForUpdateTx(tx *gorm.DB, userId int) (*AffiliateBalance,
 		return nil, errors.New("invalid user id")
 	}
 	balance := &AffiliateBalance{}
-	err := tx.Set("gorm:query_option", "FOR UPDATE").Where("user_id = ?", userId).First(balance).Error
+	err := lockForUpdate(tx).Where("user_id = ?", userId).First(balance).Error
 	if err == nil {
 		balance.normalizeTotalQuotaFloor()
 		return balance, nil
@@ -468,7 +468,7 @@ func SettleMatureAffiliateRecords(userId int) error {
 
 func settleMatureAffiliateRecordsTx(tx *gorm.DB, userId int) error {
 	now := common.GetTimestamp()
-	query := tx.Set("gorm:query_option", "FOR UPDATE").
+	query := lockForUpdate(tx).
 		Where("status = ? AND available_time <= ?", AffiliateRecordStatusPending, now)
 	if userId > 0 {
 		query = query.Where("user_id = ?", userId)
@@ -1249,7 +1249,7 @@ func UnbindUserInviter(userId int, userIdentifier string) (*AffiliateInviterUnbi
 
 func findAffiliateInviterByAffCodeTx(tx *gorm.DB, affCode string) (*User, error) {
 	var users []User
-	if err := tx.Set("gorm:query_option", "FOR UPDATE").
+	if err := lockForUpdate(tx).
 		Select("id", "username", "display_name", "aff_code", "inviter_id", "aff_count").
 		Where("aff_code = ?", affCode).
 		Limit(2).
@@ -1286,7 +1286,7 @@ func normalizeAffiliateBindAffCode(raw string) string {
 }
 
 func findAffiliateBindUserTx(tx *gorm.DB, userId int, userIdentifier string) (*User, error) {
-	query := tx.Set("gorm:query_option", "FOR UPDATE").
+	query := lockForUpdate(tx).
 		Select("id", "username", "display_name", "email", "inviter_id")
 	if userId > 0 {
 		user := &User{}
@@ -1423,7 +1423,7 @@ func SaveAffiliatePayoutAccount(account *AffiliatePayoutAccount) error {
 
 	return DB.Transaction(func(tx *gorm.DB) error {
 		existing := &AffiliatePayoutAccount{}
-		err := tx.Set("gorm:query_option", "FOR UPDATE").Where("user_id = ?", account.UserId).First(existing).Error
+		err := lockForUpdate(tx).Where("user_id = ?", account.UserId).First(existing).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return tx.Create(account).Error
@@ -1455,7 +1455,7 @@ func SetAffiliatePayoutQrPath(userId int, method string, qrPath string) (*Affili
 	var saved *AffiliatePayoutAccount
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		account := &AffiliatePayoutAccount{}
-		err := tx.Set("gorm:query_option", "FOR UPDATE").Where("user_id = ?", userId).First(account).Error
+		err := lockForUpdate(tx).Where("user_id = ?", userId).First(account).Error
 		if err != nil {
 			if !errors.Is(err, gorm.ErrRecordNotFound) {
 				return err
@@ -1621,7 +1621,7 @@ func updateAffiliateWithdrawalStatus(withdrawalId int, adminId int, remark strin
 	now := common.GetTimestamp()
 	return DB.Transaction(func(tx *gorm.DB) error {
 		withdrawal := &AffiliateWithdrawal{}
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id = ?", withdrawalId).First(withdrawal).Error; err != nil {
+		if err := lockForUpdate(tx).Where("id = ?", withdrawalId).First(withdrawal).Error; err != nil {
 			return err
 		}
 		if withdrawal.Status == targetStatus {

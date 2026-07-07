@@ -367,7 +367,7 @@ func recordPromoCodeUsageTx(tx *gorm.DB, promoCodeId int, userId int, orderType 
 		return err
 	}
 	var promo PromoCode
-	query := tx.Set("gorm:query_option", "FOR UPDATE")
+	query := lockForUpdate(tx)
 	if !enforceLimit {
 		query = query.Unscoped()
 	}

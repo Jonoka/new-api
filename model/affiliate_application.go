@@ -158,7 +158,7 @@ func GrantAffiliateAccessByUser(userId int, userIdentifier string, adminId int, 
 
 		now := common.GetTimestamp()
 		app := &AffiliateApplication{}
-		err = tx.Set("gorm:query_option", "FOR UPDATE").Where("user_id = ?", user.Id).First(app).Error
+		err = lockForUpdate(tx).Where("user_id = ?", user.Id).First(app).Error
 		if err != nil {
 			if !errors.Is(err, gorm.ErrRecordNotFound) {
 				return err

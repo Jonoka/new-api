@@ -496,7 +496,7 @@ func UpdateInvoiceRecord(id int, downloadUrl string, status string, adminRemark 
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
 		var record InvoiceRecord
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id = ?", id).First(&record).Error; err != nil {
+		if err := lockForUpdate(tx).Where("id = ?", id).First(&record).Error; err != nil {
 			return err
 		}
 		record.DownloadUrl = strings.TrimSpace(downloadUrl)
