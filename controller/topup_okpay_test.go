@@ -1,12 +1,17 @@
 package controller
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -127,4 +132,81 @@ func TestCalculateOkpayAffiliateSourceQuotaUsesPurchasedCreditRatio(t *testing.T
 	quota := calculateOkpayAffiliateSourceQuota(10, 72, 36)
 
 	require.Equal(t, int(5*common.QuotaPerUnit), quota)
+}
+
+func signedOkpayCallbackValues(params map[string]string, merchantToken string) url.Values {
+	values := url.Values{}
+	for key, value := range params {
+		values.Set(key, value)
+	}
+	values.Set("sign", generateOkpaySignature(params, merchantToken))
+	return values
+}
+
+func newOkpayCallbackContext(method string, target string, body string, contentType string) *gin.Context {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(method, target, strings.NewReader(body))
+	if contentType != "" {
+		ctx.Request.Header.Set("Content-Type", contentType)
+	}
+	return ctx
+}
+
+func TestParseOkpayCallbackValuesSupportsGetQuery(t *testing.T) {
+	merchantToken := "okpay-token"
+	values := signedOkpayCallbackValues(map[string]string{
+		"status":          "success",
+		"data[status]":    "1",
+		"data[unique_id]": "USR1NOabc",
+		"data[order_id]":  "OK123",
+	}, merchantToken)
+	ctx := newOkpayCallbackContext(http.MethodGet, "/api/okpay/notify?"+values.Encode(), "", "")
+
+	parsed, bodyBytes, err := parseOkpayCallbackValues(ctx)
+
+	require.NoError(t, err)
+	require.Empty(t, bodyBytes)
+	require.Equal(t, "USR1NOabc", parsed.Get("data[unique_id]"))
+	require.True(t, verifyOkpayCallbackSignature(parsed, merchantToken))
+	require.True(t, isOkpayCallbackSuccess(parsed.Get("status"), parsed.Get("data[status]")))
+}
+
+func TestParseOkpayCallbackValuesSupportsPostForm(t *testing.T) {
+	merchantToken := "okpay-token"
+	values := signedOkpayCallbackValues(map[string]string{
+		"status":          "success",
+		"data[status]":    "1",
+		"data[unique_id]": "USR2NOabc",
+		"data[amount]":    "10.00000000",
+	}, merchantToken)
+	ctx := newOkpayCallbackContext(http.MethodPost, "/api/okpay/notify", values.Encode(), "application/x-www-form-urlencoded")
+
+	parsed, bodyBytes, err := parseOkpayCallbackValues(ctx)
+
+	require.NoError(t, err)
+	require.NotEmpty(t, bodyBytes)
+	require.Equal(t, "10.00000000", parsed.Get("data[amount]"))
+	require.True(t, verifyOkpayCallbackSignature(parsed, merchantToken))
+}
+
+func TestParseOkpayCallbackValuesSupportsNestedJSON(t *testing.T) {
+	merchantToken := "okpay-token"
+	params := map[string]string{
+		"status":          "success",
+		"data[status]":    "1",
+		"data[unique_id]": "USR3NOabc",
+		"data[order_id]":  "OK789",
+	}
+	sign := generateOkpaySignature(params, merchantToken)
+	body := `{"status":"success","data":{"status":1,"unique_id":"USR3NOabc","order_id":"OK789"},"sign":"` + sign + `"}`
+	ctx := newOkpayCallbackContext(http.MethodPost, "/api/okpay/notify", body, "application/json")
+
+	parsed, _, err := parseOkpayCallbackValues(ctx)
+
+	require.NoError(t, err)
+	require.Equal(t, "1", parsed.Get("data[status]"))
+	require.Equal(t, "USR3NOabc", parsed.Get("data[unique_id]"))
+	require.True(t, verifyOkpayCallbackSignature(parsed, merchantToken))
+	require.True(t, isOkpayCallbackSuccess(parsed.Get("status"), parsed.Get("data[status]")))
 }

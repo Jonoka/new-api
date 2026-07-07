@@ -193,6 +193,40 @@ const SiderBar = ({ onNavigate = () => {} }) => {
     return [...filteredItems, ...getCustomItemsForSection('personal')];
   }, [t, isModuleVisible, customMenuItems]);
 
+  const extensionMenuItems = useMemo(() => {
+    return extensionItems.map((item) => ({
+      ...item,
+      text: item.title,
+      itemKey: item.itemKey,
+      to: item.to,
+    }));
+  }, [extensionItems]);
+
+  const extensionSubItems = useMemo(() => {
+    const items = [
+      {
+        text: t('模块管理'),
+        itemKey: 'extension_admin',
+        to: '/extensions',
+        className:
+          isRoot() && isModuleVisible('admin', 'extension_admin')
+            ? ''
+            : 'tableHiddle',
+      },
+      ...extensionMenuItems,
+    ];
+    return items.filter((item) => item.className !== 'tableHiddle');
+  }, [extensionMenuItems, isRoot(), isModuleVisible, t]);
+
+  const extensionGroupItem = useMemo(
+    () => ({
+      text: t('扩展模块'),
+      itemKey: 'extension_group',
+      items: extensionSubItems,
+    }),
+    [extensionSubItems, t],
+  );
+
   const adminItems = useMemo(() => {
     const items = [
       {
@@ -263,42 +297,26 @@ const SiderBar = ({ onNavigate = () => {} }) => {
       return configVisible;
     });
 
-    return [...filteredItems, ...getCustomItemsForSection('admin')];
-  }, [isAdmin(), isRoot(), t, isModuleVisible, customMenuItems]);
-
-  const extensionMenuItems = useMemo(() => {
-    return extensionItems.map((item) => ({
-      ...item,
-      text: item.title,
-      itemKey: item.itemKey,
-      to: item.to,
-    }));
-  }, [extensionItems]);
-
-  const extensionSubItems = useMemo(() => {
-    const items = [
-      {
-        text: t('模块管理'),
-        itemKey: 'extension_admin',
-        to: '/extensions',
-        className:
-          isRoot() && isModuleVisible('admin', 'extension_admin')
-            ? ''
-            : 'tableHiddle',
-      },
-      ...extensionMenuItems,
+    const systemSettingsItem = filteredItems.find(
+      (item) => item.itemKey === 'setting',
+    );
+    const orderedItems = [
+      ...filteredItems.filter((item) => item.itemKey !== 'setting'),
+      ...getCustomItemsForSection('admin'),
+      ...(extensionSubItems.length > 0 ? [extensionGroupItem] : []),
+      systemSettingsItem,
     ];
-    return items.filter((item) => item.className !== 'tableHiddle');
-  }, [extensionMenuItems, isRoot(), isModuleVisible, t]);
 
-  const extensionGroupItem = useMemo(
-    () => ({
-      text: t('扩展模块'),
-      itemKey: 'extension_group',
-      items: extensionSubItems,
-    }),
-    [extensionSubItems, t],
-  );
+    return orderedItems.filter(Boolean);
+  }, [
+    isAdmin(),
+    isRoot(),
+    t,
+    isModuleVisible,
+    customMenuItems,
+    extensionSubItems,
+    extensionGroupItem,
+  ]);
 
   const chatMenuItems = useMemo(() => {
     const items = [
@@ -693,12 +711,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
                 {!collapsed && (
                   <div className='sidebar-group-label'>{t('管理员')}</div>
                 )}
-                {adminItems.map((item) => renderNavItem(item))}
+                {adminItems.map((item) => renderSubItem(item))}
               </div>
             </>
           )}
 
-          {extensionSubItems.length > 0 && (
+          {!isAdmin() && extensionSubItems.length > 0 && (
             <>
               <Divider className='sidebar-divider' />
               <div>{renderSubItem(extensionGroupItem)}</div>

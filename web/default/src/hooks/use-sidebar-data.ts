@@ -258,20 +258,6 @@ export function useSidebarData(): SidebarData {
     ],
   }
 
-  if (extensionMenuItems.length > 0) {
-    sidebarData.navGroups.push({
-      id: 'extensions',
-      title: t('Modules'),
-      items: [
-        {
-          title: t('Extension Modules'),
-          icon: Puzzle,
-          items: extensionMenuItems,
-        },
-      ],
-    })
-  }
-
   customItems.forEach((item) => {
     const group = sidebarData.navGroups.find(
       (navGroup) => navGroup.id === item.section
@@ -286,6 +272,46 @@ export function useSidebarData(): SidebarData {
       configUrls: [getSidebarCustomModuleKey(item.id)],
     })
   })
+
+  const adminGroup = sidebarData.navGroups.find(
+    (navGroup) => navGroup.id === 'admin'
+  )
+  const systemSettingsItem = adminGroup?.items.find(
+    (item) => 'url' in item && item.url === '/system-settings/site'
+  )
+
+  const isAdminUser = Boolean(user && user.role >= ROLE.ADMIN)
+
+  if (adminGroup && isAdminUser && extensionMenuItems.length > 0) {
+    const systemSettingsIndex = systemSettingsItem
+      ? adminGroup.items.indexOf(systemSettingsItem)
+      : adminGroup.items.length
+
+    adminGroup.items.splice(systemSettingsIndex, 0, {
+      title: t('Extension Modules'),
+      icon: Puzzle,
+      items: extensionMenuItems,
+    })
+  } else if (extensionMenuItems.length > 0) {
+    sidebarData.navGroups.push({
+      id: 'extensions',
+      title: t('Modules'),
+      items: [
+        {
+          title: t('Extension Modules'),
+          icon: Puzzle,
+          items: extensionMenuItems,
+        },
+      ],
+    })
+  }
+
+  if (adminGroup && systemSettingsItem) {
+    adminGroup.items = [
+      ...adminGroup.items.filter((item) => item !== systemSettingsItem),
+      systemSettingsItem,
+    ]
+  }
 
   return sidebarData
 }

@@ -43,6 +43,22 @@ function Test-ExcludedPath {
     return $false
 }
 
+function Test-StaticRuntimeExcludedPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$RelativePath
+    )
+
+    $path = $RelativePath.Replace('\', '/').Trim('/')
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+
+    $fileName = [System.IO.Path]::GetFileName($path)
+    $staticRuntimeServerEntries = @(
+        "server.mjs", "server.js", "server.cjs",
+        "app.mjs", "app.js", "app.cjs"
+    )
+    return $staticRuntimeServerEntries -contains $fileName
+}
+
 function Get-RelativePath {
     param(
         [Parameter(Mandatory = $true)][string]$Base,
@@ -125,7 +141,8 @@ New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 try {
     $files = Get-ChildItem -Path $modulePath -Recurse -File | Where-Object {
         $relative = Get-RelativePath -Base $modulePath -Target $_.FullName
-        -not (Test-ExcludedPath -RelativePath $relative)
+        -not (Test-ExcludedPath -RelativePath $relative) -and
+        -not ($runtimeType -eq "static" -and (Test-StaticRuntimeExcludedPath -RelativePath $relative))
     }
 
     if ($files.Count -eq 0) {

@@ -118,8 +118,12 @@ func isBepusdtTopUpEnabled() bool {
 		len(setting.GetBepusdtChains()) > 0
 }
 
+func isBepusdtWebhookConfigured() bool {
+	return strings.TrimSpace(setting.BepusdtAuthToken) != ""
+}
+
 func isBepusdtWebhookEnabled() bool {
-	return isBepusdtTopUpEnabled()
+	return isBepusdtWebhookConfigured()
 }
 
 func isOkpayTopUpEnabled() bool {
@@ -131,6 +135,10 @@ func isOkpayTopUpEnabled() bool {
 		strings.TrimSpace(setting.OkpayMerchantToken) != ""
 }
 
+func isOkpayWebhookConfigured() bool {
+	return strings.TrimSpace(setting.OkpayMerchantToken) != ""
+}
+
 func isOkpayWebhookEnabled() bool {
-	return isOkpayTopUpEnabled()
+	return isOkpayWebhookConfigured()
 }

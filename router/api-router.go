@@ -77,7 +77,9 @@ func SetApiRouter(router *gin.Engine) {
 		// :env separates test vs prod URLs so the operator can register each
 		// in Pancake's matching webhook slot; handler enforces env match.
 		apiRouter.POST("/waffo-pancake/webhook/:env", controller.WaffoPancakeWebhook)
+		apiRouter.GET("/bepusdt/notify", controller.BepusdtNotify)
 		apiRouter.POST("/bepusdt/notify", controller.BepusdtNotify)
+		apiRouter.GET("/okpay/notify", controller.OkpayNotify)
 		apiRouter.POST("/okpay/notify", controller.OkpayNotify)
 
 		// Universal secure verification routes

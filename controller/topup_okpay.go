@@ -1,7 +1,9 @@
 package controller
 
 import (
+	"bytes"
 	"crypto/md5"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -102,6 +104,117 @@ func verifyOkpayCallbackSignature(formValues url.Values, merchantToken string) b
 	expected := generateOkpaySignature(params, merchantToken)
 	actual := strings.TrimSpace(formValues.Get("sign"))
 	return strings.EqualFold(expected, actual)
+}
+
+func mergeOkpayCallbackValues(dst url.Values, src url.Values) {
+	for key, values := range src {
+		key = strings.TrimSpace(key)
+		if key == "" || len(values) == 0 {
+			continue
+		}
+		dst[key] = append([]string(nil), values...)
+	}
+}
+
+func setOkpayJSONCallbackValue(values url.Values, key string, raw json.RawMessage) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return
+	}
+	value := strings.TrimSpace(common.JsonRawMessageToString(raw))
+	if value == "" {
+		return
+	}
+	values.Set(key, value)
+}
+
+func parseOkpayJSONCallbackValues(body []byte) (url.Values, error) {
+	var payload map[string]json.RawMessage
+	if err := common.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+
+	values := url.Values{}
+	for key, raw := range payload {
+		if strings.TrimSpace(key) == "data" && common.GetJsonType(raw) == "object" {
+			var data map[string]json.RawMessage
+			if err := common.Unmarshal(raw, &data); err != nil {
+				return nil, err
+			}
+			for dataKey, dataRaw := range data {
+				setOkpayJSONCallbackValue(values, "data["+dataKey+"]", dataRaw)
+			}
+			continue
+		}
+		setOkpayJSONCallbackValue(values, key, raw)
+	}
+	return values, nil
+}
+
+func parseOkpayCallbackValues(c *gin.Context) (url.Values, []byte, error) {
+	values := url.Values{}
+	mergeOkpayCallbackValues(values, c.Request.URL.Query())
+
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return nil, nil, err
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+	contentType := strings.ToLower(c.GetHeader("Content-Type"))
+	if strings.Contains(contentType, "multipart/form-data") {
+		if err := c.Request.ParseMultipartForm(32 << 20); err != nil {
+			return nil, bodyBytes, err
+		}
+		mergeOkpayCallbackValues(values, c.Request.PostForm)
+		if c.Request.MultipartForm != nil {
+			mergeOkpayCallbackValues(values, c.Request.MultipartForm.Value)
+		}
+		c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		return values, bodyBytes, nil
+	}
+
+	trimmedBody := bytes.TrimSpace(bodyBytes)
+	if len(trimmedBody) == 0 {
+		return values, bodyBytes, nil
+	}
+
+	if trimmedBody[0] == '{' {
+		jsonValues, err := parseOkpayJSONCallbackValues(trimmedBody)
+		if err != nil {
+			return nil, bodyBytes, err
+		}
+		mergeOkpayCallbackValues(values, jsonValues)
+		c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		return values, bodyBytes, nil
+	}
+
+	formValues, err := url.ParseQuery(string(trimmedBody))
+	if err != nil {
+		return nil, bodyBytes, err
+	}
+	mergeOkpayCallbackValues(values, formValues)
+	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	return values, bodyBytes, nil
+}
+
+func getOkpayCallbackValue(values url.Values, keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(values.Get(key)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func isOkpayCallbackSuccess(requestStatus string, paymentStatus string) bool {
+	requestStatus = strings.TrimSpace(requestStatus)
+	paymentStatus = strings.TrimSpace(paymentStatus)
+	requestOk := requestStatus == "" || strings.EqualFold(requestStatus, "success") || requestStatus == "1"
+	if paymentStatus != "" {
+		return requestOk && (paymentStatus == "1" || strings.EqualFold(paymentStatus, "success") || strings.EqualFold(paymentStatus, "paid"))
+	}
+	return strings.EqualFold(requestStatus, "success") || requestStatus == "1"
 }
 
 // getOkpayFiatPayMoney 计算站内 OKPay 标价金额（CNY）。
@@ -546,46 +659,44 @@ func OkpayNotify(c *gin.Context) {
 		return
 	}
 
-	bodyBytes, err := io.ReadAll(c.Request.Body)
+	formValues, bodyBytes, err := parseOkpayCallbackValues(c)
 	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay webhook 读取请求体失败 client_ip=%s error=%q", c.ClientIP(), err.Error()))
+		logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay webhook 解析请求失败 path=%q method=%s content_type=%q client_ip=%s error=%q body=%q", c.Request.RequestURI, c.Request.Method, c.GetHeader("Content-Type"), c.ClientIP(), err.Error(), string(bodyBytes)))
 		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
 
-	logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay webhook 收到请求 client_ip=%s body=%q", c.ClientIP(), string(bodyBytes)))
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay webhook 收到请求 path=%q method=%s content_type=%q client_ip=%s params=%q body=%q", c.Request.RequestURI, c.Request.Method, c.GetHeader("Content-Type"), c.ClientIP(), common.GetJsonString(formValues), string(bodyBytes)))
 
-	// 解析 form body
-	formValues, err := url.ParseQuery(strings.TrimSpace(string(bodyBytes)))
-	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay webhook 解析 form 失败 client_ip=%s error=%q", c.ClientIP(), err.Error()))
+	if len(formValues) == 0 {
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("OKPay webhook 参数为空 path=%q method=%s client_ip=%s", c.Request.RequestURI, c.Request.Method, c.ClientIP()))
 		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
 
 	sign := strings.TrimSpace(formValues.Get("sign"))
 	if sign == "" {
-		logger.LogWarn(c.Request.Context(), fmt.Sprintf("OKPay webhook 缺少 sign client_ip=%s", c.ClientIP()))
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("OKPay webhook 缺少 sign path=%q method=%s client_ip=%s params=%q", c.Request.RequestURI, c.Request.Method, c.ClientIP(), common.GetJsonString(formValues)))
 		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
 
 	// 验证签名
 	if !verifyOkpayCallbackSignature(formValues, setting.OkpayMerchantToken) {
-		logger.LogWarn(c.Request.Context(), fmt.Sprintf("OKPay webhook 验签失败 client_ip=%s sign=%q", c.ClientIP(), sign))
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("OKPay webhook 验签失败 path=%q method=%s client_ip=%s sign=%q params=%q", c.Request.RequestURI, c.Request.Method, c.ClientIP(), sign, common.GetJsonString(formValues)))
 		_, _ = c.Writer.Write([]byte("fail"))
 		return
 	}
 
 	requestStatus := strings.TrimSpace(formValues.Get("status"))
-	paymentStatus := strings.TrimSpace(formValues.Get("data[status]"))
-	uniqueID := strings.TrimSpace(formValues.Get("data[unique_id]"))
-	orderID := strings.TrimSpace(formValues.Get("data[order_id]"))
+	paymentStatus := getOkpayCallbackValue(formValues, "data[status]", "payment_status", "trade_status", "order_status")
+	uniqueID := getOkpayCallbackValue(formValues, "data[unique_id]", "unique_id", "trade_no", "out_trade_no", "order_id")
+	orderID := getOkpayCallbackValue(formValues, "data[order_id]", "order_id", "trade_id")
 
-	logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay webhook 验签成功 unique_id=%s order_id=%s status=%s payment_status=%s client_ip=%s", uniqueID, orderID, requestStatus, paymentStatus, c.ClientIP()))
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay webhook 验签成功 path=%q method=%s unique_id=%s order_id=%s status=%s payment_status=%s client_ip=%s", c.Request.RequestURI, c.Request.Method, uniqueID, orderID, requestStatus, paymentStatus, c.ClientIP()))
 
-	// 判断支付状态: request status 必须为 "success"，data[status] 为 "1" 表示成功
-	if !strings.EqualFold(requestStatus, "success") || paymentStatus != "1" {
+	// 兼容 OKPay 回调的嵌套状态与扁平状态字段。
+	if !isOkpayCallbackSuccess(requestStatus, paymentStatus) {
 		logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay 订单非成功状态 unique_id=%s status=%s payment_status=%s", uniqueID, requestStatus, paymentStatus))
 		_, _ = c.Writer.Write([]byte("success"))
 		return

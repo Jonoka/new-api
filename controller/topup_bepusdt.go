@@ -3,10 +3,12 @@ package controller
 import (
 	"bytes"
 	"crypto/md5"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -75,6 +77,12 @@ type bepusdtNotifyPayload struct {
 	Status             int         `json:"status"`
 }
 
+type bepusdtParsedNotify struct {
+	Payload bepusdtNotifyPayload
+	Params  map[string]string
+	Body    []byte
+}
+
 // generateBepusdtSignature 按 bepusdt 规范生成 MD5 签名
 // 1. 收集所有非空、非 signature 参数
 // 2. 按 key ASCII 排序
@@ -136,6 +144,139 @@ func verifyBepusdtNotifySignature(payload *bepusdtNotifyPayload, authToken strin
 
 	expected := generateBepusdtSignature(params, authToken)
 	return strings.EqualFold(expected, payload.Signature)
+}
+
+func verifyBepusdtNotifyParamsSignature(params map[string]string, authToken string) bool {
+	signature := strings.TrimSpace(params["signature"])
+	if signature == "" {
+		return false
+	}
+	expected := generateBepusdtSignature(params, authToken)
+	return strings.EqualFold(expected, signature)
+}
+
+func bepusdtPayloadFromParams(params map[string]string) bepusdtNotifyPayload {
+	status, _ := strconv.Atoi(strings.TrimSpace(params["status"]))
+	return bepusdtNotifyPayload{
+		TradeId:            strings.TrimSpace(params["trade_id"]),
+		OrderId:            strings.TrimSpace(params["order_id"]),
+		Amount:             strings.TrimSpace(params["amount"]),
+		ActualAmount:       strings.TrimSpace(params["actual_amount"]),
+		Token:              strings.TrimSpace(params["token"]),
+		BlockTransactionId: strings.TrimSpace(params["block_transaction_id"]),
+		Signature:          strings.TrimSpace(params["signature"]),
+		Status:             status,
+	}
+}
+
+func setBepusdtJSONParam(params map[string]string, key string, raw json.RawMessage) {
+	key = strings.TrimSpace(key)
+	if key == "" || key == "signature" {
+		return
+	}
+	value := strings.TrimSpace(common.JsonRawMessageToString(raw))
+	if value == "" {
+		return
+	}
+	params[key] = value
+}
+
+func parseBepusdtJSONNotify(body []byte) (bepusdtParsedNotify, error) {
+	var raw map[string]json.RawMessage
+	if err := common.Unmarshal(body, &raw); err != nil {
+		return bepusdtParsedNotify{}, err
+	}
+
+	params := make(map[string]string)
+	for key, value := range raw {
+		if key == "signature" {
+			params[key] = strings.TrimSpace(common.JsonRawMessageToString(value))
+			continue
+		}
+		setBepusdtJSONParam(params, key, value)
+	}
+
+	payload := bepusdtPayloadFromParams(params)
+	return bepusdtParsedNotify{
+		Payload: payload,
+		Params:  params,
+		Body:    body,
+	}, nil
+}
+
+func bepusdtParamsFromValues(values url.Values) map[string]string {
+	params := make(map[string]string)
+	for key := range values {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		value := strings.TrimSpace(values.Get(key))
+		if value == "" {
+			continue
+		}
+		params[key] = value
+	}
+	return params
+}
+
+func parseBepusdtNotifyPayload(c *gin.Context) (bepusdtParsedNotify, error) {
+	values := c.Request.URL.Query()
+
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return bepusdtParsedNotify{}, err
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+	contentType := strings.ToLower(c.GetHeader("Content-Type"))
+	if strings.Contains(contentType, "multipart/form-data") {
+		if err := c.Request.ParseMultipartForm(32 << 20); err != nil {
+			return bepusdtParsedNotify{Body: bodyBytes}, err
+		}
+		for key, itemValues := range c.Request.PostForm {
+			values[key] = itemValues
+		}
+		if c.Request.MultipartForm != nil {
+			for key, itemValues := range c.Request.MultipartForm.Value {
+				values[key] = itemValues
+			}
+		}
+		params := bepusdtParamsFromValues(values)
+		c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		return bepusdtParsedNotify{Payload: bepusdtPayloadFromParams(params), Params: params, Body: bodyBytes}, nil
+	}
+
+	trimmedBody := bytes.TrimSpace(bodyBytes)
+	if len(trimmedBody) > 0 {
+		if trimmedBody[0] == '{' {
+			parsed, err := parseBepusdtJSONNotify(trimmedBody)
+			if err != nil {
+				return bepusdtParsedNotify{Body: bodyBytes}, err
+			}
+			for key, value := range bepusdtParamsFromValues(values) {
+				if _, exists := parsed.Params[key]; !exists {
+					parsed.Params[key] = value
+				}
+			}
+			parsed.Payload = bepusdtPayloadFromParams(parsed.Params)
+			parsed.Body = bodyBytes
+			c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			return parsed, nil
+		}
+
+		bodyValues, err := url.ParseQuery(string(trimmedBody))
+		if err != nil {
+			return bepusdtParsedNotify{Body: bodyBytes}, err
+		}
+		for key, itemValues := range bodyValues {
+			values[key] = itemValues
+		}
+	}
+
+	params := bepusdtParamsFromValues(values)
+	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	return bepusdtParsedNotify{Payload: bepusdtPayloadFromParams(params), Params: params, Body: bodyBytes}, nil
 }
 
 // getBepusdtPayMoney 计算 bepusdt 支付金额（CNY）
@@ -603,27 +744,25 @@ func BepusdtNotify(c *gin.Context) {
 		return
 	}
 
-	bodyBytes, err := io.ReadAll(c.Request.Body)
+	parsed, err := parseBepusdtNotifyPayload(c)
 	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Bepusdt webhook 读取请求体失败 path=%q client_ip=%s error=%q", c.Request.RequestURI, c.ClientIP(), err.Error()))
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Bepusdt webhook 解析失败 path=%q method=%s content_type=%q client_ip=%s error=%q body=%q", c.Request.RequestURI, c.Request.Method, c.GetHeader("Content-Type"), c.ClientIP(), err.Error(), string(parsed.Body)))
 		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
+	payload := parsed.Payload
 
-	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Bepusdt webhook 收到请求 path=%q client_ip=%s body=%q", c.Request.RequestURI, c.ClientIP(), string(bodyBytes)))
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Bepusdt webhook 收到请求 path=%q method=%s content_type=%q client_ip=%s params=%q body=%q", c.Request.RequestURI, c.Request.Method, c.GetHeader("Content-Type"), c.ClientIP(), common.GetJsonString(parsed.Params), string(parsed.Body)))
 
-	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-
-	var payload bepusdtNotifyPayload
-	if err := c.ShouldBindJSON(&payload); err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Bepusdt webhook 解析失败 path=%q client_ip=%s error=%q body=%q", c.Request.RequestURI, c.ClientIP(), err.Error(), string(bodyBytes)))
+	if len(parsed.Params) == 0 {
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Bepusdt webhook 参数为空 path=%q method=%s client_ip=%s", c.Request.RequestURI, c.Request.Method, c.ClientIP()))
 		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
 
 	// 验证签名
-	if !verifyBepusdtNotifySignature(&payload, setting.BepusdtAuthToken) {
-		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Bepusdt webhook 验签失败 path=%q client_ip=%s order_id=%s trade_id=%s signature=%q", c.Request.RequestURI, c.ClientIP(), payload.OrderId, payload.TradeId, payload.Signature))
+	if !verifyBepusdtNotifyParamsSignature(parsed.Params, setting.BepusdtAuthToken) {
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Bepusdt webhook 验签失败 path=%q method=%s client_ip=%s order_id=%s trade_id=%s signature=%q params=%q", c.Request.RequestURI, c.Request.Method, c.ClientIP(), payload.OrderId, payload.TradeId, payload.Signature, common.GetJsonString(parsed.Params)))
 		c.AbortWithStatus(http.StatusUnauthorized)
 		return
 	}
