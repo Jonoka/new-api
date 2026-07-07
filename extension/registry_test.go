@@ -12,6 +12,33 @@ import (
 	"github.com/QuantumNous/new-api/common"
 )
 
+func TestResolveRootDirHonorsEnv(t *testing.T) {
+	t.Setenv("EXTENSIONS_ROOT", "/custom/extensions")
+	t.Setenv("MODULES_ROOT", "/custom/modules")
+
+	if got := resolveRootDir(); got != "/custom/extensions" {
+		t.Fatalf("expected EXTENSIONS_ROOT to win, got %q", got)
+	}
+}
+
+func TestHasInstalledModules(t *testing.T) {
+	rootDir := t.TempDir()
+	if hasInstalledModules(rootDir) {
+		t.Fatal("empty root should not report installed modules")
+	}
+	writeManifest(t, rootDir, "echo", Manifest{
+		ID:      "echo",
+		Name:    "Echo",
+		Version: "0.1.0",
+		Runtime: Runtime{
+			BaseURL: "http://127.0.0.1:39001",
+		},
+	})
+	if !hasInstalledModules(rootDir) {
+		t.Fatal("root with manifest should report installed modules")
+	}
+}
+
 func TestManagerScanAndEnableModule(t *testing.T) {
 	rootDir := t.TempDir()
 	writeManifest(t, rootDir, "echo", Manifest{

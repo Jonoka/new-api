@@ -62,7 +62,30 @@ func resolveRootDir() string {
 	if value := strings.TrimSpace(os.Getenv("MODULES_ROOT")); value != "" {
 		return value
 	}
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		legacyDir := filepath.Join("/data", DefaultRootDir)
+		if hasInstalledModules(legacyDir) {
+			return legacyDir
+		}
+		return "/data/modules"
+	}
 	return DefaultRootDir
+}
+
+func hasInstalledModules(rootDir string) bool {
+	entries, err := os.ReadDir(rootDir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if regularFileExists(filepath.Join(rootDir, entry.Name(), "manifest.json")) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Manager) RootDir() string {
