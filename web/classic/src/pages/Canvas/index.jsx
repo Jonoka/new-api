@@ -65,6 +65,7 @@ const Canvas = () => {
         setGroups(groupOptions);
 
         const fallback =
+          groupOptions.find((group) => group.value === 'auto')?.value ||
           groupOptions.find((group) => group.value === 'default')?.value ||
           groupOptions[0]?.value ||
           '';

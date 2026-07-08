@@ -38,6 +38,7 @@ export function CanvasLauncher() {
   useEffect(() => {
     if (selectedGroup || groups.length === 0) return
     const fallback =
+      groups.find((group) => group.value === 'auto')?.value ??
       groups.find((group) => group.value === 'default')?.value ??
       groups[0].value
     setSelectedGroup(fallback)
