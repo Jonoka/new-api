@@ -426,6 +426,8 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 	if isImageGenerationTaskPath(c.Request.URL.Path) {
 		// image task polling has no request body model; keep channel selection disabled
 		// and do not fall back to the legacy dall-e default.
+		shouldSelectChannel = false
+		c.Set("relay_mode", relayconstant.RelayModeVideoFetchByID)
 	} else if isImageGenerationPath(c.Request.URL.Path) {
 		modelRequest.Model = common.GetStringIfEmpty(modelRequest.Model, "dall-e")
 	} else if isImageEditPath(c.Request.URL.Path) {
