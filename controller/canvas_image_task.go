@@ -45,7 +45,7 @@ func CanvasImageTaskSubmit(c *gin.Context) {
 		abortCanvasRequest(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	action := normalizeCanvasImageTaskAction(c.Query("action"))
+	action := canvasImageTaskAction(c)
 
 	now := time.Now().Unix()
 	task := &model.Task{
@@ -220,6 +220,16 @@ func executeCanvasImageRelayWithHandler(relayReq canvasImageTaskRelayRequest, ha
 	engine.ServeHTTP(recorder, request)
 
 	return recorder, channelID, relayInfo
+}
+
+func canvasImageTaskAction(c *gin.Context) string {
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return canvasImageTaskActionGenerations
+	}
+	if action := strings.TrimSpace(c.Query("action")); action != "" {
+		return normalizeCanvasImageTaskAction(action)
+	}
+	return normalizeCanvasImageTaskAction(strings.TrimPrefix(c.Request.URL.Path, "/canvas/v1/"))
 }
 
 func normalizeCanvasImageTaskAction(action string) string {

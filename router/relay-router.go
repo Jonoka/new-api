@@ -88,8 +88,9 @@ func SetRelayRouter(router *gin.Engine) {
 			controller.CanvasImageTaskSubmit(c)
 		})
 		canvasRelayRouter.GET("/images/generations/:task_id", controller.RelayImageTaskFetch)
+		canvasRelayRouter.GET("/images/edits/:task_id", controller.RelayImageTaskFetch)
 		canvasRelayRouter.POST("/images/edits", func(c *gin.Context) {
-			controller.Relay(c, types.RelayFormatOpenAIImage)
+			controller.CanvasImageTaskSubmit(c)
 		})
 		canvasRelayRouter.POST("/audio/speech", func(c *gin.Context) {
 			controller.Relay(c, types.RelayFormatOpenAIAudio)

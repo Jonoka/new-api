@@ -233,6 +233,14 @@ func TestNormalizeCanvasImageTaskActionAcceptsShortEditAction(t *testing.T) {
 	require.Equal(t, canvasImageTaskActionGenerations, normalizeCanvasImageTaskAction(""))
 }
 
+func TestCanvasImageTaskActionFallsBackToEditPath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/canvas/v1/images/edits?group=auto", nil)
+
+	require.Equal(t, canvasImageTaskActionEdits, canvasImageTaskAction(ctx))
+}
+
 func TestBuildCanvasImageActualBillingInputUsesReturnedSizeQuality(t *testing.T) {
 	expr := `param("quality") == "high" || has(param("size"), "3840") ? tier("4k", 300000 * param("n")) : tier("standard", 100000 * param("n"))`
 	snap := &billingexpr.BillingSnapshot{
