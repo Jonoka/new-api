@@ -478,7 +478,9 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 }
 
 func isImageGenerationTaskPath(path string) bool {
-	return strings.HasPrefix(path, "/v1/images/generations/") || strings.HasPrefix(path, "/canvas/v1/images/generations/")
+	return strings.HasPrefix(path, "/v1/images/generations/") ||
+		strings.HasPrefix(path, "/canvas/v1/images/generations/") ||
+		strings.HasPrefix(path, "/canvas/v1/images/edits/")
 }
 
 func isImageGenerationPath(path string) bool {

@@ -11,6 +11,7 @@ func TestImageGenerationPathHelpers(t *testing.T) {
 		"/v1/images/generations/task_123":           {generation: true, task: true},
 		"/canvas/v1/images/generations":             {generation: true, task: false},
 		"/canvas/v1/images/generations/task_123":    {generation: true, task: true},
+		"/canvas/v1/images/edits/task_123":          {generation: false, task: true},
 		"/api/v1/images/generations/task_123":       {generation: false, task: false},
 		"/v1/images/edits":                          {generation: false, task: false},
 	}
