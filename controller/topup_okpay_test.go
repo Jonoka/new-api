@@ -210,3 +210,27 @@ func TestParseOkpayCallbackValuesSupportsNestedJSON(t *testing.T) {
 	require.True(t, verifyOkpayCallbackSignature(parsed, merchantToken))
 	require.True(t, isOkpayCallbackSuccess(parsed.Get("status"), parsed.Get("data[status]")))
 }
+
+func TestVerifyOkpayCallbackSignatureMatchesDocumentOrder(t *testing.T) {
+	body := "code=200&data[order_id]=ac7b86615fdb137576ae35879f7ed844&data[unique_id]=BWIN-20250922152023LDVNSyxLQko&data[pay_user_id]=7238234930&data[amount]=6.00000000&data[coin]=USDT&data[status]=1&data[type]=deposit&id=1&status=success&sign=95BE540FB7D1996770E2B4CDBC6F184D"
+	ctx := newOkpayCallbackContext(http.MethodPost, "/api/okpay/notify", body, "application/x-www-form-urlencoded")
+
+	parsed, _, err := parseOkpayCallbackValues(ctx)
+
+	require.NoError(t, err)
+	require.Equal(t, "BWIN-20250922152023LDVNSyxLQko", parsed.Get("data[unique_id]"))
+	require.True(t, verifyOkpayCallbackSignature(parsed, "123456"))
+	require.True(t, isOkpayCallbackSuccess(parsed.Get("status"), parsed.Get("data[status]")))
+}
+
+func TestVerifyOkpayCallbackSignatureMatchesDocumentOrderJSON(t *testing.T) {
+	body := `{"code":200,"data":{"order_id":"ac7b86615fdb137576ae35879f7ed844","unique_id":"BWIN-20250922152023LDVNSyxLQko","pay_user_id":7238234930,"amount":"6.00000000","coin":"USDT","status":1,"type":"deposit"},"id":1,"status":"success","sign":"95BE540FB7D1996770E2B4CDBC6F184D"}`
+	ctx := newOkpayCallbackContext(http.MethodPost, "/api/okpay/notify", body, "application/json")
+
+	parsed, _, err := parseOkpayCallbackValues(ctx)
+
+	require.NoError(t, err)
+	require.Equal(t, "7238234930", parsed.Get("data[pay_user_id]"))
+	require.True(t, verifyOkpayCallbackSignature(parsed, "123456"))
+	require.True(t, isOkpayCallbackSuccess(parsed.Get("status"), parsed.Get("data[status]")))
+}

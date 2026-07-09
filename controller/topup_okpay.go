@@ -55,12 +55,30 @@ type okpayRateCacheEntry struct {
 	expiresAt time.Time
 }
 
+type okpaySignPair struct {
+	Key   string
+	Value string
+}
+
 var (
 	okpayRateCacheMu sync.Mutex
 	okpayRateCache   okpayRateCacheEntry
 )
 
 const okpayRateCacheTTL = 5 * time.Minute
+
+var okpayCallbackSignatureOrder = []string{
+	"code",
+	"data[order_id]",
+	"data[unique_id]",
+	"data[pay_user_id]",
+	"data[amount]",
+	"data[coin]",
+	"data[status]",
+	"data[type]",
+	"id",
+	"status",
+}
 
 // generateOkpaySignature 按 OKPay 规范生成 MD5 签名
 // 1. 所有非空参数按 key 排序
@@ -80,19 +98,58 @@ func generateOkpaySignature(params map[string]string, merchantToken string) stri
 	}
 	sort.Strings(keys)
 
-	pairs := make([]string, 0, len(keys))
+	pairs := make([]okpaySignPair, 0, len(keys))
 	for _, k := range keys {
-		pairs = append(pairs, k+"="+strings.TrimSpace(params[k]))
+		pairs = append(pairs, okpaySignPair{Key: k, Value: params[k]})
 	}
-	query := strings.Join(pairs, "&")
+	return generateOkpaySignatureFromPairs(pairs, merchantToken)
+}
+
+func generateOkpaySignatureFromPairs(pairs []okpaySignPair, merchantToken string) string {
+	signParts := make([]string, 0, len(pairs))
+	for _, pair := range pairs {
+		key := strings.TrimSpace(pair.Key)
+		value := strings.TrimSpace(pair.Value)
+		if key == "" || value == "" || strings.EqualFold(key, "sign") {
+			continue
+		}
+		signParts = append(signParts, key+"="+value)
+	}
+	if len(signParts) == 0 {
+		return ""
+	}
+	query := strings.Join(signParts, "&")
 	query += "&token=" + strings.TrimSpace(merchantToken)
 
 	hash := md5.Sum([]byte(query))
 	return strings.ToUpper(fmt.Sprintf("%x", hash))
 }
 
+func generateOkpayCallbackOrderedSignature(formValues url.Values, merchantToken string) string {
+	pairs := make([]okpaySignPair, 0, len(okpayCallbackSignatureOrder))
+	for _, key := range okpayCallbackSignatureOrder {
+		value := strings.TrimSpace(formValues.Get(key))
+		if value == "" {
+			continue
+		}
+		pairs = append(pairs, okpaySignPair{Key: key, Value: value})
+	}
+	return generateOkpaySignatureFromPairs(pairs, merchantToken)
+}
+
 // verifyOkpayCallbackSignature 验证回调签名
 func verifyOkpayCallbackSignature(formValues url.Values, merchantToken string) bool {
+	actual := strings.TrimSpace(formValues.Get("sign"))
+	if actual == "" {
+		return false
+	}
+
+	// OKPay 回调签名按官方回调字段顺序生成；独角数卡/Dujiao-Next
+	// 也是先按该顺序验签，再用字典序作为兼容兜底。
+	if expected := generateOkpayCallbackOrderedSignature(formValues, merchantToken); expected != "" && strings.EqualFold(expected, actual) {
+		return true
+	}
+
 	params := make(map[string]string)
 	for key := range formValues {
 		value := strings.TrimSpace(formValues.Get(key))
@@ -102,7 +159,6 @@ func verifyOkpayCallbackSignature(formValues url.Values, merchantToken string) b
 		params[key] = value
 	}
 	expected := generateOkpaySignature(params, merchantToken)
-	actual := strings.TrimSpace(formValues.Get("sign"))
 	return strings.EqualFold(expected, actual)
 }
 
