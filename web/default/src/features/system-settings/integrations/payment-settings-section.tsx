@@ -42,11 +42,19 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { RiskAcknowledgementDialog } from '@/components/risk-acknowledgement-dialog'
-import { confirmPaymentCompliance } from '../api'
+import { confirmPaymentCompliance, previewOkpayRate } from '../api'
 import {
   SettingsForm,
   SettingsSwitchContent,
@@ -204,6 +212,11 @@ const paymentSchema = z.object({
   OkpayAutoExchangeEnabled: z.boolean(),
   OkpayUsdtCnyRate: z.coerce.number().min(0),
   OkpayRateApiUrl: z.string(),
+  OkpayRateSource: z.string(),
+  OkpayOkxSide: z.string(),
+  OkpayOkxTier: z.coerce.number().int().min(1),
+  OkpayRateAdjustmentType: z.string(),
+  OkpayRateAdjustmentValue: z.coerce.number(),
   OkpayMinTopUp: z.coerce.number().min(0),
   OkpayCoin: z.string(),
 })
@@ -376,6 +389,25 @@ export function PaymentSettingsSection({
     },
   })
 
+  const previewOkpayRateMutation = useMutation({
+    mutationFn: previewOkpayRate,
+    onSuccess: (data) => {
+      if (data.success && data.data) {
+        toast.success(
+          t('Current OKPay rate: {{rate}} CNY/USDT ({{source}})', {
+            rate: data.data.adjusted_rate,
+            source: data.data.source,
+          })
+        )
+      } else {
+        toast.error(data.message || t('Failed to fetch OKPay rate'))
+      }
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || t('Failed to fetch OKPay rate'))
+    },
+  })
+
   const form = useForm<PaymentFormValues>({
     resolver: zodResolver(paymentSchema) as Resolver<PaymentFormValues>,
     mode: 'onChange', // Enable real-time validation
@@ -395,6 +427,11 @@ export function PaymentSettingsSection({
       OkpayAutoExchangeEnabled: initialFormValues.OkpayAutoExchangeEnabled,
       OkpayUsdtCnyRate: initialFormValues.OkpayUsdtCnyRate,
       OkpayRateApiUrl: initialFormValues.OkpayRateApiUrl,
+      OkpayRateSource: initialFormValues.OkpayRateSource,
+      OkpayOkxSide: initialFormValues.OkpayOkxSide,
+      OkpayOkxTier: initialFormValues.OkpayOkxTier,
+      OkpayRateAdjustmentType: initialFormValues.OkpayRateAdjustmentType,
+      OkpayRateAdjustmentValue: initialFormValues.OkpayRateAdjustmentValue,
       OkpayMinTopUp: initialFormValues.OkpayMinTopUp,
       OkpayCoin: initialFormValues.OkpayCoin,
     },
@@ -464,6 +501,11 @@ export function PaymentSettingsSection({
       OkpayAutoExchangeEnabled: parsedDefaults.OkpayAutoExchangeEnabled,
       OkpayUsdtCnyRate: parsedDefaults.OkpayUsdtCnyRate,
       OkpayRateApiUrl: parsedDefaults.OkpayRateApiUrl,
+      OkpayRateSource: parsedDefaults.OkpayRateSource,
+      OkpayOkxSide: parsedDefaults.OkpayOkxSide,
+      OkpayOkxTier: parsedDefaults.OkpayOkxTier,
+      OkpayRateAdjustmentType: parsedDefaults.OkpayRateAdjustmentType,
+      OkpayRateAdjustmentValue: parsedDefaults.OkpayRateAdjustmentValue,
       OkpayMinTopUp: parsedDefaults.OkpayMinTopUp,
       OkpayCoin: parsedDefaults.OkpayCoin,
     })
@@ -506,6 +548,12 @@ export function PaymentSettingsSection({
       OkpayAutoExchangeEnabled: values.OkpayAutoExchangeEnabled,
       OkpayUsdtCnyRate: values.OkpayUsdtCnyRate,
       OkpayRateApiUrl: removeTrailingSlash(values.OkpayRateApiUrl.trim()),
+      OkpayRateSource: values.OkpayRateSource.trim() || 'coingecko',
+      OkpayOkxSide: values.OkpayOkxSide.trim() || 'buy',
+      OkpayOkxTier: values.OkpayOkxTier,
+      OkpayRateAdjustmentType:
+        values.OkpayRateAdjustmentType.trim() || 'absolute',
+      OkpayRateAdjustmentValue: values.OkpayRateAdjustmentValue,
       OkpayMinTopUp: values.OkpayMinTopUp,
       OkpayCoin: values.OkpayCoin.trim(),
       WaffoEnabled: values.WaffoEnabled,
@@ -573,6 +621,12 @@ export function PaymentSettingsSection({
       OkpayRateApiUrl: removeTrailingSlash(
         initialRef.current.OkpayRateApiUrl.trim()
       ),
+      OkpayRateSource: initialRef.current.OkpayRateSource.trim() || 'coingecko',
+      OkpayOkxSide: initialRef.current.OkpayOkxSide.trim() || 'buy',
+      OkpayOkxTier: initialRef.current.OkpayOkxTier,
+      OkpayRateAdjustmentType:
+        initialRef.current.OkpayRateAdjustmentType.trim() || 'absolute',
+      OkpayRateAdjustmentValue: initialRef.current.OkpayRateAdjustmentValue,
       OkpayMinTopUp: initialRef.current.OkpayMinTopUp,
       OkpayCoin: initialRef.current.OkpayCoin.trim(),
       WaffoEnabled: initialRef.current.WaffoEnabled,
@@ -830,6 +884,43 @@ export function PaymentSettingsSection({
       updates.push({
         key: 'OkpayRateApiUrl',
         value: sanitized.OkpayRateApiUrl,
+      })
+    }
+
+    if (sanitized.OkpayRateSource !== initial.OkpayRateSource) {
+      updates.push({
+        key: 'OkpayRateSource',
+        value: sanitized.OkpayRateSource,
+      })
+    }
+
+    if (sanitized.OkpayOkxSide !== initial.OkpayOkxSide) {
+      updates.push({
+        key: 'OkpayOkxSide',
+        value: sanitized.OkpayOkxSide,
+      })
+    }
+
+    if (sanitized.OkpayOkxTier !== initial.OkpayOkxTier) {
+      updates.push({
+        key: 'OkpayOkxTier',
+        value: sanitized.OkpayOkxTier,
+      })
+    }
+
+    if (sanitized.OkpayRateAdjustmentType !== initial.OkpayRateAdjustmentType) {
+      updates.push({
+        key: 'OkpayRateAdjustmentType',
+        value: sanitized.OkpayRateAdjustmentType,
+      })
+    }
+
+    if (
+      sanitized.OkpayRateAdjustmentValue !== initial.OkpayRateAdjustmentValue
+    ) {
+      updates.push({
+        key: 'OkpayRateAdjustmentValue',
+        value: sanitized.OkpayRateAdjustmentValue,
       })
     }
 
@@ -2090,6 +2181,174 @@ export function PaymentSettingsSection({
                   </FormItem>
                 )}
               />
+            </div>
+
+            <div className='grid gap-6 md:grid-cols-3'>
+              <FormField
+                control={form.control}
+                name='OkpayRateSource'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Rate Source')}</FormLabel>
+                    <Select
+                      items={[
+                        { value: 'coingecko', label: 'CoinGecko' },
+                        {
+                          value: 'okx-alipay-tier',
+                          label: t('OKX Alipay Tier'),
+                        },
+                      ]}
+                      value={field.value || 'coingecko'}
+                      onValueChange={field.onChange}
+                    >
+                      <FormControl>
+                        <SelectTrigger className='w-full'>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent alignItemWithTrigger={false}>
+                        <SelectGroup>
+                          <SelectItem value='coingecko'>CoinGecko</SelectItem>
+                          <SelectItem value='okx-alipay-tier'>
+                            {t('OKX Alipay Tier')}
+                          </SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      {t('OKX source reads the configured Alipay order tier')}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='OkpayOkxSide'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('OKX Side')}</FormLabel>
+                    <Select
+                      items={[
+                        { value: 'buy', label: t('Receiving tier (buy)') },
+                        { value: 'sell', label: t('Paying tier (sell)') },
+                      ]}
+                      value={field.value || 'buy'}
+                      onValueChange={field.onChange}
+                    >
+                      <FormControl>
+                        <SelectTrigger className='w-full'>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent alignItemWithTrigger={false}>
+                        <SelectGroup>
+                          <SelectItem value='buy'>
+                            {t('Receiving tier (buy)')}
+                          </SelectItem>
+                          <SelectItem value='sell'>
+                            {t('Paying tier (sell)')}
+                          </SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='OkpayOkxTier'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('OKX Tier')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        min={1}
+                        {...safeNumberFieldProps(field)}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t('For example, 3 means the third returned order')}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            <div className='grid gap-6 md:grid-cols-3'>
+              <FormField
+                control={form.control}
+                name='OkpayRateAdjustmentType'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Rate Adjustment Mode')}</FormLabel>
+                    <Select
+                      items={[
+                        { value: 'absolute', label: t('Fixed offset') },
+                        { value: 'percent', label: t('Percent') },
+                      ]}
+                      value={field.value || 'absolute'}
+                      onValueChange={field.onChange}
+                    >
+                      <FormControl>
+                        <SelectTrigger className='w-full'>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent alignItemWithTrigger={false}>
+                        <SelectGroup>
+                          <SelectItem value='absolute'>
+                            {t('Fixed offset')}
+                          </SelectItem>
+                          <SelectItem value='percent'>
+                            {t('Percent')}
+                          </SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='OkpayRateAdjustmentValue'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Rate Adjustment Value')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        step='0.0001'
+                        {...safeNumberFieldProps(field)}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t('Use -0.2 to lower a 6.8 rate to 6.6 in fixed mode')}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <div className='flex items-end'>
+                <Button
+                  type='button'
+                  variant='outline'
+                  onClick={() => previewOkpayRateMutation.mutate()}
+                  disabled={previewOkpayRateMutation.isPending}
+                >
+                  {previewOkpayRateMutation.isPending
+                    ? t('Testing...')
+                    : t('Test Saved Rate')}
+                </Button>
+              </div>
             </div>
 
             <FormField

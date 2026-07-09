@@ -131,6 +131,31 @@ func TestManagerScanAndEnableStaticModule(t *testing.T) {
 	}
 }
 
+func TestInstallBuiltinModulesInstallsOkxAlipayRate(t *testing.T) {
+	rootDir := t.TempDir()
+	if err := validateBuiltinModules(); err != nil {
+		t.Fatalf("validate builtin modules: %v", err)
+	}
+	if err := installBuiltinModules(rootDir); err != nil {
+		t.Fatalf("install builtin modules: %v", err)
+	}
+
+	manager := NewManager(rootDir)
+	if err := manager.Scan(); err != nil {
+		t.Fatalf("scan builtin modules: %v", err)
+	}
+	module, ok := manager.Get("okx-alipay-rate")
+	if !ok {
+		t.Fatal("okx-alipay-rate builtin module was not installed")
+	}
+	if module.Runtime.Type != RuntimeTypeStatic {
+		t.Fatalf("expected static builtin module, got %q", module.Runtime.Type)
+	}
+	if !regularFileExists(filepath.Join(rootDir, "okx-alipay-rate", "public", "index.html")) {
+		t.Fatal("builtin module static entry was not installed")
+	}
+}
+
 func TestStaticProxyServesIndexAndRejectsTraversal(t *testing.T) {
 	rootDir := t.TempDir()
 	moduleDir := writeManifest(t, rootDir, "static-demo", Manifest{

@@ -52,20 +52,27 @@ func TestOkpayPaymentAmountUsesCachedAutoRate(t *testing.T) {
 	originalAutoExchangeEnabled := setting.OkpayAutoExchangeEnabled
 	originalUsdtCnyRate := setting.OkpayUsdtCnyRate
 	originalCoin := setting.OkpayCoin
+	originalAdjustmentType := setting.OkpayRateAdjustmentType
+	originalAdjustmentValue := setting.OkpayRateAdjustmentValue
 	t.Cleanup(func() {
 		setting.OkpayAutoExchangeEnabled = originalAutoExchangeEnabled
 		setting.OkpayUsdtCnyRate = originalUsdtCnyRate
 		setting.OkpayCoin = originalCoin
+		setting.OkpayRateAdjustmentType = originalAdjustmentType
+		setting.OkpayRateAdjustmentValue = originalAdjustmentValue
 		resetOkpayRateCacheForTest()
 	})
 
 	setting.OkpayAutoExchangeEnabled = true
 	setting.OkpayUsdtCnyRate = 7.2
 	setting.OkpayCoin = "USDT"
+	setting.OkpayRateAdjustmentType = "absolute"
+	setting.OkpayRateAdjustmentValue = 0
 	okpayRateCacheMu.Lock()
 	okpayRateCache = okpayRateCacheEntry{
 		rate:      6.75,
 		source:    "test",
+		configKey: okpayRateCacheKey(),
 		expiresAt: time.Now().Add(time.Minute),
 	}
 	okpayRateCacheMu.Unlock()
@@ -103,6 +110,72 @@ func TestParseOkpayRateFromBody(t *testing.T) {
 
 	require.NoError(t, err)
 	require.InDelta(t, 6.76, rate, 0.000001)
+}
+
+func TestParseOkpayOkxAlipayTierRateFromBody(t *testing.T) {
+	body := []byte(`{"code":0,"data":{"buy":[{"price":"6.71"},{"price":"6.72"},{"price":"6.73"}],"sell":[{"price":"6.81"}]}}`)
+
+	rate, err := parseOkpayOkxAlipayTierRateFromBody(body, "buy", 3)
+
+	require.NoError(t, err)
+	require.InDelta(t, 6.73, rate, 0.000001)
+}
+
+func TestFetchOkpayUsdtCnyRateQuoteUsesOkxTierAndAbsoluteAdjustment(t *testing.T) {
+	originalRateSource := setting.OkpayRateSource
+	originalRateApiUrl := setting.OkpayRateApiUrl
+	originalOkxSide := setting.OkpayOkxSide
+	originalOkxTier := setting.OkpayOkxTier
+	originalAdjustmentType := setting.OkpayRateAdjustmentType
+	originalAdjustmentValue := setting.OkpayRateAdjustmentValue
+	t.Cleanup(func() {
+		setting.OkpayRateSource = originalRateSource
+		setting.OkpayRateApiUrl = originalRateApiUrl
+		setting.OkpayOkxSide = originalOkxSide
+		setting.OkpayOkxTier = originalOkxTier
+		setting.OkpayRateAdjustmentType = originalAdjustmentType
+		setting.OkpayRateAdjustmentValue = originalAdjustmentValue
+		resetOkpayRateCacheForTest()
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Contains(t, r.Header.Get("User-Agent"), "Mozilla")
+		_, _ = w.Write([]byte(`{"code":0,"data":{"buy":[{"price":"6.70"},{"price":"6.80"},{"price":"6.90"}]}}`))
+	}))
+	defer server.Close()
+
+	setting.OkpayRateSource = "okx-alipay-tier"
+	setting.OkpayRateApiUrl = server.URL
+	setting.OkpayOkxSide = "buy"
+	setting.OkpayOkxTier = 2
+	setting.OkpayRateAdjustmentType = "absolute"
+	setting.OkpayRateAdjustmentValue = -0.2
+
+	quote, err := fetchOkpayUsdtCnyRateQuote()
+
+	require.NoError(t, err)
+	require.Equal(t, "okx-alipay-tier", quote.Source)
+	require.Equal(t, "buy", quote.Side)
+	require.Equal(t, 2, quote.Tier)
+	require.InDelta(t, 6.8, quote.RawRate, 0.000001)
+	require.InDelta(t, 6.6, quote.AdjustedRate, 0.000001)
+}
+
+func TestApplyOkpayRateAdjustmentPercent(t *testing.T) {
+	originalAdjustmentType := setting.OkpayRateAdjustmentType
+	originalAdjustmentValue := setting.OkpayRateAdjustmentValue
+	t.Cleanup(func() {
+		setting.OkpayRateAdjustmentType = originalAdjustmentType
+		setting.OkpayRateAdjustmentValue = originalAdjustmentValue
+	})
+
+	setting.OkpayRateAdjustmentType = "percent"
+	setting.OkpayRateAdjustmentValue = -10
+
+	adjusted, err := applyOkpayRateAdjustment(6.8)
+
+	require.NoError(t, err)
+	require.InDelta(t, 6.12, adjusted, 0.000001)
 }
 
 func TestGetOkpayFiatPayMoneyKeepsCnyUnitPriceSemantics(t *testing.T) {

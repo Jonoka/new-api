@@ -100,6 +100,11 @@ const defaultBillingSettings: BillingSettings = {
   OkpayUsdtCnyRate: 7.2,
   OkpayRateApiUrl:
     'https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=cny&include_last_updated_at=true',
+  OkpayRateSource: 'coingecko',
+  OkpayOkxSide: 'buy',
+  OkpayOkxTier: 3,
+  OkpayRateAdjustmentType: 'absolute',
+  OkpayRateAdjustmentValue: 0,
   OkpayMinTopUp: 1,
   OkpayCoin: 'USDT',
   WaffoEnabled: false,

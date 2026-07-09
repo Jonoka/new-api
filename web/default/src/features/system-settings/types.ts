@@ -39,6 +39,20 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type OkpayRatePreviewResponse = {
+  success: boolean
+  message: string
+  data?: {
+    raw_rate: string
+    adjusted_rate: string
+    source: string
+    side: string
+    tier: number
+    adjustment_type: string
+    adjustment: string
+  }
+}
+
 export type ConfirmPaymentComplianceResponse = {
   success: boolean
   message: string
@@ -257,6 +271,11 @@ export type BillingSettings = {
   OkpayAutoExchangeEnabled: boolean
   OkpayUsdtCnyRate: number
   OkpayRateApiUrl: string
+  OkpayRateSource: string
+  OkpayOkxSide: string
+  OkpayOkxTier: number
+  OkpayRateAdjustmentType: string
+  OkpayRateAdjustmentValue: number
   OkpayMinTopUp: number
   OkpayCoin: string
   WaffoEnabled: boolean

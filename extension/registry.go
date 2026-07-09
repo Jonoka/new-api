@@ -52,6 +52,9 @@ func NewManager(rootDir string) *Manager {
 
 func Init() error {
 	DefaultManager = NewManager(resolveRootDir())
+	if err := installBuiltinModules(DefaultManager.rootDir); err != nil {
+		return err
+	}
 	return DefaultManager.Scan()
 }
 

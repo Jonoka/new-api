@@ -108,6 +108,11 @@ func InitOptionMap() {
 	common.OptionMap["OkpayAutoExchangeEnabled"] = strconv.FormatBool(setting.OkpayAutoExchangeEnabled)
 	common.OptionMap["OkpayUsdtCnyRate"] = strconv.FormatFloat(setting.OkpayUsdtCnyRate, 'f', -1, 64)
 	common.OptionMap["OkpayRateApiUrl"] = setting.OkpayRateApiUrl
+	common.OptionMap["OkpayRateSource"] = setting.OkpayRateSource
+	common.OptionMap["OkpayOkxSide"] = setting.OkpayOkxSide
+	common.OptionMap["OkpayOkxTier"] = strconv.Itoa(setting.OkpayOkxTier)
+	common.OptionMap["OkpayRateAdjustmentType"] = setting.OkpayRateAdjustmentType
+	common.OptionMap["OkpayRateAdjustmentValue"] = strconv.FormatFloat(setting.OkpayRateAdjustmentValue, 'f', -1, 64)
 	common.OptionMap["OkpayMinTopUp"] = strconv.Itoa(setting.OkpayMinTopUp)
 	common.OptionMap["OkpayCoin"] = setting.OkpayCoin
 	common.OptionMap["WaffoEnabled"] = strconv.FormatBool(setting.WaffoEnabled)
@@ -484,6 +489,16 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.OkpayUsdtCnyRate, _ = strconv.ParseFloat(value, 64)
 	case "OkpayRateApiUrl":
 		setting.OkpayRateApiUrl = value
+	case "OkpayRateSource":
+		setting.OkpayRateSource = value
+	case "OkpayOkxSide":
+		setting.OkpayOkxSide = value
+	case "OkpayOkxTier":
+		setting.OkpayOkxTier, _ = strconv.Atoi(value)
+	case "OkpayRateAdjustmentType":
+		setting.OkpayRateAdjustmentType = value
+	case "OkpayRateAdjustmentValue":
+		setting.OkpayRateAdjustmentValue, _ = strconv.ParseFloat(value, 64)
 	case "OkpayMinTopUp":
 		setting.OkpayMinTopUp, _ = strconv.Atoi(value)
 	case "OkpayCoin":

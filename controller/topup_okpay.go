@@ -52,7 +52,17 @@ type okpayPaymentAmount struct {
 type okpayRateCacheEntry struct {
 	rate      float64
 	source    string
+	configKey string
 	expiresAt time.Time
+}
+
+type okpayRateQuote struct {
+	RawRate      float64 `json:"raw_rate"`
+	AdjustedRate float64 `json:"adjusted_rate"`
+	Source       string  `json:"source"`
+	Tier         int     `json:"tier,omitempty"`
+	Side         string  `json:"side,omitempty"`
+	Adjustment   float64 `json:"adjustment"`
 }
 
 type okpaySignPair struct {
@@ -66,6 +76,14 @@ var (
 )
 
 const okpayRateCacheTTL = 5 * time.Minute
+
+const (
+	okpayRateSourceCoinGecko     = "coingecko"
+	okpayRateSourceOkxAlipayTier = "okx-alipay-tier"
+	okpayAdjustmentTypeAbsolute  = "absolute"
+	okpayAdjustmentTypePercent   = "percent"
+	okpayDefaultCoinGeckoRateUrl = "https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=cny&include_last_updated_at=true"
+)
 
 var okpayCallbackSignatureOrder = []string{
 	"code",
@@ -323,6 +341,72 @@ func getOkpayFallbackUsdtCnyRate() float64 {
 	return 1
 }
 
+func normalizeOkpayRateSource() string {
+	source := strings.ToLower(strings.TrimSpace(setting.OkpayRateSource))
+	switch source {
+	case okpayRateSourceOkxAlipayTier:
+		return okpayRateSourceOkxAlipayTier
+	default:
+		return okpayRateSourceCoinGecko
+	}
+}
+
+func normalizeOkpayOkxSide() string {
+	side := strings.ToLower(strings.TrimSpace(setting.OkpayOkxSide))
+	if side == "sell" {
+		return "sell"
+	}
+	return "buy"
+}
+
+func getOkpayOkxTier() int {
+	if setting.OkpayOkxTier <= 0 {
+		return 3
+	}
+	return setting.OkpayOkxTier
+}
+
+func normalizeOkpayAdjustmentType() string {
+	adjustmentType := strings.ToLower(strings.TrimSpace(setting.OkpayRateAdjustmentType))
+	if adjustmentType == okpayAdjustmentTypePercent {
+		return okpayAdjustmentTypePercent
+	}
+	return okpayAdjustmentTypeAbsolute
+}
+
+func okpayRateCacheKey() string {
+	return fmt.Sprintf(
+		"%s|%s|%s|%d|%s|%.8f",
+		normalizeOkpayRateSource(),
+		strings.TrimSpace(setting.OkpayRateApiUrl),
+		normalizeOkpayOkxSide(),
+		getOkpayOkxTier(),
+		normalizeOkpayAdjustmentType(),
+		setting.OkpayRateAdjustmentValue,
+	)
+}
+
+func applyOkpayRateAdjustment(rate float64) (float64, error) {
+	if rate <= 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+		return 0, fmt.Errorf("invalid raw rate")
+	}
+	adjusted := rate
+	value := setting.OkpayRateAdjustmentValue
+	switch normalizeOkpayAdjustmentType() {
+	case okpayAdjustmentTypePercent:
+		adjusted = decimal.NewFromFloat(rate).
+			Mul(decimal.NewFromFloat(100).Add(decimal.NewFromFloat(value))).
+			Div(decimal.NewFromFloat(100)).
+			InexactFloat64()
+	default:
+		adjusted = decimal.NewFromFloat(rate).Add(decimal.NewFromFloat(value)).InexactFloat64()
+	}
+	if adjusted <= 0 || math.IsNaN(adjusted) || math.IsInf(adjusted, 0) {
+		return 0, fmt.Errorf("adjusted rate must be greater than zero")
+	}
+	return adjusted, nil
+}
+
 func parseOkpayRateFromBody(body []byte) (float64, error) {
 	var payload map[string]interface{}
 	if err := common.Unmarshal(body, &payload); err != nil {
@@ -343,29 +427,140 @@ func parseOkpayRateFromBody(body []byte) (float64, error) {
 	return rate, nil
 }
 
-func fetchOkpayUsdtCnyRate() (float64, string, error) {
+func parseOkpayOkxAlipayTierRateFromBody(body []byte, side string, tier int) (float64, error) {
+	if tier <= 0 {
+		tier = 3
+	}
+	var payload map[string]interface{}
+	if err := common.Unmarshal(body, &payload); err != nil {
+		return 0, err
+	}
+	rawData, ok := payload["data"].(map[string]interface{})
+	if !ok {
+		return 0, fmt.Errorf("missing okx data")
+	}
+	rawOrders, ok := rawData[side].([]interface{})
+	if !ok || len(rawOrders) < tier {
+		return 0, fmt.Errorf("missing okx %s tier %d", side, tier)
+	}
+	order, ok := rawOrders[tier-1].(map[string]interface{})
+	if !ok {
+		return 0, fmt.Errorf("invalid okx tier %d", tier)
+	}
+	rawPrice, ok := order["price"]
+	if !ok {
+		return 0, fmt.Errorf("missing okx price")
+	}
+	rate, err := strconv.ParseFloat(fmt.Sprintf("%v", rawPrice), 64)
+	if err != nil || rate <= 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+		return 0, fmt.Errorf("invalid okx price")
+	}
+	return rate, nil
+}
+
+func defaultOkpayOkxRateApiUrl() string {
+	return fmt.Sprintf(
+		"https://www.okx.com/v3/c2c/tradingOrders/books?quoteCurrency=CNY&baseCurrency=USDT&side=%s&paymentMethod=aliPay",
+		normalizeOkpayOkxSide(),
+	)
+}
+
+func newOkpayRateRequest(rateUrl string) (*http.Request, error) {
+	req, err := http.NewRequest(http.MethodGet, rateUrl, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36")
+	return req, nil
+}
+
+func fetchOkpayUsdtCnyRateQuote() (okpayRateQuote, error) {
 	rateUrl := strings.TrimSpace(setting.OkpayRateApiUrl)
-	if rateUrl == "" {
-		return 0, "", fmt.Errorf("rate api url is empty")
+	source := normalizeOkpayRateSource()
+	if source == okpayRateSourceOkxAlipayTier {
+		if rateUrl == "" || strings.EqualFold(rateUrl, okpayDefaultCoinGeckoRateUrl) {
+			rateUrl = defaultOkpayOkxRateApiUrl()
+		}
+	} else if rateUrl == "" {
+		return okpayRateQuote{}, fmt.Errorf("rate api url is empty")
 	}
 	client := &http.Client{Timeout: 8 * time.Second}
-	resp, err := client.Get(rateUrl)
+	req, err := newOkpayRateRequest(rateUrl)
 	if err != nil {
-		return 0, "", err
+		return okpayRateQuote{}, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return okpayRateQuote{}, err
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, "", err
+		return okpayRateQuote{}, err
 	}
 	if resp.StatusCode/100 != 2 {
-		return 0, "", fmt.Errorf("rate api http %d", resp.StatusCode)
+		return okpayRateQuote{}, fmt.Errorf("rate api http %d", resp.StatusCode)
 	}
-	rate, err := parseOkpayRateFromBody(body)
+
+	side := ""
+	tier := 0
+	var rate float64
+	switch source {
+	case okpayRateSourceOkxAlipayTier:
+		side = normalizeOkpayOkxSide()
+		tier = getOkpayOkxTier()
+		rate, err = parseOkpayOkxAlipayTierRateFromBody(body, side, tier)
+	default:
+		source = okpayRateSourceCoinGecko
+		rate, err = parseOkpayRateFromBody(body)
+	}
+	if err != nil {
+		return okpayRateQuote{}, err
+	}
+	adjustedRate, err := applyOkpayRateAdjustment(rate)
+	if err != nil {
+		return okpayRateQuote{}, err
+	}
+	return okpayRateQuote{
+		RawRate:      rate,
+		AdjustedRate: adjustedRate,
+		Source:       source,
+		Tier:         tier,
+		Side:         side,
+		Adjustment:   setting.OkpayRateAdjustmentValue,
+	}, nil
+}
+
+func fetchOkpayUsdtCnyRate() (float64, string, error) {
+	quote, err := fetchOkpayUsdtCnyRateQuote()
 	if err != nil {
 		return 0, "", err
 	}
-	return rate, "coingecko", nil
+	return quote.AdjustedRate, quote.Source, nil
+}
+
+// PreviewOkpayRate 获取当前 OKPay 汇率配置的实时预览，不写入任何状态。
+func PreviewOkpayRate(c *gin.Context) {
+	quote, err := fetchOkpayUsdtCnyRateQuote()
+	if err != nil {
+		common.ApiErrorMsg(c, "获取 OKPay 汇率失败: "+err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data": gin.H{
+			"raw_rate":        strconv.FormatFloat(quote.RawRate, 'f', -1, 64),
+			"adjusted_rate":   strconv.FormatFloat(quote.AdjustedRate, 'f', -1, 64),
+			"source":          quote.Source,
+			"side":            quote.Side,
+			"tier":            quote.Tier,
+			"adjustment_type": normalizeOkpayAdjustmentType(),
+			"adjustment":      strconv.FormatFloat(quote.Adjustment, 'f', -1, 64),
+		},
+	})
 }
 
 func getOkpayUsdtCnyRate() (float64, string, bool) {
@@ -375,8 +570,9 @@ func getOkpayUsdtCnyRate() (float64, string, bool) {
 	}
 
 	now := time.Now()
+	cacheKey := okpayRateCacheKey()
 	okpayRateCacheMu.Lock()
-	if okpayRateCache.rate > 0 && now.Before(okpayRateCache.expiresAt) {
+	if okpayRateCache.rate > 0 && okpayRateCache.configKey == cacheKey && now.Before(okpayRateCache.expiresAt) {
 		cached := okpayRateCache
 		okpayRateCacheMu.Unlock()
 		return cached.rate, cached.source, false
@@ -393,6 +589,7 @@ func getOkpayUsdtCnyRate() (float64, string, bool) {
 	okpayRateCache = okpayRateCacheEntry{
 		rate:      rate,
 		source:    source,
+		configKey: cacheKey,
 		expiresAt: now.Add(okpayRateCacheTTL),
 	}
 	okpayRateCacheMu.Unlock()

@@ -21,6 +21,7 @@ import type {
   ConfirmPaymentComplianceResponse,
   DeleteLogsResponse,
   FetchUpstreamRatiosRequest,
+  OkpayRatePreviewResponse,
   SystemOptionsResponse,
   UpdateOptionRequest,
   UpdateOptionResponse,
@@ -42,6 +43,13 @@ export async function confirmPaymentCompliance() {
   const res = await api.post<ConfirmPaymentComplianceResponse>(
     '/api/option/payment_compliance',
     { confirmed: true }
+  )
+  return res.data
+}
+
+export async function previewOkpayRate() {
+  const res = await api.get<OkpayRatePreviewResponse>(
+    '/api/option/okpay/rate-preview'
   )
   return res.data
 }
