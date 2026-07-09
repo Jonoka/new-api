@@ -438,6 +438,7 @@ export function PaymentSettingsSection({
   })
 
   const { isSubmitting } = form.formState
+  const okpayRateSource = form.watch('OkpayRateSource')
 
   const setPaymentValue = React.useCallback(
     (
@@ -2195,7 +2196,11 @@ export function PaymentSettingsSection({
                         { value: 'coingecko', label: 'CoinGecko' },
                         {
                           value: 'okx-alipay-tier',
-                          label: t('OKX Alipay Tier'),
+                          label: t('OKX Alipay Direct Tier'),
+                        },
+                        {
+                          value: 'okx-alipay-rate-module',
+                          label: t('OKX Alipay Rate Module'),
                         },
                       ]}
                       value={field.value || 'coingecko'}
@@ -2210,69 +2215,18 @@ export function PaymentSettingsSection({
                         <SelectGroup>
                           <SelectItem value='coingecko'>CoinGecko</SelectItem>
                           <SelectItem value='okx-alipay-tier'>
-                            {t('OKX Alipay Tier')}
+                            {t('OKX Alipay Direct Tier')}
+                          </SelectItem>
+                          <SelectItem value='okx-alipay-rate-module'>
+                            {t('OKX Alipay Rate Module')}
                           </SelectItem>
                         </SelectGroup>
                       </SelectContent>
                     </Select>
                     <FormDescription>
-                      {t('OKX source reads the configured Alipay order tier')}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name='OkpayOkxSide'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('OKX Side')}</FormLabel>
-                    <Select
-                      items={[
-                        { value: 'buy', label: t('Receiving tier (buy)') },
-                        { value: 'sell', label: t('Paying tier (sell)') },
-                      ]}
-                      value={field.value || 'buy'}
-                      onValueChange={field.onChange}
-                    >
-                      <FormControl>
-                        <SelectTrigger className='w-full'>
-                          <SelectValue />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent alignItemWithTrigger={false}>
-                        <SelectGroup>
-                          <SelectItem value='buy'>
-                            {t('Receiving tier (buy)')}
-                          </SelectItem>
-                          <SelectItem value='sell'>
-                            {t('Paying tier (sell)')}
-                          </SelectItem>
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name='OkpayOkxTier'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('OKX Tier')}</FormLabel>
-                    <FormControl>
-                      <Input
-                        type='number'
-                        min={1}
-                        {...safeNumberFieldProps(field)}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      {t('For example, 3 means the third returned order')}
+                      {t(
+                        'Module source uses the OKX Alipay rate module configuration'
+                      )}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -2280,75 +2234,150 @@ export function PaymentSettingsSection({
               />
             </div>
 
-            <div className='grid gap-6 md:grid-cols-3'>
-              <FormField
-                control={form.control}
-                name='OkpayRateAdjustmentType'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Rate Adjustment Mode')}</FormLabel>
-                    <Select
-                      items={[
-                        { value: 'absolute', label: t('Fixed offset') },
-                        { value: 'percent', label: t('Percent') },
-                      ]}
-                      value={field.value || 'absolute'}
-                      onValueChange={field.onChange}
-                    >
-                      <FormControl>
-                        <SelectTrigger className='w-full'>
-                          <SelectValue />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent alignItemWithTrigger={false}>
-                        <SelectGroup>
-                          <SelectItem value='absolute'>
-                            {t('Fixed offset')}
-                          </SelectItem>
-                          <SelectItem value='percent'>
-                            {t('Percent')}
-                          </SelectItem>
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+            {okpayRateSource === 'okx-alipay-tier' && (
+              <>
+                <div className='grid gap-6 md:grid-cols-3'>
+                  <FormField
+                    control={form.control}
+                    name='OkpayOkxSide'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('OKX Side')}</FormLabel>
+                        <Select
+                          items={[
+                            { value: 'buy', label: t('Receiving tier (buy)') },
+                            { value: 'sell', label: t('Paying tier (sell)') },
+                          ]}
+                          value={field.value || 'buy'}
+                          onValueChange={field.onChange}
+                        >
+                          <FormControl>
+                            <SelectTrigger className='w-full'>
+                              <SelectValue />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent alignItemWithTrigger={false}>
+                            <SelectGroup>
+                              <SelectItem value='buy'>
+                                {t('Receiving tier (buy)')}
+                              </SelectItem>
+                              <SelectItem value='sell'>
+                                {t('Paying tier (sell)')}
+                              </SelectItem>
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-              <FormField
-                control={form.control}
-                name='OkpayRateAdjustmentValue'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Rate Adjustment Value')}</FormLabel>
-                    <FormControl>
-                      <Input
-                        type='number'
-                        step='0.0001'
-                        {...safeNumberFieldProps(field)}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      {t('Use -0.2 to lower a 6.8 rate to 6.6 in fixed mode')}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                  <FormField
+                    control={form.control}
+                    name='OkpayOkxTier'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('OKX Tier')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            type='number'
+                            min={1}
+                            {...safeNumberFieldProps(field)}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t('For example, 3 means the third returned order')}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
 
-              <div className='flex items-end'>
-                <Button
-                  type='button'
-                  variant='outline'
-                  onClick={() => previewOkpayRateMutation.mutate()}
-                  disabled={previewOkpayRateMutation.isPending}
-                >
-                  {previewOkpayRateMutation.isPending
-                    ? t('Testing...')
-                    : t('Test Saved Rate')}
-                </Button>
-              </div>
+                <div className='grid gap-6 md:grid-cols-3'>
+                  <FormField
+                    control={form.control}
+                    name='OkpayRateAdjustmentType'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Rate Adjustment Mode')}</FormLabel>
+                        <Select
+                          items={[
+                            { value: 'absolute', label: t('Fixed offset') },
+                            { value: 'percent', label: t('Percent') },
+                          ]}
+                          value={field.value || 'absolute'}
+                          onValueChange={field.onChange}
+                        >
+                          <FormControl>
+                            <SelectTrigger className='w-full'>
+                              <SelectValue />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent alignItemWithTrigger={false}>
+                            <SelectGroup>
+                              <SelectItem value='absolute'>
+                                {t('Fixed offset')}
+                              </SelectItem>
+                              <SelectItem value='percent'>
+                                {t('Percent')}
+                              </SelectItem>
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='OkpayRateAdjustmentValue'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Rate Adjustment Value')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            type='number'
+                            step='0.0001'
+                            {...safeNumberFieldProps(field)}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t(
+                            'Use -0.2 to lower a 6.8 rate to 6.6 in fixed mode'
+                          )}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </>
+            )}
+
+            {okpayRateSource === 'okx-alipay-rate-module' && (
+              <Alert>
+                <AlertTitle>{t('OKX Alipay Rate Module')}</AlertTitle>
+                <AlertDescription>
+                  {t(
+                    'The final OKPay rate will be provided by the OKX Alipay rate module. Configure tier and adjustment in Extensions - OKX Alipay Rate.'
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
+
+            <div>
+              <Button
+                type='button'
+                variant='outline'
+                onClick={() => previewOkpayRateMutation.mutate()}
+                disabled={previewOkpayRateMutation.isPending}
+              >
+                {previewOkpayRateMutation.isPending
+                  ? t('Testing...')
+                  : t('Test Saved Rate')}
+              </Button>
             </div>
 
             <FormField

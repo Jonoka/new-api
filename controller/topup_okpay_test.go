@@ -4,11 +4,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/extension"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
@@ -159,6 +162,85 @@ func TestFetchOkpayUsdtCnyRateQuoteUsesOkxTierAndAbsoluteAdjustment(t *testing.T
 	require.Equal(t, 2, quote.Tier)
 	require.InDelta(t, 6.8, quote.RawRate, 0.000001)
 	require.InDelta(t, 6.6, quote.AdjustedRate, 0.000001)
+}
+
+func TestOkpayPaymentAmountUsesOkxAlipayRateModule(t *testing.T) {
+	originalRateSource := setting.OkpayRateSource
+	originalAutoExchangeEnabled := setting.OkpayAutoExchangeEnabled
+	originalUsdtCnyRate := setting.OkpayUsdtCnyRate
+	originalCoin := setting.OkpayCoin
+	originalManager := extension.DefaultManager
+	t.Cleanup(func() {
+		setting.OkpayRateSource = originalRateSource
+		setting.OkpayAutoExchangeEnabled = originalAutoExchangeEnabled
+		setting.OkpayUsdtCnyRate = originalUsdtCnyRate
+		setting.OkpayCoin = originalCoin
+		extension.DefaultManager = originalManager
+		resetOkpayRateCacheForTest()
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"code":0,"data":{"buy":[{"price":"6.70"},{"price":"6.80"}]}}`))
+	}))
+	defer server.Close()
+
+	rootDir := t.TempDir()
+	moduleDir := filepath.Join(rootDir, extension.OkxAlipayRateModuleID)
+	require.NoError(t, os.MkdirAll(filepath.Join(moduleDir, "public"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(moduleDir, "manifest.json"), []byte(`{
+		"id":"okx-alipay-rate",
+		"name":"OKX 支付宝汇率",
+		"version":"0.2.0",
+		"runtime":{"type":"static","static_dir":"public"},
+		"permissions":{"roles":["root"]}
+	}`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(moduleDir, "public", "index.html"), []byte("ok"), 0644))
+	manager := extension.NewManager(rootDir)
+	require.NoError(t, manager.Scan())
+	_, err := manager.SetEnabled(extension.OkxAlipayRateModuleID, true)
+	require.NoError(t, err)
+	extension.DefaultManager = manager
+
+	common.OptionMapRWMutex.Lock()
+	if common.OptionMap == nil {
+		common.OptionMap = map[string]string{}
+	}
+	originalOptions := map[string]string{
+		extension.OkxAlipayRateOptionRateAPIURL:      common.OptionMap[extension.OkxAlipayRateOptionRateAPIURL],
+		extension.OkxAlipayRateOptionSide:            common.OptionMap[extension.OkxAlipayRateOptionSide],
+		extension.OkxAlipayRateOptionTier:            common.OptionMap[extension.OkxAlipayRateOptionTier],
+		extension.OkxAlipayRateOptionAdjustmentType:  common.OptionMap[extension.OkxAlipayRateOptionAdjustmentType],
+		extension.OkxAlipayRateOptionAdjustmentValue: common.OptionMap[extension.OkxAlipayRateOptionAdjustmentValue],
+	}
+	common.OptionMap[extension.OkxAlipayRateOptionRateAPIURL] = server.URL
+	common.OptionMap[extension.OkxAlipayRateOptionSide] = "buy"
+	common.OptionMap[extension.OkxAlipayRateOptionTier] = "2"
+	common.OptionMap[extension.OkxAlipayRateOptionAdjustmentType] = "absolute"
+	common.OptionMap[extension.OkxAlipayRateOptionAdjustmentValue] = "-0.2"
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		defer common.OptionMapRWMutex.Unlock()
+		for key, value := range originalOptions {
+			if value == "" {
+				delete(common.OptionMap, key)
+				continue
+			}
+			common.OptionMap[key] = value
+		}
+	})
+
+	setting.OkpayRateSource = extension.OkxAlipayRateSourceID
+	setting.OkpayAutoExchangeEnabled = true
+	setting.OkpayUsdtCnyRate = 7.2
+	setting.OkpayCoin = "USDT"
+
+	amount := getOkpayPaymentAmountFromFiat(66)
+
+	require.Equal(t, extension.OkxAlipayRateSourceID, amount.RateSource)
+	require.False(t, amount.AutoRateFailed)
+	require.InDelta(t, 6.6, amount.Rate, 0.000001)
+	require.InDelta(t, 10, amount.CoinAmount, 0.00000001)
 }
 
 func TestApplyOkpayRateAdjustmentPercent(t *testing.T) {

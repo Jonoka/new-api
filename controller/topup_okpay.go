@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/extension"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
@@ -57,12 +58,13 @@ type okpayRateCacheEntry struct {
 }
 
 type okpayRateQuote struct {
-	RawRate      float64 `json:"raw_rate"`
-	AdjustedRate float64 `json:"adjusted_rate"`
-	Source       string  `json:"source"`
-	Tier         int     `json:"tier,omitempty"`
-	Side         string  `json:"side,omitempty"`
-	Adjustment   float64 `json:"adjustment"`
+	RawRate        float64 `json:"raw_rate"`
+	AdjustedRate   float64 `json:"adjusted_rate"`
+	Source         string  `json:"source"`
+	Tier           int     `json:"tier,omitempty"`
+	Side           string  `json:"side,omitempty"`
+	Adjustment     float64 `json:"adjustment"`
+	AdjustmentType string  `json:"adjustment_type"`
 }
 
 type okpaySignPair struct {
@@ -80,6 +82,7 @@ const okpayRateCacheTTL = 5 * time.Minute
 const (
 	okpayRateSourceCoinGecko     = "coingecko"
 	okpayRateSourceOkxAlipayTier = "okx-alipay-tier"
+	okpayRateSourceOkxModule     = extension.OkxAlipayRateSourceID
 	okpayAdjustmentTypeAbsolute  = "absolute"
 	okpayAdjustmentTypePercent   = "percent"
 	okpayDefaultCoinGeckoRateUrl = "https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=cny&include_last_updated_at=true"
@@ -344,6 +347,8 @@ func getOkpayFallbackUsdtCnyRate() float64 {
 func normalizeOkpayRateSource() string {
 	source := strings.ToLower(strings.TrimSpace(setting.OkpayRateSource))
 	switch source {
+	case okpayRateSourceOkxModule:
+		return okpayRateSourceOkxModule
 	case okpayRateSourceOkxAlipayTier:
 		return okpayRateSourceOkxAlipayTier
 	default:
@@ -375,9 +380,13 @@ func normalizeOkpayAdjustmentType() string {
 }
 
 func okpayRateCacheKey() string {
+	source := normalizeOkpayRateSource()
+	if source == okpayRateSourceOkxModule {
+		return source + "|" + extension.OkxAlipayRateConfigCacheKey()
+	}
 	return fmt.Sprintf(
 		"%s|%s|%s|%d|%s|%.8f",
-		normalizeOkpayRateSource(),
+		source,
 		strings.TrimSpace(setting.OkpayRateApiUrl),
 		normalizeOkpayOkxSide(),
 		getOkpayOkxTier(),
@@ -479,6 +488,21 @@ func newOkpayRateRequest(rateUrl string) (*http.Request, error) {
 func fetchOkpayUsdtCnyRateQuote() (okpayRateQuote, error) {
 	rateUrl := strings.TrimSpace(setting.OkpayRateApiUrl)
 	source := normalizeOkpayRateSource()
+	if source == okpayRateSourceOkxModule {
+		quote, err := extension.FetchEnabledOkxAlipayRateQuote()
+		if err != nil {
+			return okpayRateQuote{}, err
+		}
+		return okpayRateQuote{
+			RawRate:        quote.RawRate,
+			AdjustedRate:   quote.AdjustedRate,
+			Source:         quote.Source,
+			Tier:           quote.Tier,
+			Side:           quote.Side,
+			Adjustment:     quote.AdjustmentValue,
+			AdjustmentType: quote.AdjustmentType,
+		}, nil
+	}
 	if source == okpayRateSourceOkxAlipayTier {
 		if rateUrl == "" || strings.EqualFold(rateUrl, okpayDefaultCoinGeckoRateUrl) {
 			rateUrl = defaultOkpayOkxRateApiUrl()
@@ -524,12 +548,13 @@ func fetchOkpayUsdtCnyRateQuote() (okpayRateQuote, error) {
 		return okpayRateQuote{}, err
 	}
 	return okpayRateQuote{
-		RawRate:      rate,
-		AdjustedRate: adjustedRate,
-		Source:       source,
-		Tier:         tier,
-		Side:         side,
-		Adjustment:   setting.OkpayRateAdjustmentValue,
+		RawRate:        rate,
+		AdjustedRate:   adjustedRate,
+		Source:         source,
+		Tier:           tier,
+		Side:           side,
+		Adjustment:     setting.OkpayRateAdjustmentValue,
+		AdjustmentType: normalizeOkpayAdjustmentType(),
 	}, nil
 }
 
@@ -557,7 +582,7 @@ func PreviewOkpayRate(c *gin.Context) {
 			"source":          quote.Source,
 			"side":            quote.Side,
 			"tier":            quote.Tier,
-			"adjustment_type": normalizeOkpayAdjustmentType(),
+			"adjustment_type": quote.AdjustmentType,
 			"adjustment":      strconv.FormatFloat(quote.Adjustment, 'f', -1, 64),
 		},
 	})

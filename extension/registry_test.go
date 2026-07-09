@@ -156,6 +156,50 @@ func TestInstallBuiltinModulesInstallsOkxAlipayRate(t *testing.T) {
 	}
 }
 
+func TestInstallBuiltinModulesRefreshesOlderBuiltinVersion(t *testing.T) {
+	rootDir := t.TempDir()
+	moduleDir := filepath.Join(rootDir, "okx-alipay-rate")
+	if err := os.MkdirAll(filepath.Join(moduleDir, "public"), 0755); err != nil {
+		t.Fatalf("make old builtin dir: %v", err)
+	}
+	oldManifest := []byte(`{
+		"id":"okx-alipay-rate",
+		"name":"OKX 支付宝汇率",
+		"version":"0.1.0",
+		"runtime":{"type":"static","static_dir":"public"},
+		"permissions":{"roles":["root"]}
+	}`)
+	if err := os.WriteFile(filepath.Join(moduleDir, "manifest.json"), oldManifest, 0644); err != nil {
+		t.Fatalf("write old manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(moduleDir, "public", "index.html"), []byte("old page"), 0644); err != nil {
+		t.Fatalf("write old page: %v", err)
+	}
+
+	if err := installBuiltinModules(rootDir); err != nil {
+		t.Fatalf("refresh builtin modules: %v", err)
+	}
+
+	manifestBytes, err := os.ReadFile(filepath.Join(moduleDir, "manifest.json"))
+	if err != nil {
+		t.Fatalf("read refreshed manifest: %v", err)
+	}
+	var manifest Manifest
+	if err := common.Unmarshal(manifestBytes, &manifest); err != nil {
+		t.Fatalf("parse refreshed manifest: %v", err)
+	}
+	if manifest.Version != "0.2.0" {
+		t.Fatalf("expected refreshed builtin version 0.2.0, got %q", manifest.Version)
+	}
+	pageBytes, err := os.ReadFile(filepath.Join(moduleDir, "public", "index.html"))
+	if err != nil {
+		t.Fatalf("read refreshed page: %v", err)
+	}
+	if string(pageBytes) == "old page" {
+		t.Fatal("old builtin page was not refreshed")
+	}
+}
+
 func TestStaticProxyServesIndexAndRejectsTraversal(t *testing.T) {
 	rootDir := t.TempDir()
 	moduleDir := writeManifest(t, rootDir, "static-demo", Manifest{

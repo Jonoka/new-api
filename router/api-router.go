@@ -52,6 +52,9 @@ func SetApiRouter(router *gin.Engine) {
 			extensionAdminRoute.GET("/", controller.ListExtensions)
 			extensionAdminRoute.POST("/refresh", controller.RefreshExtensions)
 			extensionAdminRoute.POST("/upload", controller.UploadExtension)
+			extensionAdminRoute.GET("/okx-alipay-rate/config", controller.GetOkxAlipayRateConfig)
+			extensionAdminRoute.PUT("/okx-alipay-rate/config", controller.SaveOkxAlipayRateConfig)
+			extensionAdminRoute.GET("/okx-alipay-rate/quote", controller.PreviewOkxAlipayRate)
 			extensionAdminRoute.PUT("/:id/enabled", controller.SetExtensionEnabled)
 			extensionAdminRoute.DELETE("/:id", controller.UninstallExtension)
 		}

@@ -28,14 +28,56 @@ func installBuiltinModules(rootDir string) error {
 		if err != nil {
 			return err
 		}
-		if regularFileExists(filepath.Join(targetDir, "manifest.json")) {
+		shouldInstall, err := shouldInstallBuiltinModule(moduleID, targetDir)
+		if err != nil {
+			return fmt.Errorf("inspect builtin module %s: %w", moduleID, err)
+		}
+		if !shouldInstall {
 			continue
+		}
+		if err := os.RemoveAll(targetDir); err != nil {
+			return fmt.Errorf("clear builtin module %s: %w", moduleID, err)
 		}
 		if err := copyBuiltinModule("builtin/"+moduleID, targetDir); err != nil {
 			return fmt.Errorf("install builtin module %s: %w", moduleID, err)
 		}
 	}
 	return nil
+}
+
+func readBuiltinManifest(moduleID string) (Manifest, error) {
+	manifestBytes, err := builtinModules.ReadFile("builtin/" + moduleID + "/manifest.json")
+	if err != nil {
+		return Manifest{}, err
+	}
+	var manifest Manifest
+	if err := common.Unmarshal(manifestBytes, &manifest); err != nil {
+		return Manifest{}, err
+	}
+	return manifest, nil
+}
+
+func shouldInstallBuiltinModule(moduleID string, targetDir string) (bool, error) {
+	builtinManifest, err := readBuiltinManifest(moduleID)
+	if err != nil {
+		return false, err
+	}
+	targetManifestPath := filepath.Join(targetDir, "manifest.json")
+	if !regularFileExists(targetManifestPath) {
+		return true, nil
+	}
+	targetBytes, err := os.ReadFile(targetManifestPath)
+	if err != nil {
+		return false, err
+	}
+	var installedManifest Manifest
+	if err := common.Unmarshal(targetBytes, &installedManifest); err != nil {
+		return true, nil
+	}
+	if strings.TrimSpace(installedManifest.ID) != moduleID {
+		return false, fmt.Errorf("installed module id %q does not match builtin id", installedManifest.ID)
+	}
+	return strings.TrimSpace(installedManifest.Version) != strings.TrimSpace(builtinManifest.Version), nil
 }
 
 func copyBuiltinModule(sourceRoot string, targetRoot string) error {
@@ -74,12 +116,8 @@ func validateBuiltinModules() error {
 		if !entry.IsDir() {
 			continue
 		}
-		manifestBytes, err := builtinModules.ReadFile("builtin/" + entry.Name() + "/manifest.json")
+		manifest, err := readBuiltinManifest(entry.Name())
 		if err != nil {
-			return err
-		}
-		var manifest Manifest
-		if err := common.Unmarshal(manifestBytes, &manifest); err != nil {
 			return err
 		}
 		if err := manifest.Validate(); err != nil {

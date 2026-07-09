@@ -315,61 +315,80 @@ export default function SettingsPaymentGatewayOkpay(props) {
                   CoinGecko
                 </Form.Select.Option>
                 <Form.Select.Option value='okx-alipay-tier'>
-                  OKX 支付宝档位
+                  OKX 支付宝直连档位
+                </Form.Select.Option>
+                <Form.Select.Option value='okx-alipay-rate-module'>
+                  OKX 支付宝汇率模块
                 </Form.Select.Option>
               </Form.Select>
-            </Col>
-            <Col xs={24} sm={24} md={8} lg={8} xl={8}>
-              <Form.Select
-                field='OkpayOkxSide'
-                label={t('OKX 方向')}
-                placeholder={t('选择 OKX 方向')}
-              >
-                <Form.Select.Option value='buy'>
-                  {t('收款档位（buy）')}
-                </Form.Select.Option>
-                <Form.Select.Option value='sell'>
-                  {t('付款档位（sell）')}
-                </Form.Select.Option>
-              </Form.Select>
-            </Col>
-            <Col xs={24} sm={24} md={8} lg={8} xl={8}>
-              <Form.InputNumber
-                field='OkpayOkxTier'
-                label={t('OKX 档位')}
-                min={1}
-                precision={0}
-                placeholder={t('例如：3')}
-              />
             </Col>
           </Row>
-          <Row
-            gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
-            style={{ marginTop: 16 }}
-          >
-            <Col xs={24} sm={24} md={8} lg={8} xl={8}>
-              <Form.Select
-                field='OkpayRateAdjustmentType'
-                label={t('汇率调价方式')}
-                placeholder={t('选择调价方式')}
+          {inputs.OkpayRateSource === 'okx-alipay-tier' && (
+            <>
+              <Row
+                gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
+                style={{ marginTop: 16 }}
               >
-                <Form.Select.Option value='absolute'>
-                  {t('固定偏移（元）')}
-                </Form.Select.Option>
-                <Form.Select.Option value='percent'>
-                  {t('百分比')}
-                </Form.Select.Option>
-              </Form.Select>
-            </Col>
-            <Col xs={24} sm={24} md={8} lg={8} xl={8}>
-              <Form.InputNumber
-                field='OkpayRateAdjustmentValue'
-                precision={4}
-                label={t('汇率调价值')}
-                placeholder={t('例如：-0.2 表示下浮 0.2 元')}
-              />
-            </Col>
-          </Row>
+                <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+                  <Form.Select
+                    field='OkpayOkxSide'
+                    label={t('OKX 方向')}
+                    placeholder={t('选择 OKX 方向')}
+                  >
+                    <Form.Select.Option value='buy'>
+                      {t('收款档位（buy）')}
+                    </Form.Select.Option>
+                    <Form.Select.Option value='sell'>
+                      {t('付款档位（sell）')}
+                    </Form.Select.Option>
+                  </Form.Select>
+                </Col>
+                <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+                  <Form.InputNumber
+                    field='OkpayOkxTier'
+                    label={t('OKX 档位')}
+                    min={1}
+                    precision={0}
+                    placeholder={t('例如：3')}
+                  />
+                </Col>
+              </Row>
+              <Row
+                gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
+                style={{ marginTop: 16 }}
+              >
+                <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+                  <Form.Select
+                    field='OkpayRateAdjustmentType'
+                    label={t('汇率调价方式')}
+                    placeholder={t('选择调价方式')}
+                  >
+                    <Form.Select.Option value='absolute'>
+                      {t('固定偏移（元）')}
+                    </Form.Select.Option>
+                    <Form.Select.Option value='percent'>
+                      {t('百分比')}
+                    </Form.Select.Option>
+                  </Form.Select>
+                </Col>
+                <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+                  <Form.InputNumber
+                    field='OkpayRateAdjustmentValue'
+                    precision={4}
+                    label={t('汇率调价值')}
+                    placeholder={t('例如：-0.2 表示下浮 0.2 元')}
+                  />
+                </Col>
+              </Row>
+            </>
+          )}
+          {inputs.OkpayRateSource === 'okx-alipay-rate-module' && (
+            <div style={{ marginTop: 16, color: 'var(--semi-color-text-1)' }}>
+              {t(
+                'OKPay 将使用 OKX 支付宝汇率模块提供的最终汇率，档位和上浮下浮请到扩展模块里的 OKX 支付宝汇率页面配置。',
+              )}
+            </div>
+          )}
           <div style={{ marginTop: 16 }}>
             <Button onClick={submitOkpaySetting}>{t('更新 OKPay 设置')}</Button>
             <Button

@@ -115,6 +115,10 @@ func InitOptionMap() {
 	common.OptionMap["OkpayRateAdjustmentValue"] = strconv.FormatFloat(setting.OkpayRateAdjustmentValue, 'f', -1, 64)
 	common.OptionMap["OkpayMinTopUp"] = strconv.Itoa(setting.OkpayMinTopUp)
 	common.OptionMap["OkpayCoin"] = setting.OkpayCoin
+	okxAlipayRateDefaults := setting.DefaultOkxAlipayRateModuleOptions()
+	for key, value := range okxAlipayRateDefaults {
+		common.OptionMap[key] = value
+	}
 	common.OptionMap["WaffoEnabled"] = strconv.FormatBool(setting.WaffoEnabled)
 	common.OptionMap["WaffoApiKey"] = setting.WaffoApiKey
 	common.OptionMap["WaffoPrivateKey"] = setting.WaffoPrivateKey
