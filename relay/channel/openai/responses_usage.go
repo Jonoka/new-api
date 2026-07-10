@@ -1,8 +1,6 @@
 package openai
 
 import (
-	"strings"
-
 	"github.com/QuantumNous/new-api/dto"
 
 	"github.com/tidwall/gjson"
@@ -21,23 +19,6 @@ func isResponsesTerminalUsageEvent(eventType string) bool {
 	default:
 		return false
 	}
-}
-
-func isGPT56ResponsesCacheCreationModel(model string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(model))
-	return strings.Contains(normalized, "gpt-5.6-sol") ||
-		strings.Contains(normalized, "gpt-5.6-terra") ||
-		strings.Contains(normalized, "gpt-5.6-luna")
-}
-
-func inferGPT56ResponsesCacheCreationTokens(model string, inputTokens int, details *dto.InputTokenDetails) int {
-	if details == nil || details.HasAnyCacheCreationTokensField() || !isGPT56ResponsesCacheCreationModel(model) {
-		return 0
-	}
-	if inputTokens <= details.CachedTokens {
-		return 0
-	}
-	return inputTokens - details.CachedTokens
 }
 
 func applyResponsesUsageToOpenAIUsage(usage *dto.Usage, resp *dto.OpenAIResponsesResponse) {
@@ -73,9 +54,6 @@ func applyResponsesUsageToOpenAIUsage(usage *dto.Usage, resp *dto.OpenAIResponse
 		usage.InputTokensDetails = respUsage.InputTokensDetails
 		usage.PromptTokensDetails.CachedTokens = respUsage.InputTokensDetails.CachedTokens
 		cacheCreationTokens := respUsage.GetCacheCreationTokens()
-		if cacheCreationTokens == 0 && !respUsage.HasAnyDetailCacheCreationTokensField() {
-			cacheCreationTokens = inferGPT56ResponsesCacheCreationTokens(resp.Model, inputTokens, respUsage.InputTokensDetails)
-		}
 		if respUsage.HasAnyCacheCreationTokensField() || cacheCreationTokens > 0 {
 			usage.SetCacheCreationTokensWithPresence(cacheCreationTokens)
 		}

@@ -7,23 +7,6 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 )
 
-func isGPT56ResponsesCacheCreationModel(model string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(model))
-	return strings.Contains(normalized, "gpt-5.6-sol") ||
-		strings.Contains(normalized, "gpt-5.6-terra") ||
-		strings.Contains(normalized, "gpt-5.6-luna")
-}
-
-func inferGPT56ResponsesCacheCreationTokens(model string, inputTokens int, details *dto.InputTokenDetails) int {
-	if details == nil || details.HasAnyCacheCreationTokensField() || !isGPT56ResponsesCacheCreationModel(model) {
-		return 0
-	}
-	if inputTokens <= details.CachedTokens {
-		return 0
-	}
-	return inputTokens - details.CachedTokens
-}
-
 func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesResponse, id string) (*dto.OpenAITextResponse, *dto.Usage, error) {
 	if resp == nil {
 		return nil, nil, errors.New("response is nil")
@@ -58,9 +41,6 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 			usage.InputTokensDetails = resp.Usage.InputTokensDetails
 			usage.PromptTokensDetails.CachedTokens = resp.Usage.InputTokensDetails.CachedTokens
 			cacheCreationTokens := resp.Usage.GetCacheCreationTokens()
-			if cacheCreationTokens == 0 && !resp.Usage.HasAnyDetailCacheCreationTokensField() {
-				cacheCreationTokens = inferGPT56ResponsesCacheCreationTokens(resp.Model, usage.PromptTokens, resp.Usage.InputTokensDetails)
-			}
 			if resp.Usage.HasAnyCacheCreationTokensField() || cacheCreationTokens > 0 {
 				usage.SetCacheCreationTokensWithPresence(cacheCreationTokens)
 			}

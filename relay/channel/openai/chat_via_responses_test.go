@@ -312,22 +312,18 @@ func TestOaiResponsesUsageKeepsMissingCacheCreationAsZero(t *testing.T) {
 	require.Equal(t, 0, usage.PromptTokensDetails.CachedCreationTokens)
 }
 
-func TestOaiResponsesUsageInfersGPT56CacheCreationTokens(t *testing.T) {
+func TestOaiResponsesUsageDoesNotInferGPT56CacheCreationTokens(t *testing.T) {
 	body := `{"id":"resp_1","model":"gpt-5.6-sol","created_at":1800000000,"usage":{"input_tokens":188727,"output_tokens":368,"total_tokens":189095,"input_tokens_details":{"cached_tokens":185088}}}`
-	c, recorder, info, resp := setupResponsesStreamTest(body)
+	c, _, info, resp := setupResponsesStreamTest(body)
 
 	usage, err := OaiResponsesHandler(c, info, resp)
 	require.Nil(t, err)
 	require.NotNil(t, usage)
 	require.Equal(t, 185088, usage.PromptTokensDetails.CachedTokens)
-	require.Equal(t, 3639, usage.PromptTokensDetails.CachedCreationTokens)
-	require.EqualValues(t, 3639, gjson.Get(recorder.Body.String(), "usage.input_tokens_details.cache_creation_tokens").Int())
-	require.EqualValues(t, 3639, gjson.Get(recorder.Body.String(), "usage.input_tokens_details.cached_creation_tokens").Int())
-	require.EqualValues(t, 3639, gjson.Get(recorder.Body.String(), "usage.cache_creation_tokens").Int())
-	require.EqualValues(t, 3639, gjson.Get(recorder.Body.String(), "usage.cache_write_tokens").Int())
+	require.Equal(t, 0, usage.PromptTokensDetails.CachedCreationTokens)
 }
 
-func TestOaiResponsesUsageInfersGPT56CacheCreationWithTopLevelZeroAlias(t *testing.T) {
+func TestOaiResponsesUsageKeepsGPT56TopLevelZeroAlias(t *testing.T) {
 	body := `{"id":"resp_1","model":"gpt-5.6-sol","created_at":1800000000,"usage":{"input_tokens":188727,"output_tokens":368,"total_tokens":189095,"cache_creation_input_tokens":0,"input_tokens_details":{"cached_tokens":185088}}}`
 	c, recorder, info, resp := setupResponsesStreamTest(body)
 
@@ -335,9 +331,9 @@ func TestOaiResponsesUsageInfersGPT56CacheCreationWithTopLevelZeroAlias(t *testi
 	require.Nil(t, err)
 	require.NotNil(t, usage)
 	require.Equal(t, 185088, usage.PromptTokensDetails.CachedTokens)
-	require.Equal(t, 3639, usage.PromptTokensDetails.CachedCreationTokens)
-	require.EqualValues(t, 3639, gjson.Get(recorder.Body.String(), "usage.cache_creation_input_tokens").Int())
-	require.EqualValues(t, 3639, gjson.Get(recorder.Body.String(), "usage.cache_write_tokens").Int())
+	require.Equal(t, 0, usage.PromptTokensDetails.CachedCreationTokens)
+	require.EqualValues(t, 0, gjson.Get(recorder.Body.String(), "usage.cache_creation_input_tokens").Int())
+	require.EqualValues(t, 0, gjson.Get(recorder.Body.String(), "usage.cache_write_tokens").Int())
 }
 
 func TestOaiResponsesUsageDoesNotInferCacheCreationForOtherModels(t *testing.T) {
@@ -390,18 +386,16 @@ func TestOaiResponsesCompactionHandlerDetailExplicitZeroOverridesTopLevelAlias(t
 	require.EqualValues(t, 0, gjson.Get(recorder.Body.String(), "usage.cache_creation_input_tokens").Int())
 }
 
-func TestOaiResponsesCompactionHandlerInfersGPT56CacheCreationTokens(t *testing.T) {
+func TestOaiResponsesCompactionHandlerDoesNotInferGPT56CacheCreationTokens(t *testing.T) {
 	body := `{"id":"resp_1","model":"gpt-5.6-terra","usage":{"input_tokens":188727,"output_tokens":368,"total_tokens":189095,"input_tokens_details":{"cached_tokens":185088}}}`
-	c, recorder, _, resp := setupResponsesStreamTest(body)
+	c, _, _, resp := setupResponsesStreamTest(body)
 
 	usage, err := OaiResponsesCompactionHandler(c, resp)
 	require.Nil(t, err)
 	require.NotNil(t, usage)
 	require.Equal(t, 188727, usage.PromptTokens)
 	require.Equal(t, 185088, usage.PromptTokensDetails.CachedTokens)
-	require.Equal(t, 3639, usage.PromptTokensDetails.CachedCreationTokens)
-	require.EqualValues(t, 3639, gjson.Get(recorder.Body.String(), "usage.input_tokens_details.cache_creation_tokens").Int())
-	require.EqualValues(t, 3639, gjson.Get(recorder.Body.String(), "usage.cache_write_tokens").Int())
+	require.Equal(t, 0, usage.PromptTokensDetails.CachedCreationTokens)
 }
 
 func TestOaiResponsesToChatStreamHandlerReadsDoneUsage(t *testing.T) {
