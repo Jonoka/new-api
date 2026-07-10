@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -170,6 +171,129 @@ func TestCacheWriteTokensTotal(t *testing.T) {
 		}
 		require.Equal(t, 30, cacheWriteTokensTotal(summary))
 	})
+}
+
+func TestApplyMissingCacheWriteFallbackInfersForConfiguredGPT56Channel(t *testing.T) {
+	policy := model_setting.MissingCacheWriteFallbackPolicy{
+		Enabled:       true,
+		Mode:          model_setting.MissingCacheWriteFallbackModeBill,
+		ChannelIDs:    []int{1, 5},
+		ModelPatterns: []string{`^gpt-5\.6-(luna|sol|terra)$`},
+	}
+	relayInfo := &relaycommon.RelayInfo{
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: 5, ChannelType: constant.ChannelTypeOpenAI},
+		OriginModelName: "gpt-5.6-sol",
+	}
+	usage := &dto.Usage{
+		PromptTokens: 152728,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens: 146176,
+		},
+	}
+
+	result := applyMissingCacheWriteFallback(policy, relayInfo, usage)
+
+	require.Equal(t, 6552, result.InferredTokens)
+	require.Equal(t, 6552, usage.PromptTokensDetails.CachedCreationTokens)
+	require.Equal(t, cacheWriteTokensSourceInferredMissingField, result.Source)
+	require.True(t, result.Billable)
+}
+
+func TestApplyMissingCacheWriteFallbackObserveOnlyDoesNotChangeBillingUsage(t *testing.T) {
+	policy := model_setting.MissingCacheWriteFallbackPolicy{
+		Enabled:       true,
+		Mode:          model_setting.MissingCacheWriteFallbackModeObserve,
+		AllChannels:   true,
+		ModelPatterns: []string{`^gpt-5\.6-(luna|sol|terra)$`},
+	}
+	relayInfo := &relaycommon.RelayInfo{
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: 24, ChannelType: constant.ChannelTypeOpenAI},
+		OriginModelName: "gpt-5.6-terra",
+	}
+	usage := &dto.Usage{
+		PromptTokens: 10000,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens: 8000,
+		},
+	}
+
+	result := applyMissingCacheWriteFallback(policy, relayInfo, usage)
+
+	require.Equal(t, 2000, result.InferredTokens)
+	require.Zero(t, usage.PromptTokensDetails.CachedCreationTokens)
+	require.Equal(t, cacheWriteTokensSourceInferredMissingField, result.Source)
+	require.False(t, result.Billable)
+}
+
+func TestApplyMissingCacheWriteFallbackKeepsExplicitUpstreamValue(t *testing.T) {
+	policy := model_setting.MissingCacheWriteFallbackPolicy{
+		Enabled:       true,
+		Mode:          model_setting.MissingCacheWriteFallbackModeBill,
+		AllChannels:   true,
+		ModelPatterns: []string{`^gpt-5\.6-(luna|sol|terra)$`},
+	}
+	relayInfo := &relaycommon.RelayInfo{
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: 18, ChannelType: constant.ChannelTypeOpenAI},
+		OriginModelName: "gpt-5.6-luna",
+	}
+	usage := &dto.Usage{
+		PromptTokens: 10000,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:                8000,
+			CachedCreationTokens:        1500,
+			CachedCreationTokensPresent: true,
+		},
+	}
+
+	result := applyMissingCacheWriteFallback(policy, relayInfo, usage)
+
+	require.Equal(t, 1500, usage.PromptTokensDetails.CachedCreationTokens)
+	require.Equal(t, cacheWriteTokensSourceUpstream, result.Source)
+	require.Zero(t, result.InferredTokens)
+}
+
+func TestApplyMissingCacheWriteFallbackKeepsExplicitZero(t *testing.T) {
+	policy := model_setting.MissingCacheWriteFallbackPolicy{
+		Enabled:       true,
+		Mode:          model_setting.MissingCacheWriteFallbackModeBill,
+		AllChannels:   true,
+		ModelPatterns: []string{`^gpt-5\.6-(luna|sol|terra)$`},
+	}
+	relayInfo := &relaycommon.RelayInfo{
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: 1, ChannelType: constant.ChannelTypeOpenAI},
+		OriginModelName: "gpt-5.6-sol",
+	}
+	usage := &dto.Usage{
+		PromptTokens: 10000,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:                8000,
+			CachedCreationTokensPresent: true,
+		},
+	}
+
+	result := applyMissingCacheWriteFallback(policy, relayInfo, usage)
+
+	require.Zero(t, usage.PromptTokensDetails.CachedCreationTokens)
+	require.Equal(t, cacheWriteTokensSourceExplicitZero, result.Source)
+	require.Zero(t, result.InferredTokens)
+}
+
+func TestApplyMissingCacheWriteFallbackRejectsUnconfiguredModelAndChannel(t *testing.T) {
+	policy := model_setting.MissingCacheWriteFallbackPolicy{
+		Enabled:       true,
+		Mode:          model_setting.MissingCacheWriteFallbackModeBill,
+		ChannelIDs:    []int{5},
+		ModelPatterns: []string{`^gpt-5\.6-(luna|sol|terra)$`},
+	}
+	usage := &dto.Usage{PromptTokens: 10000, PromptTokensDetails: dto.InputTokenDetails{CachedTokens: 8000}}
+
+	wrongChannel := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 1}, OriginModelName: "gpt-5.6-sol"}
+	require.Empty(t, applyMissingCacheWriteFallback(policy, wrongChannel, usage).Source)
+	require.Zero(t, usage.PromptTokensDetails.CachedCreationTokens)
+
+	wrongModel := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 5}, OriginModelName: "gpt-5.5"}
+	require.Empty(t, applyMissingCacheWriteFallback(policy, wrongModel, usage).Source)
+	require.Zero(t, usage.PromptTokensDetails.CachedCreationTokens)
 }
 
 func TestCalculateTextQuotaSummaryHandlesLegacyClaudeDerivedOpenAIUsage(t *testing.T) {

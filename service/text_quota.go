@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -55,6 +56,58 @@ type textQuotaSummary struct {
 	AudioInputPrice          float64
 	ImageGenerationCallPrice float64
 	ToolCallSurchargeQuota   decimal.Decimal
+}
+
+const (
+	cacheWriteTokensSourceUpstream             = "upstream"
+	cacheWriteTokensSourceExplicitZero         = "explicit_zero"
+	cacheWriteTokensSourceInferredMissingField = "inferred_missing_field"
+)
+
+type missingCacheWriteFallbackResult struct {
+	Source         string
+	InferredTokens int
+	Billable       bool
+}
+
+func applyMissingCacheWriteFallback(policy model_setting.MissingCacheWriteFallbackPolicy, relayInfo *relaycommon.RelayInfo, usage *dto.Usage) missingCacheWriteFallbackResult {
+	if relayInfo == nil || usage == nil {
+		return missingCacheWriteFallbackResult{}
+	}
+	channelID := 0
+	channelType := 0
+	if relayInfo.ChannelMeta != nil {
+		channelID = relayInfo.ChannelMeta.ChannelId
+		channelType = relayInfo.ChannelMeta.ChannelType
+	}
+	if !policy.IsEnabledFor(channelID, channelType, relayInfo.OriginModelName) {
+		return missingCacheWriteFallbackResult{}
+	}
+
+	details := &usage.PromptTokensDetails
+	if details.CachedCreationTokensPresent {
+		if details.CachedCreationTokens == 0 {
+			return missingCacheWriteFallbackResult{Source: cacheWriteTokensSourceExplicitZero}
+		}
+		return missingCacheWriteFallbackResult{Source: cacheWriteTokensSourceUpstream}
+	}
+	if details.CachedCreationTokens > 0 {
+		return missingCacheWriteFallbackResult{Source: cacheWriteTokensSourceUpstream}
+	}
+	if details.CachedTokens <= 0 || usage.PromptTokens <= details.CachedTokens {
+		return missingCacheWriteFallbackResult{}
+	}
+
+	inferred := usage.PromptTokens - details.CachedTokens
+	result := missingCacheWriteFallbackResult{
+		Source:         cacheWriteTokensSourceInferredMissingField,
+		InferredTokens: inferred,
+		Billable:       policy.Mode == model_setting.MissingCacheWriteFallbackModeBill,
+	}
+	if result.Billable {
+		details.CachedCreationTokens = inferred
+	}
+	return result
 }
 
 func cacheWriteTokensTotal(summary textQuotaSummary) int {
@@ -327,6 +380,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	if originUsage != nil {
 		ObserveChannelAffinityUsageCacheByRelayFormat(ctx, usage, relayInfo.GetFinalRequestRelayFormat())
 	}
+	cacheWriteFallback := applyMissingCacheWriteFallback(model_setting.GetGlobalSettings().MissingCacheWriteFallback, relayInfo, usage)
 
 	adminRejectReason := common.GetContextKeyString(ctx, constant.ContextKeyAdminRejectReason)
 	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
@@ -447,6 +501,13 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		// If split 5m/1h values are present, this is their sum; otherwise it falls back
 		// to cache_creation_tokens.
 		other["cache_write_tokens"] = cacheWriteTokens
+	}
+	if cacheWriteFallback.Source != "" {
+		other["cache_write_tokens_source"] = cacheWriteFallback.Source
+	}
+	if cacheWriteFallback.InferredTokens > 0 {
+		other["inferred_cache_write_tokens"] = cacheWriteFallback.InferredTokens
+		other["inferred_cache_write_billable"] = cacheWriteFallback.Billable
 	}
 	if relayInfo.GetFinalRequestRelayFormat() != types.RelayFormatClaude && usage != nil && usage.UsageSource != "" && usage.InputTokens > 0 {
 		// input_tokens_total: explicit normalized total input used by the usage log UI.

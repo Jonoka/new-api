@@ -49,6 +49,7 @@ func applyResponsesUsageToOpenAIUsage(usage *dto.Usage, resp *dto.OpenAIResponse
 		usage.InputTokensDetails = respUsage.InputTokensDetails
 		usage.PromptTokensDetails.CachedTokens = respUsage.InputTokensDetails.CachedTokens
 		usage.PromptTokensDetails.CachedCreationTokens = respUsage.InputTokensDetails.CachedCreationTokens
+		usage.PromptTokensDetails.CachedCreationTokensPresent = respUsage.InputTokensDetails.CachedCreationTokensPresent
 		usage.PromptTokensDetails.ImageTokens = respUsage.InputTokensDetails.ImageTokens
 		usage.PromptTokensDetails.AudioTokens = respUsage.InputTokensDetails.AudioTokens
 		usage.PromptTokensDetails.TextTokens = respUsage.InputTokensDetails.TextTokens
@@ -56,7 +57,10 @@ func applyResponsesUsageToOpenAIUsage(usage *dto.Usage, resp *dto.OpenAIResponse
 	if respUsage.PromptTokensDetails.CachedTokens != 0 {
 		usage.PromptTokensDetails.CachedTokens = respUsage.PromptTokensDetails.CachedTokens
 	}
-	if respUsage.PromptTokensDetails.CachedCreationTokens != 0 {
+	if respUsage.PromptTokensDetails.CachedCreationTokensPresent {
+		usage.PromptTokensDetails.CachedCreationTokensPresent = true
+		usage.PromptTokensDetails.CachedCreationTokens = respUsage.PromptTokensDetails.CachedCreationTokens
+	} else if respUsage.PromptTokensDetails.CachedCreationTokens != 0 {
 		usage.PromptTokensDetails.CachedCreationTokens = respUsage.PromptTokensDetails.CachedCreationTokens
 	}
 	if respUsage.PromptTokensDetails.ImageTokens != 0 {

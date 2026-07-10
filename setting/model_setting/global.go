@@ -1,11 +1,45 @@
 package model_setting
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 
 	"github.com/QuantumNous/new-api/setting/config"
 )
+
+const (
+	MissingCacheWriteFallbackModeObserve = "observe"
+	MissingCacheWriteFallbackModeBill    = "bill"
+)
+
+type MissingCacheWriteFallbackPolicy struct {
+	Enabled       bool     `json:"enabled"`
+	Mode          string   `json:"mode"`
+	AllChannels   bool     `json:"all_channels"`
+	ChannelIDs    []int    `json:"channel_ids,omitempty"`
+	ChannelTypes  []int    `json:"channel_types,omitempty"`
+	ModelPatterns []string `json:"model_patterns,omitempty"`
+}
+
+func (p MissingCacheWriteFallbackPolicy) IsEnabledFor(channelID int, channelType int, model string) bool {
+	if !p.Enabled || (p.Mode != MissingCacheWriteFallbackModeObserve && p.Mode != MissingCacheWriteFallbackModeBill) {
+		return false
+	}
+	channelEnabled := p.AllChannels ||
+		(channelID > 0 && slices.Contains(p.ChannelIDs, channelID)) ||
+		(channelType > 0 && slices.Contains(p.ChannelTypes, channelType))
+	if !channelEnabled || model == "" {
+		return false
+	}
+	for _, pattern := range p.ModelPatterns {
+		matched, err := regexp.MatchString(pattern, model)
+		if err == nil && matched {
+			return true
+		}
+	}
+	return false
+}
 
 type ChatCompletionsToResponsesPolicy struct {
 	Enabled       bool     `json:"enabled"`
@@ -36,6 +70,7 @@ type GlobalSettings struct {
 	PassThroughRequestEnabled        bool                             `json:"pass_through_request_enabled"`
 	ThinkingModelBlacklist           []string                         `json:"thinking_model_blacklist"`
 	ChatCompletionsToResponsesPolicy ChatCompletionsToResponsesPolicy `json:"chat_completions_to_responses_policy"`
+	MissingCacheWriteFallback        MissingCacheWriteFallbackPolicy  `json:"missing_cache_write_fallback"`
 }
 
 // 默认配置
@@ -48,6 +83,10 @@ var defaultOpenaiSettings = GlobalSettings{
 	ChatCompletionsToResponsesPolicy: ChatCompletionsToResponsesPolicy{
 		Enabled:     false,
 		AllChannels: true,
+	},
+	MissingCacheWriteFallback: MissingCacheWriteFallbackPolicy{
+		Enabled: false,
+		Mode:    MissingCacheWriteFallbackModeObserve,
 	},
 }
 

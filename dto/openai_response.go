@@ -253,11 +253,12 @@ type OpenAIVideoResponse struct {
 }
 
 type InputTokenDetails struct {
-	CachedTokens         int `json:"cached_tokens"`
-	CachedCreationTokens int `json:"cached_creation_tokens,omitempty"`
-	TextTokens           int `json:"text_tokens"`
-	AudioTokens          int `json:"audio_tokens"`
-	ImageTokens          int `json:"image_tokens"`
+	CachedTokens                int  `json:"cached_tokens"`
+	CachedCreationTokens        int  `json:"cached_creation_tokens,omitempty"`
+	CachedCreationTokensPresent bool `json:"-"`
+	TextTokens                  int  `json:"text_tokens"`
+	AudioTokens                 int  `json:"audio_tokens"`
+	ImageTokens                 int  `json:"image_tokens"`
 }
 
 // UnmarshalJSON accepts both New API's historical cached_creation_tokens name
@@ -265,17 +266,26 @@ type InputTokenDetails struct {
 // prompt tokens written to cache and use CachedCreationTokens for billing.
 func (d *InputTokenDetails) UnmarshalJSON(data []byte) error {
 	type inputTokenDetailsAlias InputTokenDetails
-	aux := struct {
-		*inputTokenDetailsAlias
-		CacheWriteTokens *int `json:"cache_write_tokens"`
-	}{
-		inputTokenDetailsAlias: (*inputTokenDetailsAlias)(d),
-	}
-	if err := json.Unmarshal(data, &aux); err != nil {
+	d.CachedCreationTokens = 0
+	d.CachedCreationTokensPresent = false
+	if err := common.Unmarshal(data, (*inputTokenDetailsAlias)(d)); err != nil {
 		return err
 	}
-	if aux.CacheWriteTokens != nil {
-		d.CachedCreationTokens = *aux.CacheWriteTokens
+
+	var fields map[string]json.RawMessage
+	if err := common.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if raw, ok := fields["cache_write_tokens"]; ok {
+		if string(raw) == "null" {
+			return nil
+		}
+		d.CachedCreationTokensPresent = true
+		if err := common.Unmarshal(raw, &d.CachedCreationTokens); err != nil {
+			return err
+		}
+	} else if raw, ok := fields["cached_creation_tokens"]; ok && string(raw) != "null" {
+		d.CachedCreationTokensPresent = true
 	}
 	return nil
 }
