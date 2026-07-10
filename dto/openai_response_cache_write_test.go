@@ -1,0 +1,29 @@
+package dto
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestInputTokenDetailsAcceptsOpenAICacheWriteTokens(t *testing.T) {
+	var details InputTokenDetails
+	if err := json.Unmarshal([]byte(`{"cached_tokens":1920,"cache_write_tokens":2048}`), &details); err != nil {
+		t.Fatal(err)
+	}
+	if details.CachedTokens != 1920 {
+		t.Fatalf("CachedTokens = %d, want 1920", details.CachedTokens)
+	}
+	if details.CachedCreationTokens != 2048 {
+		t.Fatalf("CachedCreationTokens = %d, want 2048", details.CachedCreationTokens)
+	}
+}
+
+func TestInputTokenDetailsKeepsLegacyCachedCreationTokens(t *testing.T) {
+	var details InputTokenDetails
+	if err := json.Unmarshal([]byte(`{"cached_creation_tokens":300}`), &details); err != nil {
+		t.Fatal(err)
+	}
+	if details.CachedCreationTokens != 300 {
+		t.Fatalf("CachedCreationTokens = %d, want 300", details.CachedCreationTokens)
+	}
+}

@@ -260,6 +260,26 @@ type InputTokenDetails struct {
 	ImageTokens          int `json:"image_tokens"`
 }
 
+// UnmarshalJSON accepts both New API's historical cached_creation_tokens name
+// and OpenAI's GPT-5.6+ cache_write_tokens name. Internally both represent
+// prompt tokens written to cache and use CachedCreationTokens for billing.
+func (d *InputTokenDetails) UnmarshalJSON(data []byte) error {
+	type inputTokenDetailsAlias InputTokenDetails
+	aux := struct {
+		*inputTokenDetailsAlias
+		CacheWriteTokens *int `json:"cache_write_tokens"`
+	}{
+		inputTokenDetailsAlias: (*inputTokenDetailsAlias)(d),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if aux.CacheWriteTokens != nil {
+		d.CachedCreationTokens = *aux.CacheWriteTokens
+	}
+	return nil
+}
+
 type OutputTokenDetails struct {
 	TextTokens      int `json:"text_tokens"`
 	AudioTokens     int `json:"audio_tokens"`
