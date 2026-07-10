@@ -33,8 +33,6 @@ const EMPTY_MODEL = {
   fixedPrice: '',
   inputPrice: '',
   completionPrice: '',
-  lockedCompletionRatio: '',
-  completionRatioLocked: false,
   cachePrice: '',
   createCachePrice: '',
   imagePrice: '',
@@ -110,13 +108,11 @@ const ratioToBasePrice = (ratio) => {
 const normalizeCompletionRatioMeta = (rawMeta) => {
   if (!rawMeta || typeof rawMeta !== 'object' || Array.isArray(rawMeta)) {
     return {
-      locked: false,
       ratio: '',
     };
   }
 
   return {
-    locked: Boolean(rawMeta.locked),
     ratio: toNumericString(rawMeta.ratio),
   };
 };
@@ -164,23 +160,9 @@ const buildModelState = (name, sourceMaps) => {
     billingMode: hasValue(fixedPrice) ? 'per-request' : 'per-token',
     fixedPrice,
     inputPrice,
-    completionRatioLocked: completionRatioMeta.locked,
-    lockedCompletionRatio: completionRatioMeta.ratio,
     completionPrice:
-      inputPriceNumber !== null &&
-      hasValue(
-        completionRatioMeta.locked
-          ? completionRatioMeta.ratio
-          : completionRatio,
-      )
-        ? formatNumber(
-            inputPriceNumber *
-              Number(
-                completionRatioMeta.locked
-                  ? completionRatioMeta.ratio
-                  : completionRatio,
-              ),
-          )
+      inputPriceNumber !== null && hasValue(completionRatio)
+        ? formatNumber(inputPriceNumber * Number(completionRatio))
         : '',
     cachePrice:
       inputPriceNumber !== null && hasValue(cacheRatio)
@@ -326,7 +308,7 @@ export const buildSummaryText = (model, t) => {
 
 export const buildOptionalFieldToggles = (model) => ({
   completionPrice:
-    model.completionRatioLocked || hasValue(model.completionPrice),
+    hasValue(model.completionPrice),
   cachePrice: hasValue(model.cachePrice),
   createCachePrice: hasValue(model.createCachePrice),
   imagePrice: hasValue(model.imagePrice),
@@ -414,12 +396,9 @@ const serializeModel = (model, t) => {
 
   result.ModelRatio = toNormalizedNumber(inputPrice / 2);
 
-  if (!model.completionRatioLocked && completionPrice !== null) {
+  if (completionPrice !== null) {
     result.CompletionRatio = toNormalizedNumber(completionPrice / inputPrice);
-  } else if (
-    model.completionRatioLocked &&
-    hasValue(model.rawRatios.completionRatio)
-  ) {
+  } else if (hasValue(model.rawRatios.completionRatio)) {
     result.CompletionRatio = toNormalizedNumber(
       model.rawRatios.completionRatio,
     );
@@ -570,9 +549,8 @@ export const buildPreviewRows = (model, t) => {
     {
       key: 'CompletionRatio',
       label: 'CompletionRatio',
-      value: model.completionRatioLocked
-        ? `${model.lockedCompletionRatio || t('空')} (${t('后端固定')})`
-        : completionPrice !== null
+      value:
+        completionPrice !== null
           ? formatNumber(completionPrice / inputPrice)
           : t('空'),
     },
@@ -820,10 +798,8 @@ export function useModelPricingEditorState({
     return {
       ...model,
       completionPrice:
-        model.completionRatioLocked && hasValue(model.lockedCompletionRatio)
-          ? formatNumber(baseNumber * Number(model.lockedCompletionRatio))
-          : !hasValue(model.completionPrice) &&
-              hasValue(model.rawRatios.completionRatio)
+        !hasValue(model.completionPrice) &&
+        hasValue(model.rawRatios.completionRatio)
             ? formatNumber(baseNumber * Number(model.rawRatios.completionRatio))
             : model.completionPrice,
       cachePrice:
@@ -975,18 +951,6 @@ export function useModelPricingEditorState({
           requestRuleExpr: selectedModel.requestRuleExpr || '',
         };
 
-        if (
-          nextModel.billingMode === 'per-token' &&
-          nextModel.completionRatioLocked &&
-          hasValue(nextModel.inputPrice) &&
-          hasValue(nextModel.lockedCompletionRatio)
-        ) {
-          nextModel.completionPrice = formatNumber(
-            Number(nextModel.inputPrice) *
-              Number(nextModel.lockedCompletionRatio),
-          );
-        }
-
         return nextModel;
       }),
     );
@@ -996,9 +960,7 @@ export function useModelPricingEditorState({
       selectedModelNames.forEach((modelName) => {
         const targetModel = models.find((item) => item.name === modelName);
         next[modelName] = {
-          completionPrice: targetModel?.completionRatioLocked
-            ? true
-            : Boolean(sourceToggles.completionPrice),
+          completionPrice: Boolean(sourceToggles.completionPrice),
           cachePrice: Boolean(sourceToggles.cachePrice),
           createCachePrice: Boolean(sourceToggles.createCachePrice),
           imagePrice: Boolean(sourceToggles.imagePrice),
