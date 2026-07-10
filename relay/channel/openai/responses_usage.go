@@ -48,12 +48,16 @@ func applyResponsesUsageToOpenAIUsage(usage *dto.Usage, resp *dto.OpenAIResponse
 	if respUsage.InputTokensDetails != nil {
 		usage.InputTokensDetails = respUsage.InputTokensDetails
 		usage.PromptTokensDetails.CachedTokens = respUsage.InputTokensDetails.CachedTokens
+		usage.PromptTokensDetails.CachedCreationTokens = respUsage.InputTokensDetails.GetCacheCreationTokens()
 		usage.PromptTokensDetails.ImageTokens = respUsage.InputTokensDetails.ImageTokens
 		usage.PromptTokensDetails.AudioTokens = respUsage.InputTokensDetails.AudioTokens
 		usage.PromptTokensDetails.TextTokens = respUsage.InputTokensDetails.TextTokens
 	}
 	if respUsage.PromptTokensDetails.CachedTokens != 0 {
 		usage.PromptTokensDetails.CachedTokens = respUsage.PromptTokensDetails.CachedTokens
+	}
+	if cacheCreationTokens := respUsage.PromptTokensDetails.GetCacheCreationTokens(); cacheCreationTokens != 0 {
+		usage.PromptTokensDetails.CachedCreationTokens = cacheCreationTokens
 	}
 	if respUsage.PromptTokensDetails.ImageTokens != 0 {
 		usage.PromptTokensDetails.ImageTokens = respUsage.PromptTokensDetails.ImageTokens

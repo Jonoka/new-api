@@ -112,6 +112,82 @@ func TestOaiResponsesStreamHandlerReadsDoneUsage(t *testing.T) {
 	require.Equal(t, 12, usage.TotalTokens)
 }
 
+func TestOaiResponsesHandlerMapsCacheCreationTokens(t *testing.T) {
+	body := `{"id":"resp_1","model":"test-model","created_at":1800000000,"usage":{"input_tokens":169969,"output_tokens":60,"total_tokens":170029,"input_tokens_details":{"cached_tokens":168704,"cache_creation_tokens":1265}}}`
+	c, _, info, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesHandler(c, info, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 169969, usage.PromptTokens)
+	require.Equal(t, 168704, usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 1265, usage.PromptTokensDetails.CachedCreationTokens)
+	require.Equal(t, 60, usage.CompletionTokens)
+}
+
+func TestOaiResponsesStreamHandlerMapsCompletedCacheCreationTokens(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"type":"response.output_text.delta","delta":"Hi"}`,
+		`data: {"type":"response.completed","response":{"id":"resp_1","model":"test-model","created_at":1800000000,"usage":{"input_tokens":169969,"output_tokens":60,"total_tokens":170029,"input_tokens_details":{"cached_tokens":168704,"cache_creation_tokens":1265}}}}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+	c, _, info, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesStreamHandler(c, info, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 169969, usage.PromptTokens)
+	require.Equal(t, 168704, usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 1265, usage.PromptTokensDetails.CachedCreationTokens)
+	require.Equal(t, 60, usage.CompletionTokens)
+}
+
+func TestOaiResponsesUsageMapsLegacyCachedCreationTokens(t *testing.T) {
+	body := `{"id":"resp_1","model":"test-model","created_at":1800000000,"usage":{"input_tokens":100,"output_tokens":5,"total_tokens":105,"input_tokens_details":{"cached_tokens":70,"cached_creation_tokens":30}}}`
+	c, _, info, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesHandler(c, info, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 70, usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 30, usage.PromptTokensDetails.CachedCreationTokens)
+}
+
+func TestOaiResponsesUsagePrefersCacheCreationTokens(t *testing.T) {
+	body := `{"id":"resp_1","model":"test-model","created_at":1800000000,"usage":{"input_tokens":100,"output_tokens":5,"total_tokens":105,"input_tokens_details":{"cached_tokens":70,"cache_creation_tokens":30,"cached_creation_tokens":999}}}`
+	c, _, info, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesHandler(c, info, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 70, usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 30, usage.PromptTokensDetails.CachedCreationTokens)
+}
+
+func TestOaiResponsesUsageKeepsMissingCacheCreationAsZero(t *testing.T) {
+	body := `{"id":"resp_1","model":"test-model","created_at":1800000000,"usage":{"input_tokens":100,"output_tokens":5,"total_tokens":105,"input_tokens_details":{"cached_tokens":70}}}`
+	c, _, info, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesHandler(c, info, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 70, usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 0, usage.PromptTokensDetails.CachedCreationTokens)
+}
+
+func TestOaiResponsesCompactionHandlerMapsCacheCreationTokens(t *testing.T) {
+	body := `{"id":"resp_1","usage":{"input_tokens":100,"output_tokens":5,"total_tokens":105,"input_tokens_details":{"cached_tokens":70,"cache_creation_tokens":30}}}`
+	c, _, _, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesCompactionHandler(c, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 100, usage.PromptTokens)
+	require.Equal(t, 70, usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 30, usage.PromptTokensDetails.CachedCreationTokens)
+}
+
 func TestOaiResponsesToChatStreamHandlerReadsDoneUsage(t *testing.T) {
 	body := strings.Join([]string{
 		`data: {"type":"response.output_text.delta","delta":"Hi"}`,
