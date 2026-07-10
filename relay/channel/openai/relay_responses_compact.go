@@ -38,6 +38,9 @@ func OaiResponsesCompactionHandler(c *gin.Context, resp *http.Response) (*dto.Us
 		if compactResp.Usage.InputTokensDetails != nil {
 			usage.PromptTokensDetails.CachedTokens = compactResp.Usage.InputTokensDetails.CachedTokens
 			usage.PromptTokensDetails.CachedCreationTokens = compactResp.Usage.InputTokensDetails.GetCacheCreationTokens()
+			if usage.PromptTokensDetails.CachedCreationTokens == 0 {
+				usage.PromptTokensDetails.CachedCreationTokens = inferGPT56ResponsesCacheCreationTokens(compactResp.Model, usage.PromptTokens, compactResp.Usage.InputTokensDetails)
+			}
 		}
 	}
 

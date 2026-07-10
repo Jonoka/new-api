@@ -165,6 +165,17 @@ func TestOaiResponsesUsagePrefersCacheCreationTokens(t *testing.T) {
 	require.Equal(t, 30, usage.PromptTokensDetails.CachedCreationTokens)
 }
 
+func TestOaiResponsesUsageKeepsExplicitZeroCacheCreationTokens(t *testing.T) {
+	body := `{"id":"resp_1","model":"test-model","created_at":1800000000,"usage":{"input_tokens":100,"output_tokens":5,"total_tokens":105,"input_tokens_details":{"cached_tokens":70,"cache_creation_tokens":0,"cached_creation_tokens":999}}}`
+	c, _, info, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesHandler(c, info, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 70, usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 999, usage.PromptTokensDetails.CachedCreationTokens)
+}
+
 func TestOaiResponsesUsageKeepsMissingCacheCreationAsZero(t *testing.T) {
 	body := `{"id":"resp_1","model":"test-model","created_at":1800000000,"usage":{"input_tokens":100,"output_tokens":5,"total_tokens":105,"input_tokens_details":{"cached_tokens":70}}}`
 	c, _, info, resp := setupResponsesStreamTest(body)
@@ -173,6 +184,28 @@ func TestOaiResponsesUsageKeepsMissingCacheCreationAsZero(t *testing.T) {
 	require.Nil(t, err)
 	require.NotNil(t, usage)
 	require.Equal(t, 70, usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 0, usage.PromptTokensDetails.CachedCreationTokens)
+}
+
+func TestOaiResponsesUsageInfersGPT56CacheCreationTokens(t *testing.T) {
+	body := `{"id":"resp_1","model":"gpt-5.6-sol","created_at":1800000000,"usage":{"input_tokens":188727,"output_tokens":368,"total_tokens":189095,"input_tokens_details":{"cached_tokens":185088}}}`
+	c, _, info, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesHandler(c, info, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 185088, usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 3639, usage.PromptTokensDetails.CachedCreationTokens)
+}
+
+func TestOaiResponsesUsageDoesNotInferCacheCreationForOtherModels(t *testing.T) {
+	body := `{"id":"resp_1","model":"gpt-5.5","created_at":1800000000,"usage":{"input_tokens":188727,"output_tokens":368,"total_tokens":189095,"input_tokens_details":{"cached_tokens":185088}}}`
+	c, _, info, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesHandler(c, info, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 185088, usage.PromptTokensDetails.CachedTokens)
 	require.Equal(t, 0, usage.PromptTokensDetails.CachedCreationTokens)
 }
 
@@ -186,6 +219,18 @@ func TestOaiResponsesCompactionHandlerMapsCacheCreationTokens(t *testing.T) {
 	require.Equal(t, 100, usage.PromptTokens)
 	require.Equal(t, 70, usage.PromptTokensDetails.CachedTokens)
 	require.Equal(t, 30, usage.PromptTokensDetails.CachedCreationTokens)
+}
+
+func TestOaiResponsesCompactionHandlerInfersGPT56CacheCreationTokens(t *testing.T) {
+	body := `{"id":"resp_1","model":"gpt-5.6-terra","usage":{"input_tokens":188727,"output_tokens":368,"total_tokens":189095,"input_tokens_details":{"cached_tokens":185088}}}`
+	c, _, _, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesCompactionHandler(c, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 188727, usage.PromptTokens)
+	require.Equal(t, 185088, usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 3639, usage.PromptTokensDetails.CachedCreationTokens)
 }
 
 func TestOaiResponsesToChatStreamHandlerReadsDoneUsage(t *testing.T) {

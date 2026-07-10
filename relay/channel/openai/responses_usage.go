@@ -1,6 +1,10 @@
 package openai
 
-import "github.com/QuantumNous/new-api/dto"
+import (
+	"strings"
+
+	"github.com/QuantumNous/new-api/dto"
+)
 
 func isResponsesTerminalUsageEvent(eventType string) bool {
 	switch eventType {
@@ -14,6 +18,23 @@ func isResponsesTerminalUsageEvent(eventType string) bool {
 	default:
 		return false
 	}
+}
+
+func isGPT56ResponsesCacheCreationModel(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	return strings.Contains(normalized, "gpt-5.6-sol") ||
+		strings.Contains(normalized, "gpt-5.6-terra") ||
+		strings.Contains(normalized, "gpt-5.6-luna")
+}
+
+func inferGPT56ResponsesCacheCreationTokens(model string, inputTokens int, details *dto.InputTokenDetails) int {
+	if details == nil || details.HasAnyCacheCreationTokensField() || !isGPT56ResponsesCacheCreationModel(model) {
+		return 0
+	}
+	if inputTokens <= details.CachedTokens {
+		return 0
+	}
+	return inputTokens - details.CachedTokens
 }
 
 func applyResponsesUsageToOpenAIUsage(usage *dto.Usage, resp *dto.OpenAIResponsesResponse) {
@@ -49,6 +70,9 @@ func applyResponsesUsageToOpenAIUsage(usage *dto.Usage, resp *dto.OpenAIResponse
 		usage.InputTokensDetails = respUsage.InputTokensDetails
 		usage.PromptTokensDetails.CachedTokens = respUsage.InputTokensDetails.CachedTokens
 		usage.PromptTokensDetails.CachedCreationTokens = respUsage.InputTokensDetails.GetCacheCreationTokens()
+		if usage.PromptTokensDetails.CachedCreationTokens == 0 {
+			usage.PromptTokensDetails.CachedCreationTokens = inferGPT56ResponsesCacheCreationTokens(resp.Model, inputTokens, respUsage.InputTokensDetails)
+		}
 		usage.PromptTokensDetails.ImageTokens = respUsage.InputTokensDetails.ImageTokens
 		usage.PromptTokensDetails.AudioTokens = respUsage.InputTokensDetails.AudioTokens
 		usage.PromptTokensDetails.TextTokens = respUsage.InputTokensDetails.TextTokens

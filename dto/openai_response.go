@@ -259,6 +259,31 @@ type InputTokenDetails struct {
 	TextTokens           int `json:"text_tokens"`
 	AudioTokens          int `json:"audio_tokens"`
 	ImageTokens          int `json:"image_tokens"`
+
+	HasCacheCreationTokens  bool `json:"-"`
+	HasCachedCreationTokens bool `json:"-"`
+}
+
+func (d *InputTokenDetails) UnmarshalJSON(data []byte) error {
+	type alias InputTokenDetails
+	var raw struct {
+		*alias
+		CacheCreationTokens  *int `json:"cache_creation_tokens"`
+		CachedCreationTokens *int `json:"cached_creation_tokens"`
+	}
+	raw.alias = (*alias)(d)
+	if err := common.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.CacheCreationTokens != nil {
+		d.CacheCreationTokens = *raw.CacheCreationTokens
+		d.HasCacheCreationTokens = true
+	}
+	if raw.CachedCreationTokens != nil {
+		d.CachedCreationTokens = *raw.CachedCreationTokens
+		d.HasCachedCreationTokens = true
+	}
+	return nil
 }
 
 func (d InputTokenDetails) GetCacheCreationTokens() int {
@@ -266,6 +291,10 @@ func (d InputTokenDetails) GetCacheCreationTokens() int {
 		return d.CacheCreationTokens
 	}
 	return d.CachedCreationTokens
+}
+
+func (d InputTokenDetails) HasAnyCacheCreationTokensField() bool {
+	return d.HasCacheCreationTokens || d.HasCachedCreationTokens
 }
 
 type OutputTokenDetails struct {

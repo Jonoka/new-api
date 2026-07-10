@@ -317,6 +317,44 @@ func TestCalculateTextQuotaSummaryBillsOpenAIResponsesCacheCreationSeparately(t 
 	require.Equal(t, 18572, summary.Quota)
 }
 
+func TestCalculateTextQuotaSummaryBillsInferredGPT56CacheCreationSeparately(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta:     &relaycommon.ChannelMeta{},
+		PriceData: types.PriceData{
+			ModelRatio:         1,
+			CompletionRatio:    6,
+			CacheRatio:         0.1,
+			CacheCreationRatio: 1.25,
+			GroupRatioInfo:     types.GroupRatioInfo{GroupRatio: 0.2},
+		},
+		StartTime: time.Now(),
+	}
+
+	usage := &dto.Usage{
+		PromptTokens:     188727,
+		CompletionTokens: 368,
+		TotalTokens:      189095,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:         185088,
+			CachedCreationTokens: 3639,
+		},
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+
+	// normal input = 188727 - 185088 - 3639 = 0
+	// quota = (185088*0.1 + 3639*1.25 + 368*6) * group 0.2 = 5053.95 => 5053
+	require.Equal(t, 188727, summary.PromptTokens)
+	require.Equal(t, 185088, summary.CacheTokens)
+	require.Equal(t, 3639, summary.CacheCreationTokens)
+	require.Equal(t, 5053, summary.Quota)
+}
+
 func TestOpenAIResponsesCacheCreationUsageLogFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
