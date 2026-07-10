@@ -73,6 +73,18 @@ type AffiliateBalance struct {
 	UpdatedAt        int64 `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
+func (balance *AffiliateBalance) normalizeTotalQuotaFloor() bool {
+	if balance == nil {
+		return false
+	}
+	minTotal := balance.PendingQuota + balance.AvailableQuota + balance.FrozenQuota + balance.RiskFrozenQuota + balance.WithdrawnQuota + balance.TransferredQuota
+	if balance.TotalQuota >= minTotal {
+		return false
+	}
+	balance.TotalQuota = minTotal
+	return true
+}
+
 type AffiliatePayoutAccount struct {
 	Id            int    `json:"id"`
 	UserId        int    `json:"user_id" gorm:"uniqueIndex"`
@@ -274,6 +286,7 @@ func getAffiliateBalanceForUpdateTx(tx *gorm.DB, userId int) (*AffiliateBalance,
 	balance := &AffiliateBalance{}
 	err := tx.Set("gorm:query_option", "FOR UPDATE").Where("user_id = ?", userId).First(balance).Error
 	if err == nil {
+		balance.normalizeTotalQuotaFloor()
 		return balance, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -293,6 +306,11 @@ func GetAffiliateBalance(userId int) (*AffiliateBalance, error) {
 	balance := &AffiliateBalance{}
 	err := DB.Where("user_id = ?", userId).First(balance).Error
 	if err == nil {
+		if balance.normalizeTotalQuotaFloor() {
+			if err := DB.Model(balance).Update("total_quota", balance.TotalQuota).Error; err != nil {
+				return nil, err
+			}
+		}
 		return balance, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {

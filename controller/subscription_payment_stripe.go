@@ -18,8 +18,9 @@ import (
 )
 
 type SubscriptionStripePayRequest struct {
-	PlanId    int    `json:"plan_id"`
-	PromoCode string `json:"promo_code"`
+	PlanId    int                  `json:"plan_id"`
+	PromoCode string               `json:"promo_code"`
+	Invoice   model.InvoiceRequest `json:"invoice"`
 }
 
 func SubscriptionRequestStripePay(c *gin.Context) {
@@ -40,6 +41,11 @@ func SubscriptionRequestStripePay(c *gin.Context) {
 	}
 	if !plan.Enabled {
 		common.ApiErrorMsg(c, "套餐未启用")
+		return
+	}
+	planPriceUSD, err := model.SubscriptionPlanPriceUSD(plan)
+	if err != nil {
+		common.ApiError(c, err)
 		return
 	}
 	if plan.StripePriceId == "" && strings.TrimSpace(req.PromoCode) == "" {
@@ -73,12 +79,12 @@ func SubscriptionRequestStripePay(c *gin.Context) {
 	reference := fmt.Sprintf("sub-stripe-ref-%d-%d-%s", user.Id, time.Now().UnixMilli(), randstr.String(4))
 	referenceId := "sub_ref_" + common.Sha1([]byte(reference))
 
-	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetSubscription, plan.Id, plan.PriceAmount)
+	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetSubscription, plan.Id, planPriceUSD)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	payMoney := plan.PriceAmount
+	payMoney := planPriceUSD
 	if discount != nil {
 		payMoney = discount.PaidAmount
 	}
@@ -86,12 +92,21 @@ func SubscriptionRequestStripePay(c *gin.Context) {
 		common.ApiErrorMsg(c, "套餐金额过低")
 		return
 	}
+	invoiceAmounts, err := buildInvoicePaymentAmounts(req.Invoice, model.PaymentProviderStripe, payMoney)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	totalPayMoney := payMoney
+	if invoiceAmounts.Required {
+		totalPayMoney = invoiceAmounts.TotalPayment
+	}
 
 	stripePriceId := plan.StripePriceId
-	if discount != nil {
+	if discount != nil || invoiceAmounts.Required {
 		stripePriceId = ""
 	}
-	if payMoney >= 0.01 {
+	if totalPayMoney >= 0.01 {
 		if !strings.HasPrefix(setting.StripeApiSecret, "sk_") && !strings.HasPrefix(setting.StripeApiSecret, "rk_") {
 			common.ApiErrorMsg(c, "Stripe 未配置或密钥无效")
 			return
@@ -105,7 +120,7 @@ func SubscriptionRequestStripePay(c *gin.Context) {
 	order := &model.SubscriptionOrder{
 		UserId:          userId,
 		PlanId:          plan.Id,
-		Money:           payMoney,
+		Money:           totalPayMoney,
 		TradeNo:         referenceId,
 		PaymentMethod:   model.PaymentMethodStripe,
 		PaymentProvider: model.PaymentProviderStripe,
@@ -113,11 +128,12 @@ func SubscriptionRequestStripePay(c *gin.Context) {
 		Status:          common.TopUpStatusPending,
 	}
 	model.ApplyPromoCodeResultToSubscriptionOrder(order, discount)
+	applyInvoiceToSubscriptionOrder(order, invoiceAmounts, planPriceUSD, payMoney, subscriptionPaidQuotaFromUSD(payMoney))
 	if err := order.Insert(); err != nil {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "创建订单失败"})
 		return
 	}
-	if payMoney < 0.01 {
+	if totalPayMoney < 0.01 {
 		if err := model.CompleteFreeSubscriptionOrder(referenceId, model.PaymentProviderStripe); err != nil {
 			common.ApiError(c, err)
 			return
@@ -134,7 +150,7 @@ func SubscriptionRequestStripePay(c *gin.Context) {
 		return
 	}
 
-	payLink, err := genStripeSubscriptionLink(referenceId, user.StripeCustomer, user.Email, stripePriceId, plan.Title, payMoney)
+	payLink, err := genStripeSubscriptionLink(referenceId, user.StripeCustomer, user.Email, stripePriceId, plan.Title, totalPayMoney)
 	if err != nil {
 		_ = model.ExpireSubscriptionOrder(referenceId, model.PaymentProviderStripe)
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Stripe 订阅支付链接创建失败 trade_no=%s plan_id=%d error=%q", referenceId, plan.Id, err.Error()))

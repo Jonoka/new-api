@@ -33,6 +33,17 @@ func buildMaskedTokenResponses(tokens []*model.Token) []*model.Token {
 	return maskedTokens
 }
 
+func bindTokenJSON(c *gin.Context, token *model.Token) (map[string]any, error) {
+	raw := make(map[string]any)
+	if err := common.UnmarshalBodyReusable(c, &raw); err != nil {
+		return nil, err
+	}
+	if err := common.UnmarshalBodyReusable(c, token); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
 func resolveTokenGroupForCreate(requestGroup string, userGroup string) string {
 	requestGroup = strings.TrimSpace(requestGroup)
 	if requestGroup != "" {
@@ -69,6 +80,60 @@ func validateTokenGroups(group string) error {
 		seen[g] = true
 	}
 	return nil
+}
+
+func parseTokenGroupSet(group string) map[string]bool {
+	result := make(map[string]bool)
+	for _, g := range strings.Split(group, ",") {
+		g = strings.TrimSpace(g)
+		if g != "" {
+			result[g] = true
+		}
+	}
+	return result
+}
+
+func normalizeTokenGroupRatioLimits(group string, limitsJSON string) (string, error) {
+	limitsJSON = strings.TrimSpace(limitsJSON)
+	if limitsJSON == "" {
+		return "", nil
+	}
+	limits := make(map[string]float64)
+	if err := common.UnmarshalJsonStr(limitsJSON, &limits); err != nil {
+		return "", fmt.Errorf("倍率保护配置格式错误: %w", err)
+	}
+	if len(limits) == 0 {
+		return "", nil
+	}
+	groupSet := parseTokenGroupSet(group)
+	if len(groupSet) == 0 {
+		return "", errors.New("设置倍率保护前请先选择令牌分组")
+	}
+	if groupSet["auto"] {
+		return "", errors.New("auto 分组不支持设置倍率保护，请改用明确分组")
+	}
+	normalized := make(map[string]float64, len(limits))
+	for g, ratio := range limits {
+		g = strings.TrimSpace(g)
+		if g == "" {
+			return "", errors.New("倍率保护分组名不能为空")
+		}
+		if ratio <= 0 {
+			return "", fmt.Errorf("分组 %s 的倍率保护必须大于 0", g)
+		}
+		if _, ok := groupSet[g]; !ok {
+			return "", fmt.Errorf("分组 %s 未在令牌分组中选择，不能设置倍率保护", g)
+		}
+		normalized[g] = ratio
+	}
+	if len(normalized) == 0 {
+		return "", nil
+	}
+	data, err := common.Marshal(normalized)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 func GetAllTokens(c *gin.Context) {
@@ -206,7 +271,7 @@ func GetTokenUsage(c *gin.Context) {
 
 func AddToken(c *gin.Context) {
 	token := model.Token{}
-	err := c.ShouldBindJSON(&token)
+	_, err := bindTokenJSON(c, &token)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -252,6 +317,11 @@ func AddToken(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	normalizedGroupRatioLimits, err := normalizeTokenGroupRatioLimits(resolvedGroup, token.GroupRatioLimits)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	cleanToken := model.Token{
 		UserId:             c.GetInt("id"),
 		Name:               token.Name,
@@ -265,6 +335,7 @@ func AddToken(c *gin.Context) {
 		ModelLimits:        token.ModelLimits,
 		AllowIps:           token.AllowIps,
 		Group:              resolvedGroup,
+		GroupRatioLimits:   normalizedGroupRatioLimits,
 		CrossGroupRetry:    token.CrossGroupRetry,
 	}
 	err = cleanToken.Insert()
@@ -296,11 +367,12 @@ func UpdateToken(c *gin.Context) {
 	userId := c.GetInt("id")
 	statusOnly := c.Query("status_only")
 	token := model.Token{}
-	err := c.ShouldBindJSON(&token)
+	rawFields, err := bindTokenJSON(c, &token)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	_, groupRatioLimitsProvided := rawFields["group_ratio_limits"]
 	if len(token.Name) > 50 {
 		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
 		return
@@ -338,6 +410,14 @@ func UpdateToken(c *gin.Context) {
 			common.ApiError(c, err)
 			return
 		}
+		normalizedGroupRatioLimits := ""
+		if groupRatioLimitsProvided {
+			normalizedGroupRatioLimits, err = normalizeTokenGroupRatioLimits(token.Group, token.GroupRatioLimits)
+			if err != nil {
+				common.ApiError(c, err)
+				return
+			}
+		}
 		// If you add more fields, please also update token.Update()
 		cleanToken.Name = token.Name
 		cleanToken.ExpiredTime = token.ExpiredTime
@@ -347,6 +427,9 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.ModelLimits = token.ModelLimits
 		cleanToken.AllowIps = token.AllowIps
 		cleanToken.Group = token.Group
+		if groupRatioLimitsProvided {
+			cleanToken.GroupRatioLimits = normalizedGroupRatioLimits
+		}
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
 	}
 	err = cleanToken.Update()

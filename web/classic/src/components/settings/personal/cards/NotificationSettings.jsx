@@ -82,6 +82,7 @@ const NotificationSettings = ({
       enabled: true,
       topup: true,
       affiliate: true,
+      invoice: true,
       personal: true,
     },
     admin: {
@@ -93,6 +94,7 @@ const NotificationSettings = ({
       redemption: true,
       user: true,
       affiliate_admin: true,
+      invoice_admin: true,
       setting: true,
     },
   });
@@ -172,6 +174,7 @@ const NotificationSettings = ({
         enabled: true,
         topup: true,
         affiliate: true,
+        invoice: true,
         personal: true,
       },
       admin: {
@@ -183,6 +186,7 @@ const NotificationSettings = ({
         redemption: true,
         user: true,
         affiliate_admin: true,
+        invoice_admin: true,
         setting: true,
       },
     };
@@ -299,6 +303,11 @@ const NotificationSettings = ({
           description: t('邀请返佣与提现管理'),
         },
         {
+          key: 'invoice',
+          title: t('发票中心'),
+          description: t('用户发票申请与下载记录'),
+        },
+        {
           key: 'personal',
           title: t('个人设置'),
           description: t('个人信息设置'),
@@ -329,6 +338,11 @@ const NotificationSettings = ({
           description: t('兑换码生成管理'),
         },
         { key: 'user', title: t('用户管理'), description: t('用户账户管理') },
+        {
+          key: 'invoice_admin',
+          title: t('发票管理'),
+          description: t('审核和处理发票工单'),
+        },
         {
           key: 'affiliate_admin',
           title: t('返佣分成设置'),

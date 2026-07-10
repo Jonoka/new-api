@@ -183,6 +183,11 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 	}
+	if cleanedJSONData, removed := service.RemoveIncompleteOpenAIResponsesReasoningHistoryFromJSON(jsonData); removed {
+		jsonData = cleanedJSONData
+		attachedPreviousResponseID = false
+		service.DropOpenAIResponsesPreviousResponseID(responsesReq)
+	}
 	relaycommon.MergeOpenAISessionBridgeOverride(info, jsonData)
 
 	body, size, closer, err := relaycommon.NewOutboundJSONBody(jsonData)

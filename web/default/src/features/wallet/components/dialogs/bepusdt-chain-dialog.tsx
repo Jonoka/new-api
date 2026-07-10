@@ -17,7 +17,9 @@ interface BepusdtChainDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   chains: BepusdtChain[]
-  topupAmount: number
+  topupAmount?: number
+  amountLabel?: string
+  amountText?: string
   onConfirm: (tradeType: string) => void
   processing: boolean
 }
@@ -26,7 +28,9 @@ export function BepusdtChainDialog({
   open,
   onOpenChange,
   chains,
-  topupAmount,
+  topupAmount = 0,
+  amountLabel,
+  amountText,
   onConfirm,
   processing,
 }: BepusdtChainDialogProps) {
@@ -94,9 +98,9 @@ export function BepusdtChainDialog({
           ))}
         </div>
 
-        {topupAmount > 0 && (
+        {(amountText || topupAmount > 0) && (
           <div className='text-muted-foreground text-center text-sm'>
-            {t('Topup Amount')}: {topupAmount}
+            {amountLabel || t('Topup Amount')}: {amountText || topupAmount}
           </div>
         )}
 

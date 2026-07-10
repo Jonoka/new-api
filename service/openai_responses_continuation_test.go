@@ -7,6 +7,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestAttachOpenAIResponsesContinuationDoesNotAutoInjectCachedPreviousResponseID(t *testing.T) {
@@ -143,6 +144,29 @@ func TestIsOpenAIResponsesPreviousResponseRetryable(t *testing.T) {
 			require.Equal(t, tt.want, IsOpenAIResponsesPreviousResponseRetryable(tt.statusCode, tt.message))
 		})
 	}
+}
+
+func TestRemoveIncompleteOpenAIResponsesReasoningHistoryFromJSON(t *testing.T) {
+	data := []byte(`{
+		"model":"gpt-5",
+		"previous_response_id":"resp_prev_123",
+		"input":[
+			{"type":"message","role":"user","content":"hello"},
+			{"type":"reasoning","summary":[{"text":"old"}]},
+			{"type":"reasoning","encrypted_content":"enc_123","summary":[{"text":"kept"}]},
+			{"type":"message","role":"user","content":"next"}
+		]
+	}`)
+
+	cleaned, removed := RemoveIncompleteOpenAIResponsesReasoningHistoryFromJSON(data)
+
+	require.True(t, removed)
+	require.False(t, gjson.GetBytes(cleaned, "previous_response_id").Exists(), string(cleaned))
+	require.Len(t, gjson.GetBytes(cleaned, "input").Array(), 3, string(cleaned))
+	require.Equal(t, "message", gjson.GetBytes(cleaned, "input.0.type").String())
+	require.Equal(t, "reasoning", gjson.GetBytes(cleaned, "input.1.type").String())
+	require.Equal(t, "enc_123", gjson.GetBytes(cleaned, "input.1.encrypted_content").String())
+	require.Equal(t, "next", gjson.GetBytes(cleaned, "input.2.content").String())
 }
 
 func mustMarshalRaw(t *testing.T, value any) []byte {

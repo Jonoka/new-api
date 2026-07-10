@@ -59,6 +59,7 @@ import { safeNumberFieldProps } from '../utils/numeric-field'
 import { AmountDiscountVisualEditor } from './amount-discount-visual-editor'
 import { AmountOptionsVisualEditor } from './amount-options-visual-editor'
 import { CreemProductsVisualEditor } from './creem-products-visual-editor'
+import { InvoiceSettingsVisualEditor } from './invoice-settings-visual-editor'
 import { PaymentMethodsVisualEditor } from './payment-methods-visual-editor'
 import {
   formatJsonForEditor,
@@ -77,6 +78,10 @@ import {
   WaffoSettingsSection,
   type WaffoSettingsValues,
 } from './waffo-settings-section'
+
+const DEFAULT_INVOICE_TYPES = '["personal","company"]'
+const DEFAULT_INVOICE_FEE_RULES =
+  '[{"min":0,"max":500,"type":"fixed","value":50},{"min":501,"max":2000,"type":"fixed","value":100},{"min":2001,"max":5000,"type":"fixed","value":175},{"min":5000,"type":"percent","value":5}]'
 
 const paymentSchema = z.object({
   PayAddress: z.string().refine((value) => {
@@ -117,6 +122,25 @@ const paymentSchema = z.object({
       (parsed) =>
         !!parsed && typeof parsed === 'object' && !Array.isArray(parsed)
     )
+    if (error) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: error,
+      })
+    }
+  }),
+  InvoiceEnabled: z.boolean(),
+  InvoiceTypes: z.string().superRefine((value, ctx) => {
+    const error = getJsonError(value, (parsed) => Array.isArray(parsed))
+    if (error) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: error,
+      })
+    }
+  }),
+  InvoiceFeeRules: z.string().superRefine((value, ctx) => {
+    const error = getJsonError(value, (parsed) => Array.isArray(parsed))
     if (error) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -360,6 +384,8 @@ export function PaymentSettingsSection({
       PayMethods: formatJsonForEditor(initialFormValues.PayMethods),
       AmountOptions: formatJsonForEditor(initialFormValues.AmountOptions),
       AmountDiscount: formatJsonForEditor(initialFormValues.AmountDiscount),
+      InvoiceTypes: formatJsonForEditor(initialFormValues.InvoiceTypes),
+      InvoiceFeeRules: formatJsonForEditor(initialFormValues.InvoiceFeeRules),
       CreemProducts: formatJsonForEditor(initialFormValues.CreemProducts),
       BepusdtChains: formatJsonForEditor(initialFormValues.BepusdtChains),
       OkpayGatewayUrl: initialFormValues.OkpayGatewayUrl,
@@ -427,6 +453,8 @@ export function PaymentSettingsSection({
       PayMethods: formatJsonForEditor(parsedDefaults.PayMethods),
       AmountOptions: formatJsonForEditor(parsedDefaults.AmountOptions),
       AmountDiscount: formatJsonForEditor(parsedDefaults.AmountDiscount),
+      InvoiceTypes: formatJsonForEditor(parsedDefaults.InvoiceTypes),
+      InvoiceFeeRules: formatJsonForEditor(parsedDefaults.InvoiceFeeRules),
       CreemProducts: formatJsonForEditor(parsedDefaults.CreemProducts),
       BepusdtChains: formatJsonForEditor(parsedDefaults.BepusdtChains),
       OkpayGatewayUrl: parsedDefaults.OkpayGatewayUrl,
@@ -452,6 +480,9 @@ export function PaymentSettingsSection({
       PayMethods: values.PayMethods.trim(),
       AmountOptions: values.AmountOptions.trim(),
       AmountDiscount: values.AmountDiscount.trim(),
+      InvoiceEnabled: values.InvoiceEnabled,
+      InvoiceTypes: values.InvoiceTypes.trim(),
+      InvoiceFeeRules: values.InvoiceFeeRules.trim(),
       StripeApiSecret: values.StripeApiSecret.trim(),
       StripeWebhookSecret: values.StripeWebhookSecret.trim(),
       StripePriceId: values.StripePriceId.trim(),
@@ -511,6 +542,9 @@ export function PaymentSettingsSection({
       PayMethods: initialRef.current.PayMethods.trim(),
       AmountOptions: initialRef.current.AmountOptions.trim(),
       AmountDiscount: initialRef.current.AmountDiscount.trim(),
+      InvoiceEnabled: initialRef.current.InvoiceEnabled,
+      InvoiceTypes: initialRef.current.InvoiceTypes.trim(),
+      InvoiceFeeRules: initialRef.current.InvoiceFeeRules.trim(),
       StripeApiSecret: initialRef.current.StripeApiSecret.trim(),
       StripeWebhookSecret: initialRef.current.StripeWebhookSecret.trim(),
       StripePriceId: initialRef.current.StripePriceId.trim(),
@@ -522,7 +556,9 @@ export function PaymentSettingsSection({
       CreemWebhookSecret: initialRef.current.CreemWebhookSecret.trim(),
       CreemTestMode: initialRef.current.CreemTestMode,
       CreemProducts: initialRef.current.CreemProducts.trim(),
-      BepusdtApiUrl: removeTrailingSlash(initialRef.current.BepusdtApiUrl.trim()),
+      BepusdtApiUrl: removeTrailingSlash(
+        initialRef.current.BepusdtApiUrl.trim()
+      ),
       BepusdtAuthToken: initialRef.current.BepusdtAuthToken.trim(),
       BepusdtUnitPrice: initialRef.current.BepusdtUnitPrice,
       BepusdtMinTopUp: initialRef.current.BepusdtMinTopUp,
@@ -532,8 +568,7 @@ export function PaymentSettingsSection({
       OkpayMerchantId: initialRef.current.OkpayMerchantId.trim(),
       OkpayMerchantToken: initialRef.current.OkpayMerchantToken.trim(),
       OkpayExchangeRate: initialRef.current.OkpayExchangeRate,
-      OkpayAutoExchangeEnabled:
-        initialRef.current.OkpayAutoExchangeEnabled,
+      OkpayAutoExchangeEnabled: initialRef.current.OkpayAutoExchangeEnabled,
       OkpayUsdtCnyRate: initialRef.current.OkpayUsdtCnyRate,
       OkpayRateApiUrl: removeTrailingSlash(
         initialRef.current.OkpayRateApiUrl.trim()
@@ -617,6 +652,30 @@ export function PaymentSettingsSection({
       updates.push({
         key: 'payment_setting.amount_discount',
         value: sanitized.AmountDiscount,
+      })
+    }
+
+    if (sanitized.InvoiceEnabled !== initial.InvoiceEnabled) {
+      updates.push({
+        key: 'InvoiceEnabled',
+        value: sanitized.InvoiceEnabled,
+      })
+    }
+
+    if (
+      normalizeJsonForComparison(sanitized.InvoiceTypes) !==
+      normalizeJsonForComparison(initial.InvoiceTypes)
+    ) {
+      updates.push({ key: 'InvoiceTypes', value: sanitized.InvoiceTypes })
+    }
+
+    if (
+      normalizeJsonForComparison(sanitized.InvoiceFeeRules) !==
+      normalizeJsonForComparison(initial.InvoiceFeeRules)
+    ) {
+      updates.push({
+        key: 'InvoiceFeeRules',
+        value: sanitized.InvoiceFeeRules,
       })
     }
 
@@ -1249,6 +1308,61 @@ export function PaymentSettingsSection({
                 )}
               />
             </div>
+
+            <FormField
+              control={form.control}
+              name='InvoiceEnabled'
+              render={({ field }) => (
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>{t('Invoice support')}</FormLabel>
+                    <FormDescription>
+                      {t(
+                        'Show invoice options during top-up and subscription payment confirmation'
+                      )}
+                    </FormDescription>
+                  </SettingsSwitchContent>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                </SettingsSwitchItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='InvoiceTypes'
+              render={({ field: typesField }) => (
+                <FormField
+                  control={form.control}
+                  name='InvoiceFeeRules'
+                  render={({ field: feeRulesField }) => (
+                    <FormItem>
+                      <FormLabel>{t('Invoice configuration')}</FormLabel>
+                      <FormControl>
+                        <InvoiceSettingsVisualEditor
+                          typesValue={typesField.value || DEFAULT_INVOICE_TYPES}
+                          feeRulesValue={
+                            feeRulesField.value || DEFAULT_INVOICE_FEE_RULES
+                          }
+                          onTypesChange={typesField.onChange}
+                          onFeeRulesChange={feeRulesField.onChange}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Invoice fee rules are calculated in CNY and added to the payable amount when users request an invoice.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+            />
           </div>
 
           <Separator />
@@ -1749,14 +1863,9 @@ export function PaymentSettingsSection({
                   <FormItem>
                     <FormLabel>{t('Unit Price (CNY/USD)')}</FormLabel>
                     <FormControl>
-                      <Input
-                        type='number'
-                        {...safeNumberFieldProps(field)}
-                      />
+                      <Input type='number' {...safeNumberFieldProps(field)} />
                     </FormControl>
-                    <FormDescription>
-                      {t('CNY per 1 USD')}
-                    </FormDescription>
+                    <FormDescription>{t('CNY per 1 USD')}</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -1769,10 +1878,7 @@ export function PaymentSettingsSection({
                   <FormItem>
                     <FormLabel>{t('Min Topup')}</FormLabel>
                     <FormControl>
-                      <Input
-                        type='number'
-                        {...safeNumberFieldProps(field)}
-                      />
+                      <Input type='number' {...safeNumberFieldProps(field)} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -1786,10 +1892,7 @@ export function PaymentSettingsSection({
                   <FormItem>
                     <FormLabel>{t('Timeout (seconds)')}</FormLabel>
                     <FormControl>
-                      <Input
-                        type='number'
-                        {...safeNumberFieldProps(field)}
-                      />
+                      <Input type='number' {...safeNumberFieldProps(field)} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -1826,9 +1929,7 @@ export function PaymentSettingsSection({
 
           <div className='space-y-4'>
             <div>
-              <h3 className='text-lg font-medium'>
-                {t('OKPay Gateway')}
-              </h3>
+              <h3 className='text-lg font-medium'>{t('OKPay Gateway')}</h3>
               <p className='text-muted-foreground text-sm'>
                 {t('Configuration for OKPay payment integration')}
               </p>
@@ -1898,10 +1999,7 @@ export function PaymentSettingsSection({
                   <FormItem>
                     <FormLabel>{t('Top-up unit price (CNY/USD)')}</FormLabel>
                     <FormControl>
-                      <Input
-                        type='number'
-                        {...safeNumberFieldProps(field)}
-                      />
+                      <Input type='number' {...safeNumberFieldProps(field)} />
                     </FormControl>
                     <FormDescription>
                       {t('CNY price for 1 USD of account credit')}
@@ -1918,10 +2016,7 @@ export function PaymentSettingsSection({
                   <FormItem>
                     <FormLabel>{t('Min Topup')}</FormLabel>
                     <FormControl>
-                      <Input
-                        type='number'
-                        {...safeNumberFieldProps(field)}
-                      />
+                      <Input type='number' {...safeNumberFieldProps(field)} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -1938,7 +2033,9 @@ export function PaymentSettingsSection({
                     <SettingsSwitchContent>
                       <FormLabel>{t('Auto USDT/CNY rate')}</FormLabel>
                       <FormDescription>
-                        {t('Fetch live USDT/CNY rate before creating OKPay order')}
+                        {t(
+                          'Fetch live USDT/CNY rate before creating OKPay order'
+                        )}
                       </FormDescription>
                     </SettingsSwitchContent>
                     <FormControl>

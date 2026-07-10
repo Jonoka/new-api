@@ -35,6 +35,21 @@ func ParseOpenAIReasoningEffortFromModelSuffix(modelName string) (string, string
 	return effort, baseModel
 }
 
+func NormalizeOpenAIReasoningEffort(effort string) string {
+	normalized := strings.TrimSpace(strings.ToLower(effort))
+	normalized = strings.ReplaceAll(normalized, "_", " ")
+	normalized = strings.ReplaceAll(normalized, "-", " ")
+	normalized = strings.Join(strings.Fields(normalized), " ")
+	switch normalized {
+	case "low", "medium", "high", "minimal", "none", "xhigh":
+		return normalized
+	case "extra high", "extra", "max":
+		return "xhigh"
+	default:
+		return strings.TrimSpace(strings.ToLower(effort))
+	}
+}
+
 func ParseDeepSeekV4ThinkingSuffix(modelName string) (baseModel string, thinkingType string, effort string, ok bool) {
 	baseModel, suffix, ok := TrimEffortSuffixWithSuffixes(modelName, DeepSeekV4EffortSuffixes)
 	if !ok || !strings.HasPrefix(baseModel, "deepseek-v4-") {

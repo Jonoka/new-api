@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useState, useContext, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useContext, useRef } from 'react';
 import {
   API,
   showError,
@@ -72,7 +72,14 @@ const { Text, Title } = Typography;
 // GroupMultiPicker — 多分组选择 + 排序组件（Semi Design 风格）
 // ============================================================================
 
-const GroupMultiPicker = ({ groups, selectedGroups, onChange, t }) => {
+const GroupMultiPicker = ({
+  groups,
+  selectedGroups,
+  onChange,
+  groupRatioLimits,
+  onGroupRatioLimitChange,
+  t,
+}) => {
   const [popVisible, setPopVisible] = useState(false);
   const [searchText, setSearchText] = useState('');
 
@@ -81,7 +88,8 @@ const GroupMultiPicker = ({ groups, selectedGroups, onChange, t }) => {
   const availableGroups = groups.filter((g) => {
     if (selectedGroups.includes(g.value)) return false;
     if (isAutoSelected && g.value !== 'auto') return false;
-    if (g.value === 'auto' && selectedGroups.length > 0 && !isAutoSelected) return false;
+    if (g.value === 'auto' && selectedGroups.length > 0 && !isAutoSelected)
+      return false;
     if (searchText) {
       const q = searchText.toLowerCase();
       return (
@@ -109,12 +117,17 @@ const GroupMultiPicker = ({ groups, selectedGroups, onChange, t }) => {
     const newGroups = [...selectedGroups];
     const targetIndex = index + direction;
     if (targetIndex < 0 || targetIndex >= newGroups.length) return;
-    [newGroups[index], newGroups[targetIndex]] = [newGroups[targetIndex], newGroups[index]];
+    [newGroups[index], newGroups[targetIndex]] = [
+      newGroups[targetIndex],
+      newGroups[index],
+    ];
     onChange(newGroups);
   };
 
   const groupMap = {};
-  groups.forEach((g) => { groupMap[g.value] = g; });
+  groups.forEach((g) => {
+    groupMap[g.value] = g;
+  });
 
   const renderRatioBadge = (ratio) => {
     if (ratio === undefined || ratio === null || ratio === '') return null;
@@ -129,7 +142,14 @@ const GroupMultiPicker = ({ groups, selectedGroups, onChange, t }) => {
     <div>
       {/* Selected groups list */}
       {selectedGroups.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+            marginBottom: 8,
+          }}
+        >
           {selectedGroups.map((value, index) => {
             const info = groupMap[value];
             return (
@@ -147,7 +167,9 @@ const GroupMultiPicker = ({ groups, selectedGroups, onChange, t }) => {
               >
                 {/* Order controls */}
                 {selectedGroups.length > 1 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                  <div
+                    style={{ display: 'flex', flexDirection: 'column', gap: 0 }}
+                  >
                     <Button
                       icon={<IconChevronUp size='extra-small' />}
                       size='small'
@@ -169,18 +191,56 @@ const GroupMultiPicker = ({ groups, selectedGroups, onChange, t }) => {
                   </div>
                 )}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <Text strong size='small' ellipsis={{ showTooltip: true }} style={{ maxWidth: 200 }}>
+                  <div
+                    style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+                  >
+                    <Text
+                      strong
+                      size='small'
+                      ellipsis={{ showTooltip: true }}
+                      style={{ maxWidth: 200 }}
+                    >
                       {value}
                     </Text>
                     {info && renderRatioBadge(info.ratio)}
                   </div>
                   {info && info.label && (
-                    <Text type='tertiary' size='small' ellipsis={{ showTooltip: true }} style={{ maxWidth: 300 }}>
+                    <Text
+                      type='tertiary'
+                      size='small'
+                      ellipsis={{ showTooltip: true }}
+                      style={{ maxWidth: 300 }}
+                    >
                       {info.label}
                     </Text>
                   )}
                 </div>
+                {!isAutoSelected && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      flexShrink: 0,
+                    }}
+                  >
+                    <Text type='tertiary' size='small'>
+                      {t('倍率保护')}
+                    </Text>
+                    <InputNumber
+                      size='small'
+                      min={0}
+                      step={0.1}
+                      precision={4}
+                      placeholder={t('不限制')}
+                      value={groupRatioLimits?.[value]}
+                      onNumberChange={(ratio) =>
+                        onGroupRatioLimitChange?.(value, ratio)
+                      }
+                      style={{ width: 96 }}
+                    />
+                  </div>
+                )}
                 <Button
                   icon={<IconDelete size='small' />}
                   size='small'
@@ -203,7 +263,9 @@ const GroupMultiPicker = ({ groups, selectedGroups, onChange, t }) => {
         position='bottomLeft'
         showArrow
         content={
-          <div style={{ width: 320, maxHeight: 360, overflow: 'auto', padding: 8 }}>
+          <div
+            style={{ width: 320, maxHeight: 360, overflow: 'auto', padding: 8 }}
+          >
             <Input
               prefix={<IconSearch />}
               placeholder={t('搜索分组...')}
@@ -219,7 +281,10 @@ const GroupMultiPicker = ({ groups, selectedGroups, onChange, t }) => {
               availableGroups.map((g) => (
                 <div
                   key={g.value}
-                  onClick={() => { handleAdd(g.value); setPopVisible(false); }}
+                  onClick={() => {
+                    handleAdd(g.value);
+                    setPopVisible(false);
+                  }}
                   style={{
                     display: 'flex',
                     justifyContent: 'space-between',
@@ -229,14 +294,23 @@ const GroupMultiPicker = ({ groups, selectedGroups, onChange, t }) => {
                     cursor: 'pointer',
                     transition: 'background 0.15s',
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--semi-color-fill-0)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor =
+                      'var(--semi-color-fill-0)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
                 >
                   <div>
-                    <Text strong size='small'>{g.value}</Text>
+                    <Text strong size='small'>
+                      {g.value}
+                    </Text>
                     {g.label && (
                       <div>
-                        <Text type='tertiary' size='small'>{g.label}</Text>
+                        <Text type='tertiary' size='small'>
+                          {g.label}
+                        </Text>
                       </div>
                     )}
                   </div>
@@ -247,12 +321,7 @@ const GroupMultiPicker = ({ groups, selectedGroups, onChange, t }) => {
           </div>
         }
       >
-        <Button
-          icon={<IconPlus />}
-          theme='light'
-          type='tertiary'
-          size='small'
-        >
+        <Button icon={<IconPlus />} theme='light' type='tertiary' size='small'>
           {selectedGroups.length === 0 ? t('选择分组') : t('添加分组')}
         </Button>
       </Popover>
@@ -283,10 +352,12 @@ const EditTokenModal = (props) => {
   const [groups, setGroups] = useState([]);
   const [showQuotaInput, setShowQuotaInput] = useState(false);
   const isEdit = props.editingToken.id !== undefined;
-  const defaultUseAutoGroup = statusState?.status?.default_use_auto_group === true;
+  const defaultUseAutoGroup =
+    statusState?.status?.default_use_auto_group === true;
   const [selectedGroups, setSelectedGroups] = useState(() =>
-    defaultUseAutoGroup ? ['auto'] : []
+    defaultUseAutoGroup ? ['auto'] : [],
   );
+  const [groupRatioLimits, setGroupRatioLimits] = useState({});
 
   const getInitValues = () => ({
     name: '',
@@ -303,6 +374,65 @@ const EditTokenModal = (props) => {
 
   const handleCancel = () => {
     props.handleClose();
+  };
+
+  const parseGroupRatioLimits = (raw) => {
+    if (!raw || typeof raw !== 'string') return {};
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return {};
+      }
+      return Object.entries(parsed).reduce((acc, [group, ratio]) => {
+        const normalizedGroup = String(group).trim();
+        const numericRatio = Number(ratio);
+        if (
+          normalizedGroup &&
+          Number.isFinite(numericRatio) &&
+          numericRatio > 0
+        ) {
+          acc[normalizedGroup] = numericRatio;
+        }
+        return acc;
+      }, {});
+    } catch (error) {
+      return {};
+    }
+  };
+
+  const cleanGroupRatioLimits = (limits, groupsForToken = selectedGroups) => {
+    const selectedSet = new Set(groupsForToken);
+    return Object.entries(limits || {}).reduce((acc, [group, ratio]) => {
+      const numericRatio = Number(ratio);
+      if (
+        group &&
+        selectedSet.has(group) &&
+        group !== 'auto' &&
+        Number.isFinite(numericRatio) &&
+        numericRatio > 0
+      ) {
+        acc[group] = numericRatio;
+      }
+      return acc;
+    }, {});
+  };
+
+  const onSelectedGroupsChange = (groupsForToken) => {
+    setSelectedGroups(groupsForToken);
+    setGroupRatioLimits((prev) => cleanGroupRatioLimits(prev, groupsForToken));
+  };
+
+  const handleGroupRatioLimitChange = (group, ratio) => {
+    setGroupRatioLimits((prev) => {
+      const next = { ...prev };
+      const numericRatio = Number(ratio);
+      if (!Number.isFinite(numericRatio) || numericRatio <= 0) {
+        delete next[group];
+      } else {
+        next[group] = numericRatio;
+      }
+      return cleanGroupRatioLimits(next, selectedGroups);
+    });
   };
 
   const setExpiredTime = (month, day, hour, minute) => {
@@ -389,10 +519,16 @@ const EditTokenModal = (props) => {
       // Parse group string into selectedGroups array
       const groupStr = data.group || '';
       setSelectedGroups(
-        groupStr ? groupStr.split(',').map((g) => g.trim()).filter(Boolean) : []
+        groupStr
+          ? groupStr
+              .split(',')
+              .map((g) => g.trim())
+              .filter(Boolean)
+          : [],
       );
+      setGroupRatioLimits(parseGroupRatioLimits(data.group_ratio_limits));
       // Remove group from form data since we manage it separately
-      const { group: _g, ...formData } = data;
+      const { group: _g, group_ratio_limits: _grl, ...formData } = data;
       if (formApiRef.current) {
         formApiRef.current.setValues({ ...getInitValues(), ...formData });
       }
@@ -406,7 +542,8 @@ const EditTokenModal = (props) => {
     if (formApiRef.current) {
       if (!isEdit) {
         formApiRef.current.setValues(getInitValues());
-        setSelectedGroups(defaultUseAutoGroup ? ['auto'] : []);
+        onSelectedGroupsChange(defaultUseAutoGroup ? ['auto'] : []);
+        setGroupRatioLimits({});
       }
     }
     loadModels();
@@ -419,11 +556,13 @@ const EditTokenModal = (props) => {
         loadToken();
       } else {
         formApiRef.current?.setValues(getInitValues());
-        setSelectedGroups(defaultUseAutoGroup ? ['auto'] : []);
+        onSelectedGroupsChange(defaultUseAutoGroup ? ['auto'] : []);
+        setGroupRatioLimits({});
       }
     } else {
       formApiRef.current?.reset();
-      setSelectedGroups(defaultUseAutoGroup ? ['auto'] : []);
+      onSelectedGroupsChange(defaultUseAutoGroup ? ['auto'] : []);
+      setGroupRatioLimits({});
     }
   }, [props.visiable, props.editingToken.id, defaultUseAutoGroup]);
 
@@ -445,11 +584,21 @@ const EditTokenModal = (props) => {
     const groupStr = selectedGroups.join(',');
     const isMultiGroup = selectedGroups.length > 1;
     const isAuto = selectedGroups.length === 1 && selectedGroups[0] === 'auto';
+    const cleanedGroupRatioLimits = cleanGroupRatioLimits(groupRatioLimits);
+    const groupRatioLimitsJSON =
+      Object.keys(cleanedGroupRatioLimits).length > 0
+        ? JSON.stringify(cleanedGroupRatioLimits)
+        : '';
 
     if (isEdit) {
       let { tokenCount: _tc, ...localInputs } = values;
       localInputs.group = groupStr;
-      localInputs.cross_group_retry = isMultiGroup ? true : isAuto ? !!localInputs.cross_group_retry : false;
+      localInputs.group_ratio_limits = groupRatioLimitsJSON;
+      localInputs.cross_group_retry = isMultiGroup
+        ? true
+        : isAuto
+          ? !!localInputs.cross_group_retry
+          : false;
       localInputs.remain_quota = localInputs.unlimited_quota
         ? 0
         : displayAmountToQuota(localInputs.remain_amount);
@@ -487,7 +636,12 @@ const EditTokenModal = (props) => {
       for (let i = 0; i < count; i++) {
         let { tokenCount: _tc, ...localInputs } = values;
         localInputs.group = groupStr;
-        localInputs.cross_group_retry = isMultiGroup ? true : isAuto ? !!localInputs.cross_group_retry : false;
+        localInputs.group_ratio_limits = groupRatioLimitsJSON;
+        localInputs.cross_group_retry = isMultiGroup
+          ? true
+          : isAuto
+            ? !!localInputs.cross_group_retry
+            : false;
         const baseName =
           values.name.trim() === '' ? 'default' : values.name.trim();
         if (i !== 0 || values.name.trim() === '') {
@@ -532,7 +686,8 @@ const EditTokenModal = (props) => {
     }
     setLoading(false);
     formApiRef.current?.setValues(getInitValues());
-    setSelectedGroups(defaultUseAutoGroup ? ['auto'] : []);
+    onSelectedGroupsChange(defaultUseAutoGroup ? ['auto'] : []);
+    setGroupRatioLimits({});
   };
 
   return (
@@ -621,7 +776,9 @@ const EditTokenModal = (props) => {
                       <GroupMultiPicker
                         groups={groups}
                         selectedGroups={selectedGroups}
-                        onChange={setSelectedGroups}
+                        onChange={onSelectedGroupsChange}
+                        groupRatioLimits={groupRatioLimits}
+                        onGroupRatioLimitChange={handleGroupRatioLimitChange}
                         t={t}
                       />
                     </Form.Slot>
@@ -629,7 +786,11 @@ const EditTokenModal = (props) => {
                   <Col
                     span={24}
                     style={{
-                      display: selectedGroups.length === 1 && selectedGroups[0] === 'auto' ? 'block' : 'none',
+                      display:
+                        selectedGroups.length === 1 &&
+                        selectedGroups[0] === 'auto'
+                          ? 'block'
+                          : 'none',
                     }}
                   >
                     <Form.Switch
@@ -768,7 +929,10 @@ const EditTokenModal = (props) => {
                         ? `▾ ${t('收起原生额度输入')}`
                         : `▸ ${t('使用原生额度输入')}`}
                     </div>
-                    <div style={{ display: showQuotaInput ? 'block' : 'none' }} className='mt-2'>
+                    <div
+                      style={{ display: showQuotaInput ? 'block' : 'none' }}
+                      className='mt-2'
+                    >
                       <Form.InputNumber
                         field='remain_quota'
                         label={t('额度')}

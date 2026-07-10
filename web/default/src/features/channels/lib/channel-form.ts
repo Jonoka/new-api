@@ -217,6 +217,7 @@ export const channelFormSchema = z
     claude_code_fingerprint_enabled: z.boolean().optional(), // Anthropic: Claude Code fingerprint
     claude_code_transport_fingerprint_enabled: z.boolean().optional(), // Anthropic：Claude Code Transport 指纹
     claude_code_version: z.string().optional(), // Anthropic: Custom Claude Code version for User-Agent
+    claude_code_entrypoint: z.string().optional(), // Anthropic: Custom Claude Code entrypoint for billing attribution
     // Upstream model update settings (stored in settings JSON)
     upstream_model_update_check_enabled: z.boolean().optional(),
     upstream_model_update_auto_sync_enabled: z.boolean().optional(),
@@ -363,6 +364,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   claude_code_fingerprint_enabled: false,
   claude_code_transport_fingerprint_enabled: false,
   claude_code_version: '',
+  claude_code_entrypoint: '',
   upstream_model_update_check_enabled: false,
   upstream_model_update_auto_sync_enabled: false,
   upstream_model_update_ignored_models: '',
@@ -427,6 +429,7 @@ export function transformChannelToFormDefaults(
   let claudeCodeFingerprintEnabled = false
   let claudeCodeTransportFingerprintEnabled = false
   let claudeCodeVersion = ''
+  let claudeCodeEntrypoint = ''
   let upstreamModelUpdateCheckEnabled = false
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
@@ -459,6 +462,10 @@ export function transformChannelToFormDefaults(
       claudeCodeVersion =
         typeof parsed.claude_code_version === 'string'
           ? parsed.claude_code_version
+          : ''
+      claudeCodeEntrypoint =
+        typeof parsed.claude_code_entrypoint === 'string'
+          ? parsed.claude_code_entrypoint
           : ''
       upstreamModelUpdateCheckEnabled =
         parsed.upstream_model_update_check_enabled === true
@@ -554,13 +561,15 @@ export function transformChannelToFormDefaults(
     claude_code_transport_fingerprint_enabled:
       claudeCodeTransportFingerprintEnabled,
     claude_code_version: claudeCodeVersion,
+    claude_code_entrypoint: claudeCodeEntrypoint,
     allow_safety_identifier: allowSafetyIdentifier,
     upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
     monitor_enabled: monitorEnabled,
     monitor_test_interval_minutes: monitorTestIntervalMinutes,
-    monitor_response_time_threshold_seconds: monitorResponseTimeThresholdSeconds,
+    monitor_response_time_threshold_seconds:
+      monitorResponseTimeThresholdSeconds,
     monitor_auto_disable_enabled: monitorAutoDisableEnabled,
     monitor_auto_enable_enabled: monitorAutoEnableEnabled,
     monitor_disable_threshold: monitorDisableThreshold,
@@ -667,6 +676,12 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     } else {
       delete settingsObj.claude_code_version
     }
+    if (formData.claude_code_entrypoint?.trim()) {
+      settingsObj.claude_code_entrypoint =
+        formData.claude_code_entrypoint.trim()
+    } else {
+      delete settingsObj.claude_code_entrypoint
+    }
   } else {
     if ('allow_speed' in settingsObj) delete settingsObj.allow_speed
     if ('claude_beta_query' in settingsObj) delete settingsObj.claude_beta_query
@@ -676,6 +691,8 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
       delete settingsObj.claude_code_transport_fingerprint_enabled
     if ('claude_code_version' in settingsObj)
       delete settingsObj.claude_code_version
+    if ('claude_code_entrypoint' in settingsObj)
+      delete settingsObj.claude_code_entrypoint
   }
 
   // Upstream model update settings (for model-fetchable channel types)
@@ -704,7 +721,11 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     }
   }
 
-  setOptionalBooleanOverride(settingsObj, 'monitor_enabled', formData.monitor_enabled)
+  setOptionalBooleanOverride(
+    settingsObj,
+    'monitor_enabled',
+    formData.monitor_enabled
+  )
   setOptionalNumber(
     settingsObj,
     'monitor_test_interval_minutes',

@@ -27,6 +27,7 @@ type Token struct {
 	AllowIps           *string        `json:"allow_ips" gorm:"default:''"`
 	UsedQuota          int            `json:"used_quota" gorm:"default:0"` // used quota
 	Group              string         `json:"group" gorm:"default:''"`
+	GroupRatioLimits   string         `json:"group_ratio_limits" gorm:"type:text;default:''"`
 	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
 }
@@ -295,7 +296,7 @@ func (token *Token) Update() (err error) {
 		}
 	}()
 	err = DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
-		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry").Updates(token).Error
+		"model_limits_enabled", "model_limits", "allow_ips", "group", "group_ratio_limits", "cross_group_retry").Updates(token).Error
 	return err
 }
 
@@ -368,6 +369,29 @@ func (token *Token) IsMultiGroup() bool {
 // IsAutoGroup 判断令牌是否为自动分组。
 func (token *Token) IsAutoGroup() bool {
 	return token.Group == "auto"
+}
+
+func (token *Token) GetGroupRatioLimitsMap() map[string]float64 {
+	limits := make(map[string]float64)
+	if token == nil || strings.TrimSpace(token.GroupRatioLimits) == "" {
+		return limits
+	}
+	if err := common.UnmarshalJsonStr(token.GroupRatioLimits, &limits); err != nil {
+		common.SysLog("failed to unmarshal token group ratio limits: " + err.Error())
+		return map[string]float64{}
+	}
+	for group, ratio := range limits {
+		trimmedGroup := strings.TrimSpace(group)
+		if trimmedGroup == "" || ratio <= 0 {
+			delete(limits, group)
+			continue
+		}
+		if trimmedGroup != group {
+			delete(limits, group)
+			limits[trimmedGroup] = ratio
+		}
+	}
+	return limits
 }
 
 func (token *Token) GetModelLimitsMap() map[string]bool {

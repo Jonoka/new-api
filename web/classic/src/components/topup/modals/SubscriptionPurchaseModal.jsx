@@ -24,22 +24,58 @@ import {
   Typography,
   Card,
   Button,
-  Select,
   Divider,
   Tooltip,
   Input,
 } from '@douyinfe/semi-ui';
 import { Crown, CalendarClock, Package } from 'lucide-react';
-import { SiStripe } from 'react-icons/si';
+import { SiAlipay, SiStripe, SiWechat } from 'react-icons/si';
 import { IconCreditCard } from '@douyinfe/semi-icons';
 import { renderQuota } from '../../../helpers';
-import { getCurrencyConfig } from '../../../helpers/render';
 import {
+  formatSubscriptionPlanAmount,
   formatSubscriptionDuration,
   formatSubscriptionResetPeriod,
 } from '../../../helpers/subscriptionFormat';
+import InvoiceRequestForm from '../../invoice/InvoiceRequestForm';
 
 const { Text } = Typography;
+
+const paymentIconStyle = {
+  width: 16,
+  height: 16,
+  objectFit: 'contain',
+};
+
+const renderPaymentIcon = (option, selected = false, size = 16) => {
+  const color = selected ? '#fff' : undefined;
+  const iconStyle = { ...paymentIconStyle, width: size, height: size };
+  const type = option?.value || option?.type || option?.kind;
+  const name = option?.label || option?.name || type;
+
+  if (type === 'alipay') {
+    return <SiAlipay size={size} color={color || '#1677FF'} />;
+  }
+  if (type === 'wxpay') {
+    return <SiWechat size={size} color={color || '#07C160'} />;
+  }
+  if (type === 'stripe') {
+    return <SiStripe size={size} color={color || '#635BFF'} />;
+  }
+  if (type === 'bepusdt' || type === 'usdt') {
+    return <img src='/pay-usdt.svg' alt='USDT' style={iconStyle} />;
+  }
+  if (type === 'okpay') {
+    return <img src='/pay-okpay.svg' alt='OKPay' style={iconStyle} />;
+  }
+  if (option?.icon) {
+    return <img src={option.icon} alt={name} style={iconStyle} />;
+  }
+  if (type === 'creem') {
+    return <IconCreditCard />;
+  }
+  return <IconCreditCard />;
+};
 
 const SubscriptionPurchaseModal = ({
   t,
@@ -50,6 +86,12 @@ const SubscriptionPurchaseModal = ({
   selectedEpayMethod,
   setSelectedEpayMethod,
   epayMethods = [],
+  enableBepusdtTopUp = false,
+  bepusdtChains = [],
+  selectedBepusdtTradeType,
+  setSelectedBepusdtTradeType,
+  selectedPaymentKind = '',
+  onSelectPaymentKind,
   enableOnlineTopUp = false,
   enableStripeTopUp = false,
   enableCreemTopUp = false,
@@ -57,38 +99,78 @@ const SubscriptionPurchaseModal = ({
   promoCode,
   setPromoCode,
   promoDiscount,
+  amountPreview,
   amountLoading = false,
+  invoiceConfig,
+  invoiceRequest,
+  setInvoiceRequest,
   onPromoCodeBlur,
   onPayStripe,
   onPayCreem,
+  onPayBepusdt,
   onPayEpay,
 }) => {
   const plan = selectedPlan?.plan;
   const totalAmount = Number(plan?.total_amount || 0);
-  const { symbol, rate } = getCurrencyConfig();
   const price = plan ? Number(plan.price_amount || 0) : 0;
   const hasPromoDiscount =
     promoDiscount && Number(promoDiscount.discount_amount || 0) > 0;
   const paidPrice = hasPromoDiscount
     ? Number(promoDiscount.paid_amount || 0)
     : price;
-  const convertedPrice = paidPrice * rate;
-  const displayPrice = convertedPrice.toFixed(
-    Number.isInteger(convertedPrice) ? 0 : 2,
+  const previewAmount =
+    typeof amountPreview?.amount === 'number'
+      ? amountPreview.amount
+      : Number(amountPreview?.data || Number.NaN);
+  const amountDue = Number.isFinite(previewAmount) ? previewAmount : paidPrice;
+  const amountDueCurrency = amountPreview?.currency || plan?.currency || 'USD';
+  const invoiceFee = Number(amountPreview?.invoice_fee || 0);
+  const planPriceText = formatSubscriptionPlanAmount(price, plan?.currency);
+  const displayPrice = formatSubscriptionPlanAmount(
+    amountDue,
+    amountDueCurrency,
   );
   const originalPrice = Number(promoDiscount?.original_amount || price);
   const discountAmount = Number(promoDiscount?.discount_amount || 0);
-  const displayOriginalPrice = (originalPrice * rate).toFixed(
-    Number.isInteger(originalPrice * rate) ? 0 : 2,
+  const displayOriginalPrice = formatSubscriptionPlanAmount(
+    originalPrice,
+    amountDueCurrency,
   );
-  const displayDiscountAmount = (discountAmount * rate).toFixed(
-    Number.isInteger(discountAmount * rate) ? 0 : 2,
+  const displayDiscountAmount = formatSubscriptionPlanAmount(
+    discountAmount,
+    amountDueCurrency,
   );
   // 只有当管理员开启支付网关 AND 套餐配置了对应的支付ID时才显示
   const hasStripe = enableStripeTopUp && !!plan?.stripe_price_id;
   const hasCreem = enableCreemTopUp && !!plan?.creem_product_id;
+  const hasBepusdt =
+    enableBepusdtTopUp &&
+    Array.isArray(bepusdtChains) &&
+    bepusdtChains.length > 0;
   const hasEpay = enableOnlineTopUp && epayMethods.length > 0;
-  const hasAnyPayment = hasStripe || hasCreem || hasEpay;
+  const hasAnyPayment = hasStripe || hasCreem || hasBepusdt || hasEpay;
+  const paymentOptions = [
+    ...(hasEpay
+      ? epayMethods.map((method) => ({
+          key: `epay:${method.type}`,
+          kind: 'epay',
+          value: method.type,
+          label: method.name || method.type,
+        }))
+      : []),
+    ...(hasBepusdt
+      ? [{ key: 'bepusdt', kind: 'bepusdt', value: 'bepusdt', label: 'USDT' }]
+      : []),
+    ...(hasStripe
+      ? [{ key: 'stripe', kind: 'stripe', value: 'stripe', label: 'Stripe' }]
+      : []),
+    ...(hasCreem
+      ? [{ key: 'creem', kind: 'creem', value: 'creem', label: 'Creem' }]
+      : []),
+  ];
+  const selectedEpayLabel =
+    epayMethods.find((method) => method.type === selectedEpayMethod)?.name ||
+    selectedEpayMethod;
   const purchaseLimit = Number(purchaseLimitInfo?.limit || 0);
   const purchaseCount = Number(purchaseLimitInfo?.count || 0);
   const purchaseLimitReached =
@@ -178,14 +260,21 @@ const SubscriptionPurchaseModal = ({
               <Divider margin={8} />
               <div className='flex justify-between items-center'>
                 <Text strong className='text-slate-700 dark:text-slate-200'>
+                  {t('套餐价格')}：
+                </Text>
+                <Text className='text-slate-900 dark:text-slate-100'>
+                  {planPriceText}
+                </Text>
+              </div>
+              <div className='flex justify-between items-center'>
+                <Text strong className='text-slate-700 dark:text-slate-200'>
                   {t('应付金额')}：
                 </Text>
                 {amountLoading ? (
                   <Text type='tertiary'>{t('计算中')}</Text>
                 ) : (
                   <div className='flex items-baseline space-x-2'>
-                    <Text strong className='text-xl text-purple-600'>
-                      {symbol}
+                    <Text strong className='text-xl text-red-600'>
                       {displayPrice}
                     </Text>
                     {hasPromoDiscount && (
@@ -203,7 +292,6 @@ const SubscriptionPurchaseModal = ({
                       {t('原价')}：
                     </Text>
                     <Text delete className='text-slate-500 dark:text-slate-400'>
-                      {symbol}
                       {displayOriginalPrice}
                     </Text>
                   </div>
@@ -212,8 +300,7 @@ const SubscriptionPurchaseModal = ({
                       {t('优惠')}：
                     </Text>
                     <Text className='text-emerald-600 dark:text-emerald-400'>
-                      - {symbol}
-                      {displayDiscountAmount}
+                      - {displayDiscountAmount}
                     </Text>
                   </div>
                 </>
@@ -231,6 +318,13 @@ const SubscriptionPurchaseModal = ({
                   style={{ width: 180 }}
                 />
               </div>
+              <InvoiceRequestForm
+                t={t}
+                config={invoiceConfig}
+                value={invoiceRequest}
+                onChange={setInvoiceRequest}
+                invoiceFee={invoiceFee}
+              />
             </div>
           </Card>
 
@@ -250,51 +344,82 @@ const SubscriptionPurchaseModal = ({
                 {t('选择支付方式')}：
               </Text>
 
-              {/* Stripe / Creem */}
-              {(hasStripe || hasCreem) && (
-                <div className='flex gap-2'>
-                  {hasStripe && (
+              <div className='grid grid-cols-2 sm:grid-cols-3 gap-2'>
+                {paymentOptions.map((option) => {
+                  const selected =
+                    option.kind === 'epay'
+                      ? selectedPaymentKind === 'epay' &&
+                        selectedEpayMethod === option.value
+                      : selectedPaymentKind === option.kind;
+                  return (
                     <Button
-                      theme='light'
-                      className='flex-1'
-                      icon={<SiStripe size={14} color='#635BFF' />}
-                      onClick={onPayStripe}
-                      loading={paying}
-                      disabled={purchaseLimitReached}
+                      key={option.key}
+                      theme={selected ? 'solid' : 'light'}
+                      type='primary'
+                      onClick={() =>
+                        onSelectPaymentKind?.(option.kind, option.value)
+                      }
+                      disabled={purchaseLimitReached || amountLoading}
+                      icon={renderPaymentIcon(option, selected, 16)}
                     >
-                      Stripe
+                      {option.label}
                     </Button>
-                  )}
-                  {hasCreem && (
-                    <Button
-                      theme='light'
-                      className='flex-1'
-                      icon={<IconCreditCard />}
-                      onClick={onPayCreem}
-                      loading={paying}
-                      disabled={purchaseLimitReached}
-                    >
-                      Creem
-                    </Button>
-                  )}
+                  );
+                })}
+              </div>
+
+              {selectedPaymentKind === 'bepusdt' && hasBepusdt && (
+                <div className='space-y-2'>
+                  <div className='grid grid-cols-2 gap-2'>
+                    {bepusdtChains.map((chain) => (
+                      <Button
+                        key={chain.trade_type}
+                        theme={
+                          selectedBepusdtTradeType === chain.trade_type
+                            ? 'solid'
+                            : 'light'
+                        }
+                        type='primary'
+                        onClick={() =>
+                          setSelectedBepusdtTradeType(chain.trade_type)
+                        }
+                        disabled={purchaseLimitReached}
+                      >
+                        {chain.name || chain.trade_type}
+                      </Button>
+                    ))}
+                  </div>
+                  <Banner
+                    type='info'
+                    description={t('USDT 订阅支付无平台手续费')}
+                    className='!rounded-xl'
+                    closeIcon={null}
+                  />
+                  <Button
+                    theme='solid'
+                    type='primary'
+                    block
+                    onClick={onPayBepusdt}
+                    loading={paying}
+                    disabled={!selectedBepusdtTradeType || purchaseLimitReached}
+                  >
+                    USDT
+                  </Button>
                 </div>
               )}
 
-              {/* 易支付 */}
-              {hasEpay && (
-                <div className='flex gap-2'>
-                  <Select
-                    value={selectedEpayMethod}
-                    onChange={setSelectedEpayMethod}
-                    style={{ flex: 1 }}
-                    size='default'
-                    placeholder={t('选择支付方式')}
-                    optionList={epayMethods.map((m) => ({
-                      value: m.type,
-                      label: m.name || m.type,
-                    }))}
-                    disabled={purchaseLimitReached}
-                  />
+              {selectedPaymentKind === 'epay' && hasEpay && (
+                <div className='flex gap-2 items-center'>
+                  <div className='flex-1 rounded-lg border border-solid border-[var(--semi-color-border)] px-3 py-2 text-sm flex items-center gap-2'>
+                    {renderPaymentIcon(
+                      epayMethods.find(
+                        (method) => method.type === selectedEpayMethod,
+                      ),
+                      false,
+                      16,
+                    )}
+                    {selectedEpayLabel || t('选择支付方式')}
+                  </div>
                   <Button
                     theme='solid'
                     type='primary'
@@ -305,6 +430,32 @@ const SubscriptionPurchaseModal = ({
                     {t('支付')}
                   </Button>
                 </div>
+              )}
+              {selectedPaymentKind === 'stripe' && hasStripe && (
+                <Button
+                  theme='solid'
+                  type='primary'
+                  block
+                  icon={<SiStripe size={14} color='#fff' />}
+                  onClick={onPayStripe}
+                  loading={paying}
+                  disabled={purchaseLimitReached}
+                >
+                  Stripe
+                </Button>
+              )}
+              {selectedPaymentKind === 'creem' && hasCreem && (
+                <Button
+                  theme='solid'
+                  type='primary'
+                  block
+                  icon={<IconCreditCard />}
+                  onClick={onPayCreem}
+                  loading={paying}
+                  disabled={purchaseLimitReached}
+                >
+                  Creem
+                </Button>
               )}
             </div>
           ) : (

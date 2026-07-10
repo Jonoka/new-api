@@ -60,6 +60,7 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
   personal: {
     enabled: true,
     topup: true,
+    invoice: true,
     affiliate: true,
     personal: true,
   },
@@ -72,6 +73,7 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     affiliate_admin: true,
     setting: true,
     subscription: true,
+    invoice_admin: true,
     game: true,
   },
 }
@@ -118,6 +120,7 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/usage-logs/task': { section: 'console', module: 'task' },
   '/game-center': { section: 'console', module: 'game' },
   '/wallet': { section: 'personal', module: 'topup' },
+  '/invoices': { section: 'personal', module: 'invoice' },
   '/affiliate': { section: 'personal', module: 'affiliate' },
   '/profile': { section: 'personal', module: 'personal' },
   '/channels': { section: 'admin', module: 'channel' },
@@ -127,6 +130,7 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/users': { section: 'admin', module: 'user' },
   '/redemption-codes': { section: 'admin', module: 'redemption' },
   '/subscriptions': { section: 'admin', module: 'subscription' },
+  '/invoice-management': { section: 'admin', module: 'invoice_admin' },
   '/system-settings/billing/affiliate': {
     section: 'admin',
     module: 'affiliate_admin',
@@ -207,7 +211,7 @@ function isModuleEnabled(
     const adminCustom = adminConfig.custom
     const adminAllowed = Boolean(
       !adminCustom ||
-        (adminCustom.enabled !== false && adminCustom[url] !== false)
+      (adminCustom.enabled !== false && adminCustom[url] !== false)
     )
     if (!adminAllowed) return false
 

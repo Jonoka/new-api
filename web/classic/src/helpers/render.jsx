@@ -83,6 +83,7 @@ import {
   Server,
   CalendarClock,
   Trophy,
+  ReceiptText,
 } from 'lucide-react';
 import {
   SiAtlassian,
@@ -148,6 +149,9 @@ export function getLucideIcon(key, selected = false) {
     case 'affiliate':
     case 'affiliate_admin':
       return <HandCoins {...commonProps} color={iconColor} />;
+    case 'invoice':
+    case 'invoice_admin':
+      return <ReceiptText {...commonProps} color={iconColor} />;
     case 'channel':
       return <Layers {...commonProps} color={iconColor} />;
     case 'redemption':

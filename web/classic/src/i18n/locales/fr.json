@@ -1361,6 +1361,7 @@
     "列出的模型将不会自动添加或移除-thinking/-nothinking 后缀": "Les modèles listés ici n'ajouteront ni ne retireront automatiquement le suffixe -thinking/-nothinking.",
     "列设置": "Colonnes",
     "零一万物": "Yi",
+    "倍率保护": "Protection du ratio",
     "令牌": "Jeton",
     "令牌不存在": "",
     "令牌创建成功，请在列表页面点击复制获取令牌！": "Jeton créé avec succès, veuillez cliquer sur copier sur la page de liste pour obtenir le jeton !",

@@ -138,6 +138,10 @@ export function SidebarModulesSection({
         title: t('Wallet'),
         description: t('Top up balance and view billing history.'),
       },
+      invoice: {
+        title: t('Invoice Center'),
+        description: t('View invoices for paid orders.'),
+      },
       affiliate: {
         title: t('Affiliate Commission'),
         description: t('Referral commission and payout center.'),
@@ -176,6 +180,10 @@ export function SidebarModulesSection({
         title: t('Subscription Management'),
         description: t('Manage subscription plans and pricing.'),
       },
+      invoice_admin: {
+        title: t('Invoice Management'),
+        description: t('Review invoice requests and issued invoice files.'),
+      },
       game: {
         title: t('Game Management'),
         description: t('Create prediction rounds and settle player rewards.'),
@@ -213,8 +221,11 @@ export function SidebarModulesSection({
     setCustomItems([])
   }
 
-  const sections = Object.entries(config).filter(([sectionKey, sectionConfig]) =>
-    sectionKey === 'customItems' ? false : isSidebarSectionConfig(sectionConfig)
+  const sections = Object.entries(config).filter(
+    ([sectionKey, sectionConfig]) =>
+      sectionKey === 'customItems'
+        ? false
+        : isSidebarSectionConfig(sectionConfig)
   )
 
   return (

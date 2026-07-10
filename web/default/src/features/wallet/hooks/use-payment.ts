@@ -20,9 +20,15 @@ import { useState, useCallback } from 'react'
 import i18next from 'i18next'
 import { toast } from 'sonner'
 import {
+  getInvoicePayload,
+  type InvoiceRequest,
+} from '@/features/invoices/types'
+import {
   calculateAmount,
+  calculateBepusdtAmount,
   calculateOkpayAmount,
   calculateStripeAmount,
+  calculateWaffoAmount,
   calculateWaffoPancakeAmount,
   requestPayment,
   requestStripePayment,
@@ -30,7 +36,9 @@ import {
 } from '../api'
 import {
   isStripePayment,
+  isBepusdtPayment,
   isOkpayPayment,
+  isWaffoPayment,
   isWaffoPancakePayment,
   submitPaymentForm,
 } from '../lib'
@@ -42,52 +50,81 @@ import {
 export function usePayment() {
   const [amount, setAmount] = useState<number>(0)
   const [amountText, setAmountText] = useState<string>('')
+  const [invoiceFee, setInvoiceFee] = useState(0)
   const [calculating, setCalculating] = useState(false)
   const [processing, setProcessing] = useState(false)
 
   // Calculate payment amount
   const calculatePaymentAmount = useCallback(
-    async (topupAmount: number, paymentType: string, promoCode?: string) => {
+    async (
+      topupAmount: number,
+      paymentType: string,
+      promoCode?: string,
+      invoiceRequest?: InvoiceRequest
+    ) => {
       try {
         setCalculating(true)
 
         const isStripe = isStripePayment(paymentType)
+        const isWaffo = isWaffoPayment(paymentType)
         const isPancake = isWaffoPancakePayment(paymentType)
+        const isBepusdt = isBepusdtPayment(paymentType)
         const isOkpay = isOkpayPayment(paymentType)
+        const invoicePayload = getInvoicePayload(invoiceRequest)
+
         const response = isStripe
           ? await calculateStripeAmount({
               amount: topupAmount,
               promo_code: promoCode,
+              ...invoicePayload,
             })
-          : isPancake
-            ? await calculateWaffoPancakeAmount({
+          : isWaffo
+            ? await calculateWaffoAmount({
                 amount: topupAmount,
                 promo_code: promoCode,
+                ...invoicePayload,
               })
-            : isOkpay
-              ? await calculateOkpayAmount({
+            : isPancake
+              ? await calculateWaffoPancakeAmount({
                   amount: topupAmount,
                   promo_code: promoCode,
+                  ...invoicePayload,
                 })
-            : await calculateAmount({
-                amount: topupAmount,
-                promo_code: promoCode,
-              })
+              : isBepusdt
+                ? await calculateBepusdtAmount({
+                    amount: topupAmount,
+                    promo_code: promoCode,
+                    ...invoicePayload,
+                  })
+                : isOkpay
+                  ? await calculateOkpayAmount({
+                      amount: topupAmount,
+                      promo_code: promoCode,
+                      ...invoicePayload,
+                    })
+                  : await calculateAmount({
+                      amount: topupAmount,
+                      promo_code: promoCode,
+                      ...invoicePayload,
+                    })
 
         if (isApiSuccess(response) && response.data) {
           const calculatedAmount = parseFloat(response.data)
           setAmount(calculatedAmount)
           setAmountText(response.amount_text || '')
+          setInvoiceFee(Number(response.invoice_fee || 0))
           return calculatedAmount
         }
 
         // Don't show error for calculation, just set to 0
         setAmount(0)
         setAmountText('')
+        setInvoiceFee(0)
         return 0
       } catch (_error) {
         setAmount(0)
         setAmountText('')
+        setInvoiceFee(0)
         return 0
       } finally {
         setCalculating(false)
@@ -98,23 +135,31 @@ export function usePayment() {
 
   // Process payment
   const processPayment = useCallback(
-    async (topupAmount: number, paymentType: string, promoCode?: string) => {
+    async (
+      topupAmount: number,
+      paymentType: string,
+      promoCode?: string,
+      invoiceRequest?: InvoiceRequest
+    ) => {
       try {
         setProcessing(true)
 
         const isStripe = isStripePayment(paymentType)
         const amount = Math.floor(topupAmount)
+        const invoicePayload = getInvoicePayload(invoiceRequest)
 
         const response = isStripe
           ? await requestStripePayment({
               amount,
               payment_method: 'stripe',
               promo_code: promoCode,
+              ...invoicePayload,
             })
           : await requestPayment({
               amount,
               payment_method: paymentType,
               promo_code: promoCode,
+              ...invoicePayload,
             })
 
         if (!isApiSuccess(response)) {
@@ -164,6 +209,7 @@ export function usePayment() {
   return {
     amount,
     amountText,
+    invoiceFee,
     calculating,
     processing,
     calculatePaymentAmount,

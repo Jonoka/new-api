@@ -82,6 +82,9 @@ func InitOptionMap() {
 	common.OptionMap["Price"] = strconv.FormatFloat(operation_setting.Price, 'f', -1, 64)
 	common.OptionMap["USDExchangeRate"] = strconv.FormatFloat(operation_setting.USDExchangeRate, 'f', -1, 64)
 	common.OptionMap["MinTopUp"] = strconv.Itoa(operation_setting.MinTopUp)
+	common.OptionMap["InvoiceEnabled"] = strconv.FormatBool(InvoiceEnabled)
+	common.OptionMap["InvoiceTypes"] = InvoiceTypesJSON()
+	common.OptionMap["InvoiceFeeRules"] = InvoiceFeeRulesJSON()
 	common.OptionMap["StripeMinTopUp"] = strconv.Itoa(setting.StripeMinTopUp)
 	common.OptionMap["StripeApiSecret"] = setting.StripeApiSecret
 	common.OptionMap["StripeWebhookSecret"] = setting.StripeWebhookSecret
@@ -389,6 +392,8 @@ func updateOptionMap(key string, value string) (err error) {
 			setting.DefaultUseAutoGroup = boolValue
 		case "ExposeRatioEnabled":
 			ratio_setting.SetExposeRatioEnabled(boolValue)
+		case "InvoiceEnabled":
+			InvoiceEnabled = boolValue
 		}
 	}
 	switch key {
@@ -429,6 +434,10 @@ func updateOptionMap(key string, value string) (err error) {
 		operation_setting.USDExchangeRate, _ = strconv.ParseFloat(value, 64)
 	case "MinTopUp":
 		operation_setting.MinTopUp, _ = strconv.Atoi(value)
+	case "InvoiceTypes":
+		err = UpdateInvoiceTypesByJSONString(value)
+	case "InvoiceFeeRules":
+		err = UpdateInvoiceFeeRulesByJSONString(value)
 	case "StripeApiSecret":
 		setting.StripeApiSecret = value
 	case "StripeWebhookSecret":

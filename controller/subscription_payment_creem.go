@@ -18,8 +18,9 @@ import (
 )
 
 type SubscriptionCreemPayRequest struct {
-	PlanId    int    `json:"plan_id"`
-	PromoCode string `json:"promo_code"`
+	PlanId    int                  `json:"plan_id"`
+	PromoCode string               `json:"promo_code"`
+	Invoice   model.InvoiceRequest `json:"invoice"`
 }
 
 func SubscriptionRequestCreemPay(c *gin.Context) {
@@ -46,6 +47,10 @@ func SubscriptionRequestCreemPay(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "Creem 固定产品暂不支持优惠码，请选择其他支付方式"})
 		return
 	}
+	if req.Invoice.Required {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "Creem 固定产品暂不支持开发票，请选择其他支付方式"})
+		return
+	}
 
 	plan, err := model.GetSubscriptionPlanById(req.PlanId)
 	if err != nil {
@@ -54,6 +59,11 @@ func SubscriptionRequestCreemPay(c *gin.Context) {
 	}
 	if !plan.Enabled {
 		common.ApiErrorMsg(c, "套餐未启用")
+		return
+	}
+	planPriceUSD, err := model.SubscriptionPlanPriceUSD(plan)
+	if err != nil {
+		common.ApiError(c, err)
 		return
 	}
 	if plan.CreemProductId == "" {
@@ -90,7 +100,7 @@ func SubscriptionRequestCreemPay(c *gin.Context) {
 
 	reference := "sub-creem-ref-" + randstr.String(6)
 	referenceId := "sub_ref_" + common.Sha1([]byte(reference+time.Now().String()+user.Username))
-	payMoney := plan.PriceAmount
+	payMoney := planPriceUSD
 	if payMoney < 0.01 {
 		common.ApiErrorMsg(c, "套餐金额过低")
 		return
@@ -125,7 +135,7 @@ func SubscriptionRequestCreemPay(c *gin.Context) {
 	product := &CreemProduct{
 		ProductId: plan.CreemProductId,
 		Name:      plan.Title,
-		Price:     plan.PriceAmount,
+		Price:     payMoney,
 		Currency:  currency,
 		Quota:     0,
 	}

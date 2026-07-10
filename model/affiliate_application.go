@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting"
@@ -43,6 +44,15 @@ type AffiliateApplicationWithUser struct {
 	Username    string `json:"username"`
 	DisplayName string `json:"display_name"`
 	Email       string `json:"email"`
+}
+
+type AffiliateGrantResult struct {
+	UserId      int    `json:"user_id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	Email       string `json:"email"`
+	Status      string `json:"status"`
+	Updated     bool   `json:"updated"`
 }
 
 func HashAgreementText(text string) string {
@@ -130,6 +140,82 @@ func CreateAffiliateApplication(userId int, agreementText string) error {
 		AgreementHash: HashAgreementText(agreementText),
 	}
 	return DB.Create(app).Error
+}
+
+func GrantAffiliateAccessByUser(userId int, userIdentifier string, adminId int, remark string) (*AffiliateGrantResult, error) {
+	remark = strings.TrimSpace(remark)
+	if remark == "" {
+		remark = "管理员手动赋予返佣权限"
+	}
+
+	affiliateSetting := setting.GetAffiliateSetting()
+	var result *AffiliateGrantResult
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		user, err := findAffiliateBindUserTx(tx, userId, userIdentifier)
+		if err != nil {
+			return err
+		}
+
+		now := common.GetTimestamp()
+		app := &AffiliateApplication{}
+		err = tx.Set("gorm:query_option", "FOR UPDATE").Where("user_id = ?", user.Id).First(app).Error
+		if err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			app = &AffiliateApplication{
+				UserId:        user.Id,
+				Status:        AffiliateAppStatusApproved,
+				AgreedAt:      now,
+				AgreementHash: affiliateAgreementHashForSetting(affiliateSetting),
+				AdminId:       adminId,
+				AdminRemark:   remark,
+			}
+			if err := tx.Create(app).Error; err != nil {
+				return err
+			}
+			result = &AffiliateGrantResult{
+				UserId:      user.Id,
+				Username:    user.Username,
+				DisplayName: user.DisplayName,
+				Email:       user.Email,
+				Status:      app.Status,
+				Updated:     true,
+			}
+			return nil
+		}
+
+		changed := app.Status != AffiliateAppStatusApproved ||
+			app.AgreementHash != affiliateAgreementHashForSetting(affiliateSetting) ||
+			app.AdminId != adminId ||
+			app.AdminRemark != remark ||
+			app.RejectedReason != ""
+		updates := map[string]interface{}{
+			"status":          AffiliateAppStatusApproved,
+			"agreed_at":       now,
+			"agreement_hash":  affiliateAgreementHashForSetting(affiliateSetting),
+			"admin_id":        adminId,
+			"admin_remark":    remark,
+			"rejected_reason": "",
+		}
+		if err := tx.Model(app).Updates(updates).Error; err != nil {
+			return err
+		}
+
+		result = &AffiliateGrantResult{
+			UserId:      user.Id,
+			Username:    user.Username,
+			DisplayName: user.DisplayName,
+			Email:       user.Email,
+			Status:      AffiliateAppStatusApproved,
+			Updated:     changed,
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func checkInviterEligibility(userId int, s *setting.AffiliateSetting) error {

@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
+import type { InvoiceRequest } from '@/features/invoices/types'
 
 // ============================================================================
 // Subscription Plan Schema & Types
@@ -89,7 +90,9 @@ export interface PlanPayload {
 export interface SubscriptionPayRequest {
   plan_id: number
   payment_method?: string
+  trade_type?: string
   promo_code?: string
+  invoice?: InvoiceRequest
 }
 
 export interface SubscriptionAmountPreview {
@@ -114,6 +117,8 @@ export interface SubscriptionPayResponse {
     pay_link?: string
     // Waffo Pancake / Creem hosted checkout URL.
     checkout_url?: string
+    // BEPUSDT hosted payment URL.
+    payment_url?: string
     // Pancake-only: order metadata + self-service buyer session token,
     // surfaced for future flows (refund / cancel from new-api's own UI).
     session_id?: string
@@ -128,7 +133,19 @@ export interface SubscriptionPayResponse {
 export interface SubscriptionAmountResponse {
   message?: string
   data?: string
+  amount?: number
+  currency?: string
+  amount_usd?: number
+  plan_currency?: string
+  payment_method?: string
   discount?: SubscriptionAmountPreview
+  invoice_required?: boolean
+  invoice_base_amount?: number
+  invoice_fee?: number
+  invoice_total_amount?: number
+  invoice_fee_payment_amount?: number
+  invoice_payment_amount?: number
+  invoice_currency?: string
 }
 
 export interface CreateUserSubscriptionRequest {

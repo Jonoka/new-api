@@ -166,19 +166,22 @@ func GetTopUpInfo(c *gin.Context) {
 		"amount_options":          operation_setting.GetPaymentSetting().AmountOptions,
 		"discount":                operation_setting.GetPaymentSetting().AmountDiscount,
 		"topup_link":              common.TopUpLink,
+		"invoice":                 model.InvoiceConfigSnapshot(),
 	}
 	common.ApiSuccess(c, data)
 }
 
 type EpayRequest struct {
-	Amount        int64  `json:"amount"`
-	PaymentMethod string `json:"payment_method"`
-	PromoCode     string `json:"promo_code"`
+	Amount        int64                `json:"amount"`
+	PaymentMethod string               `json:"payment_method"`
+	PromoCode     string               `json:"promo_code"`
+	Invoice       model.InvoiceRequest `json:"invoice"`
 }
 
 type AmountRequest struct {
-	Amount    int64  `json:"amount"`
-	PromoCode string `json:"promo_code"`
+	Amount    int64                `json:"amount"`
+	PromoCode string               `json:"promo_code"`
+	Invoice   model.InvoiceRequest `json:"invoice"`
 }
 
 func GetEpayClient() *epay.Client {
@@ -286,6 +289,7 @@ func RequestEpay(c *gin.Context) {
 		return
 	}
 	payMoney := getPayMoney(req.Amount, group)
+	originalPayMoney := payMoney
 	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetTopUp, 0, payMoney)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
@@ -297,6 +301,15 @@ func RequestEpay(c *gin.Context) {
 	if payMoney < 0 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
+	}
+	invoiceAmounts, err := buildInvoicePaymentAmounts(req.Invoice, model.PaymentProviderEpay, payMoney)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+		return
+	}
+	totalPayMoney := payMoney
+	if invoiceAmounts.Required {
+		totalPayMoney = invoiceAmounts.TotalPayment
 	}
 
 	if !operation_setting.ContainsPayMethod(req.PaymentMethod) {
@@ -310,7 +323,7 @@ func RequestEpay(c *gin.Context) {
 	tradeNo := fmt.Sprintf("%s%d", common.GetRandomString(6), time.Now().Unix())
 	tradeNo = fmt.Sprintf("USR%dNO%s", id, tradeNo)
 	client := GetEpayClient()
-	if client == nil && payMoney >= 0.01 {
+	if client == nil && totalPayMoney >= 0.01 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "当前管理员未配置支付信息"})
 		return
 	}
@@ -318,7 +331,7 @@ func RequestEpay(c *gin.Context) {
 	topUp := &model.TopUp{
 		UserId:          id,
 		Amount:          amount,
-		Money:           payMoney,
+		Money:           totalPayMoney,
 		TradeNo:         tradeNo,
 		PaymentMethod:   req.PaymentMethod,
 		PaymentProvider: model.PaymentProviderEpay,
@@ -326,13 +339,14 @@ func RequestEpay(c *gin.Context) {
 		Status:          common.TopUpStatusPending,
 	}
 	model.ApplyPromoCodeResultToTopUp(topUp, discount)
+	applyInvoiceToTopUp(topUp, invoiceAmounts, originalPayMoney, payMoney, true)
 	err = topUp.Insert()
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 创建充值订单失败 user_id=%d trade_no=%s payment_method=%s amount=%d error=%q", id, tradeNo, req.PaymentMethod, req.Amount, err.Error()))
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "创建订单失败"})
 		return
 	}
-	if payMoney < 0.01 {
+	if totalPayMoney < 0.01 {
 		completedTopUp, quotaToAdd, completedNow, err := model.CompleteFreeTopUp(tradeNo, model.PaymentProviderEpay)
 		if err != nil {
 			logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 0元优惠充值完成失败 user_id=%d trade_no=%s amount=%d error=%q", id, tradeNo, req.Amount, err.Error()))
@@ -350,7 +364,7 @@ func RequestEpay(c *gin.Context) {
 		Type:           req.PaymentMethod,
 		ServiceTradeNo: tradeNo,
 		Name:           fmt.Sprintf("TUC%d", req.Amount),
-		Money:          strconv.FormatFloat(payMoney, 'f', 2, 64),
+		Money:          strconv.FormatFloat(totalPayMoney, 'f', 2, 64),
 		Device:         epay.PC,
 		NotifyUrl:      notifyUrl,
 		ReturnUrl:      returnUrl,
@@ -361,7 +375,7 @@ func RequestEpay(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "拉起支付失败"})
 		return
 	}
-	logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 充值订单创建成功 user_id=%d trade_no=%s payment_method=%s amount=%d money=%.2f uri=%q params=%q", id, tradeNo, req.PaymentMethod, req.Amount, payMoney, uri, common.GetJsonString(params)))
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 充值订单创建成功 user_id=%d trade_no=%s payment_method=%s amount=%d money=%.2f uri=%q params=%q", id, tradeNo, req.PaymentMethod, req.Amount, totalPayMoney, uri, common.GetJsonString(params)))
 	c.JSON(http.StatusOK, gin.H{"message": "success", "data": params, "url": uri})
 }
 
@@ -533,10 +547,20 @@ func RequestAmount(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
 	}
-	response := gin.H{"message": "success", "data": strconv.FormatFloat(payMoney, 'f', 2, 64)}
+	invoiceAmounts, err := buildInvoicePaymentPreviewAmounts(req.Invoice, model.PaymentProviderEpay, payMoney)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+		return
+	}
+	totalPayMoney := payMoney
+	if invoiceAmounts.Required {
+		totalPayMoney = invoiceAmounts.TotalPayment
+	}
+	response := gin.H{"message": "success", "data": strconv.FormatFloat(totalPayMoney, 'f', 2, 64)}
 	if discount != nil {
 		response["discount"] = discount
 	}
+	addInvoiceFieldsToResponse(response, invoiceAmounts)
 	c.JSON(http.StatusOK, response)
 }
 

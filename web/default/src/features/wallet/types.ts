@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 // ============================================================================
 // Wallet Type Definitions
 // ============================================================================
+import type { InvoiceConfig, InvoiceRequest } from '@/features/invoices/types'
 
 /**
  * Generic API response
@@ -43,6 +44,13 @@ export type AmountResponse = ApiResponse<string> & {
   rate?: string
   rate_source?: string
   auto_rate_failed?: boolean
+  invoice_required?: boolean
+  invoice_base_amount?: number
+  invoice_fee?: number
+  invoice_total_amount?: number
+  invoice_fee_payment_amount?: number
+  invoice_payment_amount?: number
+  invoice_currency?: string
 }
 export type PaymentResponse = ApiResponse<Record<string, unknown>> & {
   url?: string
@@ -102,6 +110,7 @@ export interface CreemPaymentRequest {
   /** Payment method identifier */
   payment_method: 'creem'
   promo_code?: string
+  invoice?: InvoiceRequest
 }
 
 /**
@@ -154,6 +163,7 @@ export interface BepusdtPaymentRequest {
   trade_type: string
   /** Optional promo code */
   promo_code?: string
+  invoice?: InvoiceRequest
 }
 
 /**
@@ -164,6 +174,7 @@ export interface OkpayPaymentRequest {
   amount: number
   /** Optional promo code */
   promo_code?: string
+  invoice?: InvoiceRequest
 }
 
 /**
@@ -216,6 +227,8 @@ export interface TopupInfo {
   payment_compliance_confirmed?: boolean
   /** Current compliance terms version */
   payment_compliance_terms_version?: string
+  /** Invoice feature configuration */
+  invoice?: InvoiceConfig
 }
 
 /**
@@ -246,6 +259,7 @@ export interface PaymentRequest {
   payment_method: string
   /** Optional promo code */
   promo_code?: string
+  invoice?: InvoiceRequest
 }
 
 /**
@@ -258,6 +272,7 @@ export interface WaffoPaymentRequest {
   pay_method_index?: number
   /** Optional promo code */
   promo_code?: string
+  invoice?: InvoiceRequest
 }
 
 /**
@@ -268,6 +283,7 @@ export interface WaffoPancakePaymentRequest {
   amount: number
   /** Optional promo code */
   promo_code?: string
+  invoice?: InvoiceRequest
 }
 
 /**
@@ -278,6 +294,7 @@ export interface AmountRequest {
   amount: number
   /** Optional promo code */
   promo_code?: string
+  invoice?: InvoiceRequest
 }
 
 /**

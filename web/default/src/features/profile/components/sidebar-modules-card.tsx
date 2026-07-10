@@ -144,6 +144,11 @@ export function SidebarModulesCard() {
             description: t('Balance and top-up management'),
           },
           {
+            key: 'invoice',
+            title: t('Invoice Center'),
+            description: t('View invoices for paid orders'),
+          },
+          {
             key: 'affiliate',
             title: t('Affiliate Commission'),
             description: t('Referral commission and payout management'),

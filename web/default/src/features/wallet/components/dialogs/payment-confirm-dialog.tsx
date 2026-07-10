@@ -29,10 +29,24 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { InvoiceRequestForm } from '@/features/invoices/components/invoice-request-form'
+import {
+  isInvoiceRequestValid,
+  type InvoiceConfig,
+  type InvoiceRequest,
+} from '@/features/invoices/types'
 import { DEFAULT_DISCOUNT_RATE } from '../../constants'
-import { formatCurrency, getPaymentIcon } from '../../lib'
-import type { PaymentMethod } from '../../types'
+import { formatCurrency, getPaymentIcon, isBepusdtPayment } from '../../lib'
+import type { BepusdtChain, PaymentMethod } from '../../types'
 
 interface PaymentConfirmDialogProps {
   open: boolean
@@ -46,6 +60,13 @@ interface PaymentConfirmDialogProps {
   processing: boolean
   discountRate?: number
   usdExchangeRate?: number
+  bepusdtChains?: BepusdtChain[]
+  selectedBepusdtTradeType?: string
+  onSelectBepusdtTradeType?: (tradeType: string) => void
+  invoiceConfig?: InvoiceConfig | null
+  invoiceRequest: InvoiceRequest
+  onInvoiceRequestChange: (request: InvoiceRequest) => void
+  invoiceFee?: number
 }
 
 export function PaymentConfirmDialog({
@@ -60,11 +81,23 @@ export function PaymentConfirmDialog({
   processing,
   discountRate = DEFAULT_DISCOUNT_RATE,
   usdExchangeRate = 1,
+  bepusdtChains = [],
+  selectedBepusdtTradeType = '',
+  onSelectBepusdtTradeType,
+  invoiceConfig,
+  invoiceRequest,
+  onInvoiceRequestChange,
+  invoiceFee = 0,
 }: PaymentConfirmDialogProps) {
   const { t } = useTranslation()
+  const isBepusdt = isBepusdtPayment(paymentMethod?.type || '')
+  const selectedBepusdtChain = bepusdtChains.find(
+    (chain) => chain.trade_type === selectedBepusdtTradeType
+  )
   const hasDiscount = discountRate > 0 && discountRate < 1 && paymentAmount > 0
   const originalAmount = hasDiscount ? paymentAmount / discountRate : 0
   const discountAmount = hasDiscount ? originalAmount - paymentAmount : 0
+  const invoiceValid = isInvoiceRequestValid(invoiceConfig, invoiceRequest)
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -123,6 +156,40 @@ export function PaymentConfirmDialog({
             </div>
           )}
 
+          {isBepusdt && bepusdtChains.length > 0 && (
+            <div className='flex items-center justify-between gap-3'>
+              <span className='text-muted-foreground text-sm'>
+                {t('Network')}
+              </span>
+              <Select
+                value={selectedBepusdtTradeType}
+                onValueChange={(value) => {
+                  if (value) {
+                    onSelectBepusdtTradeType?.(value)
+                  }
+                }}
+              >
+                <SelectTrigger className='h-8 min-w-36'>
+                  <SelectValue placeholder={t('Select USDT Network')}>
+                    {selectedBepusdtChain?.name || selectedBepusdtTradeType}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent alignItemWithTrigger={false}>
+                  <SelectGroup>
+                    {bepusdtChains.map((chain) => (
+                      <SelectItem
+                        key={chain.trade_type}
+                        value={chain.trade_type}
+                      >
+                        {chain.name}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           <div className='border-t pt-4'>
             <div className='flex items-center justify-between'>
               <span className='text-muted-foreground text-sm'>
@@ -139,13 +206,24 @@ export function PaymentConfirmDialog({
               </div>
             </div>
           </div>
+
+          <InvoiceRequestForm
+            config={invoiceConfig}
+            value={invoiceRequest}
+            onChange={onInvoiceRequestChange}
+            invoiceFee={invoiceFee}
+            disabled={processing}
+          />
         </div>
 
         <AlertDialogFooter className='grid grid-cols-2 gap-2 sm:flex'>
           <AlertDialogCancel disabled={processing}>
             {t('Cancel')}
           </AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm} disabled={processing}>
+          <AlertDialogAction
+            onClick={onConfirm}
+            disabled={processing || !invoiceValid}
+          >
             {processing && <Loader2 className='mr-2 h-4 w-4 animate-spin' />}
             {t('Confirm Payment')}
           </AlertDialogAction>

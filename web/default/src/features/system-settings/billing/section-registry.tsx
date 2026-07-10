@@ -22,9 +22,9 @@ import { PricingSection } from '../general/pricing-section'
 import { QuotaSettingsSection } from '../general/quota-settings-section'
 import { PaymentSettingsSection } from '../integrations/payment-settings-section'
 import { RatioSettingsCard } from '../models/ratio-settings-card'
-import { AffiliateSettingsSection } from './affiliate-settings-section'
 import type { BillingSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
+import { AffiliateSettingsSection } from './affiliate-settings-section'
 
 const getModelDefaults = (settings: BillingSettings) => ({
   ModelPrice: settings.ModelPrice,
@@ -142,6 +142,11 @@ const BILLING_SECTIONS = [
           PayMethods: settings.PayMethods,
           AmountOptions: settings['payment_setting.amount_options'],
           AmountDiscount: settings['payment_setting.amount_discount'],
+          InvoiceEnabled: settings.InvoiceEnabled ?? false,
+          InvoiceTypes: settings.InvoiceTypes ?? '["personal","company"]',
+          InvoiceFeeRules:
+            settings.InvoiceFeeRules ??
+            '[{"min":0,"max":500,"type":"fixed","value":50},{"min":501,"max":2000,"type":"fixed","value":100},{"min":2001,"max":5000,"type":"fixed","value":175},{"min":5000,"type":"percent","value":5}]',
           StripeApiSecret: settings.StripeApiSecret,
           StripeWebhookSecret: settings.StripeWebhookSecret,
           StripePriceId: settings.StripePriceId,
@@ -158,12 +163,12 @@ const BILLING_SECTIONS = [
           BepusdtMinTopUp: settings.BepusdtMinTopUp ?? 1,
           BepusdtTimeout: settings.BepusdtTimeout ?? 1200,
           BepusdtChains: settings.BepusdtChains ?? '[]',
-          OkpayGatewayUrl: settings.OkpayGatewayUrl ?? 'https://api.okaypay.me/shop',
+          OkpayGatewayUrl:
+            settings.OkpayGatewayUrl ?? 'https://api.okaypay.me/shop',
           OkpayMerchantId: settings.OkpayMerchantId ?? '',
           OkpayMerchantToken: settings.OkpayMerchantToken ?? '',
           OkpayExchangeRate: settings.OkpayExchangeRate ?? 7.2,
-          OkpayAutoExchangeEnabled:
-            settings.OkpayAutoExchangeEnabled ?? true,
+          OkpayAutoExchangeEnabled: settings.OkpayAutoExchangeEnabled ?? true,
           OkpayUsdtCnyRate: settings.OkpayUsdtCnyRate ?? 7.2,
           OkpayRateApiUrl:
             settings.OkpayRateApiUrl ??
@@ -234,14 +239,11 @@ const BILLING_SECTIONS = [
             usdt_chain: settings['affiliate_setting.usdt_chain'],
             promotion_template:
               settings['affiliate_setting.promotion_template'],
-            review_enabled:
-              settings['affiliate_setting.review_enabled'],
+            review_enabled: settings['affiliate_setting.review_enabled'],
             auto_approve_after_days:
               settings['affiliate_setting.auto_approve_after_days'],
-            agreement_enabled:
-              settings['affiliate_setting.agreement_enabled'],
-            agreement_text:
-              settings['affiliate_setting.agreement_text'],
+            agreement_enabled: settings['affiliate_setting.agreement_enabled'],
+            agreement_text: settings['affiliate_setting.agreement_text'],
             inviter_min_account_age_days:
               settings['affiliate_setting.inviter_min_account_age_days'],
             inviter_min_recharge_amount:

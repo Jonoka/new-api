@@ -984,7 +984,7 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 			return types.NewError(err, types.ErrorCodeBadResponseBody)
 		}
 	case types.RelayFormatClaude:
-		responseData = data
+		responseData = normalizeClaudeNonStreamMessageResponseData(data)
 	}
 
 	if claudeResponse.Usage != nil && claudeResponse.Usage.ServerToolUse != nil && claudeResponse.Usage.ServerToolUse.WebSearchRequests > 0 {
@@ -993,6 +993,46 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 
 	service.IOCopyBytesGracefully(c, httpResp, responseData)
 	return nil
+}
+
+func normalizeClaudeNonStreamMessageResponseData(data []byte) []byte {
+	response := string(data)
+	if gjson.Get(response, "type").String() != "message" {
+		return data
+	}
+
+	var err error
+	if !gjson.Get(response, "stop_sequence").Exists() {
+		response, err = sjson.SetRaw(response, "stop_sequence", "null")
+		if err != nil {
+			return data
+		}
+	}
+
+	stopReason := gjson.Get(response, "stop_reason")
+	if !stopReason.Exists() || stopReason.Type == gjson.Null || stopReason.String() == "" {
+		response, err = sjson.Set(response, "stop_reason", "end_turn")
+		if err != nil {
+			return data
+		}
+	}
+
+	if usage := gjson.Get(response, "usage"); usage.Exists() && usage.IsObject() {
+		if !gjson.Get(response, "usage.cache_creation_input_tokens").Exists() {
+			response, err = sjson.Set(response, "usage.cache_creation_input_tokens", 0)
+			if err != nil {
+				return data
+			}
+		}
+		if !gjson.Get(response, "usage.cache_read_input_tokens").Exists() {
+			response, err = sjson.Set(response, "usage.cache_read_input_tokens", 0)
+			if err != nil {
+				return data
+			}
+		}
+	}
+
+	return []byte(response)
 }
 
 func ClaudeHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*dto.Usage, *types.NewAPIError) {

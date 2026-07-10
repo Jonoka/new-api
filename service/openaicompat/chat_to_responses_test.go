@@ -105,3 +105,21 @@ func TestChatCompletionsRequestToResponsesRequestPreservesPromptCacheFields(t *t
 	require.JSONEq(t, `"cache-key-123"`, string(respReq.PromptCacheKey))
 	require.JSONEq(t, `"24h"`, string(respReq.PromptCacheRetention))
 }
+
+func TestChatCompletionsRequestToResponsesRequestNormalizesReasoningEffort(t *testing.T) {
+	req := &dto.GeneralOpenAIRequest{
+		Model:           "test-model",
+		ReasoningEffort: "extra high",
+		Messages: []dto.Message{
+			{
+				Role:    "user",
+				Content: "hello",
+			},
+		},
+	}
+
+	respReq, err := ChatCompletionsRequestToResponsesRequest(req)
+	require.NoError(t, err)
+	require.NotNil(t, respReq.Reasoning)
+	require.Equal(t, "xhigh", respReq.Reasoning.Effort)
+}

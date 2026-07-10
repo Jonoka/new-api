@@ -1,6 +1,10 @@
 import { useState, useCallback } from 'react'
 import i18next from 'i18next'
 import { toast } from 'sonner'
+import {
+  getInvoicePayload,
+  type InvoiceRequest,
+} from '@/features/invoices/types'
 import { requestOkpayPayment, isApiSuccess } from '../api'
 
 function getPaymentErrorMessage(data: unknown, fallback?: string): string {
@@ -14,13 +18,18 @@ export function useOkpayPayment() {
   const [processing, setProcessing] = useState(false)
 
   const processOkpayPayment = useCallback(
-    async (topupAmount: number, promoCode?: string) => {
+    async (
+      topupAmount: number,
+      promoCode?: string,
+      invoiceRequest?: InvoiceRequest
+    ) => {
       setProcessing(true)
 
       try {
         const response = await requestOkpayPayment({
           amount: Math.floor(topupAmount),
           promo_code: promoCode,
+          ...getInvoicePayload(invoiceRequest),
         })
 
         if (isApiSuccess(response)) {

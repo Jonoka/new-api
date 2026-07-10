@@ -19,6 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 import { useState, useCallback } from 'react'
 import i18next from 'i18next'
 import { toast } from 'sonner'
+import {
+  getInvoicePayload,
+  type InvoiceRequest,
+} from '@/features/invoices/types'
 import { requestWaffoPayment, isApiSuccess } from '../api'
 
 function getPaymentUrl(data: unknown): string | null {
@@ -48,7 +52,12 @@ export function useWaffoPayment() {
   const [processing, setProcessing] = useState(false)
 
   const processWaffoPayment = useCallback(
-    async (topupAmount: number, payMethodIndex?: number, promoCode?: string) => {
+    async (
+      topupAmount: number,
+      payMethodIndex?: number,
+      promoCode?: string,
+      invoiceRequest?: InvoiceRequest
+    ) => {
       setProcessing(true)
 
       try {
@@ -56,6 +65,7 @@ export function useWaffoPayment() {
           amount: Math.floor(topupAmount),
           pay_method_index: payMethodIndex,
           promo_code: promoCode,
+          ...getInvoicePayload(invoiceRequest),
         })
 
         if (isApiSuccess(response)) {

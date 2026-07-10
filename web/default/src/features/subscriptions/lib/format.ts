@@ -18,7 +18,30 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
 import dayjs from '@/lib/dayjs'
+import { formatQuota } from '@/lib/format'
 import type { SubscriptionPlan } from '../types'
+
+export function normalizePlanCurrency(currency?: string): 'USD' | 'CNY' {
+  return currency === 'CNY' ? 'CNY' : 'USD'
+}
+
+export function formatPlanCurrencyAmount(
+  amount: number,
+  currency?: string
+): string {
+  const normalizedCurrency = normalizePlanCurrency(currency)
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: normalizedCurrency,
+      currencyDisplay: 'narrowSymbol',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(Number(amount || 0))
+  } catch {
+    return `${normalizedCurrency} ${Number(amount || 0).toFixed(2)}`
+  }
+}
 
 export function formatDuration(
   plan: Partial<SubscriptionPlan>,
@@ -58,6 +81,70 @@ export function formatResetPeriod(
     return `${seconds} ${t('seconds')}`
   }
   return t('No Reset')
+}
+
+function getDurationSeconds(plan: Partial<SubscriptionPlan>): number {
+  const value = Number(plan?.duration_value || 1)
+  switch (plan?.duration_unit || 'month') {
+    case 'year':
+      return value * 365 * 86400
+    case 'month':
+      return value * 30 * 86400
+    case 'day':
+      return value * 86400
+    case 'hour':
+      return value * 3600
+    case 'custom':
+      return Number(plan?.custom_seconds || 0)
+    default:
+      return 0
+  }
+}
+
+function getResetSeconds(plan: Partial<SubscriptionPlan>): number {
+  switch (plan?.quota_reset_period || 'never') {
+    case 'daily':
+      return 86400
+    case 'weekly':
+      return 7 * 86400
+    case 'monthly':
+      return 30 * 86400
+    case 'custom':
+      return Number(plan?.quota_reset_custom_seconds || 0)
+    default:
+      return 0
+  }
+}
+
+export function getQuotaResetCycleCount(
+  plan: Partial<SubscriptionPlan>
+): number {
+  const durationSeconds = getDurationSeconds(plan)
+  const resetSeconds = getResetSeconds(plan)
+  if (durationSeconds <= 0 || resetSeconds <= 0) return 1
+  return Math.max(1, Math.floor(durationSeconds / resetSeconds))
+}
+
+export function formatPlanQuotaAllowance(
+  plan: Partial<SubscriptionPlan>,
+  t: TFunction
+): string[] {
+  const totalAmount = Number(plan?.total_amount || 0)
+  if (totalAmount <= 0) {
+    return [`${t('Total Quota')}: ${t('Unlimited')}`]
+  }
+
+  const resetPeriod = plan?.quota_reset_period || 'never'
+  if (resetPeriod === 'never') {
+    return [`${t('Total Quota')}: ${formatQuota(totalAmount)}`]
+  }
+
+  const cycles = getQuotaResetCycleCount(plan)
+  const estimatedTotal = totalAmount * cycles
+  return [
+    `${t('Per Reset Quota')}: ${formatQuota(totalAmount)}`,
+    `${t('Estimated Quota During Validity')}: ${t('about')} ${formatQuota(estimatedTotal)} (${cycles} ${t('cycles')})`,
+  ]
 }
 
 export function formatTimestamp(ts: number): string {

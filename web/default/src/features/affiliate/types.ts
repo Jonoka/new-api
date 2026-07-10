@@ -281,3 +281,18 @@ export type AdminUnbindAffiliateInviterResult = {
   previous_inviter_id: number
   updated: boolean
 }
+
+export type AdminGrantAffiliateAccessRequest = {
+  user_id?: number
+  user_identifier?: string
+  remark?: string
+}
+
+export type AdminGrantAffiliateAccessResult = {
+  user_id: number
+  username: string
+  display_name: string
+  email: string
+  status: string
+  updated: boolean
+}

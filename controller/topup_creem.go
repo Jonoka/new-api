@@ -48,9 +48,10 @@ func verifyCreemSignature(payload string, signature string, secret string) bool 
 }
 
 type CreemPayRequest struct {
-	ProductId     string `json:"product_id"`
-	PaymentMethod string `json:"payment_method"`
-	PromoCode     string `json:"promo_code"`
+	ProductId     string               `json:"product_id"`
+	PaymentMethod string               `json:"payment_method"`
+	PromoCode     string               `json:"promo_code"`
+	Invoice       model.InvoiceRequest `json:"invoice"`
 }
 
 type CreemProduct struct {
@@ -76,6 +77,10 @@ func (*CreemAdaptor) RequestPay(c *gin.Context, req *CreemPayRequest) {
 	}
 	if strings.TrimSpace(req.PromoCode) != "" {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "Creem 固定产品暂不支持优惠码，请选择其他支付方式"})
+		return
+	}
+	if req.Invoice.Required {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "Creem 固定产品暂不支持开发票，请选择其他支付方式"})
 		return
 	}
 

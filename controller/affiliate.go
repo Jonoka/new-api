@@ -69,6 +69,12 @@ type affiliateAdminUnbindInviterRequest struct {
 	UserIdentifier string `json:"user_identifier"`
 }
 
+type affiliateAdminGrantAccessRequest struct {
+	UserId         int    `json:"user_id"`
+	UserIdentifier string `json:"user_identifier"`
+	Remark         string `json:"remark"`
+}
+
 type affiliateRiskApplyRequest struct {
 	FreezeAssets    bool   `json:"freeze_assets"`
 	BlockInviteCode bool   `json:"block_invite_code"`
@@ -457,6 +463,20 @@ func AdminBindAffiliateInviter(c *gin.Context) {
 		return
 	}
 	result, err := model.BindUserInviterByAffCode(req.UserId, req.UserIdentifier, req.AffCode, req.Force)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, result)
+}
+
+func AdminGrantAffiliateAccess(c *gin.Context) {
+	req := affiliateAdminGrantAccessRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	result, err := model.GrantAffiliateAccessByUser(req.UserId, req.UserIdentifier, c.GetInt("id"), req.Remark)
 	if err != nil {
 		common.ApiError(c, err)
 		return

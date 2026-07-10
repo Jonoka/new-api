@@ -28,9 +28,10 @@ type ChannelOtherSettings struct {
 	VertexKeyType                         VertexKeyType `json:"vertex_key_type,omitempty"` // "json" or "api_key"
 	OpenRouterEnterprise                  *bool         `json:"openrouter_enterprise,omitempty"`
 	ClaudeBetaQuery                       bool          `json:"claude_beta_query,omitempty"`                         // Claude 渠道是否强制追加 ?beta=true
-	ClaudeCodeFingerprintEnabled          bool   `json:"claude_code_fingerprint_enabled,omitempty"`           // Claude 渠道是否使用 Claude Code 指纹
-	ClaudeCodeTransportFingerprintEnabled bool   `json:"claude_code_transport_fingerprint_enabled,omitempty"` // Claude 渠道是否使用 Claude Code Transport 指纹
-	ClaudeCodeVersion                     string `json:"claude_code_version,omitempty"`                      // 自定义 Claude Code 版本号（用于 User-Agent），留空使用默认值
+	ClaudeCodeFingerprintEnabled          bool          `json:"claude_code_fingerprint_enabled,omitempty"`           // Claude 渠道是否使用 Claude Code 指纹
+	ClaudeCodeTransportFingerprintEnabled bool          `json:"claude_code_transport_fingerprint_enabled,omitempty"` // Claude 渠道是否使用 Claude Code Transport 指纹
+	ClaudeCodeVersion                     string        `json:"claude_code_version,omitempty"`                       // 自定义 Claude Code 版本号（用于 User-Agent），留空使用默认值
+	ClaudeCodeEntrypoint                  string        `json:"claude_code_entrypoint,omitempty"`                    // 自定义 Claude Code 入口标识（用于计费归因），留空使用 cli
 	AllowServiceTier                      bool          `json:"allow_service_tier,omitempty"`                        // 是否允许 service_tier 透传（默认过滤以避免额外计费）
 	AllowInferenceGeo                     bool          `json:"allow_inference_geo,omitempty"`                       // 是否允许 inference_geo 透传（仅 Claude，默认过滤以满足数据驻留合规
 	AllowSpeed                            bool          `json:"allow_speed,omitempty"`                               // 是否允许 speed 透传（仅 Claude，默认过滤以避免意外切换推理速度模式）

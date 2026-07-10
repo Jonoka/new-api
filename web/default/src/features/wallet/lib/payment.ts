@@ -87,6 +87,13 @@ export function isWaffoPancakePayment(paymentType: string): boolean {
 }
 
 /**
+ * Check if payment method is Waffo
+ */
+export function isWaffoPayment(paymentType: string): boolean {
+  return paymentType === PAYMENT_TYPES.WAFFO
+}
+
+/**
  * Check if payment method is Bepusdt (USDT)
  */
 export function isBepusdtPayment(paymentType: string): boolean {
