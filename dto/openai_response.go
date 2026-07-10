@@ -234,12 +234,123 @@ type Usage struct {
 	OutputTokens           int                `json:"output_tokens"`
 	InputTokensDetails     *InputTokenDetails `json:"input_tokens_details"`
 
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheWriteInputTokens    int `json:"cache_write_input_tokens,omitempty"`
+	CacheWriteTokens         int `json:"cache_write_tokens,omitempty"`
+	CacheCreationTokens      int `json:"cache_creation_tokens,omitempty"`
+
+	HasCacheCreationInputTokens bool `json:"-"`
+	HasCacheWriteInputTokens    bool `json:"-"`
+	HasCacheWriteTokens         bool `json:"-"`
+	HasCacheCreationTokens      bool `json:"-"`
+
 	// claude cache 1h
 	ClaudeCacheCreation5mTokens int `json:"claude_cache_creation_5_m_tokens"`
 	ClaudeCacheCreation1hTokens int `json:"claude_cache_creation_1_h_tokens"`
 
 	// OpenRouter Params
 	Cost any `json:"cost,omitempty"`
+}
+
+func (u *Usage) UnmarshalJSON(data []byte) error {
+	type alias Usage
+	var raw struct {
+		*alias
+		CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
+		CacheWriteInputTokens    *int `json:"cache_write_input_tokens"`
+		CacheWriteTokens         *int `json:"cache_write_tokens"`
+		CacheCreationTokens      *int `json:"cache_creation_tokens"`
+	}
+	raw.alias = (*alias)(u)
+	if err := common.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.CacheCreationInputTokens != nil {
+		u.CacheCreationInputTokens = *raw.CacheCreationInputTokens
+		u.HasCacheCreationInputTokens = true
+	}
+	if raw.CacheWriteInputTokens != nil {
+		u.CacheWriteInputTokens = *raw.CacheWriteInputTokens
+		u.HasCacheWriteInputTokens = true
+	}
+	if raw.CacheWriteTokens != nil {
+		u.CacheWriteTokens = *raw.CacheWriteTokens
+		u.HasCacheWriteTokens = true
+	}
+	if raw.CacheCreationTokens != nil {
+		u.CacheCreationTokens = *raw.CacheCreationTokens
+		u.HasCacheCreationTokens = true
+	}
+	return nil
+}
+
+func (u Usage) GetTopLevelCacheCreationTokens() int {
+	switch {
+	case u.CacheWriteTokens > 0:
+		return u.CacheWriteTokens
+	case u.CacheCreationInputTokens > 0:
+		return u.CacheCreationInputTokens
+	case u.CacheWriteInputTokens > 0:
+		return u.CacheWriteInputTokens
+	case u.CacheCreationTokens > 0:
+		return u.CacheCreationTokens
+	default:
+		return 0
+	}
+}
+
+func (u Usage) GetCacheCreationTokens() int {
+	if u.InputTokensDetails != nil && u.InputTokensDetails.CacheWriteTokens > 0 {
+		return u.InputTokensDetails.CacheWriteTokens
+	}
+	if u.PromptTokensDetails.CacheWriteTokens > 0 {
+		return u.PromptTokensDetails.CacheWriteTokens
+	}
+	if u.InputTokensDetails != nil && u.InputTokensDetails.CacheCreationTokens > 0 {
+		return u.InputTokensDetails.CacheCreationTokens
+	}
+	if u.PromptTokensDetails.CacheCreationTokens > 0 {
+		return u.PromptTokensDetails.CacheCreationTokens
+	}
+	if u.InputTokensDetails != nil && u.InputTokensDetails.CachedCreationTokens > 0 {
+		return u.InputTokensDetails.CachedCreationTokens
+	}
+	if u.PromptTokensDetails.CachedCreationTokens > 0 {
+		return u.PromptTokensDetails.CachedCreationTokens
+	}
+	return u.GetTopLevelCacheCreationTokens()
+}
+
+func (u Usage) HasAnyCacheCreationTokensField() bool {
+	return (u.InputTokensDetails != nil && u.InputTokensDetails.HasAnyCacheCreationTokensField()) ||
+		u.PromptTokensDetails.HasAnyCacheCreationTokensField() ||
+		u.HasCacheCreationInputTokens ||
+		u.HasCacheWriteInputTokens ||
+		u.HasCacheWriteTokens ||
+		u.HasCacheCreationTokens
+}
+
+func (u Usage) HasAnyDetailCacheCreationTokensField() bool {
+	return (u.InputTokensDetails != nil && u.InputTokensDetails.HasAnyCacheCreationTokensField()) ||
+		u.PromptTokensDetails.HasAnyCacheCreationTokensField()
+}
+
+func (u *Usage) SetCacheCreationTokens(tokens int) {
+	if tokens <= 0 {
+		return
+	}
+	u.PromptTokensDetails.SetCacheCreationTokens(tokens)
+	if u.InputTokensDetails != nil {
+		u.InputTokensDetails.SetCacheCreationTokens(tokens)
+	}
+	u.CacheCreationInputTokens = tokens
+	u.CacheWriteInputTokens = tokens
+	u.CacheWriteTokens = tokens
+	u.CacheCreationTokens = tokens
+	u.HasCacheCreationInputTokens = true
+	u.HasCacheWriteInputTokens = true
+	u.HasCacheWriteTokens = true
+	u.HasCacheCreationTokens = true
 }
 
 type OpenAIVideoResponse struct {
@@ -254,12 +365,14 @@ type OpenAIVideoResponse struct {
 
 type InputTokenDetails struct {
 	CachedTokens         int `json:"cached_tokens"`
+	CacheWriteTokens     int `json:"cache_write_tokens,omitempty"`
 	CacheCreationTokens  int `json:"cache_creation_tokens,omitempty"`
 	CachedCreationTokens int `json:"cached_creation_tokens,omitempty"`
 	TextTokens           int `json:"text_tokens"`
 	AudioTokens          int `json:"audio_tokens"`
 	ImageTokens          int `json:"image_tokens"`
 
+	HasCacheWriteTokens     bool `json:"-"`
 	HasCacheCreationTokens  bool `json:"-"`
 	HasCachedCreationTokens bool `json:"-"`
 }
@@ -268,12 +381,17 @@ func (d *InputTokenDetails) UnmarshalJSON(data []byte) error {
 	type alias InputTokenDetails
 	var raw struct {
 		*alias
+		CacheWriteTokens     *int `json:"cache_write_tokens"`
 		CacheCreationTokens  *int `json:"cache_creation_tokens"`
 		CachedCreationTokens *int `json:"cached_creation_tokens"`
 	}
 	raw.alias = (*alias)(d)
 	if err := common.Unmarshal(data, &raw); err != nil {
 		return err
+	}
+	if raw.CacheWriteTokens != nil {
+		d.CacheWriteTokens = *raw.CacheWriteTokens
+		d.HasCacheWriteTokens = true
 	}
 	if raw.CacheCreationTokens != nil {
 		d.CacheCreationTokens = *raw.CacheCreationTokens
@@ -287,6 +405,9 @@ func (d *InputTokenDetails) UnmarshalJSON(data []byte) error {
 }
 
 func (d InputTokenDetails) GetCacheCreationTokens() int {
+	if d.CacheWriteTokens > 0 {
+		return d.CacheWriteTokens
+	}
 	if d.CacheCreationTokens > 0 {
 		return d.CacheCreationTokens
 	}
@@ -294,7 +415,19 @@ func (d InputTokenDetails) GetCacheCreationTokens() int {
 }
 
 func (d InputTokenDetails) HasAnyCacheCreationTokensField() bool {
-	return d.HasCacheCreationTokens || d.HasCachedCreationTokens
+	return d.HasCacheWriteTokens || d.HasCacheCreationTokens || d.HasCachedCreationTokens
+}
+
+func (d *InputTokenDetails) SetCacheCreationTokens(tokens int) {
+	if tokens <= 0 {
+		return
+	}
+	d.CacheWriteTokens = tokens
+	d.CacheCreationTokens = tokens
+	d.CachedCreationTokens = tokens
+	d.HasCacheWriteTokens = true
+	d.HasCacheCreationTokens = true
+	d.HasCachedCreationTokens = true
 }
 
 type OutputTokenDetails struct {

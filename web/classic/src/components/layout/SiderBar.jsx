@@ -281,7 +281,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('返佣分成设置'),
         itemKey: 'affiliate_admin',
         to: '/affiliate-admin',
-        className: isRoot() ? '' : 'tableHiddle',
+        className: isAdmin() ? '' : 'tableHiddle',
       },
       {
         text: t('系统设置'),

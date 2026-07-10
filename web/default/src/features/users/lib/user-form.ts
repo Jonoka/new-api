@@ -68,9 +68,10 @@ export function transformFormDataToPayload(
     password: data.password || undefined,
   }
 
+  payload.role = data.role || 1
+
   // For create: only send required fields
   if (userId === undefined) {
-    payload.role = data.role || 1 // Default to common user
   } else {
     // For update: quota is adjusted atomically via /api/user/manage, not sent here
     payload.group = data.group

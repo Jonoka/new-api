@@ -30,16 +30,10 @@ func OaiResponsesCompactionHandler(c *gin.Context, resp *http.Response) (*dto.Us
 
 	usage := dto.Usage{}
 	if compactResp.Usage != nil {
-		usage.PromptTokens = compactResp.Usage.InputTokens
-		usage.CompletionTokens = compactResp.Usage.OutputTokens
-		usage.TotalTokens = compactResp.Usage.TotalTokens
-		if compactResp.Usage.InputTokensDetails != nil {
-			usage.PromptTokensDetails.CachedTokens = compactResp.Usage.InputTokensDetails.CachedTokens
-			usage.PromptTokensDetails.CachedCreationTokens = compactResp.Usage.InputTokensDetails.GetCacheCreationTokens()
-			if usage.PromptTokensDetails.CachedCreationTokens == 0 {
-				usage.PromptTokensDetails.CachedCreationTokens = inferGPT56ResponsesCacheCreationTokens(compactResp.Model, usage.PromptTokens, compactResp.Usage.InputTokensDetails)
-			}
-		}
+		applyResponsesUsageToOpenAIUsage(&usage, &dto.OpenAIResponsesResponse{
+			Model: compactResp.Model,
+			Usage: compactResp.Usage,
+		})
 	}
 	responseBody = []byte(patchResponsesUsageCacheCreationFields(string(responseBody), &usage))
 	service.IOCopyBytesGracefully(c, resp, responseBody)

@@ -72,10 +72,11 @@ func applyResponsesUsageToOpenAIUsage(usage *dto.Usage, resp *dto.OpenAIResponse
 	if respUsage.InputTokensDetails != nil {
 		usage.InputTokensDetails = respUsage.InputTokensDetails
 		usage.PromptTokensDetails.CachedTokens = respUsage.InputTokensDetails.CachedTokens
-		usage.PromptTokensDetails.CachedCreationTokens = respUsage.InputTokensDetails.GetCacheCreationTokens()
-		if usage.PromptTokensDetails.CachedCreationTokens == 0 {
-			usage.PromptTokensDetails.CachedCreationTokens = inferGPT56ResponsesCacheCreationTokens(resp.Model, inputTokens, respUsage.InputTokensDetails)
+		cacheCreationTokens := respUsage.GetCacheCreationTokens()
+		if cacheCreationTokens == 0 && !respUsage.HasAnyDetailCacheCreationTokensField() {
+			cacheCreationTokens = inferGPT56ResponsesCacheCreationTokens(resp.Model, inputTokens, respUsage.InputTokensDetails)
 		}
+		usage.SetCacheCreationTokens(cacheCreationTokens)
 		usage.PromptTokensDetails.ImageTokens = respUsage.InputTokensDetails.ImageTokens
 		usage.PromptTokensDetails.AudioTokens = respUsage.InputTokensDetails.AudioTokens
 		usage.PromptTokensDetails.TextTokens = respUsage.InputTokensDetails.TextTokens
@@ -83,8 +84,8 @@ func applyResponsesUsageToOpenAIUsage(usage *dto.Usage, resp *dto.OpenAIResponse
 	if respUsage.PromptTokensDetails.CachedTokens != 0 {
 		usage.PromptTokensDetails.CachedTokens = respUsage.PromptTokensDetails.CachedTokens
 	}
-	if cacheCreationTokens := respUsage.PromptTokensDetails.GetCacheCreationTokens(); cacheCreationTokens != 0 {
-		usage.PromptTokensDetails.CachedCreationTokens = cacheCreationTokens
+	if usage.PromptTokensDetails.CachedCreationTokens == 0 {
+		usage.SetCacheCreationTokens(respUsage.GetCacheCreationTokens())
 	}
 	if respUsage.PromptTokensDetails.ImageTokens != 0 {
 		usage.PromptTokensDetails.ImageTokens = respUsage.PromptTokensDetails.ImageTokens
@@ -130,6 +131,12 @@ func patchResponsesUsageCacheCreationFields(data string, usage *dto.Usage) strin
 		patches := []string{
 			root + ".input_tokens_details.cache_creation_tokens",
 			root + ".input_tokens_details.cached_creation_tokens",
+			root + ".input_tokens_details.cache_write_tokens",
+			root + ".prompt_tokens_details.cache_creation_tokens",
+			root + ".prompt_tokens_details.cached_creation_tokens",
+			root + ".prompt_tokens_details.cache_write_tokens",
+			root + ".cache_creation_input_tokens",
+			root + ".cache_write_input_tokens",
 			root + ".cache_creation_tokens",
 			root + ".cache_write_tokens",
 		}

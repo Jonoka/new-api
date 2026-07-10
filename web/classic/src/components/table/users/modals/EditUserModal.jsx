@@ -78,6 +78,7 @@ const EditUserModal = (props) => {
   const [inputs, setInputs] = useState(null);
 
   const isEdit = Boolean(userId);
+  const isRootUser = inputs?.role === 100;
 
   const getInitValues = () => ({
     username: '',
@@ -92,6 +93,7 @@ const EditUserModal = (props) => {
     email: '',
     quota: 0,
     quota_amount: 0,
+    role: 1,
     group: 'default',
     remark: '',
   });
@@ -356,6 +358,23 @@ const EditUserModal = (props) => {
                     </div>
 
                     <Row gutter={12}>
+                      <Col span={24}>
+                        <Form.Select
+                          field='role'
+                          label={t('角色')}
+                          placeholder={t('请选择角色')}
+                          optionList={[
+                            { label: t('普通用户'), value: 1 },
+                            { label: t('管理员'), value: 10 },
+                            ...(isRootUser
+                              ? [{ label: t('超级管理员'), value: 100 }]
+                              : []),
+                          ]}
+                          disabled={isRootUser}
+                          rules={[{ required: true, message: t('请选择角色') }]}
+                        />
+                      </Col>
+
                       <Col span={24}>
                         <Form.Select
                           field='group'

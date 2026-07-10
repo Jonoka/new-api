@@ -33,13 +33,21 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 
 	usage := &dto.Usage{}
 	if resp.Usage != nil {
-		if resp.Usage.InputTokens != 0 {
-			usage.PromptTokens = resp.Usage.InputTokens
-			usage.InputTokens = resp.Usage.InputTokens
+		inputTokens := resp.Usage.InputTokens
+		if inputTokens == 0 {
+			inputTokens = resp.Usage.PromptTokens
 		}
-		if resp.Usage.OutputTokens != 0 {
-			usage.CompletionTokens = resp.Usage.OutputTokens
-			usage.OutputTokens = resp.Usage.OutputTokens
+		outputTokens := resp.Usage.OutputTokens
+		if outputTokens == 0 {
+			outputTokens = resp.Usage.CompletionTokens
+		}
+		if inputTokens != 0 {
+			usage.PromptTokens = inputTokens
+			usage.InputTokens = inputTokens
+		}
+		if outputTokens != 0 {
+			usage.CompletionTokens = outputTokens
+			usage.OutputTokens = outputTokens
 		}
 		if resp.Usage.TotalTokens != 0 {
 			usage.TotalTokens = resp.Usage.TotalTokens
@@ -47,16 +55,43 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 			usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 		}
 		if resp.Usage.InputTokensDetails != nil {
+			usage.InputTokensDetails = resp.Usage.InputTokensDetails
 			usage.PromptTokensDetails.CachedTokens = resp.Usage.InputTokensDetails.CachedTokens
-			usage.PromptTokensDetails.CachedCreationTokens = resp.Usage.InputTokensDetails.GetCacheCreationTokens()
-			if usage.PromptTokensDetails.CachedCreationTokens == 0 {
-				usage.PromptTokensDetails.CachedCreationTokens = inferGPT56ResponsesCacheCreationTokens(resp.Model, usage.PromptTokens, resp.Usage.InputTokensDetails)
+			cacheCreationTokens := resp.Usage.GetCacheCreationTokens()
+			if cacheCreationTokens == 0 && !resp.Usage.HasAnyDetailCacheCreationTokensField() {
+				cacheCreationTokens = inferGPT56ResponsesCacheCreationTokens(resp.Model, usage.PromptTokens, resp.Usage.InputTokensDetails)
 			}
+			usage.SetCacheCreationTokens(cacheCreationTokens)
 			usage.PromptTokensDetails.ImageTokens = resp.Usage.InputTokensDetails.ImageTokens
 			usage.PromptTokensDetails.AudioTokens = resp.Usage.InputTokensDetails.AudioTokens
+			usage.PromptTokensDetails.TextTokens = resp.Usage.InputTokensDetails.TextTokens
+		}
+		if resp.Usage.PromptTokensDetails.CachedTokens != 0 {
+			usage.PromptTokensDetails.CachedTokens = resp.Usage.PromptTokensDetails.CachedTokens
+		}
+		if usage.PromptTokensDetails.CachedCreationTokens == 0 {
+			usage.SetCacheCreationTokens(resp.Usage.GetCacheCreationTokens())
+		}
+		if resp.Usage.PromptTokensDetails.ImageTokens != 0 {
+			usage.PromptTokensDetails.ImageTokens = resp.Usage.PromptTokensDetails.ImageTokens
+		}
+		if resp.Usage.PromptTokensDetails.AudioTokens != 0 {
+			usage.PromptTokensDetails.AudioTokens = resp.Usage.PromptTokensDetails.AudioTokens
+		}
+		if resp.Usage.PromptTokensDetails.TextTokens != 0 {
+			usage.PromptTokensDetails.TextTokens = resp.Usage.PromptTokensDetails.TextTokens
 		}
 		if resp.Usage.CompletionTokenDetails.ReasoningTokens != 0 {
 			usage.CompletionTokenDetails.ReasoningTokens = resp.Usage.CompletionTokenDetails.ReasoningTokens
+		}
+		if resp.Usage.CompletionTokenDetails.TextTokens != 0 {
+			usage.CompletionTokenDetails.TextTokens = resp.Usage.CompletionTokenDetails.TextTokens
+		}
+		if resp.Usage.CompletionTokenDetails.AudioTokens != 0 {
+			usage.CompletionTokenDetails.AudioTokens = resp.Usage.CompletionTokenDetails.AudioTokens
+		}
+		if resp.Usage.CompletionTokenDetails.ImageTokens != 0 {
+			usage.CompletionTokenDetails.ImageTokens = resp.Usage.CompletionTokenDetails.ImageTokens
 		}
 	}
 

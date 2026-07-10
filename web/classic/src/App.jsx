@@ -357,11 +357,11 @@ function App() {
         <Route
           path='/console/affiliate-admin'
           element={
-            <RootRoute>
+            <AdminRoute>
               <Suspense fallback={<Loading></Loading>} key={location.pathname}>
                 <AffiliateAdmin />
               </Suspense>
-            </RootRoute>
+            </AdminRoute>
           }
         />
         <Route

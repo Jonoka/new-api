@@ -3,6 +3,7 @@ package controller
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -585,8 +586,19 @@ func GetUserModels(c *gin.Context) {
 }
 
 func UpdateUser(c *gin.Context) {
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	var requestData map[string]interface{}
+	if err := common.Unmarshal(bodyBytes, &requestData); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	_, roleProvided := requestData["role"]
 	var updatedUser model.User
-	err := common.DecodeJson(c.Request.Body, &updatedUser)
+	err = common.Unmarshal(bodyBytes, &updatedUser)
 	if err != nil || updatedUser.Id == 0 {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
@@ -608,6 +620,21 @@ func UpdateUser(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
 		return
 	}
+	if !roleProvided {
+		updatedUser.Role = originUser.Role
+	}
+	if !common.IsValidateRole(updatedUser.Role) || updatedUser.Role == common.RoleGuestUser {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	if originUser.Role == common.RoleRootUser && updatedUser.Role != common.RoleRootUser {
+		common.ApiErrorI18n(c, i18n.MsgUserCannotDemoteRootUser)
+		return
+	}
+	if originUser.Role != common.RoleRootUser && updatedUser.Role == common.RoleRootUser {
+		common.ApiErrorI18n(c, i18n.MsgUserCannotCreateHigherLevel)
+		return
+	}
 	if !canManageTargetRole(myRole, updatedUser.Role) {
 		common.ApiErrorI18n(c, i18n.MsgUserCannotCreateHigherLevel)
 		return
@@ -619,6 +646,14 @@ func UpdateUser(c *gin.Context) {
 	if err := updatedUser.Edit(updatePassword); err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if originUser.Role != updatedUser.Role {
+		if err := model.InvalidateUserCache(updatedUser.Id); err != nil {
+			common.SysLog(fmt.Sprintf("failed to invalidate user cache for user %d: %s", updatedUser.Id, err.Error()))
+		}
+		if err := model.InvalidateUserTokensCache(updatedUser.Id); err != nil {
+			common.SysLog(fmt.Sprintf("failed to invalidate tokens cache for user %d: %s", updatedUser.Id, err.Error()))
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -860,6 +895,13 @@ func CreateUser(c *gin.Context) {
 	}
 	if user.DisplayName == "" {
 		user.DisplayName = user.Username
+	}
+	if user.Role == common.RoleGuestUser {
+		user.Role = common.RoleCommonUser
+	}
+	if !common.IsValidateRole(user.Role) {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
 	}
 	myRole := c.GetInt("role")
 	if user.Role >= myRole {
