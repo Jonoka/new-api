@@ -120,3 +120,34 @@ func TestRetryTopUpPaymentDoesNotCreateNewLocalOrder(t *testing.T) {
 	assert.EqualValues(t, 1, count)
 	assert.Contains(t, recorder.Body.String(), "暂不支持重新支付")
 }
+
+func TestAdminCompleteTopUpAllowsExpiredOrder(t *testing.T) {
+	setupSubscriptionPaymentControllerTestDB(t)
+	seedRetryTopUpUser(t, 901)
+	seedRetryTopUpOrder(t, &model.TopUp{
+		UserId:          901,
+		Amount:          10,
+		Money:           10.30,
+		TradeNo:         "admin-complete-expired-order",
+		PaymentMethod:   model.PaymentMethodBepusdt,
+		PaymentProvider: model.PaymentProviderBepusdt,
+		Status:          common.TopUpStatusExpired,
+	})
+
+	ctx, recorder := newSubscriptionPaymentContext(t, AdminCompleteTopupRequest{
+		TradeNo: "admin-complete-expired-order",
+	}, 1)
+	AdminCompleteTopUp(ctx)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+
+	var savedTopUp model.TopUp
+	require.NoError(t, model.DB.Where("trade_no = ?", "admin-complete-expired-order").First(&savedTopUp).Error)
+	assert.Equal(t, common.TopUpStatusSuccess, savedTopUp.Status)
+	assert.Greater(t, savedTopUp.CompleteTime, int64(0))
+
+	var savedUser model.User
+	require.NoError(t, model.DB.First(&savedUser, 901).Error)
+	assert.Equal(t, int(float64(10)*common.QuotaPerUnit), savedUser.Quota)
+}

@@ -300,25 +300,40 @@ func (u Usage) GetTopLevelCacheCreationTokens() int {
 }
 
 func (u Usage) GetCacheCreationTokens() int {
-	if u.InputTokensDetails != nil && u.InputTokensDetails.CacheWriteTokens > 0 {
-		return u.InputTokensDetails.CacheWriteTokens
-	}
-	if u.PromptTokensDetails.CacheWriteTokens > 0 {
-		return u.PromptTokensDetails.CacheWriteTokens
-	}
-	if u.InputTokensDetails != nil && u.InputTokensDetails.CacheCreationTokens > 0 {
-		return u.InputTokensDetails.CacheCreationTokens
-	}
-	if u.PromptTokensDetails.CacheCreationTokens > 0 {
-		return u.PromptTokensDetails.CacheCreationTokens
-	}
-	if u.InputTokensDetails != nil && u.InputTokensDetails.CachedCreationTokens > 0 {
-		return u.InputTokensDetails.CachedCreationTokens
-	}
-	if u.PromptTokensDetails.CachedCreationTokens > 0 {
-		return u.PromptTokensDetails.CachedCreationTokens
+	if tokens, ok := u.GetDetailCacheCreationTokens(); ok {
+		return tokens
 	}
 	return u.GetTopLevelCacheCreationTokens()
+}
+
+func nonNegativeTokenCount(tokens int) int {
+	if tokens < 0 {
+		return 0
+	}
+	return tokens
+}
+
+// 明细字段显式返回 0 时，也要覆盖陈旧的顶层别名，避免重复或误计费。
+func (u Usage) GetDetailCacheCreationTokens() (int, bool) {
+	if u.InputTokensDetails != nil && u.InputTokensDetails.HasCacheWriteTokens {
+		return nonNegativeTokenCount(u.InputTokensDetails.CacheWriteTokens), true
+	}
+	if u.PromptTokensDetails.HasCacheWriteTokens {
+		return nonNegativeTokenCount(u.PromptTokensDetails.CacheWriteTokens), true
+	}
+	if u.InputTokensDetails != nil && u.InputTokensDetails.HasCacheCreationTokens {
+		return nonNegativeTokenCount(u.InputTokensDetails.CacheCreationTokens), true
+	}
+	if u.PromptTokensDetails.HasCacheCreationTokens {
+		return nonNegativeTokenCount(u.PromptTokensDetails.CacheCreationTokens), true
+	}
+	if u.InputTokensDetails != nil && u.InputTokensDetails.HasCachedCreationTokens {
+		return nonNegativeTokenCount(u.InputTokensDetails.CachedCreationTokens), true
+	}
+	if u.PromptTokensDetails.HasCachedCreationTokens {
+		return nonNegativeTokenCount(u.PromptTokensDetails.CachedCreationTokens), true
+	}
+	return 0, false
 }
 
 func (u Usage) HasAnyCacheCreationTokensField() bool {
@@ -339,9 +354,14 @@ func (u *Usage) SetCacheCreationTokens(tokens int) {
 	if tokens <= 0 {
 		return
 	}
-	u.PromptTokensDetails.SetCacheCreationTokens(tokens)
+	u.SetCacheCreationTokensWithPresence(tokens)
+}
+
+func (u *Usage) SetCacheCreationTokensWithPresence(tokens int) {
+	tokens = nonNegativeTokenCount(tokens)
+	u.PromptTokensDetails.SetCacheCreationTokensWithPresence(tokens)
 	if u.InputTokensDetails != nil {
-		u.InputTokensDetails.SetCacheCreationTokens(tokens)
+		u.InputTokensDetails.SetCacheCreationTokensWithPresence(tokens)
 	}
 	u.CacheCreationInputTokens = tokens
 	u.CacheWriteInputTokens = tokens
@@ -405,13 +425,21 @@ func (d *InputTokenDetails) UnmarshalJSON(data []byte) error {
 }
 
 func (d InputTokenDetails) GetCacheCreationTokens() int {
-	if d.CacheWriteTokens > 0 {
-		return d.CacheWriteTokens
+	tokens, _ := d.GetCacheCreationTokensWithPresence()
+	return tokens
+}
+
+func (d InputTokenDetails) GetCacheCreationTokensWithPresence() (int, bool) {
+	switch {
+	case d.HasCacheWriteTokens:
+		return nonNegativeTokenCount(d.CacheWriteTokens), true
+	case d.HasCacheCreationTokens:
+		return nonNegativeTokenCount(d.CacheCreationTokens), true
+	case d.HasCachedCreationTokens:
+		return nonNegativeTokenCount(d.CachedCreationTokens), true
+	default:
+		return 0, false
 	}
-	if d.CacheCreationTokens > 0 {
-		return d.CacheCreationTokens
-	}
-	return d.CachedCreationTokens
 }
 
 func (d InputTokenDetails) HasAnyCacheCreationTokensField() bool {
@@ -422,6 +450,11 @@ func (d *InputTokenDetails) SetCacheCreationTokens(tokens int) {
 	if tokens <= 0 {
 		return
 	}
+	d.SetCacheCreationTokensWithPresence(tokens)
+}
+
+func (d *InputTokenDetails) SetCacheCreationTokensWithPresence(tokens int) {
+	tokens = nonNegativeTokenCount(tokens)
 	d.CacheWriteTokens = tokens
 	d.CacheCreationTokens = tokens
 	d.CachedCreationTokens = tokens

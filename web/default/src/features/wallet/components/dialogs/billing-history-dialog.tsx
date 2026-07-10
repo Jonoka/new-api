@@ -89,6 +89,8 @@ export function BillingHistoryDialog({
 
   const [confirmTradeNo, setConfirmTradeNo] = useState<string | null>(null)
   const { copyToClipboard, copiedText } = useCopyToClipboard({ notify: false })
+  const canAdminComplete = (status: string) =>
+    status === 'pending' || status === 'expired' || status === 'failed'
 
   const totalPages = Math.ceil(total / pageSize)
 
@@ -264,32 +266,39 @@ export function BillingHistoryDialog({
                         </div>
 
                         {/* 操作 */}
-                        {record.status === 'pending' && (
+                        {(record.status === 'pending' ||
+                          (isAdmin && canAdminComplete(record.status))) && (
                           <div className='mt-4 flex justify-end gap-2'>
                             {isAdmin ? (
                               <>
-                                <Button
-                                  size='sm'
-                                  variant='outline'
-                                  onClick={() =>
-                                    setConfirmTradeNo(record.trade_no)
-                                  }
-                                  disabled={completing}
-                                >
-                                  {t('Complete Order')}
-                                </Button>
-                                <Button
-                                  size='sm'
-                                  variant='outline'
-                                  onClick={() =>
-                                    handleRetryPayment(record.trade_no)
-                                  }
-                                  disabled={retryingTradeNo === record.trade_no}
-                                >
-                                  {retryingTradeNo === record.trade_no
-                                    ? t('Processing...')
-                                    : t('Retry Payment')}
-                                </Button>
+                                {canAdminComplete(record.status) && (
+                                  <Button
+                                    size='sm'
+                                    variant='outline'
+                                    onClick={() =>
+                                      setConfirmTradeNo(record.trade_no)
+                                    }
+                                    disabled={completing}
+                                  >
+                                    {t('Complete Order')}
+                                  </Button>
+                                )}
+                                {record.status === 'pending' && (
+                                  <Button
+                                    size='sm'
+                                    variant='outline'
+                                    onClick={() =>
+                                      handleRetryPayment(record.trade_no)
+                                    }
+                                    disabled={
+                                      retryingTradeNo === record.trade_no
+                                    }
+                                  >
+                                    {retryingTradeNo === record.trade_no
+                                      ? t('Processing...')
+                                      : t('Retry Payment')}
+                                  </Button>
+                                )}
                               </>
                             ) : (
                               <Button

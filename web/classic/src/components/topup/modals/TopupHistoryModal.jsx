@@ -214,8 +214,7 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
       }
       if (!openPaymentResponse(res)) {
         Toast.error({
-          content:
-            typeof data === 'string' && data ? data : t('支付请求失败'),
+          content: typeof data === 'string' && data ? data : t('支付请求失败'),
         });
         return;
       }
@@ -249,6 +248,9 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
     const tradeNo = (record?.trade_no || '').toLowerCase();
     return Number(record?.amount || 0) === 0 && tradeNo.startsWith('sub');
   };
+
+  const canAdminComplete = (record) =>
+    ['pending', 'expired', 'failed'].includes(record?.status);
 
   // 检查是否为管理员
   const userIsAdmin = useMemo(() => isAdmin(), []);
@@ -315,37 +317,44 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
       title: t('操作'),
       key: 'action',
       render: (_, record) => {
-        if (record.status !== 'pending') {
+        if (!userIsAdmin && record.status !== 'pending') {
           return null;
         }
         if (userIsAdmin) {
+          if (!canAdminComplete(record) && record.status !== 'pending') {
+            return null;
+          }
           return (
             <div className='flex items-center gap-2'>
-              <Button
-                key="complete"
-                size='small'
-                type='primary'
-                theme='outline'
-                onClick={() => confirmAdminComplete(record.trade_no)}
-              >
-                {t('补单')}
-              </Button>
-              <Button
-                key="retry"
-                size='small'
-                type='primary'
-                theme='outline'
-                loading={retryingTradeNo === record.trade_no}
-                onClick={() => retryPayment(record.trade_no)}
-              >
-                {t('重新支付')}
-              </Button>
+              {canAdminComplete(record) && (
+                <Button
+                  key='complete'
+                  size='small'
+                  type='primary'
+                  theme='outline'
+                  onClick={() => confirmAdminComplete(record.trade_no)}
+                >
+                  {t('补单')}
+                </Button>
+              )}
+              {record.status === 'pending' && (
+                <Button
+                  key='retry'
+                  size='small'
+                  type='primary'
+                  theme='outline'
+                  loading={retryingTradeNo === record.trade_no}
+                  onClick={() => retryPayment(record.trade_no)}
+                >
+                  {t('重新支付')}
+                </Button>
+              )}
             </div>
           );
         }
         return (
           <Button
-            key="retry"
+            key='retry'
             size='small'
             type='primary'
             theme='outline'

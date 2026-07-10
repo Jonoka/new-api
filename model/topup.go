@@ -392,8 +392,10 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 			return nil
 		}
 
-		if topUp.Status != common.TopUpStatusPending {
-			return errors.New("订单状态不是待支付，无法补单")
+		if topUp.Status != common.TopUpStatusPending &&
+			topUp.Status != common.TopUpStatusExpired &&
+			topUp.Status != common.TopUpStatusFailed {
+			return errors.New("订单状态不是待支付、已过期或失败，无法补单")
 		}
 
 		// 计算应充值额度：

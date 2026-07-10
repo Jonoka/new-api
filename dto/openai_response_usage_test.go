@@ -59,6 +59,26 @@ func TestResponsesUsageCacheCreationAliases(t *testing.T) {
 			body: `{"input_tokens":100}`,
 			want: 0,
 		},
+		{
+			name: "input detail explicit zero overrides top level alias",
+			body: `{"input_tokens":20,"output_tokens":2,"cache_creation_input_tokens":19,"input_tokens_details":{"cache_write_tokens":0}}`,
+			want: 0,
+		},
+		{
+			name: "prompt detail explicit zero overrides top level alias",
+			body: `{"input_tokens":20,"output_tokens":2,"cache_write_tokens":19,"prompt_tokens_details":{"cache_creation_tokens":0}}`,
+			want: 0,
+		},
+		{
+			name: "input cache write explicit zero overrides later detail aliases",
+			body: `{"input_tokens":20,"output_tokens":2,"input_tokens_details":{"cache_write_tokens":0,"cache_creation_tokens":7,"cached_creation_tokens":8}}`,
+			want: 0,
+		},
+		{
+			name: "input cache creation explicit zero overrides old detail alias",
+			body: `{"input_tokens":20,"output_tokens":2,"input_tokens_details":{"cache_creation_tokens":0,"cached_creation_tokens":8}}`,
+			want: 0,
+		},
 	}
 
 	for _, tt := range tests {

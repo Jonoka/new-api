@@ -265,7 +265,40 @@ func TestOaiResponsesUsageKeepsExplicitZeroCacheCreationTokens(t *testing.T) {
 	require.Nil(t, err)
 	require.NotNil(t, usage)
 	require.Equal(t, 70, usage.PromptTokensDetails.CachedTokens)
-	require.Equal(t, 999, usage.PromptTokensDetails.CachedCreationTokens)
+	require.Equal(t, 0, usage.PromptTokensDetails.CachedCreationTokens)
+}
+
+func TestOaiResponsesUsageDetailExplicitZeroOverridesTopLevelAlias(t *testing.T) {
+	body := `{"id":"resp_1","model":"test-model","created_at":1800000000,"usage":{"input_tokens":20,"output_tokens":2,"total_tokens":22,"cache_creation_input_tokens":19,"cache_write_tokens":19,"input_tokens_details":{"cached_tokens":1,"cache_write_tokens":0}}}`
+	c, recorder, info, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesHandler(c, info, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 1, usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 0, usage.PromptTokensDetails.CachedCreationTokens)
+	require.EqualValues(t, 0, gjson.Get(recorder.Body.String(), "usage.input_tokens_details.cache_write_tokens").Int())
+	require.EqualValues(t, 0, gjson.Get(recorder.Body.String(), "usage.cache_creation_input_tokens").Int())
+	require.EqualValues(t, 0, gjson.Get(recorder.Body.String(), "usage.cache_write_tokens").Int())
+}
+
+func TestOaiResponsesStreamUsageDetailExplicitZeroOverridesTopLevelAlias(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"type":"response.done","response":{"id":"resp_1","model":"test-model","created_at":1800000000,"usage":{"input_tokens":20,"output_tokens":2,"total_tokens":22,"cache_creation_input_tokens":19,"cache_write_tokens":19,"input_tokens_details":{"cached_tokens":1,"cache_write_tokens":0}}}}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+	c, recorder, info, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesStreamHandler(c, info, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 1, usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 0, usage.PromptTokensDetails.CachedCreationTokens)
+	eventData := requireResponsesSSEDataByType(t, recorder.Body.String(), "response.done")
+	require.EqualValues(t, 0, gjson.Get(eventData, "response.usage.input_tokens_details.cache_write_tokens").Int())
+	require.EqualValues(t, 0, gjson.Get(eventData, "response.usage.cache_creation_input_tokens").Int())
+	require.EqualValues(t, 0, gjson.Get(eventData, "response.usage.cache_write_tokens").Int())
 }
 
 func TestOaiResponsesUsageKeepsMissingCacheCreationAsZero(t *testing.T) {
@@ -344,6 +377,19 @@ func TestOaiResponsesCompactionHandlerMapsCacheWriteTokens(t *testing.T) {
 	require.EqualValues(t, 30, gjson.Get(recorder.Body.String(), "usage.cache_creation_input_tokens").Int())
 }
 
+func TestOaiResponsesCompactionHandlerDetailExplicitZeroOverridesTopLevelAlias(t *testing.T) {
+	body := `{"id":"resp_1","usage":{"input_tokens":20,"output_tokens":2,"total_tokens":22,"cache_creation_input_tokens":19,"cache_write_tokens":19,"input_tokens_details":{"cached_tokens":1,"cache_write_tokens":0}}}`
+	c, recorder, _, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesCompactionHandler(c, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 1, usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 0, usage.PromptTokensDetails.CachedCreationTokens)
+	require.EqualValues(t, 0, gjson.Get(recorder.Body.String(), "usage.cache_write_tokens").Int())
+	require.EqualValues(t, 0, gjson.Get(recorder.Body.String(), "usage.cache_creation_input_tokens").Int())
+}
+
 func TestOaiResponsesCompactionHandlerInfersGPT56CacheCreationTokens(t *testing.T) {
 	body := `{"id":"resp_1","model":"gpt-5.6-terra","usage":{"input_tokens":188727,"output_tokens":368,"total_tokens":189095,"input_tokens_details":{"cached_tokens":185088}}}`
 	c, recorder, _, resp := setupResponsesStreamTest(body)
@@ -397,6 +443,24 @@ func TestOaiResponsesToChatStreamHandlerMapsCacheWriteTokens(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), `"cache_creation_tokens":30`)
 }
 
+func TestOaiResponsesToChatStreamHandlerDetailExplicitZeroOverridesTopLevelAlias(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"type":"response.output_text.delta","delta":"Hi"}`,
+		`data: {"type":"response.done","response":{"id":"resp_1","model":"test-model","created_at":1800000000,"usage":{"input_tokens":20,"output_tokens":2,"total_tokens":22,"cache_creation_input_tokens":19,"cache_write_tokens":19,"input_tokens_details":{"cached_tokens":1,"cache_write_tokens":0}}}}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+	c, recorder, info, resp := setupResponsesStreamTest(body)
+	info.ShouldIncludeUsage = true
+
+	usage, err := OaiResponsesToChatStreamHandler(c, info, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 1, usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 0, usage.PromptTokensDetails.CachedCreationTokens)
+	require.Contains(t, recorder.Body.String(), `"cached_tokens":1`)
+}
+
 func TestOaiResponsesToChatHandlerMapsCacheWriteTokens(t *testing.T) {
 	body := `{"id":"resp_1","model":"test-model","created_at":1800000000,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hi"}]}],"usage":{"input_tokens":100,"output_tokens":5,"total_tokens":105,"input_tokens_details":{"cached_tokens":70,"cache_write_tokens":30}}}`
 	c, recorder, info, resp := setupResponsesStreamTest(body)
@@ -410,6 +474,19 @@ func TestOaiResponsesToChatHandlerMapsCacheWriteTokens(t *testing.T) {
 	require.Equal(t, 5, usage.CompletionTokens)
 	require.EqualValues(t, 30, gjson.Get(recorder.Body.String(), "usage.cache_write_tokens").Int())
 	require.EqualValues(t, 30, gjson.Get(recorder.Body.String(), "usage.cache_creation_tokens").Int())
+}
+
+func TestOaiResponsesToChatHandlerDetailExplicitZeroOverridesTopLevelAlias(t *testing.T) {
+	body := `{"id":"resp_1","model":"test-model","created_at":1800000000,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hi"}]}],"usage":{"input_tokens":20,"output_tokens":2,"total_tokens":22,"cache_creation_input_tokens":19,"cache_write_tokens":19,"input_tokens_details":{"cached_tokens":1,"cache_write_tokens":0}}}`
+	c, recorder, info, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesToChatHandler(c, info, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 1, usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 0, usage.PromptTokensDetails.CachedCreationTokens)
+	require.EqualValues(t, 0, gjson.Get(recorder.Body.String(), "usage.cache_write_tokens").Int())
+	require.EqualValues(t, 0, gjson.Get(recorder.Body.String(), "usage.cache_creation_tokens").Int())
 }
 
 func TestOaiResponsesToChatStreamHandlerSkipsNestedEventData(t *testing.T) {

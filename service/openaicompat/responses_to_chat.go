@@ -61,7 +61,9 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 			if cacheCreationTokens == 0 && !resp.Usage.HasAnyDetailCacheCreationTokensField() {
 				cacheCreationTokens = inferGPT56ResponsesCacheCreationTokens(resp.Model, usage.PromptTokens, resp.Usage.InputTokensDetails)
 			}
-			usage.SetCacheCreationTokens(cacheCreationTokens)
+			if resp.Usage.HasAnyCacheCreationTokensField() || cacheCreationTokens > 0 {
+				usage.SetCacheCreationTokensWithPresence(cacheCreationTokens)
+			}
 			usage.PromptTokensDetails.ImageTokens = resp.Usage.InputTokensDetails.ImageTokens
 			usage.PromptTokensDetails.AudioTokens = resp.Usage.InputTokensDetails.AudioTokens
 			usage.PromptTokensDetails.TextTokens = resp.Usage.InputTokensDetails.TextTokens
@@ -69,8 +71,8 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 		if resp.Usage.PromptTokensDetails.CachedTokens != 0 {
 			usage.PromptTokensDetails.CachedTokens = resp.Usage.PromptTokensDetails.CachedTokens
 		}
-		if usage.PromptTokensDetails.CachedCreationTokens == 0 {
-			usage.SetCacheCreationTokens(resp.Usage.GetCacheCreationTokens())
+		if !usage.PromptTokensDetails.HasAnyCacheCreationTokensField() && resp.Usage.HasAnyCacheCreationTokensField() {
+			usage.SetCacheCreationTokensWithPresence(resp.Usage.GetCacheCreationTokens())
 		}
 		if resp.Usage.PromptTokensDetails.ImageTokens != 0 {
 			usage.PromptTokensDetails.ImageTokens = resp.Usage.PromptTokensDetails.ImageTokens
