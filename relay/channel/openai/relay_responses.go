@@ -48,12 +48,13 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		c.Set("image_generation_call_size", responsesResponse.GetSize())
 	}
 
-	// 写入新的 response body
-	service.IOCopyBytesGracefully(c, resp, responseBody)
-
 	// compute usage
 	usage := dto.Usage{}
 	applyResponsesUsageToOpenAIUsage(&usage, &responsesResponse)
+	responseBody = []byte(patchResponsesUsageCacheCreationFields(string(responseBody), &usage))
+
+	// 写入新的 response body
+	service.IOCopyBytesGracefully(c, resp, responseBody)
 	if info == nil || info.ResponsesUsageInfo == nil || info.ResponsesUsageInfo.BuiltInTools == nil {
 		return &usage, nil
 	}
@@ -96,11 +97,6 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Error(err)
 			return
 		}
-		sendResponsesStreamData(c, streamResponse, normalizedData)
-		if c.GetBool("sensitive_response_stream_blocked") {
-			sr.Stop(service.ErrSensitiveResponseBlocked)
-			return
-		}
 		switch streamResponse.Type {
 		case "response.completed", "response.done", "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
 			if streamResponse.Response != nil {
@@ -114,6 +110,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 					c.Set("image_generation_call_size", streamResponse.Response.GetSize())
 				}
 			}
+			normalizedData = patchResponsesUsageCacheCreationFields(normalizedData, usage)
 		case "response.output_text.delta":
 			// 处理输出文本
 			responseTextBuilder.WriteString(streamResponse.Delta)
@@ -129,6 +126,11 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 					}
 				}
 			}
+		}
+		sendResponsesStreamData(c, streamResponse, normalizedData)
+		if c.GetBool("sensitive_response_stream_blocked") {
+			sr.Stop(service.ErrSensitiveResponseBlocked)
+			return
 		}
 	})
 

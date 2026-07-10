@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestConvertResponsesSSEToJSON(t *testing.T) {
@@ -95,6 +96,21 @@ func setupResponsesStreamTest(body string) (*gin.Context, *httptest.ResponseReco
 	return c, recorder, info, resp
 }
 
+func requireResponsesSSEDataByType(t *testing.T, body string, eventType string) string {
+	t.Helper()
+	for _, line := range strings.Split(body, "\n") {
+		data, ok := normalizeResponsesStreamJSONData(line)
+		if !ok {
+			continue
+		}
+		if gjson.Get(data, "type").String() == eventType {
+			return data
+		}
+	}
+	require.Failf(t, "missing responses SSE event", "event type %q not found in body:\n%s", eventType, body)
+	return ""
+}
+
 func TestOaiResponsesStreamHandlerReadsDoneUsage(t *testing.T) {
 	body := strings.Join([]string{
 		`data: {"type":"response.output_text.delta","delta":"Hi"}`,
@@ -114,7 +130,7 @@ func TestOaiResponsesStreamHandlerReadsDoneUsage(t *testing.T) {
 
 func TestOaiResponsesHandlerMapsCacheCreationTokens(t *testing.T) {
 	body := `{"id":"resp_1","model":"test-model","created_at":1800000000,"usage":{"input_tokens":169969,"output_tokens":60,"total_tokens":170029,"input_tokens_details":{"cached_tokens":168704,"cache_creation_tokens":1265}}}`
-	c, _, info, resp := setupResponsesStreamTest(body)
+	c, recorder, info, resp := setupResponsesStreamTest(body)
 
 	usage, err := OaiResponsesHandler(c, info, resp)
 	require.Nil(t, err)
@@ -123,6 +139,10 @@ func TestOaiResponsesHandlerMapsCacheCreationTokens(t *testing.T) {
 	require.Equal(t, 168704, usage.PromptTokensDetails.CachedTokens)
 	require.Equal(t, 1265, usage.PromptTokensDetails.CachedCreationTokens)
 	require.Equal(t, 60, usage.CompletionTokens)
+	require.EqualValues(t, 1265, gjson.Get(recorder.Body.String(), "usage.input_tokens_details.cache_creation_tokens").Int())
+	require.EqualValues(t, 1265, gjson.Get(recorder.Body.String(), "usage.input_tokens_details.cached_creation_tokens").Int())
+	require.EqualValues(t, 1265, gjson.Get(recorder.Body.String(), "usage.cache_creation_tokens").Int())
+	require.EqualValues(t, 1265, gjson.Get(recorder.Body.String(), "usage.cache_write_tokens").Int())
 }
 
 func TestOaiResponsesStreamHandlerMapsCompletedCacheCreationTokens(t *testing.T) {
@@ -132,7 +152,7 @@ func TestOaiResponsesStreamHandlerMapsCompletedCacheCreationTokens(t *testing.T)
 		`data: [DONE]`,
 		"",
 	}, "\n")
-	c, _, info, resp := setupResponsesStreamTest(body)
+	c, recorder, info, resp := setupResponsesStreamTest(body)
 
 	usage, err := OaiResponsesStreamHandler(c, info, resp)
 	require.Nil(t, err)
@@ -141,6 +161,11 @@ func TestOaiResponsesStreamHandlerMapsCompletedCacheCreationTokens(t *testing.T)
 	require.Equal(t, 168704, usage.PromptTokensDetails.CachedTokens)
 	require.Equal(t, 1265, usage.PromptTokensDetails.CachedCreationTokens)
 	require.Equal(t, 60, usage.CompletionTokens)
+	eventData := requireResponsesSSEDataByType(t, recorder.Body.String(), "response.completed")
+	require.EqualValues(t, 1265, gjson.Get(eventData, "response.usage.input_tokens_details.cache_creation_tokens").Int())
+	require.EqualValues(t, 1265, gjson.Get(eventData, "response.usage.input_tokens_details.cached_creation_tokens").Int())
+	require.EqualValues(t, 1265, gjson.Get(eventData, "response.usage.cache_creation_tokens").Int())
+	require.EqualValues(t, 1265, gjson.Get(eventData, "response.usage.cache_write_tokens").Int())
 }
 
 func TestOaiResponsesUsageMapsLegacyCachedCreationTokens(t *testing.T) {
@@ -189,13 +214,17 @@ func TestOaiResponsesUsageKeepsMissingCacheCreationAsZero(t *testing.T) {
 
 func TestOaiResponsesUsageInfersGPT56CacheCreationTokens(t *testing.T) {
 	body := `{"id":"resp_1","model":"gpt-5.6-sol","created_at":1800000000,"usage":{"input_tokens":188727,"output_tokens":368,"total_tokens":189095,"input_tokens_details":{"cached_tokens":185088}}}`
-	c, _, info, resp := setupResponsesStreamTest(body)
+	c, recorder, info, resp := setupResponsesStreamTest(body)
 
 	usage, err := OaiResponsesHandler(c, info, resp)
 	require.Nil(t, err)
 	require.NotNil(t, usage)
 	require.Equal(t, 185088, usage.PromptTokensDetails.CachedTokens)
 	require.Equal(t, 3639, usage.PromptTokensDetails.CachedCreationTokens)
+	require.EqualValues(t, 3639, gjson.Get(recorder.Body.String(), "usage.input_tokens_details.cache_creation_tokens").Int())
+	require.EqualValues(t, 3639, gjson.Get(recorder.Body.String(), "usage.input_tokens_details.cached_creation_tokens").Int())
+	require.EqualValues(t, 3639, gjson.Get(recorder.Body.String(), "usage.cache_creation_tokens").Int())
+	require.EqualValues(t, 3639, gjson.Get(recorder.Body.String(), "usage.cache_write_tokens").Int())
 }
 
 func TestOaiResponsesUsageDoesNotInferCacheCreationForOtherModels(t *testing.T) {
@@ -223,7 +252,7 @@ func TestOaiResponsesCompactionHandlerMapsCacheCreationTokens(t *testing.T) {
 
 func TestOaiResponsesCompactionHandlerInfersGPT56CacheCreationTokens(t *testing.T) {
 	body := `{"id":"resp_1","model":"gpt-5.6-terra","usage":{"input_tokens":188727,"output_tokens":368,"total_tokens":189095,"input_tokens_details":{"cached_tokens":185088}}}`
-	c, _, _, resp := setupResponsesStreamTest(body)
+	c, recorder, _, resp := setupResponsesStreamTest(body)
 
 	usage, err := OaiResponsesCompactionHandler(c, resp)
 	require.Nil(t, err)
@@ -231,6 +260,8 @@ func TestOaiResponsesCompactionHandlerInfersGPT56CacheCreationTokens(t *testing.
 	require.Equal(t, 188727, usage.PromptTokens)
 	require.Equal(t, 185088, usage.PromptTokensDetails.CachedTokens)
 	require.Equal(t, 3639, usage.PromptTokensDetails.CachedCreationTokens)
+	require.EqualValues(t, 3639, gjson.Get(recorder.Body.String(), "usage.input_tokens_details.cache_creation_tokens").Int())
+	require.EqualValues(t, 3639, gjson.Get(recorder.Body.String(), "usage.cache_write_tokens").Int())
 }
 
 func TestOaiResponsesToChatStreamHandlerReadsDoneUsage(t *testing.T) {

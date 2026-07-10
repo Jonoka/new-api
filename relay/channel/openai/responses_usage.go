@@ -4,6 +4,9 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/dto"
+
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 func isResponsesTerminalUsageEvent(eventType string) bool {
@@ -105,4 +108,38 @@ func applyResponsesUsageToOpenAIUsage(usage *dto.Usage, resp *dto.OpenAIResponse
 	if respUsage.CompletionTokenDetails.ImageTokens != 0 {
 		usage.CompletionTokenDetails.ImageTokens = respUsage.CompletionTokenDetails.ImageTokens
 	}
+}
+
+func patchResponsesUsageCacheCreationFields(data string, usage *dto.Usage) string {
+	if usage == nil || usage.PromptTokensDetails.CachedCreationTokens <= 0 || data == "" {
+		return data
+	}
+	cacheCreationTokens := usage.PromptTokensDetails.CachedCreationTokens
+	usageRoots := []string{}
+	if gjson.Get(data, "usage").Exists() {
+		usageRoots = append(usageRoots, "usage")
+	}
+	if gjson.Get(data, "response.usage").Exists() {
+		usageRoots = append(usageRoots, "response.usage")
+	}
+	if len(usageRoots) == 0 {
+		return data
+	}
+	updated := data
+	for _, root := range usageRoots {
+		patches := []string{
+			root + ".input_tokens_details.cache_creation_tokens",
+			root + ".input_tokens_details.cached_creation_tokens",
+			root + ".cache_creation_tokens",
+			root + ".cache_write_tokens",
+		}
+		for _, path := range patches {
+			next, err := sjson.Set(updated, path, cacheCreationTokens)
+			if err != nil {
+				return data
+			}
+			updated = next
+		}
+	}
+	return updated
 }

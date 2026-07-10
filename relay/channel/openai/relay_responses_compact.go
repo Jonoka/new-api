@@ -28,8 +28,6 @@ func OaiResponsesCompactionHandler(c *gin.Context, resp *http.Response) (*dto.Us
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
 
-	service.IOCopyBytesGracefully(c, resp, responseBody)
-
 	usage := dto.Usage{}
 	if compactResp.Usage != nil {
 		usage.PromptTokens = compactResp.Usage.InputTokens
@@ -43,6 +41,8 @@ func OaiResponsesCompactionHandler(c *gin.Context, resp *http.Response) (*dto.Us
 			}
 		}
 	}
+	responseBody = []byte(patchResponsesUsageCacheCreationFields(string(responseBody), &usage))
+	service.IOCopyBytesGracefully(c, resp, responseBody)
 
 	return &usage, nil
 }
