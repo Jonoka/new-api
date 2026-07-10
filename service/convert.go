@@ -64,10 +64,8 @@ func resolveClaudePromptCacheKey(claudeRequest dto.ClaudeRequest, info *relaycom
 
 func mapClaudeEffortToOpenAIReasoningEffort(effort string) string {
 	switch strings.TrimSpace(strings.ToLower(effort)) {
-	case "low", "medium", "high", "minimal", "none", "xhigh":
+	case "low", "medium", "high", "minimal", "none", "xhigh", "max", "ultra":
 		return strings.TrimSpace(strings.ToLower(effort))
-	case "max":
-		return "xhigh"
 	default:
 		return ""
 	}

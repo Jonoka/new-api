@@ -123,3 +123,21 @@ func TestChatCompletionsRequestToResponsesRequestNormalizesReasoningEffort(t *te
 	require.NotNil(t, respReq.Reasoning)
 	require.Equal(t, "xhigh", respReq.Reasoning.Effort)
 }
+
+func TestChatCompletionsRequestToResponsesRequestPreservesMaxReasoningEffort(t *testing.T) {
+	req := &dto.GeneralOpenAIRequest{
+		Model:           "test-model",
+		ReasoningEffort: "max",
+		Messages: []dto.Message{
+			{
+				Role:    "user",
+				Content: "hello",
+			},
+		},
+	}
+
+	respReq, err := ChatCompletionsRequestToResponsesRequest(req)
+	require.NoError(t, err)
+	require.NotNil(t, respReq.Reasoning)
+	require.Equal(t, "max", respReq.Reasoning.Effort)
+}
