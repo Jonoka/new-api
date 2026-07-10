@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -59,9 +60,10 @@ type textQuotaSummary struct {
 }
 
 const (
-	cacheWriteTokensSourceUpstream             = "upstream"
-	cacheWriteTokensSourceExplicitZero         = "explicit_zero"
-	cacheWriteTokensSourceInferredMissingField = "inferred_missing_field"
+	cacheWriteTokensSourceUpstream                      = "upstream"
+	cacheWriteTokensSourceExplicitZero                  = "explicit_zero"
+	cacheWriteTokensSourceInferredMissingField          = "inferred_missing_field"
+	cacheWriteTokensSourceInferredUntrustedExplicitZero = "inferred_untrusted_explicit_zero"
 )
 
 type missingCacheWriteFallbackResult struct {
@@ -85,22 +87,30 @@ func applyMissingCacheWriteFallback(policy model_setting.MissingCacheWriteFallba
 	}
 
 	details := &usage.PromptTokensDetails
-	if details.CachedCreationTokensPresent {
-		if details.CachedCreationTokens == 0 {
-			return missingCacheWriteFallbackResult{Source: cacheWriteTokensSourceExplicitZero}
-		}
+	explicitZero := details.CachedCreationTokensPresent && details.CachedCreationTokens == 0
+	if explicitZero && !slices.Contains(policy.UntrustedExplicitZeroChannelIDs, channelID) {
+		return missingCacheWriteFallbackResult{Source: cacheWriteTokensSourceExplicitZero}
+	}
+	if details.CachedCreationTokensPresent && details.CachedCreationTokens > 0 {
 		return missingCacheWriteFallbackResult{Source: cacheWriteTokensSourceUpstream}
 	}
 	if details.CachedCreationTokens > 0 {
 		return missingCacheWriteFallbackResult{Source: cacheWriteTokensSourceUpstream}
 	}
-	if details.CachedTokens <= 0 || usage.PromptTokens <= details.CachedTokens {
+	if usage.PromptTokens <= details.CachedTokens {
+		if explicitZero {
+			return missingCacheWriteFallbackResult{Source: cacheWriteTokensSourceExplicitZero}
+		}
 		return missingCacheWriteFallbackResult{}
 	}
 
 	inferred := usage.PromptTokens - details.CachedTokens
+	source := cacheWriteTokensSourceInferredMissingField
+	if explicitZero {
+		source = cacheWriteTokensSourceInferredUntrustedExplicitZero
+	}
 	result := missingCacheWriteFallbackResult{
-		Source:         cacheWriteTokensSourceInferredMissingField,
+		Source:         source,
 		InferredTokens: inferred,
 		Billable:       policy.Mode == model_setting.MissingCacheWriteFallbackModeBill,
 	}

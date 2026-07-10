@@ -278,6 +278,62 @@ func TestApplyMissingCacheWriteFallbackKeepsExplicitZero(t *testing.T) {
 	require.Zero(t, result.InferredTokens)
 }
 
+func TestApplyMissingCacheWriteFallbackInfersUntrustedExplicitZeroOnlyForConfiguredChannel(t *testing.T) {
+	policy := model_setting.MissingCacheWriteFallbackPolicy{
+		Enabled:                         true,
+		Mode:                            model_setting.MissingCacheWriteFallbackModeObserve,
+		ChannelIDs:                      []int{24, 30},
+		UntrustedExplicitZeroChannelIDs: []int{30},
+		ModelPatterns:                   []string{`^gpt-5\.6-(luna|sol|terra)$`},
+	}
+	usage := &dto.Usage{
+		PromptTokens: 304117,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:                296704,
+			CachedCreationTokensPresent: true,
+		},
+	}
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: 30},
+	}
+
+	result := applyMissingCacheWriteFallback(policy, relayInfo, usage)
+
+	require.Zero(t, usage.PromptTokensDetails.CachedCreationTokens)
+	require.Equal(t, 7413, result.InferredTokens)
+	require.Equal(t, cacheWriteTokensSourceInferredUntrustedExplicitZero, result.Source)
+	require.False(t, result.Billable)
+}
+
+func TestApplyMissingCacheWriteFallbackKeepsExplicitZeroForOtherChannels(t *testing.T) {
+	policy := model_setting.MissingCacheWriteFallbackPolicy{
+		Enabled:                         true,
+		Mode:                            model_setting.MissingCacheWriteFallbackModeBill,
+		ChannelIDs:                      []int{24, 30},
+		UntrustedExplicitZeroChannelIDs: []int{30},
+		ModelPatterns:                   []string{`^gpt-5\.6-(luna|sol|terra)$`},
+	}
+	usage := &dto.Usage{
+		PromptTokens: 247295,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:                11008,
+			CachedCreationTokensPresent: true,
+		},
+	}
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: 24},
+	}
+
+	result := applyMissingCacheWriteFallback(policy, relayInfo, usage)
+
+	require.Zero(t, usage.PromptTokensDetails.CachedCreationTokens)
+	require.Zero(t, result.InferredTokens)
+	require.Equal(t, cacheWriteTokensSourceExplicitZero, result.Source)
+	require.False(t, result.Billable)
+}
+
 func TestApplyMissingCacheWriteFallbackRejectsUnconfiguredModelAndChannel(t *testing.T) {
 	policy := model_setting.MissingCacheWriteFallbackPolicy{
 		Enabled:       true,

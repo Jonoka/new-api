@@ -14,12 +14,13 @@ const (
 )
 
 type MissingCacheWriteFallbackPolicy struct {
-	Enabled       bool     `json:"enabled"`
-	Mode          string   `json:"mode"`
-	AllChannels   bool     `json:"all_channels"`
-	ChannelIDs    []int    `json:"channel_ids,omitempty"`
-	ChannelTypes  []int    `json:"channel_types,omitempty"`
-	ModelPatterns []string `json:"model_patterns,omitempty"`
+	Enabled                         bool     `json:"enabled"`
+	Mode                            string   `json:"mode"`
+	AllChannels                     bool     `json:"all_channels"`
+	ChannelIDs                      []int    `json:"channel_ids,omitempty"`
+	ChannelTypes                    []int    `json:"channel_types,omitempty"`
+	UntrustedExplicitZeroChannelIDs []int    `json:"untrusted_explicit_zero_channel_ids,omitempty"`
+	ModelPatterns                   []string `json:"model_patterns,omitempty"`
 }
 
 func (p MissingCacheWriteFallbackPolicy) IsEnabledFor(channelID int, channelType int, model string) bool {
