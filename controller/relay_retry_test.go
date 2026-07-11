@@ -39,20 +39,38 @@ func TestShouldRetryWithReasonRetriesConfiguredBadRequest(t *testing.T) {
 }
 
 func TestShouldRetryWithReasonFastForwardsAfterAuthUnavailable(t *testing.T) {
-	ctx := buildRelayRetryTestContext()
-	ctx.Set(string(constant.ContextKeyUsingGroup), "svip,Codex-Plus,Codex-Pro")
-	ctx.Set(string(constant.ContextKeyAutoGroup), "svip")
-	err := types.NewOpenAIError(
-		errors.New("auth_unavailable: no auth available (providers=codex, model=gpt-5.6-sol)"),
-		types.ErrorCodeBadResponseStatusCode,
-		http.StatusServiceUnavailable,
-	)
+	t.Run("multi group token", func(t *testing.T) {
+		ctx := buildRelayRetryTestContext()
+		ctx.Set(string(constant.ContextKeyUsingGroup), "svip,Codex-Plus,Codex-Pro")
+		ctx.Set(string(constant.ContextKeyAutoGroup), "svip")
+		err := types.NewOpenAIError(
+			errors.New("auth_unavailable: no auth available (providers=codex, model=gpt-5.6-sol)"),
+			types.ErrorCodeBadResponseStatusCode,
+			http.StatusServiceUnavailable,
+		)
 
-	decision := shouldRetryWithReason(ctx, err, 2)
+		decision := shouldRetryWithReason(ctx, err, 2)
 
-	require.True(t, decision.Retry)
-	require.Equal(t, "auth_unavailable_fast_group_fallback", decision.Reason)
-	require.Equal(t, 1, ctx.GetInt("auto_group_index"))
+		require.True(t, decision.Retry)
+		require.Equal(t, "auth_unavailable_fast_group_fallback", decision.Reason)
+		require.Equal(t, 1, ctx.GetInt("auto_group_index"))
+	})
+
+	t.Run("auto group before selected group is recorded", func(t *testing.T) {
+		ctx := buildRelayRetryTestContext()
+		ctx.Set(string(constant.ContextKeyUsingGroup), "auto")
+		err := types.NewOpenAIError(
+			errors.New("auth_unavailable: no auth available (providers=codex, model=gpt-5.4)"),
+			types.ErrorCodeBadResponseStatusCode,
+			http.StatusServiceUnavailable,
+		)
+
+		decision := shouldRetryWithReason(ctx, err, 2)
+
+		require.True(t, decision.Retry)
+		require.Equal(t, "auth_unavailable_fast_group_fallback", decision.Reason)
+		require.Equal(t, 1, ctx.GetInt("auto_group_index"))
+	})
 }
 
 func TestShouldRetryWithReasonReportsBlockingReason(t *testing.T) {

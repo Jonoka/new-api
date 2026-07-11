@@ -386,10 +386,6 @@ func shouldFastFallbackGroup(c *gin.Context, openaiErr *types.NewAPIError) bool 
 		return false
 	}
 	usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
-	selectedGroup := common.GetContextKeyString(c, constant.ContextKeyAutoGroup)
-	if selectedGroup == "" || selectedGroup == usingGroup {
-		return false
-	}
 	if usingGroup == "auto" {
 		return true
 	}
