@@ -39,10 +39,11 @@ func TestShouldRetryWithReasonRetriesConfiguredBadRequest(t *testing.T) {
 }
 
 func TestShouldRetryWithReasonFastForwardsAfterAuthUnavailable(t *testing.T) {
-	t.Run("multi group token", func(t *testing.T) {
+	t.Run("multi group token uses original token group after distributor selects first group", func(t *testing.T) {
 		ctx := buildRelayRetryTestContext()
-		ctx.Set(string(constant.ContextKeyUsingGroup), "svip,Codex-Plus,Codex-Pro")
+		ctx.Set(string(constant.ContextKeyUsingGroup), "svip")
 		ctx.Set(string(constant.ContextKeyAutoGroup), "svip")
+		ctx.Set("relay_info", &relaycommon.RelayInfo{TokenGroup: "svip,Codex-Plus,Codex-Pro"})
 		err := types.NewOpenAIError(
 			errors.New("auth_unavailable: no auth available (providers=codex, model=gpt-5.6-sol)"),
 			types.ErrorCodeBadResponseStatusCode,

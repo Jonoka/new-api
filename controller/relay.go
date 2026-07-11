@@ -381,15 +381,27 @@ func isAuthUnavailableError(openaiErr *types.NewAPIError) bool {
 	return strings.Contains(msg, "auth_unavailable") && strings.Contains(msg, "no auth available")
 }
 
+func fallbackTokenGroup(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	if relayInfo, ok := c.Get("relay_info"); ok {
+		if info, ok := relayInfo.(*relaycommon.RelayInfo); ok && info != nil && info.TokenGroup != "" {
+			return info.TokenGroup
+		}
+	}
+	return common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+}
+
 func shouldFastFallbackGroup(c *gin.Context, openaiErr *types.NewAPIError) bool {
 	if c == nil || !isAuthUnavailableError(openaiErr) {
 		return false
 	}
-	usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
-	if usingGroup == "auto" {
+	tokenGroup := fallbackTokenGroup(c)
+	if tokenGroup == "auto" {
 		return true
 	}
-	if strings.Contains(usingGroup, ",") {
+	if strings.Contains(tokenGroup, ",") {
 		return true
 	}
 	return false
