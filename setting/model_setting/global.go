@@ -20,6 +20,7 @@ type MissingCacheWriteFallbackPolicy struct {
 	ChannelIDs                      []int    `json:"channel_ids,omitempty"`
 	ChannelTypes                    []int    `json:"channel_types,omitempty"`
 	UntrustedExplicitZeroChannelIDs []int    `json:"untrusted_explicit_zero_channel_ids,omitempty"`
+	BillChannelIDs                  []int    `json:"bill_channel_ids,omitempty"`
 	ModelPatterns                   []string `json:"model_patterns,omitempty"`
 }
 

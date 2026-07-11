@@ -109,10 +109,12 @@ func applyMissingCacheWriteFallback(policy model_setting.MissingCacheWriteFallba
 	if explicitZero {
 		source = cacheWriteTokensSourceInferredUntrustedExplicitZero
 	}
+	billable := policy.Mode == model_setting.MissingCacheWriteFallbackModeBill ||
+		(channelID > 0 && slices.Contains(policy.BillChannelIDs, channelID))
 	result := missingCacheWriteFallbackResult{
 		Source:         source,
 		InferredTokens: inferred,
-		Billable:       policy.Mode == model_setting.MissingCacheWriteFallbackModeBill,
+		Billable:       billable,
 	}
 	if result.Billable {
 		details.CachedCreationTokens = inferred

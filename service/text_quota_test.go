@@ -306,6 +306,63 @@ func TestApplyMissingCacheWriteFallbackInfersUntrustedExplicitZeroOnlyForConfigu
 	require.False(t, result.Billable)
 }
 
+func TestApplyMissingCacheWriteFallbackBillsOnlyConfiguredBillChannel(t *testing.T) {
+	policy := model_setting.MissingCacheWriteFallbackPolicy{
+		Enabled:                         true,
+		Mode:                            model_setting.MissingCacheWriteFallbackModeObserve,
+		ChannelIDs:                      []int{1, 4, 5, 21, 30},
+		UntrustedExplicitZeroChannelIDs: []int{4, 5, 21, 30},
+		BillChannelIDs:                  []int{4, 5, 21, 30},
+		ModelPatterns:                   []string{`^gpt-5\.6-(luna|sol|terra)$`},
+	}
+	usage := &dto.Usage{
+		PromptTokens: 57861,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:                56064,
+			CachedCreationTokensPresent: true,
+		},
+	}
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: 30},
+	}
+
+	result := applyMissingCacheWriteFallback(policy, relayInfo, usage)
+
+	require.Equal(t, 1797, usage.PromptTokensDetails.CachedCreationTokens)
+	require.Equal(t, 1797, result.InferredTokens)
+	require.Equal(t, cacheWriteTokensSourceInferredUntrustedExplicitZero, result.Source)
+	require.True(t, result.Billable)
+}
+
+func TestApplyMissingCacheWriteFallbackKeepsOtherConfiguredChannelsObserveOnly(t *testing.T) {
+	policy := model_setting.MissingCacheWriteFallbackPolicy{
+		Enabled:                         true,
+		Mode:                            model_setting.MissingCacheWriteFallbackModeObserve,
+		ChannelIDs:                      []int{1, 30},
+		UntrustedExplicitZeroChannelIDs: []int{1, 30},
+		BillChannelIDs:                  []int{30},
+		ModelPatterns:                   []string{`^gpt-5\.6-(luna|sol|terra)$`},
+	}
+	usage := &dto.Usage{
+		PromptTokens: 274199,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:                272896,
+			CachedCreationTokensPresent: true,
+		},
+	}
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: 1},
+	}
+
+	result := applyMissingCacheWriteFallback(policy, relayInfo, usage)
+
+	require.Zero(t, usage.PromptTokensDetails.CachedCreationTokens)
+	require.Equal(t, 1303, result.InferredTokens)
+	require.False(t, result.Billable)
+}
+
 func TestApplyMissingCacheWriteFallbackKeepsExplicitZeroForOtherChannels(t *testing.T) {
 	policy := model_setting.MissingCacheWriteFallbackPolicy{
 		Enabled:                         true,
