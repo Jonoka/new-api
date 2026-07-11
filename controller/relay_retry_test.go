@@ -108,6 +108,24 @@ func TestShouldRetryWithReasonReportsBlockingReason(t *testing.T) {
 		require.Equal(t, "channel_affinity_skip", decision.Reason)
 	})
 
+	t.Run("upstream timing without client body does not block retry", func(t *testing.T) {
+		ctx := buildRelayRetryTestContext()
+		info := &relaycommon.RelayInfo{}
+		info.ResetFirstResponseTiming(time.Now())
+		info.SetFirstResponseTime()
+		ctx.Set("relay_info", info)
+		err := types.NewOpenAIError(
+			errors.New("Service temporarily unavailable"),
+			types.ErrorCodeBadResponseStatusCode,
+			http.StatusServiceUnavailable,
+		)
+
+		decision := shouldRetryWithReason(ctx, err, 2)
+
+		require.True(t, decision.Retry)
+		require.Equal(t, "status_code_retry", decision.Reason)
+	})
+
 	t.Run("stream already started", func(t *testing.T) {
 		ctx := buildRelayRetryTestContext()
 		info := &relaycommon.RelayInfo{}

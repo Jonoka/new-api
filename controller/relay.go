@@ -453,7 +453,7 @@ func shouldRetryWithReason(c *gin.Context, openaiErr *types.NewAPIError, retryTi
 	}
 	if relayInfo, ok := c.Get("relay_info"); ok {
 		if info, ok := relayInfo.(*relaycommon.RelayInfo); ok && info != nil {
-			if info.HasSendResponse() || info.ReceivedResponseCount > 0 {
+			if c.Writer.Written() || info.ReceivedResponseCount > 0 {
 				return retryDecision{Reason: "no_retry_after_stream_started"}
 			}
 		}
