@@ -232,6 +232,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		processChannelError(c, relayInfo, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 
 		retryDecision := shouldRetryWithReason(c, newAPIError, common.RetryTimes-retryParam.GetRetry())
+		if retryDecision.Reason == "auth_unavailable_fast_group_fallback" {
+			retryParam.SetRetry(0)
+			retryParam.ResetRetryNextTry()
+		}
 		if !retryDecision.Retry {
 			logger.LogInfo(c, fmt.Sprintf("不重试：%s", retryDecision.Reason))
 			break
@@ -366,6 +370,44 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	return shouldRetryWithReason(c, openaiErr, retryTimes).Retry
 }
 
+func isAuthUnavailableError(openaiErr *types.NewAPIError) bool {
+	if openaiErr == nil {
+		return false
+	}
+	if openaiErr.StatusCode != http.StatusServiceUnavailable {
+		return false
+	}
+	msg := strings.ToLower(openaiErr.Error())
+	return strings.Contains(msg, "auth_unavailable") && strings.Contains(msg, "no auth available")
+}
+
+func shouldFastFallbackGroup(c *gin.Context, openaiErr *types.NewAPIError) bool {
+	if c == nil || !isAuthUnavailableError(openaiErr) {
+		return false
+	}
+	usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+	selectedGroup := common.GetContextKeyString(c, constant.ContextKeyAutoGroup)
+	if selectedGroup == "" || selectedGroup == usingGroup {
+		return false
+	}
+	if usingGroup == "auto" {
+		return true
+	}
+	if strings.Contains(usingGroup, ",") {
+		return true
+	}
+	return false
+}
+
+func markFastFallbackNextGroup(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	idx := common.GetContextKeyInt(c, constant.ContextKeyAutoGroupIndex)
+	common.SetContextKey(c, constant.ContextKeyAutoGroupIndex, idx+1)
+	common.SetContextKey(c, constant.ContextKeyAutoGroupRetryIndex, 0)
+}
+
 func shouldRetryWithReason(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) retryDecision {
 	if openaiErr == nil {
 		return retryDecision{Reason: "nil_error"}
@@ -391,6 +433,10 @@ func shouldRetryWithReason(c *gin.Context, openaiErr *types.NewAPIError, retryTi
 	}
 	if _, ok := c.Get("specific_channel_id"); ok {
 		return retryDecision{Reason: "specific_channel"}
+	}
+	if shouldFastFallbackGroup(c, openaiErr) {
+		markFastFallbackNextGroup(c)
+		return retryDecision{Retry: true, Reason: "auth_unavailable_fast_group_fallback"}
 	}
 	code := openaiErr.StatusCode
 	if code >= 200 && code < 300 {

@@ -1,11 +1,13 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -34,6 +36,23 @@ func TestShouldRetryWithReasonRetriesConfiguredBadRequest(t *testing.T) {
 
 	require.True(t, decision.Retry)
 	require.Equal(t, "status_code_retry", decision.Reason)
+}
+
+func TestShouldRetryWithReasonFastForwardsAfterAuthUnavailable(t *testing.T) {
+	ctx := buildRelayRetryTestContext()
+	ctx.Set(string(constant.ContextKeyUsingGroup), "svip,Codex-Plus,Codex-Pro")
+	ctx.Set(string(constant.ContextKeyAutoGroup), "svip")
+	err := types.NewOpenAIError(
+		errors.New("auth_unavailable: no auth available (providers=codex, model=gpt-5.6-sol)"),
+		types.ErrorCodeBadResponseStatusCode,
+		http.StatusServiceUnavailable,
+	)
+
+	decision := shouldRetryWithReason(ctx, err, 2)
+
+	require.True(t, decision.Retry)
+	require.Equal(t, "auth_unavailable_fast_group_fallback", decision.Reason)
+	require.Equal(t, 1, ctx.GetInt("auto_group_index"))
 }
 
 func TestShouldRetryWithReasonReportsBlockingReason(t *testing.T) {
