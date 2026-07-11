@@ -52,6 +52,10 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 		other["is_model_mapped"] = true
 		other["upstream_model_name"] = relayInfo.UpstreamModelName
 	}
+	if requestedModel := ctx.GetString("compatibility_requested_model"); requestedModel != "" {
+		other["compatibility_requested_model"] = requestedModel
+		other["compatibility_routed_model"] = ctx.GetString("compatibility_routed_model")
+	}
 
 	isSystemPromptOverwritten := common.GetContextKeyBool(ctx, constant.ContextKeySystemPromptOverride)
 	if isSystemPromptOverwritten {

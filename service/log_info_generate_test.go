@@ -20,6 +20,21 @@ func buildLogInfoContextForTest() *gin.Context {
 	return ctx
 }
 
+func TestGenerateTextOtherInfoCompatibilityRoutingAudit(t *testing.T) {
+	ctx := buildLogInfoContextForTest()
+	ctx.Set("compatibility_requested_model", "gpt-image-2")
+	ctx.Set("compatibility_routed_model", "gpt-image-2-lite")
+	info := &relaycommon.RelayInfo{
+		StartTime:   time.Now(),
+		ChannelMeta: &relaycommon.ChannelMeta{},
+	}
+
+	other := GenerateTextOtherInfo(ctx, info, 0, 0.4, 0, 0, 0, 0.1, -1)
+
+	require.Equal(t, "gpt-image-2", other["compatibility_requested_model"])
+	require.Equal(t, "gpt-image-2-lite", other["compatibility_routed_model"])
+}
+
 func TestGenerateTextOtherInfoTimingDiagnosticsDisabled(t *testing.T) {
 	oldEnabled := constant.UpstreamTimingDiagnosticsEnabled
 	constant.UpstreamTimingDiagnosticsEnabled = false

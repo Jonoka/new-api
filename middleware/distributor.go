@@ -42,6 +42,12 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 			return
 		}
+		requestedModel := modelRequest.Model
+		modelRequest.Model = resolveImageCompatibilityModel(c.Request.URL.Path, modelRequest.Model)
+		if requestedModel != modelRequest.Model {
+			c.Set("compatibility_requested_model", requestedModel)
+			c.Set("compatibility_routed_model", modelRequest.Model)
+		}
 		if ok {
 			id, err := strconv.Atoi(channelId.(string))
 			if err != nil {
@@ -78,7 +84,7 @@ func Distribute() func(c *gin.Context) {
 				if !ok {
 					tokenModelLimit = map[string]bool{}
 				}
-				matchName := ratio_setting.FormatMatchingModelName(modelRequest.Model) // match gpts & thinking-*
+				matchName := ratio_setting.FormatMatchingModelName(requestedModel) // authorize the client-visible model before compatibility routing
 				if _, ok := tokenModelLimit[matchName]; !ok {
 					abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorTokenModelForbidden, map[string]any{"Model": modelRequest.Model}))
 					return
@@ -249,6 +255,10 @@ func Distribute() func(c *gin.Context) {
 			common.SetContextKey(c, constant.ContextKeyUsingGroup, selectGroup)
 		}
 		common.SetContextKey(c, constant.ContextKeyOriginalModel, modelRequest.Model)
+		if requestedModel != modelRequest.Model {
+			c.Set("compatibility_requested_model", requestedModel)
+			c.Set("compatibility_routed_model", modelRequest.Model)
+		}
 		if channel != nil {
 			common.SetContextKey(c, constant.ContextKeySelectedChannel, channel)
 		}
@@ -502,6 +512,16 @@ func isImageGenerationTaskPath(path string) bool {
 	return strings.HasPrefix(path, "/v1/images/generations/") ||
 		strings.HasPrefix(path, "/canvas/v1/images/generations/") ||
 		strings.HasPrefix(path, "/canvas/v1/images/edits/")
+}
+
+func resolveImageCompatibilityModel(path string, modelName string) string {
+	if modelName != "gpt-image-2" || isImageGenerationTaskPath(path) {
+		return modelName
+	}
+	if isImageGenerationPath(path) || isImageEditPath(path) {
+		return "gpt-image-2-lite"
+	}
+	return modelName
 }
 
 func isImageGenerationPath(path string) bool {
