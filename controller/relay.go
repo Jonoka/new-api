@@ -408,6 +408,18 @@ func shouldRetryWithReason(c *gin.Context, openaiErr *types.NewAPIError, retryTi
 	if openaiErr == nil {
 		return retryDecision{Reason: "nil_error"}
 	}
+	if shouldFastFallbackGroup(c, openaiErr) {
+		if relayInfo, ok := c.Get("relay_info"); ok {
+			if info, ok := relayInfo.(*relaycommon.RelayInfo); ok && info != nil && info.ReceivedResponseCount > 0 {
+				return retryDecision{Reason: "no_retry_after_stream_started"}
+			}
+		}
+		if _, ok := c.Get("specific_channel_id"); ok {
+			return retryDecision{Reason: "specific_channel"}
+		}
+		markFastFallbackNextGroup(c)
+		return retryDecision{Retry: true, Reason: "auth_unavailable_fast_group_fallback"}
+	}
 	if relayInfo, ok := c.Get("relay_info"); ok {
 		if info, ok := relayInfo.(*relaycommon.RelayInfo); ok && info != nil {
 			if info.HasSendResponse() || info.ReceivedResponseCount > 0 {
@@ -429,10 +441,6 @@ func shouldRetryWithReason(c *gin.Context, openaiErr *types.NewAPIError, retryTi
 	}
 	if _, ok := c.Get("specific_channel_id"); ok {
 		return retryDecision{Reason: "specific_channel"}
-	}
-	if shouldFastFallbackGroup(c, openaiErr) {
-		markFastFallbackNextGroup(c)
-		return retryDecision{Retry: true, Reason: "auth_unavailable_fast_group_fallback"}
 	}
 	code := openaiErr.StatusCode
 	if code >= 200 && code < 300 {

@@ -56,9 +56,13 @@ func TestShouldRetryWithReasonFastForwardsAfterAuthUnavailable(t *testing.T) {
 		require.Equal(t, 1, ctx.GetInt("auto_group_index"))
 	})
 
-	t.Run("auto group before selected group is recorded", func(t *testing.T) {
+	t.Run("auto group retries auth error even when non-stream timing is marked", func(t *testing.T) {
 		ctx := buildRelayRetryTestContext()
 		ctx.Set(string(constant.ContextKeyUsingGroup), "auto")
+		info := &relaycommon.RelayInfo{}
+		info.ResetFirstResponseTiming(time.Now())
+		info.SetFirstResponseTime()
+		ctx.Set("relay_info", info)
 		err := types.NewOpenAIError(
 			errors.New("auth_unavailable: no auth available (providers=codex, model=gpt-5.4)"),
 			types.ErrorCodeBadResponseStatusCode,
