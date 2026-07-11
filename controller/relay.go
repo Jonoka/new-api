@@ -232,7 +232,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		processChannelError(c, relayInfo, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 
 		retryDecision := shouldRetryWithReason(c, newAPIError, common.RetryTimes-retryParam.GetRetry())
+		if retryDecision.Reason == "auth_unavailable_same_group_fallback" {
+			retryParam.ForceExcludeUsed = true
+			retryParam.SetRetry(0)
+			retryParam.ResetRetryNextTry()
+		}
 		if retryDecision.Reason == "auth_unavailable_fast_group_fallback" {
+			retryParam.ForceExcludeUsed = false
 			retryParam.SetRetry(0)
 			retryParam.ResetRetryNextTry()
 		}
@@ -332,7 +338,7 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 			AutoBan: &autoBanInt,
 		}, nil
 	}
-	if retryParam.GetRetry() > 0 {
+	if retryParam.GetRetry() > 0 || retryParam.ForceExcludeUsed {
 		retryParam.ExcludedChannelIDs = usedChannelIDSet(c)
 	} else {
 		retryParam.ExcludedChannelIDs = nil
@@ -416,6 +422,16 @@ func markFastFallbackNextGroup(c *gin.Context) {
 	common.SetContextKey(c, constant.ContextKeyAutoGroupRetryIndex, 0)
 }
 
+const authUnavailableSameGroupTriedKey = "auth_unavailable_same_group_tried"
+
+func shouldTrySameGroupAfterAuthUnavailable(c *gin.Context) bool {
+	if c == nil || c.GetBool(authUnavailableSameGroupTriedKey) {
+		return false
+	}
+	c.Set(authUnavailableSameGroupTriedKey, true)
+	return true
+}
+
 func shouldRetryWithReason(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) retryDecision {
 	if openaiErr == nil {
 		return retryDecision{Reason: "nil_error"}
@@ -428,6 +444,9 @@ func shouldRetryWithReason(c *gin.Context, openaiErr *types.NewAPIError, retryTi
 		}
 		if _, ok := c.Get("specific_channel_id"); ok {
 			return retryDecision{Reason: "specific_channel"}
+		}
+		if shouldTrySameGroupAfterAuthUnavailable(c) {
+			return retryDecision{Retry: true, Reason: "auth_unavailable_same_group_fallback"}
 		}
 		markFastFallbackNextGroup(c)
 		return retryDecision{Retry: true, Reason: "auth_unavailable_fast_group_fallback"}

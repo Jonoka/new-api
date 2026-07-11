@@ -19,6 +19,7 @@ type RetryParam struct {
 	ModelName          string
 	Retry              *int
 	ExcludedChannelIDs map[int]struct{}
+	ForceExcludeUsed    bool
 	resetNextTry       bool
 }
 

@@ -53,8 +53,8 @@ func TestShouldRetryWithReasonFastForwardsAfterAuthUnavailable(t *testing.T) {
 		decision := shouldRetryWithReason(ctx, err, 2)
 
 		require.True(t, decision.Retry)
-		require.Equal(t, "auth_unavailable_fast_group_fallback", decision.Reason)
-		require.Equal(t, 1, ctx.GetInt("auto_group_index"))
+		require.Equal(t, "auth_unavailable_same_group_fallback", decision.Reason)
+		require.Equal(t, 0, ctx.GetInt("auto_group_index"))
 	})
 
 	t.Run("auto group retries auth error even when non-stream timing is marked", func(t *testing.T) {
@@ -73,7 +73,12 @@ func TestShouldRetryWithReasonFastForwardsAfterAuthUnavailable(t *testing.T) {
 		decision := shouldRetryWithReason(ctx, err, 2)
 
 		require.True(t, decision.Retry)
-		require.Equal(t, "auth_unavailable_fast_group_fallback", decision.Reason)
+		require.Equal(t, "auth_unavailable_same_group_fallback", decision.Reason)
+		require.Equal(t, 0, ctx.GetInt("auto_group_index"))
+
+		secondDecision := shouldRetryWithReason(ctx, err, 2)
+		require.True(t, secondDecision.Retry)
+		require.Equal(t, "auth_unavailable_fast_group_fallback", secondDecision.Reason)
 		require.Equal(t, 1, ctx.GetInt("auto_group_index"))
 	})
 }
