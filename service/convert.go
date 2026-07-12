@@ -911,9 +911,9 @@ func ResponseOpenAI2Gemini(openAIResponse *dto.OpenAITextResponse, info *relayco
 	geminiResponse := &dto.GeminiChatResponse{
 		Candidates: make([]dto.GeminiChatCandidate, 0, len(openAIResponse.Choices)),
 		UsageMetadata: dto.GeminiUsageMetadata{
-			PromptTokenCount:     openAIResponse.PromptTokens,
-			CandidatesTokenCount: openAIResponse.CompletionTokens,
-			TotalTokenCount:      openAIResponse.PromptTokens + openAIResponse.CompletionTokens,
+			PromptTokenCount:     openAIResponse.Usage.PromptTokens,
+			CandidatesTokenCount: openAIResponse.Usage.CompletionTokens,
+			TotalTokenCount:      openAIResponse.Usage.PromptTokens + openAIResponse.Usage.CompletionTokens,
 		},
 	}
 

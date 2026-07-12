@@ -117,3 +117,55 @@ func TestResponsesUsageTopLevelZeroAliasIsNotDetailCacheCreation(t *testing.T) {
 	require.False(t, usage.HasAnyDetailCacheCreationTokensField())
 	require.Equal(t, 0, usage.GetCacheCreationTokens())
 }
+
+func TestOpenAITextResponseUnmarshalKeepsEnvelopeAndUsage(t *testing.T) {
+	var response OpenAITextResponse
+	body := `{"id":"chatcmpl-test","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30,"cache_write_tokens":4}}`
+
+	require.NoError(t, common.Unmarshal([]byte(body), &response))
+	require.Equal(t, "chatcmpl-test", response.Id)
+	require.Len(t, response.Choices, 1)
+	require.Equal(t, 10, response.Usage.PromptTokens)
+	require.Equal(t, 20, response.Usage.CompletionTokens)
+	require.Equal(t, 30, response.Usage.TotalTokens)
+	require.Equal(t, 4, response.Usage.CacheWriteTokens)
+	require.True(t, response.Usage.HasCacheWriteTokens)
+}
+
+func TestUsageResponseEnvelopesUnmarshalNestedUsage(t *testing.T) {
+	body := []byte(`{"usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}}`)
+
+	t.Run("simple response", func(t *testing.T) {
+		var response SimpleResponse
+		require.NoError(t, common.Unmarshal(body, &response))
+		require.Equal(t, 10, response.Usage.PromptTokens)
+	})
+
+	t.Run("text response", func(t *testing.T) {
+		var response TextResponse
+		require.NoError(t, common.Unmarshal(body, &response))
+		require.Equal(t, 10, response.Usage.PromptTokens)
+	})
+
+	t.Run("OpenAI embedding response", func(t *testing.T) {
+		var response OpenAIEmbeddingResponse
+		require.NoError(t, common.Unmarshal(body, &response))
+		require.Equal(t, 10, response.Usage.PromptTokens)
+	})
+
+	t.Run("flexible embedding response", func(t *testing.T) {
+		var response FlexibleEmbeddingResponse
+		require.NoError(t, common.Unmarshal(body, &response))
+		require.Equal(t, 10, response.Usage.PromptTokens)
+	})
+
+	t.Run("generic embedding response", func(t *testing.T) {
+		var response EmbeddingResponse
+		embeddingBody := []byte(`{"object":"list","model":"embedding-test","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]}],"usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}}`)
+		require.NoError(t, common.Unmarshal(embeddingBody, &response))
+		require.Equal(t, "list", response.Object)
+		require.Equal(t, "embedding-test", response.Model)
+		require.Len(t, response.Data, 1)
+		require.Equal(t, 10, response.Usage.PromptTokens)
+	})
+}

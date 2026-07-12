@@ -13,8 +13,8 @@ const (
 )
 
 type SimpleResponse struct {
-	Usage `json:"usage"`
-	Error any `json:"error"`
+	Usage Usage `json:"usage"`
+	Error any   `json:"error"`
 }
 
 // GetOpenAIError 从动态错误类型中提取OpenAIError结构
@@ -28,7 +28,7 @@ type TextResponse struct {
 	Created int64                      `json:"created"`
 	Model   string                     `json:"model"`
 	Choices []OpenAITextResponseChoice `json:"choices"`
-	Usage   `json:"usage"`
+	Usage   Usage                      `json:"usage"`
 }
 
 type OpenAITextResponseChoice struct {
@@ -44,7 +44,7 @@ type OpenAITextResponse struct {
 	Created any                        `json:"created"`
 	Choices []OpenAITextResponseChoice `json:"choices"`
 	Error   any                        `json:"error,omitempty"`
-	Usage   `json:"usage"`
+	Usage   Usage                      `json:"usage"`
 }
 
 // GetOpenAIError 从动态错误类型中提取OpenAIError结构
@@ -62,7 +62,7 @@ type OpenAIEmbeddingResponse struct {
 	Object string                        `json:"object"`
 	Data   []OpenAIEmbeddingResponseItem `json:"data"`
 	Model  string                        `json:"model"`
-	Usage  `json:"usage"`
+	Usage  Usage                         `json:"usage"`
 }
 
 type FlexibleEmbeddingResponseItem struct {
@@ -75,7 +75,7 @@ type FlexibleEmbeddingResponse struct {
 	Object string                          `json:"object"`
 	Data   []FlexibleEmbeddingResponseItem `json:"data"`
 	Model  string                          `json:"model"`
-	Usage  `json:"usage"`
+	Usage  Usage                           `json:"usage"`
 }
 
 type ChatCompletionsStreamResponseChoice struct {

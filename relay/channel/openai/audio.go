@@ -46,8 +46,8 @@ func OpenaiTTSHandler(c *gin.Context, resp *http.Response, info *relaycommon.Rel
 					sr.Error(err)
 				} else if simpleResponse.Usage.TotalTokens != 0 {
 					usage.PromptTokens = simpleResponse.Usage.InputTokens
-					usage.CompletionTokens = simpleResponse.OutputTokens
-					usage.TotalTokens = simpleResponse.TotalTokens
+					usage.CompletionTokens = simpleResponse.Usage.OutputTokens
+					usage.TotalTokens = simpleResponse.Usage.TotalTokens
 				}
 			}
 			if err := helper.StringData(c, data); err != nil {
