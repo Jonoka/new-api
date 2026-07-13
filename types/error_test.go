@@ -12,3 +12,11 @@ func TestNewOpenAIErrorPreservesTypedErrorCode(t *testing.T) {
 		t.Fatalf("expected %q, got %q", ErrorCodeDoRequestFailed, got)
 	}
 }
+
+func TestNewOpenAIErrorPreservesErrorCodeWhenWrappingNewAPIError(t *testing.T) {
+	inner := NewError(errors.New("dial failed"), ErrorCodeDoRequestFailed)
+	err := NewOpenAIError(inner, ErrorCodeDoRequestFailed, http.StatusInternalServerError)
+	if got := err.GetErrorCode(); got != ErrorCodeDoRequestFailed {
+		t.Fatalf("expected %q, got %q", ErrorCodeDoRequestFailed, got)
+	}
+}

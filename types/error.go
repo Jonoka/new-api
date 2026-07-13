@@ -271,10 +271,12 @@ func NewOpenAIError(err error, errorCode ErrorCode, statusCode int, ops ...NewAP
 			openaiError := OpenAIError{
 				Message: newErr.Error(),
 				Type:    string(errorCode),
-				Code:    errorCode,
+				Code:    string(errorCode),
 			}
 			newErr.RelayError = openaiError
 		}
+		newErr.errorCode = errorCode
+		newErr.StatusCode = statusCode
 		for _, op := range ops {
 			op(newErr)
 		}
