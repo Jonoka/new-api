@@ -14,13 +14,15 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/relay/helper"
-	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+)
+
+var (
+	relayImageTaskRelay = Relay
+	insertImageTask     = func(task *model.Task) error { return task.Insert() }
 )
 
 // RelayImageTaskSubmit handles upstreams that expose async image jobs through
@@ -28,55 +30,24 @@ import (
 // relay path writes the submit response and charges the request, but it does
 // not persist a row in tasks, so later GET /v1/images/generations/{task_id}
 // cannot find the returned public task id.  This task-shaped submit path keeps
-// billing and response behavior in ImageHelper, then persists the returned task
-// metadata for polling.
+// billing, channel selection, and retries in Relay, then persists the returned
+// task metadata for polling.
 func RelayImageTaskSubmit(c *gin.Context) {
-	request, err := helper.GetAndValidateRequest(c, types.RelayFormatOpenAIImage)
-	if err != nil {
-		apiErr := types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
-		c.JSON(apiErr.StatusCode, gin.H{"error": apiErr.ToOpenAIError()})
-		return
-	}
-
-	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatOpenAIImage, request, nil)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, &dto.TaskError{
-			Code:       "gen_relay_info_failed",
-			Message:    err.Error(),
-			StatusCode: http.StatusInternalServerError,
-		})
-		return
-	}
-
-	meta := request.GetTokenCountMeta()
-	tokens, err := service.EstimateRequestToken(c, meta, relayInfo)
-	if err != nil {
-		apiErr := types.NewErrorWithStatusCode(err, types.ErrorCodeCountTokenFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
-		c.JSON(apiErr.StatusCode, gin.H{"error": apiErr.ToOpenAIError()})
-		return
-	}
-	relayInfo.SetEstimatePromptTokens(tokens)
-	priceData, err := helper.ModelPriceHelper(c, relayInfo, tokens, meta)
-	if err != nil {
-		apiErr := types.NewErrorWithStatusCode(err, types.ErrorCodeModelPriceError, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
-		c.JSON(apiErr.StatusCode, gin.H{"error": apiErr.ToOpenAIError()})
-		return
-	}
-	if !priceData.FreeModel {
-		if apiErr := service.PreConsumeBilling(c, priceData.QuotaToPreConsume, relayInfo); apiErr != nil {
-			c.JSON(apiErr.StatusCode, apiErr.ToOpenAIError())
-			return
-		}
-	}
-
 	capture := &imageTaskResponseCapture{ResponseWriter: c.Writer}
 	c.Writer = capture
-	apiErr := relayHandler(c, relayInfo)
-	if apiErr != nil {
-		if relayInfo.Billing != nil {
-			relayInfo.Billing.Refund(c)
-		}
-		c.JSON(apiErr.StatusCode, apiErr.ToOpenAIError())
+	relayImageTaskRelay(c, types.RelayFormatOpenAIImage)
+	if capture.Status() < http.StatusOK || capture.Status() >= http.StatusMultipleChoices {
+		return
+	}
+
+	value, ok := c.Get("relay_info")
+	if !ok {
+		common.SysLog("skip image task insert: relay info missing after successful response")
+		return
+	}
+	relayInfo, ok := value.(*relaycommon.RelayInfo)
+	if !ok || relayInfo == nil {
+		common.SysLog("skip image task insert: invalid relay info after successful response")
 		return
 	}
 
@@ -122,7 +93,7 @@ func RelayImageTaskSubmit(c *gin.Context) {
 	if len(body) > 0 {
 		task.Data = body
 	}
-	if insertErr := task.Insert(); insertErr != nil {
+	if insertErr := insertImageTask(task); insertErr != nil {
 		common.SysError("insert image task error: " + insertErr.Error())
 		return
 	}
