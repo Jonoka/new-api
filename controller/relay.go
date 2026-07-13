@@ -72,8 +72,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	//originalModel := common.GetContextKeyString(c, constant.ContextKeyOriginalModel)
 
 	var (
-		newAPIError *types.NewAPIError
-		ws          *websocket.Conn
+		newAPIError                   *types.NewAPIError
+		ws                            *websocket.Conn
+		liteChannelSelectionExhausted bool
 	)
 
 	if relayFormat == types.RelayFormatOpenAIRealtime {
@@ -194,6 +195,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if channelErr != nil {
 			logger.LogError(c, channelErr.Error())
 			newAPIError = channelErr
+			liteChannelSelectionExhausted = strings.EqualFold(strings.TrimSpace(relayInfo.OriginModelName), "gpt-image-2-lite") && len(c.GetStringSlice("use_channel")) > 0
 			break
 		}
 
@@ -254,10 +256,45 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		logger.LogInfo(c, retryLogStr)
 	}
 	if newAPIError != nil {
+		if shouldMarkLitePoolExhausted(c, relayInfo, newAPIError, liteChannelSelectionExhausted) {
+			newAPIError = markLitePoolExhausted(newAPIError)
+		}
 		gopool.Go(func() {
 			perfmetrics.RecordRelaySample(relayInfo, false, 0)
 		})
 	}
+}
+
+func shouldMarkLitePoolExhausted(c *gin.Context, relayInfo *relaycommon.RelayInfo, err *types.NewAPIError, channelSelectionExhausted bool) bool {
+	if !channelSelectionExhausted || c == nil || relayInfo == nil || err == nil || !strings.EqualFold(strings.TrimSpace(relayInfo.OriginModelName), "gpt-image-2-lite") {
+		return false
+	}
+	if len(c.GetStringSlice("use_channel")) == 0 {
+		return false
+	}
+	switch err.GetErrorCode() {
+	case types.ErrorCodeInvalidRequest,
+		types.ErrorCodeReadRequestBodyFailed,
+		types.ErrorCodeConvertRequestFailed,
+		types.ErrorCodeModelPriceError,
+		types.ErrorCodeInsufficientUserQuota,
+		types.ErrorCodePreConsumeTokenQuotaFailed,
+		types.ErrorCodePromptBlocked,
+		types.ErrorCodeSensitiveWordsDetected,
+		types.ErrorCodeAccessDenied:
+		return false
+	}
+	return err.StatusCode >= http.StatusInternalServerError && err.StatusCode <= 599
+}
+
+func markLitePoolExhausted(err *types.NewAPIError) *types.NewAPIError {
+	if err == nil {
+		return nil
+	}
+	openAIError := err.ToOpenAIError()
+	openAIError.Type = string(types.ErrorCodeLitePoolExhausted)
+	openAIError.Code = string(types.ErrorCodeLitePoolExhausted)
+	return types.WithOpenAIError(openAIError, err.StatusCode)
 }
 
 var upgrader = websocket.Upgrader{

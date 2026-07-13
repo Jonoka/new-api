@@ -85,6 +85,9 @@ const (
 	// quota error
 	ErrorCodeInsufficientUserQuota      ErrorCode = "insufficient_user_quota"
 	ErrorCodePreConsumeTokenQuotaFailed ErrorCode = "pre_consume_token_quota_failed"
+
+	// image availability error exposed only after the Lite pool has been exhausted
+	ErrorCodeLitePoolExhausted ErrorCode = "lite_pool_exhausted"
 )
 
 type NewAPIError struct {

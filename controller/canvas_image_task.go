@@ -418,9 +418,38 @@ func buildCanvasImageTaskResponse(task *model.Task) gin.H {
 		response["result"] = buildCanvasImageTaskResult(task)
 	}
 	if task.Status == model.TaskStatusFailure {
-		response["error"] = task.FailReason
+		if structured := canvasImageTaskFailurePayload(task.Data); structured != nil {
+			response["error"] = structured
+		} else {
+			response["error"] = task.FailReason
+		}
+		response["msg"] = task.FailReason
 	}
 	return response
+}
+
+func canvasImageTaskFailurePayload(data []byte) gin.H {
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil
+	}
+	var payload struct {
+		Error struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+			Code    any    `json:"code"`
+		} `json:"error"`
+	}
+	if err := common.Unmarshal(data, &payload); err != nil || strings.TrimSpace(payload.Error.Message) == "" {
+		return nil
+	}
+	result := gin.H{"message": payload.Error.Message}
+	if strings.TrimSpace(payload.Error.Type) != "" {
+		result["type"] = payload.Error.Type
+	}
+	if payload.Error.Code != nil {
+		result["code"] = payload.Error.Code
+	}
+	return result
 }
 
 func buildCanvasImageTaskResult(task *model.Task) gin.H {

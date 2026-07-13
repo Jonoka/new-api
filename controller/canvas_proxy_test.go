@@ -86,6 +86,31 @@ func TestBuildCanvasImageTaskResponseReturnsLightweightContentURLs(t *testing.T)
 	require.NotContains(t, string(encoded), "abc")
 }
 
+func TestBuildCanvasImageTaskResponsePreservesLegacyStringFailure(t *testing.T) {
+	task := &model.Task{TaskID: "task_legacy_failed", Status: model.TaskStatusFailure, Progress: "100%", FailReason: "legacy failure"}
+	response := buildCanvasImageTaskResponse(task)
+	require.Equal(t, "legacy failure", response["error"])
+	require.Equal(t, "legacy failure", response["msg"])
+}
+
+func TestBuildCanvasImageTaskResponsePreservesStructuredFailure(t *testing.T) {
+	task := &model.Task{
+		TaskID:     "task_failed",
+		Status:     model.TaskStatusFailure,
+		Progress:   "100%",
+		FailReason: "Lite pool unavailable",
+		Data:       json.RawMessage(`{"error":{"message":"Lite pool unavailable","type":"new_api_error","code":"lite_pool_exhausted"}}`),
+	}
+
+	response := buildCanvasImageTaskResponse(task)
+
+	errorPayload, ok := response["error"].(gin.H)
+	require.True(t, ok)
+	require.Equal(t, "Lite pool unavailable", errorPayload["message"])
+	require.Equal(t, "new_api_error", errorPayload["type"])
+	require.Equal(t, "lite_pool_exhausted", errorPayload["code"])
+}
+
 func TestCanvasImageTaskContentReturnsStoredBase64Image(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	setupCanvasImageTaskTestDB(t)

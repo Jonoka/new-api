@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -153,6 +154,22 @@ func TestShouldRetryWithReasonReportsBlockingReason(t *testing.T) {
 		require.False(t, decision.Retry)
 		require.Equal(t, "no_retry_after_stream_started", decision.Reason)
 	})
+}
+
+func TestShouldMarkLitePoolExhausted(t *testing.T) {
+	ctx := buildRelayRetryTestContext()
+	ctx.Set("use_channel", []string{"33", "14"})
+	relayInfo := &relaycommon.RelayInfo{OriginModelName: "gpt-image-2-lite"}
+
+	require.True(t, shouldMarkLitePoolExhausted(ctx, relayInfo, types.NewOpenAIError(errors.New("upstream unavailable"), types.ErrorCodeBadResponseStatusCode, http.StatusBadGateway), true))
+	require.False(t, shouldMarkLitePoolExhausted(ctx, relayInfo, types.NewOpenAIError(errors.New("upstream unavailable"), types.ErrorCodeBadResponseStatusCode, http.StatusBadGateway), false))
+	require.False(t, shouldMarkLitePoolExhausted(ctx, &relaycommon.RelayInfo{OriginModelName: "gpt-image-2-pro"}, types.NewOpenAIError(errors.New("upstream unavailable"), types.ErrorCodeBadResponseStatusCode, http.StatusBadGateway), true))
+	require.False(t, shouldMarkLitePoolExhausted(ctx, relayInfo, types.NewOpenAIError(errors.New("invalid request"), types.ErrorCodeInvalidRequest, http.StatusBadRequest), true))
+	require.False(t, shouldMarkLitePoolExhausted(ctx, relayInfo, types.NewOpenAIError(errors.New("quota"), types.ErrorCodeInsufficientUserQuota, http.StatusServiceUnavailable), true))
+
+	wrapped := markLitePoolExhausted(types.NewOpenAIError(errors.New("upstream unavailable"), types.ErrorCodeBadResponseStatusCode, http.StatusBadGateway))
+	require.Equal(t, types.ErrorCodeLitePoolExhausted, wrapped.GetErrorCode())
+	require.Equal(t, string(types.ErrorCodeLitePoolExhausted), fmt.Sprint(wrapped.ToOpenAIError().Code))
 }
 
 func TestAppendErrorLogRequestConversion(t *testing.T) {
