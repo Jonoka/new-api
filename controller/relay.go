@@ -483,6 +483,9 @@ func shouldRetryWithReason(c *gin.Context, openaiErr *types.NewAPIError, retryTi
 	if operation_setting.IsAlwaysSkipRetryCode(openaiErr.GetErrorCode()) {
 		return retryDecision{Reason: "always_skip_error_code"}
 	}
+	if openaiErr.GetErrorCode() == types.ErrorCodeDoRequestFailed {
+		return retryDecision{Retry: true, Reason: "transport_error_retry"}
+	}
 	if operation_setting.ShouldRetryByStatusCode(code) {
 		return retryDecision{Retry: true, Reason: "status_code_retry"}
 	}

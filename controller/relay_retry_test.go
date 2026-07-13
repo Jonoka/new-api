@@ -22,6 +22,20 @@ func buildRelayRetryTestContext() *gin.Context {
 	return ctx
 }
 
+func TestShouldRetryWithReasonRetriesTransportFailure(t *testing.T) {
+	ctx := buildRelayRetryTestContext()
+	err := types.NewOpenAIError(
+		errors.New("dial tcp 127.0.0.1:9: connect: connection refused"),
+		types.ErrorCodeDoRequestFailed,
+		http.StatusInternalServerError,
+	)
+
+	decision := shouldRetryWithReason(ctx, err, 2)
+
+	require.True(t, decision.Retry)
+	require.Equal(t, "transport_error_retry", decision.Reason)
+}
+
 func TestShouldRetryWithReasonRetriesConfiguredBadRequest(t *testing.T) {
 	originalRanges := operation_setting.AutomaticRetryStatusCodeRanges
 	operation_setting.AutomaticRetryStatusCodeRanges = []operation_setting.StatusCodeRange{
