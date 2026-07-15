@@ -36,8 +36,7 @@ const defaultOperationsSettings: OperationsSettings = {
   AutomaticEnableChannelEnabled: false,
   AutomaticDisableKeywords: '',
   AutomaticDisableStatusCodes: '401',
-  AutomaticRetryStatusCodes:
-    '100-199,300-399,401-407,409-499,500-599',
+  AutomaticRetryStatusCodes: '100-199,300-399,401-407,409-499,500-599',
   'monitor_setting.auto_test_channel_enabled': false,
   'monitor_setting.auto_test_channel_minutes': 10,
   'monitor_setting.auto_disable_threshold': 1,
@@ -58,6 +57,7 @@ const defaultOperationsSettings: OperationsSettings = {
   'performance_setting.disk_cache_threshold_mb': 10,
   'performance_setting.disk_cache_max_size_mb': 1024,
   'performance_setting.disk_cache_path': '',
+  'performance_setting.image_task_data_retention_hours': 1,
   'performance_setting.monitor_enabled': false,
   'performance_setting.monitor_cpu_threshold': 90,
   'performance_setting.monitor_memory_threshold': 90,

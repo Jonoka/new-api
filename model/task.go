@@ -310,7 +310,7 @@ func GetAllUnFinishSyncTasks(limit int) []*Task {
 	err = DB.Where("progress != ?", "100%").
 		Where("status != ?", TaskStatusFailure).
 		Where("status != ?", TaskStatusSuccess).
-		Where("platform != ?", constant.TaskPlatformCanvasImage).
+		Where("platform NOT IN ?", constant.ImageTaskPlatforms()).
 		Limit(limit).
 		Order("id").
 		Find(&tasks).Error

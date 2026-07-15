@@ -437,6 +437,8 @@ func SetApiRouter(router *gin.Engine) {
 		taskRoute := apiRouter.Group("/task")
 		{
 			taskRoute.GET("/self", middleware.UserAuth(), controller.GetUserTask)
+			// 前端通过带用户标识的 API 请求按需读取图片；跨用户权限由控制器实时校验。
+			taskRoute.GET("/:task_id/content/:index", middleware.UserAuth(), controller.GetTaskImageContent)
 			taskRoute.GET("/", middleware.AdminAuth(), controller.GetAllTask)
 		}
 

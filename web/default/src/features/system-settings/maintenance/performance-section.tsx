@@ -84,6 +84,7 @@ const perfSchema = z.object({
     disk_cache_threshold_mb: z.coerce.number().min(1),
     disk_cache_max_size_mb: z.coerce.number().min(100),
     disk_cache_path: z.string(),
+    image_task_data_retention_hours: z.coerce.number().int().min(0).max(8760),
     monitor_enabled: z.boolean(),
     monitor_cpu_threshold: z.coerce.number().min(0),
     monitor_memory_threshold: z.coerce.number().min(0).max(100),
@@ -105,6 +106,7 @@ type FlatPerfDefaults = {
   'performance_setting.disk_cache_threshold_mb': number
   'performance_setting.disk_cache_max_size_mb': number
   'performance_setting.disk_cache_path': string
+  'performance_setting.image_task_data_retention_hours': number
   'performance_setting.monitor_enabled': boolean
   'performance_setting.monitor_cpu_threshold': number
   'performance_setting.monitor_memory_threshold': number
@@ -123,6 +125,8 @@ const buildFormDefaults = (defaults: FlatPerfDefaults): PerfFormInput => ({
     disk_cache_max_size_mb:
       defaults['performance_setting.disk_cache_max_size_mb'],
     disk_cache_path: defaults['performance_setting.disk_cache_path'] ?? '',
+    image_task_data_retention_hours:
+      defaults['performance_setting.image_task_data_retention_hours'],
     monitor_enabled: defaults['performance_setting.monitor_enabled'],
     monitor_cpu_threshold:
       defaults['performance_setting.monitor_cpu_threshold'],
@@ -148,6 +152,8 @@ const normalizeFormValues = (values: PerfFormValues): FlatPerfDefaults => ({
     values.performance_setting.disk_cache_max_size_mb,
   'performance_setting.disk_cache_path':
     values.performance_setting.disk_cache_path ?? '',
+  'performance_setting.image_task_data_retention_hours':
+    values.performance_setting.image_task_data_retention_hours,
   'performance_setting.monitor_enabled':
     values.performance_setting.monitor_enabled,
   'performance_setting.monitor_cpu_threshold':
@@ -514,6 +520,42 @@ export function PerformanceSection(props: Props) {
               )}
             />
           )}
+
+          <Separator />
+
+          <div>
+            <h4 className='font-medium'>{t('Image Task Data Retention')}</h4>
+            <p className='text-muted-foreground mt-1 text-xs'>
+              {t(
+                'Completed Canvas and /v1/images/tasks image result data is cleared after the configured time. Task status, billing, and audit records are retained.'
+              )}
+            </p>
+          </div>
+
+          <FormField
+            control={form.control}
+            name='performance_setting.image_task_data_retention_hours'
+            render={({ field }) => (
+              <FormItem className='max-w-md'>
+                <FormLabel>{t('Image Data Retention (hours)')}</FormLabel>
+                <FormControl>
+                  <Input
+                    type='number'
+                    min={0}
+                    max={8760}
+                    step={1}
+                    {...safeNumberFieldProps(field)}
+                  />
+                </FormControl>
+                <FormDescription>
+                  {t(
+                    'Use 0 to disable automatic cleanup. Extending the time cannot restore data that has already been cleared.'
+                  )}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
 
           <Separator />
 

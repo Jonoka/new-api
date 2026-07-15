@@ -4430,6 +4430,10 @@
     "统计窗口": "Khoang",
     "统计窗口(小时)": "Khoang thoi gian kha dung (gio)",
     "统计窗口必须在1到720小时之间": "Khoang thoi gian kha dung phai tu 1 den 720 gio",
-    "用于选择Uptime Kuma可用率统计窗口，例如1H或24H": "Dung de chon khoang kha dung Uptime Kuma, vi du 1H hoac 24H"
+    "用于选择Uptime Kuma可用率统计窗口，例如1H或24H": "Dung de chon khoang kha dung Uptime Kuma, vi du 1H hoac 24H",
+    "异步图片数据清理": "Dọn dẹp dữ liệu hình ảnh bất đồng bộ",
+    "Canvas 和 /v1/images/tasks 异步图片任务完成后，图片结果数据将在设定时间后自动清理；任务状态、计费和审计记录仍会保留。": "Dữ liệu kết quả hình ảnh của các tác vụ bất đồng bộ Canvas và /v1/images/tasks đã hoàn tất sẽ được xóa sau thời gian cấu hình. Trạng thái tác vụ cùng dữ liệu thanh toán và kiểm toán vẫn được giữ lại.",
+    "图片数据保留时间（小时）": "Thời gian lưu dữ liệu hình ảnh (giờ)",
+    "设置为 0 可关闭自动清理；已清理的数据无法通过延长时间恢复。": "Đặt 0 để tắt tự động dọn dẹp. Việc kéo dài thời gian không thể khôi phục dữ liệu đã bị xóa."
   }
 }

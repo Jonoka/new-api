@@ -30,8 +30,7 @@ import {
   XCircle,
   Loader,
   List,
-  Hash,
-  Video,
+  Image,
   Sparkles,
 } from 'lucide-react';
 import {
@@ -92,6 +91,18 @@ function renderDuration(submit_time, finishTime) {
 
 const renderType = (type, t) => {
   switch (type) {
+    case 'images/generations':
+      return (
+        <Tag color='purple' shape='circle' prefixIcon={<Image size={14} />}>
+          {t('绘图')}
+        </Tag>
+      );
+    case 'images/edits':
+      return (
+        <Tag color='violet' shape='circle' prefixIcon={<Image size={14} />}>
+          {t('编辑')}
+        </Tag>
+      );
     case 'MUSIC':
       return (
         <Tag color='grey' shape='circle' prefixIcon={<Music size={14} />}>
@@ -155,6 +166,18 @@ const renderPlatform = (platform, t) => {
     );
   }
   switch (platform) {
+    case 'image':
+      return (
+        <Tag color='violet' shape='circle'>
+          Image API
+        </Tag>
+      );
+    case 'canvas_image':
+      return (
+        <Tag color='purple' shape='circle'>
+          Canvas
+        </Tag>
+      );
     case 'suno':
       return (
         <Tag color='green' shape='circle'>
@@ -241,6 +264,7 @@ export const getTaskLogsColumns = ({
   isAdminUser,
   openVideoModal,
   openAudioModal,
+  openImagePreview,
 }) => {
   return [
     {
@@ -301,15 +325,10 @@ export const getTaskLogsColumns = ({
         const displayText = String(record.username || userId || '?');
         return (
           <Space>
-            <Avatar
-              size='extra-small'
-              color={stringToColor(displayText)}
-            >
+            <Avatar size='extra-small' color={stringToColor(displayText)}>
               {displayText.slice(0, 1)}
             </Avatar>
-            <Typography.Text>
-              {displayText}
-            </Typography.Text>
+            <Typography.Text>{displayText}</Typography.Text>
           </Space>
         );
       },
@@ -415,8 +434,33 @@ export const getTaskLogsColumns = ({
           record.action === TASK_ACTION_REFERENCE_GENERATE ||
           record.action === TASK_ACTION_REMIX_GENERATE;
         const isSuccess = record.status === 'SUCCESS';
+        const imageUrls = Array.isArray(record.image_urls)
+          ? record.image_urls.filter(
+              (url) => typeof url === 'string' && url.trim() !== '',
+            )
+          : [];
+        if (isSuccess && imageUrls.length > 0) {
+          return (
+            <a
+              href='#'
+              onClick={(e) => {
+                e.preventDefault();
+                openImagePreview(imageUrls, record.task_id);
+              }}
+            >
+              {t('查看图片')}
+            </a>
+          );
+        }
+        if (isSuccess && record.result_expired) {
+          return (
+            <Typography.Text type='tertiary'>{t('已过期')}</Typography.Text>
+          );
+        }
+
         const resultUrl = record.result_url;
-        const hasResultUrl = typeof resultUrl === 'string' && /^https?:\/\//.test(resultUrl);
+        const hasResultUrl =
+          typeof resultUrl === 'string' && /^https?:\/\//.test(resultUrl);
         if (isSuccess && isVideoTask && hasResultUrl) {
           return (
             <a

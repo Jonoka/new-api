@@ -700,6 +700,7 @@
     "Cancel": "Hủy bỏ",
     "Cancelled": "Đã hủy",
     "Cancelled at": "Đã hủy lúc",
+    "Canvas": "Canvas",
     "Capabilities": "Khả năng",
     "Capture a reusable bundle of models, tags, endpoints, or sensitive keywords.": "Tạo một gói có thể tái sử dụng gồm mô hình, thẻ, endpoint hoặc từ khóa nhạy cảm.",
     "Capture a reusable bundle of models, tags, or endpoints.": "Đóng gói một bộ có thể tái sử dụng gồm các mô hình, thẻ hoặc điểm cuối.",
@@ -5074,6 +5075,10 @@
     "Zero retention": "Không lưu dữ liệu",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Image Task Data Retention": "Thời gian lưu dữ liệu tác vụ hình ảnh",
+    "Completed Canvas and /v1/images/tasks image result data is cleared after the configured time. Task status, billing, and audit records are retained.": "Dữ liệu kết quả hình ảnh của các tác vụ bất đồng bộ Canvas và /v1/images/tasks đã hoàn tất sẽ được xóa sau thời gian cấu hình. Trạng thái tác vụ cùng dữ liệu thanh toán và kiểm toán vẫn được giữ lại.",
+    "Image Data Retention (hours)": "Thời gian lưu dữ liệu hình ảnh (giờ)",
+    "Use 0 to disable automatic cleanup. Extending the time cannot restore data that has already been cleared.": "Đặt 0 để tắt tự động dọn dẹp. Việc kéo dài thời gian không thể khôi phục dữ liệu đã bị xóa."
   }
 }

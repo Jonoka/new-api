@@ -700,6 +700,7 @@
     "Cancel": "Cancel",
     "Cancelled": "Cancelled",
     "Cancelled at": "Cancelled at",
+    "Canvas": "Canvas",
     "Capabilities": "Capabilities",
     "Capture a reusable bundle of models, tags, endpoints, or sensitive keywords.": "Capture a reusable bundle of models, tags, endpoints, or sensitive keywords.",
     "Capture a reusable bundle of models, tags, or endpoints.": "Capture a reusable bundle of models, tags, or endpoints.",
@@ -5074,6 +5075,10 @@
     "Zero retention": "Zero retention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Image Task Data Retention": "Image Task Data Retention",
+    "Completed Canvas and /v1/images/tasks image result data is cleared after the configured time. Task status, billing, and audit records are retained.": "Completed Canvas and /v1/images/tasks image result data is cleared after the configured time. Task status, billing, and audit records are retained.",
+    "Image Data Retention (hours)": "Image Data Retention (hours)",
+    "Use 0 to disable automatic cleanup. Extending the time cannot restore data that has already been cleared.": "Use 0 to disable automatic cleanup. Extending the time cannot restore data that has already been cleared."
   }
 }

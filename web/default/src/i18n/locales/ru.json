@@ -700,6 +700,7 @@
     "Cancel": "Отмена",
     "Cancelled": "Отменено",
     "Cancelled at": "Отменено",
+    "Canvas": "Canvas",
     "Capabilities": "Возможности",
     "Capture a reusable bundle of models, tags, endpoints, or sensitive keywords.": "Создайте переиспользуемый набор моделей, тегов, эндпоинтов или чувствительных ключевых слов.",
     "Capture a reusable bundle of models, tags, or endpoints.": "Создайте повторно используемый набор моделей, тегов или конечных точек.",
@@ -5074,6 +5075,10 @@
     "Zero retention": "Без хранения данных",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Image Task Data Retention": "Хранение данных задач изображений",
+    "Completed Canvas and /v1/images/tasks image result data is cleared after the configured time. Task status, billing, and audit records are retained.": "Данные результатов завершённых асинхронных задач изображений Canvas и /v1/images/tasks удаляются по истечении заданного времени. Статус задач, данные биллинга и аудита сохраняются.",
+    "Image Data Retention (hours)": "Срок хранения данных изображений (часы)",
+    "Use 0 to disable automatic cleanup. Extending the time cannot restore data that has already been cleared.": "Укажите 0, чтобы отключить автоматическую очистку. Увеличение срока не восстановит уже удалённые данные."
   }
 }

@@ -3901,6 +3901,10 @@
     "统计窗口": "Fenetre",
     "统计窗口(小时)": "Fenetre de disponibilite (heures)",
     "统计窗口必须在1到720小时之间": "La fenetre de disponibilite doit etre comprise entre 1 et 720 heures",
-    "用于选择Uptime Kuma可用率统计窗口，例如1H或24H": "Utilise pour selectionner la fenetre de disponibilite Uptime Kuma, par exemple 1H ou 24H"
+    "用于选择Uptime Kuma可用率统计窗口，例如1H或24H": "Utilise pour selectionner la fenetre de disponibilite Uptime Kuma, par exemple 1H ou 24H",
+    "异步图片数据清理": "Nettoyage des données d’images asynchrones",
+    "Canvas 和 /v1/images/tasks 异步图片任务完成后，图片结果数据将在设定时间后自动清理；任务状态、计费和审计记录仍会保留。": "Les données de résultat d’image des tâches Canvas et /v1/images/tasks terminées sont effacées après la durée configurée. L’état des tâches ainsi que les données de facturation et d’audit sont conservés.",
+    "图片数据保留时间（小时）": "Durée de conservation des données d’image (heures)",
+    "设置为 0 可关闭自动清理；已清理的数据无法通过延长时间恢复。": "Utilisez 0 pour désactiver le nettoyage automatique. Prolonger la durée ne restaure pas les données déjà effacées."
   }
 }

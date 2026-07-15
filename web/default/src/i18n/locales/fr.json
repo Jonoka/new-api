@@ -700,6 +700,7 @@
     "Cancel": "Annuler",
     "Cancelled": "Annulé",
     "Cancelled at": "Annulé le",
+    "Canvas": "Canvas",
     "Capabilities": "Capacités",
     "Capture a reusable bundle of models, tags, endpoints, or sensitive keywords.": "Créez un ensemble réutilisable de modèles, tags, endpoints ou mots-clés sensibles.",
     "Capture a reusable bundle of models, tags, or endpoints.": "Capturez un ensemble réutilisable de modèles, d'étiquettes ou de points de terminaison.",
@@ -5074,6 +5075,10 @@
     "Zero retention": "Aucune rétention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Image Task Data Retention": "Conservation des données des tâches d’image",
+    "Completed Canvas and /v1/images/tasks image result data is cleared after the configured time. Task status, billing, and audit records are retained.": "Les données de résultat d’image des tâches Canvas et /v1/images/tasks terminées sont effacées après la durée configurée. L’état des tâches ainsi que les données de facturation et d’audit sont conservés.",
+    "Image Data Retention (hours)": "Durée de conservation des données d’image (heures)",
+    "Use 0 to disable automatic cleanup. Extending the time cannot restore data that has already been cleared.": "Utilisez 0 pour désactiver le nettoyage automatique. Prolonger la durée ne restaure pas les données déjà effacées."
   }
 }

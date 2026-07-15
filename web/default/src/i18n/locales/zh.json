@@ -700,6 +700,7 @@
     "Cancel": "取消",
     "Cancelled": "已取消",
     "Cancelled at": "作废于",
+    "Canvas": "Canvas",
     "Capabilities": "能力",
     "Capture a reusable bundle of models, tags, endpoints, or sensitive keywords.": "创建可复用的模型、标签、端点或敏感关键词集合。",
     "Capture a reusable bundle of models, tags, or endpoints.": "捕获可重用的模型、标签或端点捆绑包。",
@@ -5074,6 +5075,10 @@
     "Zero retention": "零数据保留",
     "Zhipu": "智谱",
     "Zhipu V4": "智谱 V4",
-    "Zoom": "缩放"
+    "Zoom": "缩放",
+    "Image Task Data Retention": "图片任务数据保留",
+    "Completed Canvas and /v1/images/tasks image result data is cleared after the configured time. Task status, billing, and audit records are retained.": "Canvas 和 /v1/images/tasks 异步图片任务完成后，图片结果数据将在设定时间后自动清理；任务状态、计费和审计记录仍会保留。",
+    "Image Data Retention (hours)": "图片数据保留时间（小时）",
+    "Use 0 to disable automatic cleanup. Extending the time cannot restore data that has already been cleared.": "设置为 0 可关闭自动清理；已清理的数据无法通过延长时间恢复。"
   }
 }
