@@ -319,29 +319,31 @@ func extractChannelAffinityValue(c *gin.Context, src operation_setting.ChannelAf
 		if src.Path == "" {
 			return ""
 		}
-		if src.Path == "prompt_cache_key" {
-			if value := strings.TrimSpace(extractVirtualPromptCacheKey(c)); value != "" {
-				return value
+		storage, err := common.GetBodyStorage(c)
+		if err == nil {
+			body, readErr := storage.Bytes()
+			if readErr == nil && len(body) > 0 {
+				res := gjson.GetBytes(body, src.Path)
+				if res.Exists() {
+					switch res.Type {
+					case gjson.Null:
+						// JSON null 等同字段缺失，允许 prompt_cache_key 回退到稳定会话头。
+					case gjson.String, gjson.Number, gjson.True, gjson.False:
+						if value := strings.TrimSpace(res.String()); value != "" {
+							return value
+						}
+					default:
+						if value := strings.TrimSpace(res.Raw); value != "" {
+							return value
+						}
+					}
+				}
 			}
 		}
-		storage, err := common.GetBodyStorage(c)
-		if err != nil {
-			return ""
+		if src.Path == "prompt_cache_key" {
+			return strings.TrimSpace(extractVirtualPromptCacheKey(c))
 		}
-		body, err := storage.Bytes()
-		if err != nil || len(body) == 0 {
-			return ""
-		}
-		res := gjson.GetBytes(body, src.Path)
-		if !res.Exists() {
-			return ""
-		}
-		switch res.Type {
-		case gjson.String, gjson.Number, gjson.True, gjson.False:
-			return strings.TrimSpace(res.String())
-		default:
-			return strings.TrimSpace(res.Raw)
-		}
+		return ""
 	default:
 		return ""
 	}
@@ -351,14 +353,8 @@ func extractVirtualPromptCacheKey(c *gin.Context) string {
 	if c == nil || c.Request == nil {
 		return ""
 	}
-	for _, headerKey := range []string{
-		"X-Claude-Code-Session-Id", "x-claude-code-session-id",
-		"Session_id", "session_id",
-		"X-Client-Request-Id", "x-client-request-id",
-	} {
-		if value := strings.TrimSpace(c.Request.Header.Get(headerKey)); value != "" {
-			return value
-		}
+	if value := resolveStableOpenAISessionHeader(c.Request.Header.Get); value != "" {
+		return value
 	}
 	storage, err := common.GetBodyStorage(c)
 	if err != nil {

@@ -2285,6 +2285,24 @@ func TestShouldAuditParamPathUsesFieldBoundaryPrefixMatching(t *testing.T) {
 	require.False(t, shouldAuditParamPath("message"))
 }
 
+func TestSanitizeHeaderOverrideMapIgnoresNilValues(t *testing.T) {
+	got := sanitizeHeaderOverrideMap(map[string]interface{}{
+		"session_id":      nil,
+		"conversation_id": nil,
+		"x-keep":          "value",
+	})
+
+	require.NotContains(t, got, "session_id")
+	require.NotContains(t, got, "conversation_id")
+	require.Equal(t, "value", got["x-keep"])
+}
+
+func TestNormalizeOpenAIBridgeSessionIDRejectsNilSentinel(t *testing.T) {
+	require.Empty(t, normalizeOpenAIBridgeSessionID(nil, nil))
+	require.Empty(t, normalizeOpenAIBridgeSessionID(nil, "<nil>"))
+	require.Empty(t, normalizeOpenAIBridgeSessionID(nil, "  <NiL>  "))
+}
+
 func assertJSONEqual(t *testing.T, want, got string) {
 	t.Helper()
 

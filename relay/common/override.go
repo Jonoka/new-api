@@ -436,6 +436,9 @@ func sanitizeHeaderOverrideMap(source map[string]interface{}) map[string]interfa
 	}
 	target := make(map[string]interface{}, len(source))
 	for key, value := range source {
+		if value == nil {
+			continue
+		}
 		normalizedKey := normalizeHeaderContextKey(key)
 		if normalizedKey == "" {
 			continue

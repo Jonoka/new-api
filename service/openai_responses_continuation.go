@@ -64,7 +64,11 @@ func resolveOpenAIResponsesContinuationSessionID(info *relaycommon.RelayInfo, re
 	}
 	headers := relaycommon.GetEffectiveHeaderOverride(info)
 	for _, key := range []string{"session_id", "conversation_id"} {
-		if value := strings.TrimSpace(fmt.Sprintf("%v", headers[key])); value != "" {
+		raw, exists := headers[key]
+		if !exists || raw == nil {
+			continue
+		}
+		if value := strings.TrimSpace(fmt.Sprintf("%v", raw)); value != "" {
 			return relaycommon.NormalizeOpenAIBridgeSessionIDForCache(info, value)
 		}
 	}

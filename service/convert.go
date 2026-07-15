@@ -50,16 +50,7 @@ func resolveClaudePromptCacheKey(claudeRequest dto.ClaudeRequest, info *relaycom
 	if info == nil {
 		return ""
 	}
-	for _, key := range []string{
-		"X-Claude-Code-Session-Id", "x-claude-code-session-id",
-		"Session_id", "session_id",
-		"X-Client-Request-Id", "x-client-request-id",
-	} {
-		if value := strings.TrimSpace(info.RequestHeaders[key]); value != "" {
-			return value
-		}
-	}
-	return ""
+	return resolveStableOpenAISessionHeaderFromMap(info.RequestHeaders)
 }
 
 func mapClaudeEffortToOpenAIReasoningEffort(effort string) string {

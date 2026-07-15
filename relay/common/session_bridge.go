@@ -87,14 +87,18 @@ func resolveOpenAISessionSeedFromRequestHeaders(context map[string]interface{}) 
 	if len(requestHeaders) == 0 {
 		return ""
 	}
+	// x-client-request-id 只标识单次请求，不能参与跨轮会话桥接。
 	for _, key := range []string{
 		"x-claude-code-session-id",
 		"x-codex-session-id",
 		"conversation_id",
 		"x-session-id",
-		"x-client-request-id",
 	} {
-		if value := strings.TrimSpace(fmt.Sprintf("%v", requestHeaders[key])); value != "" {
+		raw, exists := requestHeaders[key]
+		if !exists || raw == nil {
+			continue
+		}
+		if value := strings.TrimSpace(fmt.Sprintf("%v", raw)); value != "" {
 			return value
 		}
 	}
@@ -102,8 +106,11 @@ func resolveOpenAISessionSeedFromRequestHeaders(context map[string]interface{}) 
 }
 
 func normalizeOpenAIBridgeSessionID(info *RelayInfo, value interface{}) string {
+	if value == nil {
+		return ""
+	}
 	raw := strings.TrimSpace(fmt.Sprintf("%v", value))
-	if raw == "" {
+	if raw == "" || strings.EqualFold(raw, "<nil>") {
 		return ""
 	}
 	return generateStableSessionUUID(isolateOpenAISessionSeed(info, raw))

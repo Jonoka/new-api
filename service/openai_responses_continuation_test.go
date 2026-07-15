@@ -100,6 +100,16 @@ func TestResolveOpenAIResponsesContinuationSessionIDUsesRuntimeSessionID(t *test
 	require.Equal(t, relaycommon.NormalizeOpenAIBridgeSessionIDForCache(info, "123e4567-e89b-12d3-a456-426614174000"), sessionID)
 }
 
+func TestResolveOpenAIResponsesContinuationSessionIDWithoutIdentityIsEmpty(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId: 9530,
+		},
+	}
+
+	require.Empty(t, resolveOpenAIResponsesContinuationSessionID(info, &dto.OpenAIResponsesRequest{}))
+}
+
 func TestIsOpenAIResponsesPreviousResponseRetryable(t *testing.T) {
 	tests := []struct {
 		name       string
