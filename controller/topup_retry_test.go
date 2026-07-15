@@ -2,11 +2,15 @@ package controller
 
 import (
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -119,6 +123,94 @@ func TestRetryTopUpPaymentDoesNotCreateNewLocalOrder(t *testing.T) {
 	require.NoError(t, model.DB.Model(&model.TopUp{}).Count(&count).Error)
 	assert.EqualValues(t, 1, count)
 	assert.Contains(t, recorder.Body.String(), "暂不支持重新支付")
+}
+
+func TestRetryOkpayTopUpPaymentRefreshesSnapshotAndAcceptsNewCallback(t *testing.T) {
+	db := setupSubscriptionPaymentControllerTestDB(t)
+	seedRetryTopUpUser(t, 901)
+	topUp := &model.TopUp{
+		UserId:           901,
+		Amount:           10,
+		Money:            72,
+		TradeNo:          "retry-okpay-order",
+		PaymentMethod:    model.PaymentMethodOkpay,
+		PaymentProvider:  model.PaymentProviderOkpay,
+		ProviderOrderId:  "provider-old",
+		ProviderAmount:   "9.00000000",
+		ProviderCurrency: "USDT",
+		Status:           common.TopUpStatusPending,
+	}
+	seedRetryTopUpOrder(t, topUp)
+
+	var capturedAmount string
+	var capturedTradeNo string
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		capturedAmount = r.Form.Get("amount")
+		capturedTradeNo = r.Form.Get("unique_id")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"pay_url":"https://pay.example.test/retry","order_id":"provider-retry-new"}}`))
+	}))
+	t.Cleanup(gateway.Close)
+
+	originalGateway := setting.OkpayGatewayUrl
+	originalMerchantID := setting.OkpayMerchantId
+	originalToken := setting.OkpayMerchantToken
+	originalExchangeRate := setting.OkpayExchangeRate
+	originalAutoRate := setting.OkpayAutoExchangeEnabled
+	originalFallbackRate := setting.OkpayUsdtCnyRate
+	originalCoin := setting.OkpayCoin
+	setting.OkpayGatewayUrl = gateway.URL
+	setting.OkpayMerchantId = "merchant-retry"
+	setting.OkpayMerchantToken = "retry-secret"
+	setting.OkpayExchangeRate = 7.2
+	setting.OkpayAutoExchangeEnabled = false
+	setting.OkpayUsdtCnyRate = 7.2
+	setting.OkpayCoin = "USDT"
+	resetOkpayRateCacheForTest()
+	t.Cleanup(func() {
+		setting.OkpayGatewayUrl = originalGateway
+		setting.OkpayMerchantId = originalMerchantID
+		setting.OkpayMerchantToken = originalToken
+		setting.OkpayExchangeRate = originalExchangeRate
+		setting.OkpayAutoExchangeEnabled = originalAutoRate
+		setting.OkpayUsdtCnyRate = originalFallbackRate
+		setting.OkpayCoin = originalCoin
+		resetOkpayRateCacheForTest()
+	})
+
+	ctx, recorder := newSubscriptionPaymentContext(t, RetryTopUpPaymentRequest{TradeNo: topUp.TradeNo}, 901)
+	RetryTopUpPayment(ctx)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"provider_order_id":"provider-retry-new"`)
+	assert.Equal(t, topUp.TradeNo, capturedTradeNo)
+	assert.Equal(t, "10.00000000", capturedAmount)
+
+	var savedTopUp model.TopUp
+	require.NoError(t, db.Where("trade_no = ?", topUp.TradeNo).First(&savedTopUp).Error)
+	assert.Equal(t, "provider-retry-new", savedTopUp.ProviderOrderId)
+	assert.Equal(t, "10.00000000", savedTopUp.ProviderAmount)
+	assert.Equal(t, "USDT", savedTopUp.ProviderCurrency)
+
+	callbackBody := buildSignedOkpayJSONCallbackForTest(
+		topUp.TradeNo,
+		"provider-retry-new",
+		"10.00000000",
+		"USDT",
+		setting.OkpayMerchantId,
+		setting.OkpayMerchantToken,
+	)
+	callbackRecorder := httptest.NewRecorder()
+	callbackContext, _ := gin.CreateTestContext(callbackRecorder)
+	callbackContext.Request = httptest.NewRequest(http.MethodPost, "/api/okpay/notify", strings.NewReader(callbackBody))
+	callbackContext.Request.Header.Set("Content-Type", "application/json")
+	OkpayNotify(callbackContext)
+
+	assert.Equal(t, http.StatusOK, callbackRecorder.Code)
+	assert.JSONEq(t, `{"status":"success"}`, callbackRecorder.Body.String())
+	require.NoError(t, db.Where("trade_no = ?", topUp.TradeNo).First(&savedTopUp).Error)
+	assert.Equal(t, common.TopUpStatusSuccess, savedTopUp.Status)
 }
 
 func TestAdminCompleteTopUpAllowsExpiredOrder(t *testing.T) {

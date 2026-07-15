@@ -281,12 +281,15 @@ type SubscriptionOrder struct {
 	InvoiceFeeAmount     float64 `json:"invoice_fee_amount"`
 	InvoiceStatus        string  `json:"invoice_status" gorm:"type:varchar(32);default:''"`
 
-	TradeNo         string `json:"trade_no" gorm:"unique;type:varchar(255);index"`
-	PaymentMethod   string `json:"payment_method" gorm:"type:varchar(50)"`
-	PaymentProvider string `json:"payment_provider" gorm:"type:varchar(50);default:''"`
-	Status          string `json:"status"`
-	CreateTime      int64  `json:"create_time"`
-	CompleteTime    int64  `json:"complete_time"`
+	TradeNo          string `json:"trade_no" gorm:"unique;type:varchar(255);index"`
+	PaymentMethod    string `json:"payment_method" gorm:"type:varchar(50)"`
+	PaymentProvider  string `json:"payment_provider" gorm:"type:varchar(50);default:''"`
+	ProviderOrderId  string `json:"provider_order_id" gorm:"type:varchar(128);default:'';index"`
+	ProviderAmount   string `json:"provider_amount" gorm:"type:varchar(64);default:''"`
+	ProviderCurrency string `json:"provider_currency" gorm:"type:varchar(32);default:''"`
+	Status           string `json:"status"`
+	CreateTime       int64  `json:"create_time"`
+	CompleteTime     int64  `json:"complete_time"`
 
 	ProviderPayload string `json:"provider_payload" gorm:"type:text"`
 }
@@ -327,6 +330,44 @@ func GetSubscriptionOrderByTradeNo(tradeNo string) *SubscriptionOrder {
 		return nil
 	}
 	return &order
+}
+
+func GetSubscriptionOrderByProviderOrderId(paymentProvider string, providerOrderId string) *SubscriptionOrder {
+	paymentProvider = strings.TrimSpace(paymentProvider)
+	providerOrderId = strings.TrimSpace(providerOrderId)
+	if paymentProvider == "" || providerOrderId == "" {
+		return nil
+	}
+	var order SubscriptionOrder
+	if err := DB.Where("payment_provider = ? AND provider_order_id = ?", paymentProvider, providerOrderId).First(&order).Error; err != nil {
+		return nil
+	}
+	return &order
+}
+
+func UpdateSubscriptionOrderProviderSnapshot(tradeNo string, expectedPaymentProvider string, providerOrderId string, providerAmount string, providerCurrency string) error {
+	tradeNo = strings.TrimSpace(tradeNo)
+	expectedPaymentProvider = strings.TrimSpace(expectedPaymentProvider)
+	providerOrderId = strings.TrimSpace(providerOrderId)
+	providerAmount = strings.TrimSpace(providerAmount)
+	providerCurrency = strings.ToUpper(strings.TrimSpace(providerCurrency))
+	if tradeNo == "" || expectedPaymentProvider == "" || providerOrderId == "" || providerAmount == "" || providerCurrency == "" {
+		return errors.New("支付网关订单快照不完整")
+	}
+	result := DB.Model(&SubscriptionOrder{}).
+		Where("trade_no = ? AND payment_provider = ? AND status = ?", tradeNo, expectedPaymentProvider, common.TopUpStatusPending).
+		Updates(map[string]interface{}{
+			"provider_order_id": providerOrderId,
+			"provider_amount":   providerAmount,
+			"provider_currency": providerCurrency,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrSubscriptionOrderStatusInvalid
+	}
+	return nil
 }
 
 // User subscription instance
@@ -829,7 +870,9 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 		if order.Status == common.TopUpStatusSuccess {
 			return nil
 		}
-		if order.Status != common.TopUpStatusPending {
+		if order.Status != common.TopUpStatusPending &&
+			order.Status != common.TopUpStatusFailed &&
+			order.Status != common.TopUpStatusExpired {
 			return ErrSubscriptionOrderStatusInvalid
 		}
 		plan, err := getSubscriptionPlanByIdTx(tx, order.PlanId)

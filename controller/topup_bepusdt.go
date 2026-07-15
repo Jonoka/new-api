@@ -279,6 +279,21 @@ func parseBepusdtNotifyPayload(c *gin.Context) (bepusdtParsedNotify, error) {
 	return bepusdtParsedNotify{Payload: bepusdtPayloadFromParams(params), Params: params, Body: bodyBytes}, nil
 }
 
+func validateBepusdtCallbackAmount(payload *bepusdtNotifyPayload, expected float64) error {
+	if payload == nil || payload.Amount == nil {
+		return errors.New("回调缺少支付金额")
+	}
+	actual, err := decimal.NewFromString(strings.TrimSpace(fmt.Sprintf("%v", payload.Amount)))
+	if err != nil {
+		return fmt.Errorf("回调支付金额无效: %w", err)
+	}
+	expectedAmount := decimal.NewFromFloat(expected)
+	if actual.Sub(expectedAmount).Abs().GreaterThan(decimal.NewFromFloat(0.01)) {
+		return fmt.Errorf("回调支付金额不匹配: expected=%s actual=%s", expectedAmount.StringFixed(2), actual.String())
+	}
+	return nil
+}
+
 // getBepusdtPayMoney 计算 bepusdt 支付金额（CNY）
 func getBepusdtPayMoney(amount int64, group string) float64 {
 	dAmount := decimal.NewFromInt(amount)
@@ -807,25 +822,36 @@ func handleBepusdtPaymentSuccess(c *gin.Context, payload *bepusdtNotifyPayload) 
 
 	topUp := model.GetTopUpByTradeNo(tradeNo)
 	if topUp == nil {
+		order := model.GetSubscriptionOrderByTradeNo(tradeNo)
+		if order == nil {
+			logger.LogWarn(c.Request.Context(), fmt.Sprintf("Bepusdt 充值/订阅订单不存在 trade_no=%s trade_id=%s", tradeNo, payload.TradeId))
+			c.AbortWithStatus(http.StatusBadRequest)
+			return
+		}
+		if err := validateBepusdtCallbackAmount(payload, order.Money); err != nil {
+			logger.LogWarn(c.Request.Context(), fmt.Sprintf("Bepusdt 订阅回调金额校验失败 trade_no=%s trade_id=%s error=%q", tradeNo, payload.TradeId, err.Error()))
+			c.AbortWithStatus(http.StatusBadRequest)
+			return
+		}
 		err := model.CompleteSubscriptionOrder(tradeNo, common.GetJsonString(payload), model.PaymentProviderBepusdt, model.PaymentMethodBepusdt)
 		if err == nil {
 			logger.LogInfo(c.Request.Context(), fmt.Sprintf("Bepusdt USDT 订阅购买成功 trade_no=%s trade_id=%s actual_amount=%v block_tx=%s client_ip=%s", tradeNo, payload.TradeId, payload.ActualAmount, payload.BlockTransactionId, c.ClientIP()))
 			_, _ = c.Writer.Write([]byte("ok"))
 			return
 		}
-		if !errors.Is(err, model.ErrSubscriptionOrderNotFound) {
-			logger.LogError(c.Request.Context(), fmt.Sprintf("Bepusdt 订阅处理失败 trade_no=%s trade_id=%s client_ip=%s error=%q", tradeNo, payload.TradeId, c.ClientIP(), err.Error()))
-			c.AbortWithStatus(http.StatusInternalServerError)
-			return
-		}
-		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Bepusdt 充值/订阅订单不存在 trade_no=%s trade_id=%s", tradeNo, payload.TradeId))
-		c.AbortWithStatus(http.StatusBadRequest)
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Bepusdt 订阅处理失败 trade_no=%s trade_id=%s client_ip=%s error=%q", tradeNo, payload.TradeId, c.ClientIP(), err.Error()))
+		c.AbortWithStatus(http.StatusInternalServerError)
 		return
 	}
 
-	if topUp.Status != common.TopUpStatusPending {
-		logger.LogInfo(c.Request.Context(), fmt.Sprintf("Bepusdt 充值订单状态非 pending，忽略处理 trade_no=%s status=%s trade_id=%s", tradeNo, topUp.Status, payload.TradeId))
+	if topUp.Status == common.TopUpStatusSuccess {
+		logger.LogInfo(c.Request.Context(), fmt.Sprintf("Bepusdt 充值订单已完成，幂等返回 trade_no=%s trade_id=%s", tradeNo, payload.TradeId))
 		_, _ = c.Writer.Write([]byte("ok"))
+		return
+	}
+	if err := validateBepusdtCallbackAmount(payload, topUp.Money); err != nil {
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Bepusdt 充值回调金额校验失败 trade_no=%s trade_id=%s error=%q", tradeNo, payload.TradeId, err.Error()))
+		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
 

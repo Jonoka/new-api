@@ -1148,6 +1148,7 @@ const TopUp = () => {
           payMethods={confirmPayMethods}
           enableBepusdtTopUp={enableBepusdtTopUp}
           bepusdtChains={bepusdtChains}
+          enableOkpayTopUp={enableOkpayTopUp}
           preTopUp={preTopUp}
           paymentLoading={paymentLoading}
           payWay={payWay}
@@ -1169,6 +1170,7 @@ const TopUp = () => {
           activeSubscriptions={activeSubscriptions}
           allSubscriptions={allSubscriptions}
           reloadSubscriptionSelf={getSubscriptionSelf}
+          reloadUserQuota={getUserQuota}
           invoiceConfig={invoiceConfig}
           enableRedemption={topupInfo.enable_redemption !== false}
         />

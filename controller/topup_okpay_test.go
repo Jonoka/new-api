@@ -1,11 +1,14 @@
 package controller
 
 import (
+	"crypto/md5"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +20,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func okpaySignatureForTest(raw string, token string) string {
+	hash := md5.Sum([]byte(raw + "&token=" + token))
+	return strings.ToUpper(fmt.Sprintf("%x", hash))
+}
 
 func resetOkpayRateCacheForTest() {
 	okpayRateCacheMu.Lock()
@@ -388,4 +396,44 @@ func TestVerifyOkpayCallbackSignatureMatchesDocumentOrderJSON(t *testing.T) {
 	require.Equal(t, "7238234930", parsed.Get("data[pay_user_id]"))
 	require.True(t, verifyOkpayCallbackSignature(parsed, "123456"))
 	require.True(t, isOkpayCallbackSuccess(parsed.Get("status"), parsed.Get("data[status]")))
+}
+
+func TestVerifyOkpayCallbackSignatureFallsBackToSortedKeys(t *testing.T) {
+	const token = "123456"
+	const raw = "id=1&status=success&code=200&data[amount]=6.00000000&data[coin]=USDT&data[order_id]=gateway-order&data[status]=1&data[unique_id]=trade-no"
+	pairs := strings.Split(raw, "&")
+	sort.Strings(pairs)
+	signature := okpaySignatureForTest(strings.Join(pairs, "&"), token)
+
+	values, err := url.ParseQuery(raw + "&sign=" + signature)
+	require.NoError(t, err)
+	require.True(t, verifyOkpayCallbackSignature(values, token))
+}
+
+func TestVerifyOkpayCallbackSignatureFallsBackToRawOrder(t *testing.T) {
+	const token = "123456"
+	const raw = "status=success&code=200&data[unique_id]=trade-no&id=1"
+	signature := okpaySignatureForTest(raw, token)
+	values, err := url.ParseQuery(raw + "&sign=" + signature)
+	require.NoError(t, err)
+
+	require.False(t, verifyOkpayCallbackSignature(values, token))
+	require.True(t, verifyOkpayCallbackSignature(values, token, parseOkpayCallbackOrderedPairs([]byte(raw))))
+}
+
+func TestVerifyOkpayCallbackRawOrderRejectsUnsignedMergedFields(t *testing.T) {
+	const token = "123456"
+	const raw = "status=success&code=200&data[unique_id]=trade-no&id=1"
+	signature := okpaySignatureForTest(raw, token)
+	values, err := url.ParseQuery(raw + "&sign=" + signature)
+	require.NoError(t, err)
+	values.Set("data[amount]", "10.00000000")
+
+	require.False(t, verifyOkpayCallbackSignature(values, token, parseOkpayCallbackOrderedPairs([]byte(raw))))
+}
+
+func TestVerifyOkpayCallbackRejectsInvalidSignature(t *testing.T) {
+	values, err := url.ParseQuery("status=success&data[unique_id]=trade-no&sign=invalid")
+	require.NoError(t, err)
+	require.False(t, verifyOkpayCallbackSignature(values, "123456"))
 }

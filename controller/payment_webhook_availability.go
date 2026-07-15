@@ -123,6 +123,7 @@ func isBepusdtWebhookConfigured() bool {
 }
 
 func isBepusdtWebhookEnabled() bool {
+	// 存量订单的回调不应因管理员关闭新订单入口或调整链列表而失效。
 	return isBepusdtWebhookConfigured()
 }
 
@@ -140,5 +141,6 @@ func isOkpayWebhookConfigured() bool {
 }
 
 func isOkpayWebhookEnabled() bool {
+	// 存量订单回调只依赖验签令牌；商户号存在时仍会在回调中严格复核。
 	return isOkpayWebhookConfigured()
 }

@@ -2,7 +2,6 @@ package controller
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -520,82 +519,32 @@ func retryOkpayTopUpPayment(c *gin.Context, topUp *model.TopUp) {
 	callbackUrl := callBackAddress + "/api/okpay/notify"
 	redirectUrl := paymentReturnPath("/console/log")
 	paymentAmount := getOkpayPaymentAmountFromFiat(topUp.Money)
-	dPayMoney := decimal.NewFromFloat(paymentAmount.CoinAmount)
-	payload := map[string]string{
-		"unique_id":    topUp.TradeNo,
-		"amount":       dPayMoney.StringFixed(8),
-		"return_url":   redirectUrl,
-		"callback_url": callbackUrl,
-		"coin":         paymentAmount.Coin,
-		"name":         fmt.Sprintf("TopUp-%s", topUp.TradeNo),
-		"id":           setting.OkpayMerchantId,
-	}
-	payload["sign"] = generateOkpaySignature(payload, setting.OkpayMerchantToken)
-
-	gatewayUrl := strings.TrimRight(setting.OkpayGatewayUrl, "/") + "/payLink"
-	formValues := url.Values{}
-	for k, v := range payload {
-		formValues.Set(k, v)
-	}
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.PostForm(gatewayUrl, formValues)
+	payment, err := createOkpayPaymentLink(c, topUp.TradeNo, paymentAmount, fmt.Sprintf("TopUp-%s", topUp.TradeNo), callbackUrl, redirectUrl)
 	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay 重新请求失败 user_id=%d trade_no=%s error=%q", topUp.UserId, topUp.TradeNo, err.Error()))
+		logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay 重新拉起支付失败 user_id=%d trade_no=%s error=%q", topUp.UserId, topUp.TradeNo, err.Error()))
 		common.ApiErrorMsg(c, "拉起支付失败")
 		return
 	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay 重新读取响应失败 user_id=%d trade_no=%s error=%q", topUp.UserId, topUp.TradeNo, err.Error()))
-		common.ApiErrorMsg(c, "拉起支付失败")
+	if err := model.UpdateTopUpProviderSnapshot(topUp.TradeNo, model.PaymentProviderOkpay, payment.ProviderOrderId, payment.Amount, payment.PaymentAmount.Coin); err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay 重新支付保存网关快照失败 user_id=%d trade_no=%s provider_order_id=%s error=%q", topUp.UserId, topUp.TradeNo, payment.ProviderOrderId, err.Error()))
+		common.ApiErrorMsg(c, "保存支付订单失败")
 		return
 	}
-	logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay 重新支付 API 响应 trade_no=%s status_code=%d body=%q", topUp.TradeNo, resp.StatusCode, string(body)))
-	if resp.StatusCode/100 != 2 {
-		common.ApiErrorMsg(c, "拉起支付失败")
-		return
-	}
-	var raw map[string]interface{}
-	if err := common.Unmarshal(body, &raw); err != nil {
-		common.ApiErrorMsg(c, "解析支付响应失败")
-		return
-	}
-	payUrl := ""
-	if data, ok := raw["data"].(map[string]interface{}); ok {
-		if u, ok := data["pay_url"].(string); ok {
-			payUrl = strings.TrimSpace(u)
-		}
-	}
-	if payUrl == "" {
-		if items, ok := raw["data"].([]interface{}); ok && len(items) > 0 {
-			if first, ok := items[0].(map[string]interface{}); ok {
-				if u, ok := first["pay_url"].(string); ok {
-					payUrl = strings.TrimSpace(u)
-				}
-			}
-		}
-	}
-	if payUrl == "" {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay 重新支付未返回 pay_url trade_no=%s body=%q", topUp.TradeNo, string(body)))
-		common.ApiErrorMsg(c, "拉起支付失败")
-		return
-	}
-	logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay 重新拉起支付成功 user_id=%d trade_no=%s fiat_money=%.2f CNY coin_amount=%s coin=%s", topUp.UserId, topUp.TradeNo, topUp.Money, payload["amount"], paymentAmount.Coin))
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay 重新拉起支付成功 user_id=%d trade_no=%s provider_order_id=%s fiat_money=%.2f CNY coin_amount=%s coin=%s", topUp.UserId, topUp.TradeNo, payment.ProviderOrderId, topUp.Money, payment.Amount, payment.PaymentAmount.Coin))
 	c.JSON(http.StatusOK, gin.H{
 		"message": "success",
 		"data": gin.H{
-			"payment_url":      payUrl,
-			"trade_no":         topUp.TradeNo,
-			"amount":           payload["amount"],
-			"amount_text":      fmt.Sprintf("%s %s", payload["amount"], paymentAmount.Coin),
-			"coin":             paymentAmount.Coin,
-			"fiat_amount":      strconv.FormatFloat(paymentAmount.FiatAmount, 'f', 2, 64),
-			"fiat_currency":    "CNY",
-			"rate":             strconv.FormatFloat(paymentAmount.Rate, 'f', -1, 64),
-			"rate_source":      paymentAmount.RateSource,
-			"auto_rate_failed": paymentAmount.AutoRateFailed,
+			"payment_url":       payment.PaymentUrl,
+			"trade_no":          topUp.TradeNo,
+			"provider_order_id": payment.ProviderOrderId,
+			"amount":            payment.Amount,
+			"amount_text":       fmt.Sprintf("%s %s", payment.Amount, payment.PaymentAmount.Coin),
+			"coin":              payment.PaymentAmount.Coin,
+			"fiat_amount":       strconv.FormatFloat(payment.PaymentAmount.FiatAmount, 'f', 2, 64),
+			"fiat_currency":     "CNY",
+			"rate":              strconv.FormatFloat(payment.PaymentAmount.Rate, 'f', -1, 64),
+			"rate_source":       payment.PaymentAmount.RateSource,
+			"auto_rate_failed":  payment.PaymentAmount.AutoRateFailed,
 		},
 	})
 }

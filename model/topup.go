@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -35,6 +36,9 @@ type TopUp struct {
 	TradeNo              string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
 	PaymentMethod        string  `json:"payment_method" gorm:"type:varchar(50)"`
 	PaymentProvider      string  `json:"payment_provider" gorm:"type:varchar(50);default:''"`
+	ProviderOrderId      string  `json:"provider_order_id" gorm:"type:varchar(128);default:'';index"`
+	ProviderAmount       string  `json:"provider_amount" gorm:"type:varchar(64);default:''"`
+	ProviderCurrency     string  `json:"provider_currency" gorm:"type:varchar(32);default:''"`
 	CreateTime           int64   `json:"create_time"`
 	CompleteTime         int64   `json:"complete_time"`
 	Status               string  `json:"status"`
@@ -65,6 +69,7 @@ var (
 	ErrPaymentMethodMismatch = errors.New("payment method mismatch")
 	ErrTopUpNotFound         = errors.New("topup not found")
 	ErrTopUpStatusInvalid    = errors.New("topup status invalid")
+	increaseCryptoTopUpCache = cacheIncrUserQuota
 )
 
 func (topUp *TopUp) Insert() error {
@@ -113,6 +118,44 @@ func GetTopUpByTradeNo(tradeNo string) *TopUp {
 		return nil
 	}
 	return topUp
+}
+
+func GetTopUpByProviderOrderId(paymentProvider string, providerOrderId string) *TopUp {
+	paymentProvider = strings.TrimSpace(paymentProvider)
+	providerOrderId = strings.TrimSpace(providerOrderId)
+	if paymentProvider == "" || providerOrderId == "" {
+		return nil
+	}
+	var topUp TopUp
+	if err := DB.Where("payment_provider = ? AND provider_order_id = ?", paymentProvider, providerOrderId).First(&topUp).Error; err != nil {
+		return nil
+	}
+	return &topUp
+}
+
+func UpdateTopUpProviderSnapshot(tradeNo string, expectedPaymentProvider string, providerOrderId string, providerAmount string, providerCurrency string) error {
+	tradeNo = strings.TrimSpace(tradeNo)
+	expectedPaymentProvider = strings.TrimSpace(expectedPaymentProvider)
+	providerOrderId = strings.TrimSpace(providerOrderId)
+	providerAmount = strings.TrimSpace(providerAmount)
+	providerCurrency = strings.ToUpper(strings.TrimSpace(providerCurrency))
+	if tradeNo == "" || expectedPaymentProvider == "" || providerOrderId == "" || providerAmount == "" || providerCurrency == "" {
+		return errors.New("支付网关订单快照不完整")
+	}
+	result := DB.Model(&TopUp{}).
+		Where("trade_no = ? AND payment_provider = ? AND status = ?", tradeNo, expectedPaymentProvider, common.TopUpStatusPending).
+		Updates(map[string]interface{}{
+			"provider_order_id": providerOrderId,
+			"provider_amount":   providerAmount,
+			"provider_currency": providerCurrency,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrTopUpStatusInvalid
+	}
+	return nil
 }
 
 func UpdatePendingTopUpStatus(tradeNo string, expectedPaymentProvider string, targetStatus string) error {
@@ -765,6 +808,7 @@ func RechargeBepusdt(tradeNo string, callerIp string) (err error) {
 	}
 
 	var quotaToAdd int
+	completedNow := false
 	topUp := &TopUp{}
 
 	refCol := "`trade_no`"
@@ -786,7 +830,9 @@ func RechargeBepusdt(tradeNo string, callerIp string) (err error) {
 			return nil // 幂等：已成功直接返回
 		}
 
-		if topUp.Status != common.TopUpStatusPending {
+		if topUp.Status != common.TopUpStatusPending &&
+			topUp.Status != common.TopUpStatusFailed &&
+			topUp.Status != common.TopUpStatusExpired {
 			return errors.New("充值订单状态错误")
 		}
 
@@ -819,6 +865,7 @@ func RechargeBepusdt(tradeNo string, callerIp string) (err error) {
 			return err
 		}
 
+		completedNow = true
 		return nil
 	})
 
@@ -826,8 +873,13 @@ func RechargeBepusdt(tradeNo string, callerIp string) (err error) {
 		common.SysError("bepusdt topup failed: " + err.Error())
 		return errors.New("充值失败，请稍后重试")
 	}
+	if completedNow {
+		if err := increaseCryptoTopUpCache(topUp.UserId, int64(quotaToAdd)); err != nil {
+			common.SysLog("failed to increase user quota cache after bepusdt topup: " + err.Error())
+		}
+	}
 
-	if quotaToAdd > 0 {
+	if completedNow && quotaToAdd > 0 {
 		RecordTopupLog(topUp.UserId, fmt.Sprintf("Bepusdt USDT充值成功，充值额度: %v，支付金额: %.2f CNY", logger.FormatQuota(quotaToAdd), topUp.Money), callerIp, topUp.PaymentMethod, PaymentMethodBepusdt)
 	}
 
@@ -840,6 +892,7 @@ func RechargeOkpay(tradeNo string, callerIp string) (err error) {
 	}
 
 	var quotaToAdd int
+	completedNow := false
 	topUp := &TopUp{}
 
 	refCol := "`trade_no`"
@@ -861,7 +914,9 @@ func RechargeOkpay(tradeNo string, callerIp string) (err error) {
 			return nil
 		}
 
-		if topUp.Status != common.TopUpStatusPending {
+		if topUp.Status != common.TopUpStatusPending &&
+			topUp.Status != common.TopUpStatusFailed &&
+			topUp.Status != common.TopUpStatusExpired {
 			return errors.New("充值订单状态错误")
 		}
 
@@ -894,6 +949,7 @@ func RechargeOkpay(tradeNo string, callerIp string) (err error) {
 			return err
 		}
 
+		completedNow = true
 		return nil
 	})
 
@@ -901,8 +957,13 @@ func RechargeOkpay(tradeNo string, callerIp string) (err error) {
 		common.SysError("okpay topup failed: " + err.Error())
 		return errors.New("充值失败，请稍后重试")
 	}
+	if completedNow {
+		if err := increaseCryptoTopUpCache(topUp.UserId, int64(quotaToAdd)); err != nil {
+			common.SysLog("failed to increase user quota cache after okpay topup: " + err.Error())
+		}
+	}
 
-	if quotaToAdd > 0 {
+	if completedNow && quotaToAdd > 0 {
 		RecordTopupLog(topUp.UserId, fmt.Sprintf("OKPay充值成功，充值额度: %v，支付金额: %.2f", logger.FormatQuota(quotaToAdd), topUp.Money), callerIp, topUp.PaymentMethod, PaymentMethodOkpay)
 	}
 
