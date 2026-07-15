@@ -10,7 +10,6 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
-	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -144,7 +143,7 @@ func TestProcessHeaderOverride_PassthroughSkipsAcceptEncoding(t *testing.T) {
 	require.False(t, hasAcceptEncoding)
 }
 
-func TestProcessHeaderOverride_ClaudeCodeFingerprintSkipsPassiveProtectedHeaders(t *testing.T) {
+func TestProcessHeaderOverride_ClaudeCodeFingerprintKeepsCompatibleClientHeaders(t *testing.T) {
 	t.Parallel()
 
 	gin.SetMode(gin.TestMode)
@@ -175,12 +174,12 @@ func TestProcessHeaderOverride_ClaudeCodeFingerprintSkipsPassiveProtectedHeaders
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
 	require.Equal(t, "trace-123", headers["x-trace-id"])
-	require.NotContains(t, headers, "user-agent")
-	require.NotContains(t, headers, "anthropic-beta")
-	require.NotContains(t, headers, "x-app")
-	require.NotContains(t, headers, "x-stainless-lang")
-	require.NotContains(t, headers, "x-client-request-id")
-	require.NotContains(t, headers, "x-claude-code-session-id")
+	require.Equal(t, "CherryStudio/1.0", headers["user-agent"])
+	require.Equal(t, "client-beta", headers["anthropic-beta"])
+	require.Equal(t, "browser", headers["x-app"])
+	require.Equal(t, "python", headers["x-stainless-lang"])
+	require.Equal(t, "client-request-id", headers["x-client-request-id"])
+	require.Equal(t, "client-session-id", headers["x-claude-code-session-id"])
 }
 
 func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.T) {
@@ -237,7 +236,7 @@ func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.
 	require.Empty(t, upstreamReq.Header.Get("X-Codex-Beta-Features"))
 }
 
-func TestProcessHeaderOverride_ClaudeCodeFingerprintSkipsPassHeadersProtectedHeaders(t *testing.T) {
+func TestProcessHeaderOverride_ClaudeCodeFingerprintPassHeadersKeepsCompatibleClientHeaders(t *testing.T) {
 	t.Parallel()
 
 	gin.SetMode(gin.TestMode)
@@ -283,25 +282,25 @@ func TestProcessHeaderOverride_ClaudeCodeFingerprintSkipsPassHeadersProtectedHea
 	require.NoError(t, err)
 	require.True(t, info.UseRuntimeHeadersOverride)
 	require.Equal(t, "trace-123", info.RuntimeHeadersOverride["x-trace-id"])
-	require.NotContains(t, info.RuntimeHeadersOverride, "user-agent")
-	require.NotContains(t, info.RuntimeHeadersOverride, "anthropic-beta")
-	require.NotContains(t, info.RuntimeHeadersOverride, "x-app")
-	require.NotContains(t, info.RuntimeHeadersOverride, "x-stainless-lang")
-	require.NotContains(t, info.RuntimeHeadersOverride, "x-client-request-id")
-	require.NotContains(t, info.RuntimeHeadersOverride, "x-claude-code-session-id")
+	require.Equal(t, "CherryStudio/1.0", info.RuntimeHeadersOverride["user-agent"])
+	require.Equal(t, "client-beta", info.RuntimeHeadersOverride["anthropic-beta"])
+	require.Equal(t, "browser", info.RuntimeHeadersOverride["x-app"])
+	require.Equal(t, "python", info.RuntimeHeadersOverride["x-stainless-lang"])
+	require.Equal(t, "client-request-id", info.RuntimeHeadersOverride["x-client-request-id"])
+	require.Equal(t, "client-session-id", info.RuntimeHeadersOverride["x-claude-code-session-id"])
 
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
 	require.Equal(t, "trace-123", headers["x-trace-id"])
-	require.NotContains(t, headers, "user-agent")
-	require.NotContains(t, headers, "anthropic-beta")
-	require.NotContains(t, headers, "x-app")
-	require.NotContains(t, headers, "x-stainless-lang")
-	require.NotContains(t, headers, "x-client-request-id")
-	require.NotContains(t, headers, "x-claude-code-session-id")
+	require.Equal(t, "CherryStudio/1.0", headers["user-agent"])
+	require.Equal(t, "client-beta", headers["anthropic-beta"])
+	require.Equal(t, "browser", headers["x-app"])
+	require.Equal(t, "python", headers["x-stainless-lang"])
+	require.Equal(t, "client-request-id", headers["x-client-request-id"])
+	require.Equal(t, "client-session-id", headers["x-claude-code-session-id"])
 }
 
-func TestProcessHeaderOverride_ClaudeCodeFingerprintSkipsExplicitProtectedHeaders(t *testing.T) {
+func TestProcessHeaderOverride_ClaudeCodeFingerprintKeepsCompatibleClientExplicitHeaders(t *testing.T) {
 	t.Parallel()
 
 	gin.SetMode(gin.TestMode)
@@ -331,13 +330,61 @@ func TestProcessHeaderOverride_ClaudeCodeFingerprintSkipsExplicitProtectedHeader
 
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
+	require.Equal(t, "custom-agent", headers["user-agent"])
+	require.Equal(t, "custom-beta", headers["anthropic-beta"])
+	require.Equal(t, "custom-app", headers["x-app"])
+	require.Equal(t, "custom-lang", headers["x-stainless-lang"])
+	require.Equal(t, "custom-request-id", headers["x-client-request-id"])
+	require.Equal(t, "custom-session-id", headers["x-claude-code-session-id"])
+	require.Equal(t, "custom-value", headers["x-custom-header"])
+}
+
+func TestProcessHeaderOverride_RealClaudeCodeSkipsProtectedHeadersWithoutFingerprintSetting(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Set("User-Agent", "claude-cli/2.1.156 (Claude Code)")
+	ctx.Request.Header.Set("Anthropic-Beta", "client-beta")
+	ctx.Request.Header.Set("X-App", "claude-code")
+	ctx.Request.Header.Set("X-Stainless-Lang", "js")
+	ctx.Request.Header.Set("X-Stainless-Package-Version", "0.72.0")
+	ctx.Request.Header.Set("X-Client-Request-Id", "client-request-id")
+	ctx.Request.Header.Set("X-Claude-Code-Session-Id", "client-session-id")
+	ctx.Request.Header.Set("X-Trace-Id", "trace-123")
+
+	info := &relaycommon.RelayInfo{
+		IsChannelTest: false,
+		RelayFormat:   types.RelayFormatClaude,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeOpenAI,
+			HeadersOverride: map[string]any{
+				"*":                           "",
+				"User-Agent":                  "custom-agent",
+				"Anthropic-Beta":              "custom-beta",
+				"X-App":                       "custom-app",
+				"X-Stainless-Lang":            "custom-lang",
+				"X-Stainless-Package-Version": "custom-package",
+				"X-Client-Request-Id":         "custom-request-id",
+				"X-Claude-Code-Session-Id":    "custom-session-id",
+				"X-Custom-Header":             "custom-value",
+			},
+		},
+	}
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	require.Equal(t, "trace-123", headers["x-trace-id"])
+	require.Equal(t, "custom-value", headers["x-custom-header"])
 	require.NotContains(t, headers, "user-agent")
 	require.NotContains(t, headers, "anthropic-beta")
 	require.NotContains(t, headers, "x-app")
 	require.NotContains(t, headers, "x-stainless-lang")
+	require.NotContains(t, headers, "x-stainless-package-version")
 	require.NotContains(t, headers, "x-client-request-id")
 	require.NotContains(t, headers, "x-claude-code-session-id")
-	require.Equal(t, "custom-value", headers["x-custom-header"])
 }
 
 func TestApplyHeaderOverrideKeepsUserHeadersHighestPriority(t *testing.T) {
@@ -354,6 +401,152 @@ func TestApplyHeaderOverrideKeepsUserHeadersHighestPriority(t *testing.T) {
 
 	require.Equal(t, "custom-beta", upstreamReq.Header.Get("anthropic-beta"))
 	require.Equal(t, "custom-agent", upstreamReq.Header.Get("User-Agent"))
+}
+
+func TestSanitizeClaudeCodeHeadersForCompatibleClientRemovesClaudeCodeMarkers(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Set("User-Agent", "CherryStudio/1.0")
+	ctx.Request.Header.Set("X-App", "browser")
+
+	upstreamReq := httptest.NewRequest(http.MethodPost, "https://example.com/v1/messages", nil)
+	upstreamReq.Header.Set("anthropic-beta", "claude-code-20250219,context-1m-2025-08-07")
+	upstreamReq.Header.Set("User-Agent", "claude-cli/2.1.169 (external, cli)")
+	upstreamReq.Header.Set("X-App", "cli")
+	upstreamReq.Header.Set("Anthropic-Dangerous-Direct-Browser-Access", "true")
+	upstreamReq.Header.Set("X-Claude-Code-Session-Id", "session-123")
+	upstreamReq.Header.Set("X-Stainless-Lang", "js")
+	upstreamReq.Header.Set("X-Stainless-Package-Version", "0.94.0")
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
+		},
+	}
+
+	sanitizeClaudeCodeHeadersForCompatibleClient(ctx, upstreamReq, info)
+
+	require.Equal(t, "context-1m-2025-08-07", upstreamReq.Header.Get("anthropic-beta"))
+	require.Empty(t, upstreamReq.Header.Get("User-Agent"))
+	require.Empty(t, upstreamReq.Header.Get("X-App"))
+	require.Empty(t, upstreamReq.Header.Get("Anthropic-Dangerous-Direct-Browser-Access"))
+	require.Empty(t, upstreamReq.Header.Get("X-Claude-Code-Session-Id"))
+	require.Empty(t, upstreamReq.Header.Get("X-Stainless-Lang"))
+	require.Empty(t, upstreamReq.Header.Get("X-Stainless-Package-Version"))
+}
+
+func TestSanitizeClaudeCodeHeadersKeepsSyntheticFingerprintWhenEnabled(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Set("User-Agent", "CherryStudio/1.0")
+	ctx.Request.Header.Set("X-App", "browser")
+
+	upstreamReq := httptest.NewRequest(http.MethodPost, "https://example.com/v1/messages", nil)
+	upstreamReq.Header.Set("anthropic-beta", "claude-code-20250219,context-1m-2025-08-07")
+	upstreamReq.Header.Set("User-Agent", "claude-cli/2.1.169 (external, cli)")
+	upstreamReq.Header.Set("X-App", "cli")
+	upstreamReq.Header.Set("Anthropic-Dangerous-Direct-Browser-Access", "true")
+	upstreamReq.Header.Set("X-Stainless-Lang", "js")
+	upstreamReq.Header.Set("X-Stainless-Package-Version", "0.94.0")
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeFingerprintEnabled: true,
+			},
+		},
+	}
+
+	sanitizeClaudeCodeHeadersForCompatibleClient(ctx, upstreamReq, info)
+
+	require.Equal(t, "claude-code-20250219,context-1m-2025-08-07", upstreamReq.Header.Get("anthropic-beta"))
+	require.Equal(t, "claude-cli/2.1.169 (external, cli)", upstreamReq.Header.Get("User-Agent"))
+	require.Equal(t, "cli", upstreamReq.Header.Get("X-App"))
+	require.Equal(t, "true", upstreamReq.Header.Get("Anthropic-Dangerous-Direct-Browser-Access"))
+	require.Equal(t, "js", upstreamReq.Header.Get("X-Stainless-Lang"))
+	require.Equal(t, "0.94.0", upstreamReq.Header.Get("X-Stainless-Package-Version"))
+}
+
+func TestSanitizeClaudeCodeHeadersRemovesMarkersWhenOnlyTransportFingerprintEnabled(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Set("User-Agent", "CherryStudio/1.0")
+	ctx.Request.Header.Set("X-App", "browser")
+
+	upstreamReq := httptest.NewRequest(http.MethodPost, "https://example.com/v1/messages", nil)
+	upstreamReq.Header.Set("anthropic-beta", "claude-code-20250219,context-1m-2025-08-07")
+	upstreamReq.Header.Set("User-Agent", "claude-cli/2.1.169 (external, cli)")
+	upstreamReq.Header.Set("X-App", "cli")
+	upstreamReq.Header.Set("Anthropic-Dangerous-Direct-Browser-Access", "true")
+	upstreamReq.Header.Set("X-Stainless-Lang", "js")
+	upstreamReq.Header.Set("X-Stainless-Package-Version", "0.94.0")
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
+			ChannelOtherSettings: dto.ChannelOtherSettings{
+				ClaudeCodeTransportFingerprintEnabled: true,
+			},
+		},
+	}
+
+	sanitizeClaudeCodeHeadersForCompatibleClient(ctx, upstreamReq, info)
+
+	require.Equal(t, "context-1m-2025-08-07", upstreamReq.Header.Get("anthropic-beta"))
+	require.Empty(t, upstreamReq.Header.Get("User-Agent"))
+	require.Empty(t, upstreamReq.Header.Get("X-App"))
+	require.Empty(t, upstreamReq.Header.Get("Anthropic-Dangerous-Direct-Browser-Access"))
+	require.Empty(t, upstreamReq.Header.Get("X-Stainless-Lang"))
+	require.Empty(t, upstreamReq.Header.Get("X-Stainless-Package-Version"))
+}
+
+func TestSanitizeClaudeCodeHeadersKeepsRealClaudeCodeRequest(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Set("User-Agent", "claude-cli/2.1.156 (Claude Code)")
+	ctx.Request.Header.Set("X-App", "claude-code")
+
+	upstreamReq := httptest.NewRequest(http.MethodPost, "https://example.com/v1/messages", nil)
+	upstreamReq.Header.Set("anthropic-beta", "claude-code-20250219,context-1m-2025-08-07")
+	upstreamReq.Header.Set("User-Agent", "claude-cli/2.1.156 (Claude Code)")
+	upstreamReq.Header.Set("X-App", "claude-code")
+	upstreamReq.Header.Set("X-Claude-Code-Session-Id", "session-123")
+	upstreamReq.Header.Set("X-Stainless-Lang", "js")
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeAnthropic,
+		},
+	}
+
+	sanitizeClaudeCodeHeadersForCompatibleClient(ctx, upstreamReq, info)
+
+	require.Equal(t, "claude-code-20250219,context-1m-2025-08-07", upstreamReq.Header.Get("anthropic-beta"))
+	require.Equal(t, "claude-cli/2.1.156 (Claude Code)", upstreamReq.Header.Get("User-Agent"))
+	require.Equal(t, "claude-code", upstreamReq.Header.Get("X-App"))
+	require.Equal(t, "session-123", upstreamReq.Header.Get("X-Claude-Code-Session-Id"))
+	require.Equal(t, "js", upstreamReq.Header.Get("X-Stainless-Lang"))
 }
 
 func TestEnforceFinalStreamHeadersKeepsCodexResponsesAcceptSSE(t *testing.T) {
@@ -622,14 +815,14 @@ func TestShouldUseClaudeCodeTransportFingerprint(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "anthropic with switch uses claude code transport",
+			name: "anthropic with switch keeps normal transport for compatible clients",
 			info: &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
 				ApiType: constant.APITypeAnthropic,
 				ChannelOtherSettings: dto.ChannelOtherSettings{
 					ClaudeCodeTransportFingerprintEnabled: true,
 				},
 			}},
-			want: true,
+			want: false,
 		},
 	}
 
@@ -642,8 +835,52 @@ func TestShouldUseClaudeCodeTransportFingerprint(t *testing.T) {
 	}
 }
 
-func TestSelectRelayHTTPClientUsesClaudeCodeTransportFingerprint(t *testing.T) {
-	service.InitHttpClient()
+func TestShouldUseClaudeCodeTransportForRealClaudeCodeRequest(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Set("User-Agent", "claude-cli/2.1.156 (Claude Code)")
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeOpenAI,
+		},
+	}
+
+	require.True(t, shouldUseClaudeCodeTransport(ctx, info))
+}
+
+func TestShouldUseClaudeCodeTransportForRealClaudeCodeSessionHeader(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Set("X-Claude-Code-Session-Id", "session-123")
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiType: constant.APITypeOpenAI,
+		},
+	}
+
+	require.True(t, shouldUseClaudeCodeTransport(ctx, info))
+}
+
+func TestShouldNotUseClaudeCodeTransportForCompatibleClientWhenOnlyTransportFingerprintEnabled(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Set("User-Agent", "CherryStudio/1.0")
 
 	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
 		ApiType: constant.APITypeAnthropic,
@@ -651,38 +888,81 @@ func TestSelectRelayHTTPClientUsesClaudeCodeTransportFingerprint(t *testing.T) {
 			ClaudeCodeTransportFingerprintEnabled: true,
 		},
 	}}
+	info.RelayFormat = types.RelayFormatClaude
 
-	client, err := selectRelayHTTPClient(info)
-	require.NoError(t, err)
-	require.NotNil(t, client)
-	require.NotSame(t, service.GetHttpClient(), client)
-
-	transport, ok := client.Transport.(*http.Transport)
-	require.True(t, ok)
-	require.False(t, transport.ForceAttemptHTTP2)
-	require.NotNil(t, transport.DialTLSContext)
-	require.Nil(t, transport.TLSClientConfig)
+	require.False(t, shouldUseClaudeCodeTransport(ctx, info))
 }
 
-func TestSelectRelayHTTPClientKeepsProxyWithClaudeCodeTransportFingerprint(t *testing.T) {
+func TestShouldUseClaudeCodeTransportForCompatibleClientWhenFullFingerprintEnabled(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Set("User-Agent", "CherryStudio/1.0")
+
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
+		ApiType: constant.APITypeAnthropic,
+		ChannelOtherSettings: dto.ChannelOtherSettings{
+			ClaudeCodeFingerprintEnabled:          true,
+			ClaudeCodeTransportFingerprintEnabled: true,
+		},
+	}}
+	info.RelayFormat = types.RelayFormatClaude
+
+	require.True(t, shouldUseClaudeCodeTransport(ctx, info))
+}
+
+func TestShouldNotUseClaudeCodeTransportForCompatibleClientWhenFullFingerprintPassThroughEnabled(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Set("User-Agent", "CherryStudio/1.0")
+
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
+		ApiType: constant.APITypeAnthropic,
+		ChannelSetting: dto.ChannelSettings{
+			PassThroughBodyEnabled: true,
+		},
+		ChannelOtherSettings: dto.ChannelOtherSettings{
+			ClaudeCodeFingerprintEnabled:          true,
+			ClaudeCodeTransportFingerprintEnabled: true,
+		},
+	}}
+	info.RelayFormat = types.RelayFormatClaude
+
+	require.False(t, shouldUseClaudeCodeTransport(ctx, info))
+}
+
+func TestSelectRelayHTTPClientUsesClaudeCodeTransportFingerprintForFullCompatibleClientFingerprint(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Set("User-Agent", "CherryStudio/1.0")
+
 	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
 		ApiType: constant.APITypeAnthropic,
 		ChannelSetting: dto.ChannelSettings{
 			Proxy: "http://127.0.0.1:18080",
 		},
 		ChannelOtherSettings: dto.ChannelOtherSettings{
+			ClaudeCodeFingerprintEnabled:          true,
 			ClaudeCodeTransportFingerprintEnabled: true,
 		},
 	}}
+	info.RelayFormat = types.RelayFormatClaude
 
-	client, err := selectRelayHTTPClient(info)
+	client, err := selectRelayHTTPClient(ctx, info)
 	require.NoError(t, err)
 	require.NotNil(t, client)
 
 	transport, ok := client.Transport.(*http.Transport)
 	require.True(t, ok)
-	require.NotNil(t, transport.Proxy)
 	require.False(t, transport.ForceAttemptHTTP2)
 	require.NotNil(t, transport.DialTLSContext)
-	require.Nil(t, transport.TLSClientConfig)
 }

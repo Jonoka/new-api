@@ -190,6 +190,15 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		&containStreamUsage); err != nil {
 		logger.LogError(c, fmt.Sprintf("error handling last response: %s, lastStreamData: [%s]", err.Error(), lastStreamData))
 	}
+	normalizeOpenAIUsageTokenCounts(usage)
+	if containStreamUsage {
+		patchedData, patchErr := patchOpenAIChatUsage(common.StringToByteSlice(lastStreamData), usage)
+		if patchErr != nil {
+			logger.LogError(c, "failed to patch stream usage: "+patchErr.Error())
+		} else {
+			lastStreamData = string(patchedData)
+		}
+	}
 
 	if !containStreamUsage {
 		usage = service.ResponseText2Usage(c, responseTextBuilder.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())

@@ -68,6 +68,15 @@ func TestHandleLastResponseNormalizesAliasOnlyUsage(t *testing.T) {
 	require.Equal(t, 120, usage.TotalTokens)
 }
 
+func TestNormalizeAndValidateOpenAIUsageAcceptsAliasOnlyUsage(t *testing.T) {
+	usage := &dto.Usage{InputTokens: 100, OutputTokens: 20, TotalTokens: 120}
+
+	require.True(t, normalizeAndValidateOpenAIUsage(usage))
+	require.Equal(t, 100, usage.PromptTokens)
+	require.Equal(t, 20, usage.CompletionTokens)
+	require.Equal(t, 120, usage.TotalTokens)
+}
+
 func TestFillMissingOpenAIChatUsageFallbackOrder(t *testing.T) {
 	t.Run("total 优先于本地估算", func(t *testing.T) {
 		usage := &dto.Usage{TotalTokens: 30}
@@ -115,6 +124,7 @@ func TestOpenaiHandlerWithUsageDoesNotDoubleCountAliases(t *testing.T) {
 	usage, newAPIError := OpenaiHandlerWithUsage(c, info, resp)
 
 	require.Nil(t, newAPIError)
+	require.NotNil(t, usage)
 	require.Equal(t, 10, usage.PromptTokens)
 	require.Equal(t, 20, usage.CompletionTokens)
 	require.Equal(t, 30, usage.TotalTokens)

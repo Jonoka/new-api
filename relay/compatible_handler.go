@@ -69,10 +69,9 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 	}
 	adaptor.Init(info)
 
-	passThroughRequestBody := shouldPassThroughRequestBody(info)
+	passThroughRequestBody := shouldPassThroughRequestBodyForContext(c, info)
 	if info.RelayMode == relayconstant.RelayModeChatCompletions &&
 		!passThroughRequestBody &&
-		!shouldUseClaudeCodeRequestFingerprint(info) &&
 		service.ShouldChatCompletionsUseResponsesGlobal(info.ChannelId, info.ChannelType, info.OriginModelName) {
 		applySystemPromptIfNeeded(c, info, request)
 		usage, newApiErr := chatCompletionsViaResponses(c, info, adaptor, request)
@@ -94,16 +93,24 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 	var requestBody io.Reader
 
 	if passThroughRequestBody {
-		storage, err := common.GetBodyStorage(c)
+		body, size, closer, err := buildClaudeCodeAwarePassthroughBody(c, info)
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
 		if common.DebugEnabled {
-			if debugBytes, bErr := storage.Bytes(); bErr == nil {
+			if storage, bErr := common.GetBodyStorage(c); bErr == nil {
+				debugBytes, bErr := storage.Bytes()
+				if bErr != nil {
+					debugBytes = nil
+				}
 				logger.LogDebug(c, "requestBody: %s", debugBytes)
 			}
 		}
-		requestBody = common.ReaderOnly(storage)
+		if closer != nil {
+			defer closer.Close()
+		}
+		info.UpstreamRequestBodySize = size
+		requestBody = body
 	} else {
 		convertedRequest, err := adaptor.ConvertOpenAIRequest(c, info, request)
 		if err != nil {

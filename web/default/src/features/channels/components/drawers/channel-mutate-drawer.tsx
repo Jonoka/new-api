@@ -51,8 +51,6 @@ import { toast } from 'sonner'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { useHiddenClickUnlock } from '@/hooks/use-hidden-click-unlock'
-import { getVendors } from '@/features/models/api'
-import { vendorsQueryKeys } from '@/features/models/lib'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -107,6 +105,8 @@ import {
   SecureVerificationDialog,
   useSecureVerification,
 } from '@/features/auth/secure-verification'
+import { getVendors } from '@/features/models/api'
+import { vendorsQueryKeys } from '@/features/models/lib'
 import {
   fetchModels,
   getAllModels,
@@ -225,6 +225,8 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.claude_beta_query ||
     values.claude_code_fingerprint_enabled ||
     values.claude_code_transport_fingerprint_enabled ||
+    values.claude_code_version?.trim() ||
+    values.claude_code_entrypoint?.trim() ||
     values.upstream_model_update_check_enabled ||
     values.upstream_model_update_auto_sync_enabled ||
     values.upstream_model_update_ignored_models?.trim() ||
@@ -1172,7 +1174,9 @@ export function ChannelMutateDrawer({
                             >
                               <FormControl>
                                 <SelectTrigger>
-                                  <SelectValue placeholder={t('Select vendor')} />
+                                  <SelectValue
+                                    placeholder={t('Select vendor')}
+                                  />
                                 </SelectTrigger>
                               </FormControl>
                               <SelectContent alignItemWithTrigger={false}>
@@ -1192,7 +1196,9 @@ export function ChannelMutateDrawer({
                               </SelectContent>
                             </Select>
                             <FormDescription>
-                              {t('Used for management and display grouping only.')}
+                              {t(
+                                'Used for management and display grouping only.'
+                              )}
                             </FormDescription>
                             <FormMessage />
                           </FormItem>
@@ -3525,6 +3531,26 @@ export function ChannelMutateDrawer({
                                           placeholder='2.1.156'
                                           {...field}
                                         />
+                                      </FormControl>
+                                    </FormItem>
+                                  )}
+                                />
+
+                                <FormField
+                                  control={form.control}
+                                  name='claude_code_entrypoint'
+                                  render={({ field }) => (
+                                    <FormItem className='px-4 py-3'>
+                                      <FormLabel className='text-sm'>
+                                        {t('Claude Code Entrypoint')}
+                                      </FormLabel>
+                                      <FormDescription>
+                                        {t(
+                                          'Custom Claude Code entrypoint for billing attribution, leave empty to use cli'
+                                        )}
+                                      </FormDescription>
+                                      <FormControl>
+                                        <Input placeholder='cli' {...field} />
                                       </FormControl>
                                     </FormItem>
                                   )}

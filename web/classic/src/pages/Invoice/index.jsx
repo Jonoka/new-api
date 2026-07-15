@@ -184,8 +184,8 @@ const InvoiceCenter = ({ adminOnly = false }) => {
     },
     {
       title: t('费用'),
-      dataIndex: 'fee_amount',
-      key: 'fee_amount',
+      dataIndex: 'total_amount',
+      key: 'total_amount',
       render: (value, record) => (
         <div>
           <Text>¥{Number(value || 0).toFixed(2)}</Text>

@@ -145,6 +145,7 @@ func Distribute() func(c *gin.Context) {
 									}
 									selectGroup = g
 									common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
+									common.SetContextKey(c, constant.ContextKeyUsingGroup, g)
 									channel = preferred
 									service.MarkChannelAffinityUsed(c, g, preferred.Id)
 									break
@@ -190,6 +191,9 @@ func Distribute() func(c *gin.Context) {
 						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 						return
 					}
+				}
+				if selectGroup != "" {
+					common.SetContextKey(c, constant.ContextKeyUsingGroup, selectGroup)
 				}
 			}
 		}

@@ -1,7 +1,6 @@
 package claude
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -22,10 +21,8 @@ import (
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/types"
 
-	"github.com/cespare/xxhash/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/tidwall/sjson"
 )
 
 type Adaptor struct {
@@ -34,14 +31,14 @@ type Adaptor struct {
 const (
 	claudeCodeSystemText               = "You are Claude Code, Anthropic's official CLI for Claude."
 	claudeCodeAnthropicBeta            = "interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14,claude-code-20250219,oauth-2025-04-20,context-management-2025-06-27,extended-cache-ttl-2025-04-11,prompt-caching-scope-2026-01-05"
-	claudeCodeUserAgentFallbackVersion = "2.1.169"
+	claudeCodeUserAgentFallbackVersion = "2.8.2"
+	claudeCodeEntrypointDefault        = "cli"
 	claudeCodeStainlessVersion         = "0.94.0"
 	claudeCodeStainlessRuntime         = "node"
 	claudeCodeStainlessRuntimeVer      = "v24.13.0"
 	claudeCodeStainlessRetryCount      = "0"
 	claudeCodeStainlessTimeoutSecs     = "600"
 	billingFingerprintSalt             = "59cf53e54c78"
-	cchSeed                            = uint64(0x6E52736AC806831E)
 )
 
 var claudeCodeUserAgentPattern = regexp.MustCompile(`(?i)^claude-cli/\d+\.\d+\.\d+`)
@@ -61,6 +58,20 @@ func getClaudeCodeVersion(info *relaycommon.RelayInfo) string {
 		return strings.TrimSpace(info.ChannelOtherSettings.ClaudeCodeVersion)
 	}
 	return claudeCodeUserAgentFallbackVersion
+}
+
+func getClaudeCodeEntrypoint(info *relaycommon.RelayInfo) string {
+	if info != nil && strings.TrimSpace(info.ChannelOtherSettings.ClaudeCodeEntrypoint) != "" {
+		entrypoint := strings.TrimSpace(info.ChannelOtherSettings.ClaudeCodeEntrypoint)
+		for _, r := range entrypoint {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+				continue
+			}
+			return claudeCodeEntrypointDefault
+		}
+		return entrypoint
+	}
+	return claudeCodeEntrypointDefault
 }
 
 func mapStainlessOS(goos string) string {
@@ -95,7 +106,7 @@ func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dt
 }
 
 func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ClaudeRequest) (any, error) {
-	if err := applyClaudeCodeRequestFingerprint(info, request); err != nil {
+	if err := applyClaudeCodeRequestFingerprint(c, info, request); err != nil {
 		return nil, err
 	}
 	if info.ReasoningEffort == "" {
@@ -156,16 +167,48 @@ func CommonClaudeHeadersOperation(c *gin.Context, req *http.Header, info *relayc
 }
 
 func shouldUseClaudeCodeFingerprint(info *relaycommon.RelayInfo) bool {
-	return info != nil &&
-		(info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled ||
-			info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled)
+	return shouldUseClaudeCodeBodyFingerprint(info)
 }
 
-func applyClaudeCodeHeaderFingerprint(req *http.Header, info *relaycommon.RelayInfo) {
-	if req == nil || !shouldUseClaudeCodeFingerprint(info) {
+func shouldUseClaudeCodeBodyFingerprint(info *relaycommon.RelayInfo) bool {
+	return info != nil && info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled
+}
+
+func shouldUseClaudeCodeOriginalPassThrough(c *gin.Context, info *relaycommon.RelayInfo) bool {
+	if info == nil || info.ChannelMeta == nil || info.RelayFormat != types.RelayFormatClaude {
+		return false
+	}
+	return isRealClaudeCodeClient(c)
+}
+
+func isRealClaudeCodeClient(c *gin.Context) bool {
+	if c == nil || c.Request == nil {
+		return false
+	}
+	userAgent := c.Request.Header.Get("User-Agent")
+	if claudeCodeUserAgentPattern.MatchString(userAgent) {
+		return true
+	}
+	xApp := c.Request.Header.Get("X-App")
+	if strings.EqualFold(xApp, "claude-code") {
+		return true
+	}
+	if strings.EqualFold(xApp, "cli") &&
+		c.Request.Header.Get("X-Stainless-Package-Version") != "" &&
+		strings.EqualFold(c.Request.Header.Get("X-Stainless-Lang"), "js") {
+		return true
+	}
+	return c.Request.Header.Get("X-Claude-Code-Session-Id") != "" &&
+		strings.TrimSpace(userAgent) == "" &&
+		strings.TrimSpace(xApp) == ""
+}
+
+func applyClaudeCodeHeaderFingerprint(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) {
+	if req == nil || !shouldApplyClaudeCodeSyntheticHeaderFingerprint(c, info) || shouldUseClaudeCodeOriginalPassThrough(c, info) {
 		return
 	}
-	req.Set("User-Agent", fmt.Sprintf("claude-cli/%s (external, cli)", getClaudeCodeVersion(info)))
+	entrypoint := getClaudeCodeEntrypoint(info)
+	req.Set("User-Agent", fmt.Sprintf("claude-cli/%s (external, %s)", getClaudeCodeVersion(info), entrypoint))
 	req.Set("X-Stainless-Lang", "js")
 	req.Set("X-Stainless-Package-Version", claudeCodeStainlessVersion)
 	req.Set("X-Stainless-OS", mapStainlessOS(runtime.GOOS))
@@ -174,7 +217,7 @@ func applyClaudeCodeHeaderFingerprint(req *http.Header, info *relaycommon.RelayI
 	req.Set("X-Stainless-Runtime-Version", claudeCodeStainlessRuntimeVer)
 	req.Set("X-Stainless-Retry-Count", claudeCodeStainlessRetryCount)
 	req.Set("X-Stainless-Timeout", claudeCodeStainlessTimeoutSecs)
-	req.Set("X-App", "cli")
+	req.Set("X-App", entrypoint)
 	req.Set("anthropic-version", "2023-06-01")
 	req.Set("anthropic-beta", claudeCodeAnthropicBeta)
 	req.Set("anthropic-dangerous-direct-browser-access", "true")
@@ -192,7 +235,11 @@ func applyRealClaudeCodeHeaderPassthrough(c *gin.Context, req *http.Header, info
 		passIncomingHeader(c.Request.Header, req, name)
 	}
 	for name := range c.Request.Header {
-		if strings.HasPrefix(strings.ToLower(name), "x-stainless-") {
+		lowerName := strings.ToLower(name)
+		if strings.HasPrefix(lowerName, "anthropic-") ||
+			strings.HasPrefix(lowerName, "x-stainless-") ||
+			strings.HasPrefix(lowerName, "x-claude-") ||
+			strings.HasPrefix(lowerName, "x-client-") {
 			passIncomingHeader(c.Request.Header, req, name)
 		}
 	}
@@ -202,10 +249,13 @@ func shouldPassThroughRealClaudeCodeHeaders(c *gin.Context, info *relaycommon.Re
 	if c == nil || c.Request == nil || info == nil || info.ChannelMeta == nil {
 		return false
 	}
-	if info.ApiType != rootconstant.APITypeAnthropic || shouldUseClaudeCodeFingerprint(info) {
+	if info.RelayFormat != types.RelayFormatClaude {
 		return false
 	}
-	return claudeCodeUserAgentPattern.MatchString(c.Request.Header.Get("User-Agent"))
+	if shouldUseClaudeCodeFingerprint(info) && !shouldUseClaudeCodeOriginalPassThrough(c, info) {
+		return false
+	}
+	return isRealClaudeCodeClient(c)
 }
 
 func passIncomingHeader(src http.Header, dst *http.Header, name string) {
@@ -224,9 +274,15 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 		anthropicVersion = "2023-06-01"
 	}
 	req.Set("anthropic-version", anthropicVersion)
-	applyRealClaudeCodeHeaderPassthrough(c, req, info)
+	if shouldUseClaudeCodeOriginalPassThrough(c, info) {
+		applyRealClaudeCodeHeaderPassthrough(c, req, info)
+		if req.Get("anthropic-version") == "" {
+			req.Set("anthropic-version", "2023-06-01")
+		}
+		return nil
+	}
 	CommonClaudeHeadersOperation(c, req, info)
-	applyClaudeCodeHeaderFingerprint(req, info)
+	applyClaudeCodeHeaderFingerprint(c, req, info)
 	return nil
 }
 
@@ -238,7 +294,7 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	if err != nil {
 		return nil, err
 	}
-	if err := applyClaudeCodeRequestFingerprint(info, claudeRequest); err != nil {
+	if err := applyClaudeCodeRequestFingerprint(c, info, claudeRequest); err != nil {
 		return nil, err
 	}
 	return claudeRequest, nil
@@ -287,12 +343,29 @@ const (
 
 var claudeCodeLegacySub2APIUserIDPattern = regexp.MustCompile(`^user_[a-fA-F0-9]{64}_account__session_[\w-]+$`)
 
-func applyClaudeCodeRequestFingerprint(info *relaycommon.RelayInfo, request *dto.ClaudeRequest) error {
-	if request == nil || !shouldUseClaudeCodeFingerprint(info) {
+func shouldApplyClaudeCodeSyntheticHeaderFingerprint(c *gin.Context, info *relaycommon.RelayInfo) bool {
+	return shouldUseClaudeCodeFingerprint(info) &&
+		info != nil &&
+		info.ApiType == rootconstant.APITypeAnthropic &&
+		!isRealClaudeCodeClient(c)
+}
+
+func shouldApplyClaudeCodeSyntheticFingerprint(c *gin.Context, info *relaycommon.RelayInfo) bool {
+	return shouldUseClaudeCodeBodyFingerprint(info) &&
+		info != nil &&
+		info.ApiType == rootconstant.APITypeAnthropic &&
+		!isRealClaudeCodeClient(c)
+}
+
+func applyClaudeCodeRequestFingerprint(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ClaudeRequest) error {
+	if request == nil {
 		return nil
 	}
-	ensureClaudeCodeSystem(request, info)
-	return ensureClaudeCodeMetadata(request)
+	if shouldApplyClaudeCodeSyntheticFingerprint(c, info) {
+		ensureClaudeCodeSystem(request, info)
+		return ensureClaudeCodeMetadata(request)
+	}
+	return nil
 }
 
 func ensureClaudeCodeMetadata(request *dto.ClaudeRequest) error {
@@ -318,7 +391,7 @@ func ensureClaudeCodeSystem(request *dto.ClaudeRequest, info *relaycommon.RelayI
 	version := getClaudeCodeVersion(info)
 
 	// Build billing attribution block (no cache_control)
-	billingText := buildBillingBlockText(request, version)
+	billingText := buildBillingBlockTextWithInfo(request, info, version)
 	billingBlock := dto.ClaudeMediaMessage{Type: "text"}
 	billingBlock.SetText(billingText)
 
@@ -341,11 +414,9 @@ func newTextSystemBlock(text string) dto.ClaudeMediaMessage {
 	return block
 }
 
-// buildBillingBlockText constructs the billing attribution header text
-// matching real Claude Code CLI format.
-func buildBillingBlockText(request *dto.ClaudeRequest, version string) string {
+func buildBillingBlockTextWithInfo(request *dto.ClaudeRequest, info *relaycommon.RelayInfo, version string) string {
 	fp := computeBillingFingerprint(request, version)
-	return fmt.Sprintf("x-anthropic-billing-header: cc_version=%s.%s; cc_entrypoint=cli; cch=00000;", version, fp)
+	return fmt.Sprintf("x-anthropic-billing-header: cc_version=%s.%s; cc_entrypoint=%s;", version, fp, getClaudeCodeEntrypoint(info))
 }
 
 // computeBillingFingerprint replicates the real Claude Code CLI fingerprint algorithm:
@@ -397,53 +468,56 @@ func extractFirstUserText(request *dto.ClaudeRequest) string {
 	return ""
 }
 
-// SignBillingHeaderCCH replaces the cch=00000 placeholder in the serialized body
-// with an xxHash64-based signature. Must be called after Marshal.
-func SignBillingHeaderCCH(body []byte) []byte {
-	placeholder := []byte("cch=00000;")
-	idx := bytes.Index(body, placeholder)
-	if idx < 0 {
-		return body
-	}
-	h := xxhash.NewWithSeed(cchSeed)
-	_, _ = h.Write(body)
-	cch := fmt.Sprintf("cch=%05x;", h.Sum64()&0xFFFFF)
-	result := make([]byte, len(body))
-	copy(result, body)
-	copy(result[idx:], []byte(cch))
-	return result
-}
-
 // ApplyClaudeCodeFinalBodyFingerprint 在下游 body 修改后重新写入 Claude Code 指纹字段，
-// 并对最终序列化 body 签名。
+// 确保最终出站 body 的 attribution 与最终消息一致。
 func ApplyClaudeCodeFinalBodyFingerprint(info *relaycommon.RelayInfo, body []byte) ([]byte, error) {
-	if len(body) == 0 || info == nil || info.ApiType != rootconstant.APITypeAnthropic || !shouldUseClaudeCodeFingerprint(info) {
+	if !shouldFinalizeClaudeCodeSyntheticFingerprint(info) {
 		return body, nil
 	}
+	return applyClaudeCodeBodyFingerprint(info, body)
+}
 
+// ApplyClaudeCodePassthroughBodyFingerprint adds the minimum Claude Code body
+// attribution needed by upstream Claude Code channels while preserving the rest
+// of the original pass-through request body.
+func ApplyClaudeCodePassthroughBodyFingerprint(info *relaycommon.RelayInfo, body []byte) ([]byte, error) {
+	if !shouldApplyClaudeCodePassthroughBodyFingerprint(info) {
+		return body, nil
+	}
+	return applyClaudeCodeBodyFingerprint(info, body)
+}
+
+func applyClaudeCodeBodyFingerprint(info *relaycommon.RelayInfo, body []byte) ([]byte, error) {
 	var request dto.ClaudeRequest
 	if err := common.Unmarshal(body, &request); err != nil {
 		return nil, err
 	}
-	if err := applyClaudeCodeRequestFingerprint(info, &request); err != nil {
+	ensureClaudeCodeSystem(&request, info)
+	if err := ensureClaudeCodeMetadata(&request); err != nil {
 		return nil, err
 	}
+	finalBody, err := common.Marshal(&request)
+	if err != nil {
+		return nil, err
+	}
+	return finalBody, nil
+}
 
-	systemBytes, err := common.Marshal(request.System)
-	if err != nil {
-		return nil, err
-	}
-	result, err := sjson.SetRawBytes(body, "system", systemBytes)
-	if err != nil {
-		return nil, err
-	}
-	if len(request.Metadata) > 0 {
-		result, err = sjson.SetRawBytes(result, "metadata", request.Metadata)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return SignBillingHeaderCCH(result), nil
+func shouldApplyClaudeCodePassthroughBodyFingerprint(info *relaycommon.RelayInfo) bool {
+	return info != nil &&
+		info.ChannelMeta != nil &&
+		info.ApiType == rootconstant.APITypeAnthropic &&
+		info.GetFinalRequestRelayFormat() == types.RelayFormatClaude &&
+		(info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled ||
+			info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled)
+}
+
+func shouldFinalizeClaudeCodeSyntheticFingerprint(info *relaycommon.RelayInfo) bool {
+	return info != nil &&
+		info.ChannelMeta != nil &&
+		info.ApiType == rootconstant.APITypeAnthropic &&
+		info.GetFinalRequestRelayFormat() == types.RelayFormatClaude &&
+		info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled
 }
 
 func normalizeClaudeSystemBlocks(value any) []dto.ClaudeMediaMessage {

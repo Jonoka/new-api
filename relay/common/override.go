@@ -48,17 +48,56 @@ var claudeCodeProtectedHeaderNames = map[string]struct{}{
 	"x-claude-code-session-id":                  {},
 }
 
+var claudeCodeHeaderUserAgentPattern = regexp.MustCompile(`(?i)^claude-cli/\d+\.\d+\.\d+`)
+
 func IsClaudeCodeFingerprintEnabled(info *RelayInfo) bool {
 	return info != nil &&
 		info.ChannelMeta != nil &&
 		info.ApiType == rootconstant.APITypeAnthropic &&
-		(info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled ||
-			info.ChannelOtherSettings.ClaudeCodeTransportFingerprintEnabled)
+		info.ChannelOtherSettings.ClaudeCodeFingerprintEnabled
 }
 
 func IsClaudeCodeProtectedHeader(name string) bool {
 	_, ok := claudeCodeProtectedHeaderNames[normalizeHeaderContextKey(name)]
 	return ok
+}
+
+func IsRealClaudeCodeHeaders(headers map[string]string) bool {
+	if headers == nil {
+		return false
+	}
+	userAgent := getHeaderMapValue(headers, "User-Agent")
+	if claudeCodeHeaderUserAgentPattern.MatchString(userAgent) {
+		return true
+	}
+	xApp := getHeaderMapValue(headers, "X-App")
+	if strings.EqualFold(xApp, "claude-code") {
+		return true
+	}
+	if strings.EqualFold(xApp, "cli") &&
+		getHeaderMapValue(headers, "X-Stainless-Package-Version") != "" &&
+		strings.EqualFold(getHeaderMapValue(headers, "X-Stainless-Lang"), "js") {
+		return true
+	}
+	return getHeaderMapValue(headers, "X-Claude-Code-Session-Id") != "" &&
+		strings.TrimSpace(userAgent) == "" &&
+		strings.TrimSpace(xApp) == ""
+}
+
+func getHeaderMapValue(headers map[string]string, name string) string {
+	if headers == nil {
+		return ""
+	}
+	if value := strings.TrimSpace(headers[name]); value != "" {
+		return value
+	}
+	normalizedName := normalizeHeaderContextKey(name)
+	for key, value := range headers {
+		if normalizeHeaderContextKey(key) == normalizedName {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 var paramOverrideSensitivePathPrefixes = []string{
@@ -2150,6 +2189,6 @@ func BuildParamOverrideContext(info *RelayInfo) map[string]interface{} {
 	}
 
 	ctx["is_channel_test"] = info.IsChannelTest
-	ctx[paramOverrideContextClaudeCode] = IsClaudeCodeFingerprintEnabled(info)
+	ctx[paramOverrideContextClaudeCode] = IsRealClaudeCodeHeaders(info.RequestHeaders)
 	return ctx
 }

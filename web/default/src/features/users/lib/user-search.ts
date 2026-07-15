@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2025 QuantumNous
+Copyright (C) 2023-2026 QuantumNous
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as
@@ -16,25 +16,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { User } from '../types'
 
-import React from 'react';
-import { Modal } from '@douyinfe/semi-ui';
+type SearchableUser = Pick<
+  User,
+  'id' | 'username' | 'display_name' | 'email'
+>
 
-const DemoteUserModal = ({ visible, onCancel, onConfirm, user, t }) => {
-  return (
-    <Modal
-      title={t('确定要降级此用户吗？')}
-      visible={visible}
-      onCancel={onCancel}
-      onOk={onConfirm}
-      type='warning'
-    >
-      <div>{t('此操作将降低用户的权限级别')}</div>
-      <strong>
-        {user?.role === 100 ? t('管理员') : t('普通用户')}
-      </strong>
-    </Modal>
-  );
-};
+export function matchesUserSearchFilter(
+  user: SearchableUser,
+  filterValue: unknown
+): boolean {
+  const searchValue = String(filterValue).trim().toLowerCase()
+  if (!searchValue) return true
 
-export default DemoteUserModal;
+  return [user.id, user.username, user.display_name, user.email].some((field) =>
+    String(field || '')
+      .toLowerCase()
+      .includes(searchValue)
+  )
+}

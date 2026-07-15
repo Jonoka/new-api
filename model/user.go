@@ -14,6 +14,7 @@ import (
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const UserNameMaxLength = 20
@@ -260,18 +261,18 @@ func SearchUsers(keyword string, group string, role *int, status *int, startIdx 
 	// 构建基础查询
 	query := tx.Unscoped().Model(&User{})
 
-	// 构建搜索条件
+	keyword = strings.TrimSpace(keyword)
 	likeCondition := "username LIKE ? OR email LIKE ? OR display_name LIKE ?"
-	likeArgs := []interface{}{"%" + keyword + "%", "%" + keyword + "%", "%" + keyword + "%"}
-
-	// 尝试将关键字转换为整数ID
-	keywordInt, err := strconv.Atoi(keyword)
-	if err == nil {
-		// 如果是数字，同时搜索ID和其他字段
+	likeKeyword := "%" + keyword + "%"
+	likeArgs := []interface{}{likeKeyword, likeKeyword, likeKeyword}
+	exactUserID := 0
+	hasExactUserID := false
+	if keywordInt, parseErr := strconv.Atoi(keyword); parseErr == nil {
 		likeCondition = "id = ? OR " + likeCondition
 		likeArgs = append([]interface{}{keywordInt}, likeArgs...)
+		exactUserID = keywordInt
+		hasExactUserID = true
 	}
-
 	query = query.Where("("+likeCondition+")", likeArgs...)
 	if group != "" {
 		query = query.Where(commonGroupCol+" = ?", group)
@@ -290,8 +291,19 @@ func SearchUsers(keyword string, group string, role *int, status *int, startIdx 
 		return nil, 0, err
 	}
 
+	// 数字搜索保留原有匹配范围，但把精确 ID 放在最前，避免目标用户被挤出当前页。
+	if hasExactUserID {
+		query = query.Order(clause.OrderBy{Expression: clause.Expr{
+			SQL:                "CASE WHEN id = ? THEN 0 ELSE 1 END, id DESC",
+			Vars:               []interface{}{exactUserID},
+			WithoutParentheses: true,
+		}})
+	} else {
+		query = query.Order("id desc")
+	}
+
 	// 获取分页数据
-	err = query.Omit("password").Order("id desc").Limit(num).Offset(startIdx).Find(&users).Error
+	err = query.Omit("password").Limit(num).Offset(startIdx).Find(&users).Error
 	if err != nil {
 		tx.Rollback()
 		return nil, 0, err

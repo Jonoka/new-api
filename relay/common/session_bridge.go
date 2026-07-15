@@ -60,7 +60,11 @@ func buildOpenAISessionBridgeOverride(info *RelayInfo, jsonData []byte) map[stri
 	if !ok {
 		return nil
 	}
-	sessionID := normalizeOpenAIBridgeSessionID(info, raw["session_id"])
+	rawSessionID, exists := raw["session_id"]
+	if !exists {
+		return nil
+	}
+	sessionID := normalizeOpenAIBridgeSessionID(info, rawSessionID)
 	if sessionID == "" {
 		return nil
 	}
