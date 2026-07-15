@@ -267,6 +267,7 @@ type SubscriptionOrder struct {
 	OriginalMoney        float64 `json:"original_money"`
 	DiscountMoney        float64 `json:"discount_money"`
 	ActualMoney          float64 `json:"actual_money"`
+	PaidAmountCNY        float64 `json:"paid_amount_cny"`
 	PromoCodeId          int     `json:"promo_code_id" gorm:"index"`
 	PromoCode            string  `json:"promo_code" gorm:"type:varchar(64);default:''"`
 	AffiliateSourceQuota int     `json:"affiliate_source_quota"`
@@ -309,11 +310,18 @@ func normalizeSubscriptionOrderMoneySnapshot(order *SubscriptionOrder) {
 	if order.OriginalMoney == 0 {
 		order.OriginalMoney = order.Money
 	}
-	if order.ActualMoney == 0 && order.Money > 0 {
+	if order.ActualMoney == 0 && order.Money > 0 && order.PromoCodeId == 0 {
 		order.ActualMoney = order.Money
 	}
 	if order.Money == 0 && order.ActualMoney > 0 {
 		order.Money = order.ActualMoney
+	}
+	if order.PaidAmountCNY <= 0 {
+		paidAmount := invoiceOrderPaidAmount(order.Money, order.ActualMoney, order.PromoCodeId)
+		if paidAmount > 0 {
+			provider := invoiceOrderPaymentProvider(order.PaymentProvider, order.PaymentMethod)
+			order.PaidAmountCNY = invoiceOrderAmountCNY(paidAmount, provider)
+		}
 	}
 }
 
@@ -1018,6 +1026,7 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 				OriginalMoney:        order.OriginalMoney,
 				DiscountMoney:        order.DiscountMoney,
 				ActualMoney:          order.ActualMoney,
+				PaidAmountCNY:        order.PaidAmountCNY,
 				PromoCodeId:          order.PromoCodeId,
 				PromoCode:            order.PromoCode,
 				AffiliateSourceQuota: order.AffiliateSourceQuota,
@@ -1046,6 +1055,7 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 	topup.OriginalMoney = order.OriginalMoney
 	topup.DiscountMoney = order.DiscountMoney
 	topup.ActualMoney = order.ActualMoney
+	topup.PaidAmountCNY = order.PaidAmountCNY
 	topup.PromoCodeId = order.PromoCodeId
 	topup.PromoCode = order.PromoCode
 	topup.AffiliateSourceQuota = order.AffiliateSourceQuota
@@ -1215,6 +1225,7 @@ func PurchaseSubscriptionWithBalance(userId int, planId int, promoCode string, i
 			UserId:          userId,
 			PlanId:          plan.Id,
 			Money:           planPriceUSD,
+			PaidAmountCNY:   invoiceBaseCNY,
 			TradeNo:         tradeNo,
 			PaymentMethod:   PaymentMethodBalance,
 			PaymentProvider: PaymentProviderBalance,
@@ -1231,6 +1242,7 @@ func PurchaseSubscriptionWithBalance(userId int, planId int, promoCode string, i
 			AddInvoiceSnapshotToSubscriptionOrder(order, normalizedInvoiceReq, invoiceBaseCNY, invoiceFeeCNY)
 			order.Money = decimal.NewFromFloat(businessPaidUSD).Add(decimal.NewFromFloat(invoiceFeeUSD)).Round(2).InexactFloat64()
 		}
+		normalizeSubscriptionOrderMoneySnapshot(order)
 		if err := tx.Create(order).Error; err != nil {
 			return err
 		}

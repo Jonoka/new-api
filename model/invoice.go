@@ -62,26 +62,27 @@ type InvoiceRequest struct {
 }
 
 type InvoiceRecord struct {
-	Id            int     `json:"id"`
-	UserId        int     `json:"user_id" gorm:"index"`
-	SourceType    string  `json:"source_type" gorm:"type:varchar(32);index;uniqueIndex:idx_invoice_source,priority:1"`
-	SourceId      string  `json:"source_id" gorm:"type:varchar(255);index;uniqueIndex:idx_invoice_source,priority:2"`
-	PaymentMethod string  `json:"payment_method" gorm:"type:varchar(50)"`
-	InvoiceType   string  `json:"invoice_type" gorm:"type:varchar(32)"`
-	Title         string  `json:"title" gorm:"type:varchar(255)"`
-	TaxNo         string  `json:"tax_no" gorm:"type:varchar(128)"`
-	Email         string  `json:"email" gorm:"type:varchar(255)"`
-	Phone         string  `json:"phone" gorm:"type:varchar(64)"`
-	Remark        string  `json:"remark" gorm:"type:text"`
-	BaseAmount    float64 `json:"base_amount"`
-	FeeAmount     float64 `json:"fee_amount"`
-	TotalAmount   float64 `json:"total_amount"`
-	Status        string  `json:"status" gorm:"type:varchar(32);index"`
-	DownloadUrl   string  `json:"download_url" gorm:"type:text"`
-	AdminRemark   string  `json:"admin_remark" gorm:"type:text"`
-	CreateTime    int64   `json:"create_time" gorm:"index"`
-	UpdateTime    int64   `json:"update_time"`
-	IssuedTime    int64   `json:"issued_time"`
+	Id            int                `json:"id"`
+	UserId        int                `json:"user_id" gorm:"index"`
+	SourceType    string             `json:"source_type" gorm:"type:varchar(32);index;uniqueIndex:idx_invoice_source,priority:1"`
+	SourceId      string             `json:"source_id" gorm:"type:varchar(255);index;uniqueIndex:idx_invoice_source,priority:2"`
+	PaymentMethod string             `json:"payment_method" gorm:"type:varchar(50)"`
+	InvoiceType   string             `json:"invoice_type" gorm:"type:varchar(32)"`
+	Title         string             `json:"title" gorm:"type:varchar(255)"`
+	TaxNo         string             `json:"tax_no" gorm:"type:varchar(128)"`
+	Email         string             `json:"email" gorm:"type:varchar(255)"`
+	Phone         string             `json:"phone" gorm:"type:varchar(64)"`
+	Remark        string             `json:"remark" gorm:"type:text"`
+	BaseAmount    float64            `json:"base_amount"`
+	FeeAmount     float64            `json:"fee_amount"`
+	TotalAmount   float64            `json:"total_amount"`
+	Status        string             `json:"status" gorm:"type:varchar(32);index"`
+	DownloadUrl   string             `json:"download_url" gorm:"type:text"`
+	AdminRemark   string             `json:"admin_remark" gorm:"type:text"`
+	CreateTime    int64              `json:"create_time" gorm:"index"`
+	UpdateTime    int64              `json:"update_time"`
+	IssuedTime    int64              `json:"issued_time"`
+	Orders        []InvoiceOrderLink `json:"orders,omitempty" gorm:"-"`
 }
 
 func InvoiceTypesJSON() string {
@@ -464,6 +465,9 @@ func GetUserInvoiceRecords(userId int, pageInfo *common.PageInfo) ([]*InvoiceRec
 	if err := tx.Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&records).Error; err != nil {
 		return nil, 0, err
 	}
+	if err := attachInvoiceOrderLinks(records); err != nil {
+		return nil, 0, err
+	}
 	return records, total, nil
 }
 
@@ -480,7 +484,38 @@ func GetAllInvoiceRecords(status string, pageInfo *common.PageInfo) ([]*InvoiceR
 	if err := tx.Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&records).Error; err != nil {
 		return nil, 0, err
 	}
+	if err := attachInvoiceOrderLinks(records); err != nil {
+		return nil, 0, err
+	}
 	return records, total, nil
+}
+
+func attachInvoiceOrderLinks(records []*InvoiceRecord) error {
+	if len(records) == 0 {
+		return nil
+	}
+	ids := make([]int, 0, len(records))
+	byId := make(map[int]*InvoiceRecord, len(records))
+	for _, record := range records {
+		if record == nil || record.Id <= 0 {
+			continue
+		}
+		ids = append(ids, record.Id)
+		byId[record.Id] = record
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	var links []InvoiceOrderLink
+	if err := DB.Where("invoice_id IN ?", ids).Order("id asc").Find(&links).Error; err != nil {
+		return err
+	}
+	for _, link := range links {
+		if record := byId[link.InvoiceId]; record != nil {
+			record.Orders = append(record.Orders, link)
+		}
+	}
+	return nil
 }
 
 func UpdateInvoiceRecord(id int, downloadUrl string, status string, adminRemark string) error {
@@ -525,6 +560,30 @@ func syncInvoiceSourceStatusTx(tx *gorm.DB, record *InvoiceRecord) error {
 		return tx.Model(&TopUp{}).Where("trade_no = ?", record.SourceId).Updates(updates).Error
 	case InvoiceSourceSubscription:
 		return tx.Model(&SubscriptionOrder{}).Where("trade_no = ?", record.SourceId).Updates(updates).Error
+	case InvoiceSourceCombined:
+		var links []InvoiceOrderLink
+		if err := tx.Where("invoice_id = ?", record.Id).Find(&links).Error; err != nil {
+			return err
+		}
+		for _, link := range links {
+			switch link.SourceType {
+			case InvoiceSourceTopUp:
+				if err := tx.Model(&TopUp{}).Where("trade_no = ?", link.SourceId).Updates(updates).Error; err != nil {
+					return err
+				}
+			case InvoiceSourceSubscription:
+				if err := tx.Model(&SubscriptionOrder{}).Where("trade_no = ?", link.SourceId).Updates(updates).Error; err != nil {
+					return err
+				}
+				// 订阅支付可能存在同订单号的充值镜像。
+				if err := tx.Model(&TopUp{}).Where("trade_no = ?", link.SourceId).Updates(updates).Error; err != nil {
+					return err
+				}
+			default:
+				return fmt.Errorf("unknown invoice order source type %s", link.SourceType)
+			}
+		}
+		return nil
 	default:
 		return fmt.Errorf("unknown invoice source type %s", record.SourceType)
 	}
