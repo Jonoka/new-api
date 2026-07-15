@@ -917,9 +917,11 @@ func testAllChannels(notify bool) error {
 	testAllChannelsLock.Unlock()
 	channels, getChannelErr := model.GetAllChannels(0, 0, true, false)
 	if getChannelErr != nil {
+		testAllChannelsLock.Lock()
+		testAllChannelsRunning = false
+		testAllChannelsLock.Unlock()
 		return getChannelErr
 	}
-	monitorSetting := operation_setting.GetMonitorSetting()
 	gopool.Go(func() {
 		// 使用 defer 确保无论如何都会重置运行状态，防止死锁
 		defer func() {
@@ -928,17 +930,37 @@ func testAllChannels(notify bool) error {
 			testAllChannelsLock.Unlock()
 		}()
 
-		for _, channel := range channels {
+		for _, listedChannel := range channels {
+			channel, err := model.GetChannelById(listedChannel.Id, true)
+			if err != nil {
+				common.SysLog(fmt.Sprintf("failed to reload channel before monitor test: channel_id=%d, error=%v", listedChannel.Id, err))
+				continue
+			}
 			settings := channel.GetOtherSettings()
-			policy := newChannelMonitorPolicy(channel, settings, monitorSetting)
+			policy := newChannelMonitorPolicy(channel, settings, operation_setting.GetMonitorSetting())
 			if !policy.shouldTest(!notify, common.GetTimestamp()) {
 				continue
 			}
-			isChannelEnabled := channel.Status == common.ChannelStatusEnabled
 			tik := time.Now()
 			result := testChannel(channel, testUserID, "", "", shouldUseStreamForAutomaticChannelTest(channel))
 			tok := time.Now()
 			milliseconds := tok.Sub(tik).Milliseconds()
+			channel.UpdateResponseTime(milliseconds)
+
+			// 测试期间管理员可能修改渠道设置。结果落库前重新读取并使用最新策略，
+			// 避免旧任务覆盖新配置，或在监控关闭后继续执行自动禁用/启用。
+			channel, err = model.GetChannelById(channel.Id, true)
+			if err != nil {
+				common.SysLog(fmt.Sprintf("failed to reload channel after monitor test: channel_id=%d, error=%v", listedChannel.Id, err))
+				continue
+			}
+			settings = channel.GetOtherSettings()
+			policy = newChannelMonitorPolicy(channel, settings, operation_setting.GetMonitorSetting())
+			now := common.GetTimestamp()
+			if !policy.shouldTest(!notify, now) {
+				continue
+			}
+			isChannelEnabled := channel.Status == common.ChannelStatusEnabled
 
 			shouldBanChannel := false
 			newAPIError := result.newAPIError
@@ -962,7 +984,7 @@ func testAllChannels(notify bool) error {
 				disableCandidate:   shouldBanChannel,
 				enableCandidate:    enableCandidate,
 				responseTimeMillis: milliseconds,
-				now:                common.GetTimestamp(),
+				now:                now,
 			})
 			if err := saveChannelMonitorSettings(channel, settings); err != nil {
 				common.SysLog(fmt.Sprintf("failed to save channel monitor state: channel_id=%d, error=%v", channel.Id, err))
@@ -978,7 +1000,6 @@ func testAllChannels(notify bool) error {
 				service.EnableChannel(channel.Id, common.GetContextKeyString(result.context, constant.ContextKeyChannelKey), channel.Name)
 			}
 
-			channel.UpdateResponseTime(milliseconds)
 			time.Sleep(common.RequestInterval)
 		}
 
@@ -1003,19 +1024,27 @@ func TestAllChannels(c *gin.Context) {
 
 var autoTestChannelsOnce sync.Once
 
-func automaticChannelTestPollInterval(monitorSetting *operation_setting.MonitorSetting) time.Duration {
-	if monitorSetting == nil {
-		return time.Minute
+func automaticChannelTestPollInterval(monitorSetting *operation_setting.MonitorSetting, channels []*model.Channel) (time.Duration, bool) {
+	pollInterval := time.Minute
+	hasEnabledChannel := false
+	for _, channel := range channels {
+		if channel == nil {
+			continue
+		}
+		policy := newChannelMonitorPolicy(channel, channel.GetOtherSettings(), monitorSetting)
+		if !policy.monitorEnabled || channel.Status == common.ChannelStatusManuallyDisabled || !channel.GetAutoBan() {
+			continue
+		}
+		hasEnabledChannel = true
+		if policy.channelTestIntervalSeconds <= 0 {
+			continue
+		}
+		channelInterval := time.Duration(policy.channelTestIntervalSeconds) * time.Second
+		if channelInterval < pollInterval {
+			pollInterval = channelInterval
+		}
 	}
-	intervalSeconds := monitorIntervalSeconds(monitorSetting.AutoTestChannelMinutes)
-	if intervalSeconds <= 0 {
-		return time.Minute
-	}
-	interval := time.Duration(intervalSeconds) * time.Second
-	if interval < time.Minute {
-		return interval
-	}
-	return time.Minute
+	return pollInterval, hasEnabledChannel
 }
 
 func AutomaticallyTestChannels() {
@@ -1026,12 +1055,18 @@ func AutomaticallyTestChannels() {
 	autoTestChannelsOnce.Do(func() {
 		for {
 			monitorSetting := operation_setting.GetMonitorSetting()
-			if !monitorSetting.AutoTestChannelEnabled {
-				time.Sleep(1 * time.Minute)
+			channels, err := model.GetAllChannels(0, 0, true, false)
+			if err != nil {
+				common.SysLog(fmt.Sprintf("failed to load channels for automatic monitor schedule: %v", err))
+				time.Sleep(time.Minute)
 				continue
 			}
-			time.Sleep(automaticChannelTestPollInterval(monitorSetting))
-			common.SysLog(fmt.Sprintf("automatically test channels with interval %f minutes", monitorSetting.AutoTestChannelMinutes))
+			pollInterval, hasEnabledChannel := automaticChannelTestPollInterval(monitorSetting, channels)
+			time.Sleep(pollInterval)
+			if !hasEnabledChannel {
+				continue
+			}
+			common.SysLog(fmt.Sprintf("automatically polling channel monitors every %s", pollInterval))
 			common.SysLog("automatically testing all channels")
 			_ = testAllChannels(false)
 			common.SysLog("automatically channel test finished")

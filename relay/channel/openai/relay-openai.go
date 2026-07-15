@@ -170,7 +170,7 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			Usage *dto.Usage `json:"usage"`
 		}
 		err := common.Unmarshal([]byte(secondLastStreamData), &streamResp)
-		if err == nil && streamResp.Usage != nil && service.ValidUsage(streamResp.Usage) {
+		if err == nil && normalizeAndValidateOpenAIUsage(streamResp.Usage) {
 			usage = streamResp.Usage
 			containStreamUsage = true
 
@@ -186,6 +186,15 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	if err := handleLastResponse(lastStreamData, &responseId, &createAt, &systemFingerprint, &model, &usage,
 		&containStreamUsage); err != nil {
 		logger.LogError(c, fmt.Sprintf("error handling last response: %s, lastStreamData: [%s]", err.Error(), lastStreamData))
+	}
+	normalizeOpenAIUsageTokenCounts(usage)
+	if containStreamUsage {
+		patchedData, patchErr := patchOpenAIChatUsage(common.StringToByteSlice(lastStreamData), usage)
+		if patchErr != nil {
+			logger.LogError(c, "failed to patch stream usage: "+patchErr.Error())
+		} else {
+			lastStreamData = string(patchedData)
+		}
 	}
 
 	if !containStreamUsage {
@@ -399,20 +408,14 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 		forceFormat = true
 	}
 
-	usageModified := false
-	if simpleResponse.Usage.PromptTokens == 0 {
-		completionTokens := simpleResponse.Usage.CompletionTokens
-		if completionTokens == 0 {
-			for _, choice := range simpleResponse.Choices {
-				ctkm := service.CountTextToken(choice.Message.StringContent()+choice.Message.GetReasoningContent(), info.UpstreamModelName)
-				completionTokens += ctkm
-			}
+	usageModified := normalizeOpenAIUsageTokenCounts(&simpleResponse.Usage)
+	completionTokens := 0
+	if simpleResponse.Usage.CompletionTokens == 0 {
+		for _, choice := range simpleResponse.Choices {
+			completionTokens += service.CountTextToken(choice.Message.StringContent()+choice.Message.GetReasoningContent(), info.UpstreamModelName)
 		}
-		simpleResponse.Usage = dto.Usage{
-			PromptTokens:     info.GetEstimatePromptTokens(),
-			CompletionTokens: completionTokens,
-			TotalTokens:      info.GetEstimatePromptTokens() + completionTokens,
-		}
+	}
+	if fillMissingOpenAIChatUsage(&simpleResponse.Usage, info.GetEstimatePromptTokens(), completionTokens) {
 		usageModified = true
 	}
 
@@ -421,13 +424,10 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:
 		if usageModified {
-			var bodyMap map[string]interface{}
-			err = common.Unmarshal(responseBody, &bodyMap)
+			responseBody, err = patchOpenAIChatUsage(responseBody, &simpleResponse.Usage)
 			if err != nil {
 				return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 			}
-			bodyMap["usage"] = simpleResponse.Usage
-			responseBody, _ = common.Marshal(bodyMap)
 		}
 		if forceFormat {
 			responseBody, err = common.Marshal(simpleResponse)
@@ -737,15 +737,14 @@ func OpenaiHandlerWithUsage(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	// because the upstream has already consumed resources and returned content
 	// We should still perform billing even if parsing fails
 	// format
-	if usageResp.InputTokens > 0 {
-		usageResp.PromptTokens += usageResp.InputTokens
-	}
-	if usageResp.OutputTokens > 0 {
-		usageResp.CompletionTokens += usageResp.OutputTokens
-	}
+	normalizeOpenAIUsageTokenCounts(&usageResp.Usage)
 	if usageResp.InputTokensDetails != nil {
-		usageResp.PromptTokensDetails.ImageTokens += usageResp.InputTokensDetails.ImageTokens
-		usageResp.PromptTokensDetails.TextTokens += usageResp.InputTokensDetails.TextTokens
+		if usageResp.PromptTokensDetails.ImageTokens == 0 {
+			usageResp.PromptTokensDetails.ImageTokens = usageResp.InputTokensDetails.ImageTokens
+		}
+		if usageResp.PromptTokensDetails.TextTokens == 0 {
+			usageResp.PromptTokensDetails.TextTokens = usageResp.InputTokensDetails.TextTokens
+		}
 	}
 	applyUsagePostProcessing(info, &usageResp.Usage, responseBody)
 	return &usageResp.Usage, nil

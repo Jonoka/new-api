@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useState, useRef } from 'react';
-import { API, showError, showSuccess } from '../../../../helpers';
+import { API, isRoot, showError, showSuccess } from '../../../../helpers';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
 import {
   Button,
@@ -43,11 +43,22 @@ const AddUserModal = (props) => {
   const formApiRef = useRef(null);
   const [loading, setLoading] = useState(false);
   const isMobile = useIsMobile();
+  const canAssignAdminRoles = isRoot();
+  const roleOptions = [
+    { label: t('普通用户'), value: 1 },
+    ...(canAssignAdminRoles
+      ? [
+          { label: t('管理员'), value: 10 },
+          { label: t('超级管理员'), value: 100 },
+        ]
+      : []),
+  ];
 
   const getInitValues = () => ({
     username: '',
     display_name: '',
     password: '',
+    role: 1,
     remark: '',
   });
 
@@ -145,6 +156,13 @@ const AddUserModal = (props) => {
                       placeholder={t('请输入用户名')}
                       rules={[{ required: true, message: t('请输入用户名') }]}
                       showClear
+                    />
+                  </Col>
+                  <Col span={24}>
+                    <Form.Select
+                      field='role'
+                      label={t('角色')}
+                      optionList={roleOptions}
                     />
                   </Col>
                   <Col span={24}>

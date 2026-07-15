@@ -88,6 +88,26 @@ const UsersFilters = ({
             size='small'
           />
         </div>
+        <div className='w-full md:w-40'>
+          <Form.Select
+            field='searchRole'
+            placeholder={t('角色')}
+            optionList={[
+              { label: t('普通用户'), value: '1' },
+              { label: t('管理员'), value: '10' },
+              { label: t('超级管理员'), value: '100' },
+            ]}
+            onChange={() => {
+              setTimeout(() => {
+                searchUsers(1, pageSize);
+              }, 100);
+            }}
+            className='w-full'
+            showClear
+            pure
+            size='small'
+          />
+        </div>
         <div className='flex gap-2 w-full md:w-auto'>
           <Button
             type='tertiary'

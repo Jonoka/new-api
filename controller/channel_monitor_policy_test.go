@@ -104,6 +104,34 @@ func TestChannelMonitorPolicySkipsAutomaticMonitoring(t *testing.T) {
 	require.True(t, legacyAutoBanOff.shouldTest(false, 1000))
 }
 
+func TestChannelMonitorPolicyMonitorSwitchOverridesGlobal(t *testing.T) {
+	enabled := true
+	disabled := false
+	channel := &model.Channel{
+		Status:  common.ChannelStatusEnabled,
+		AutoBan: common.GetPointer(1),
+	}
+
+	inheritsDisabled := newChannelMonitorPolicy(channel, dto.ChannelOtherSettings{}, &operation_setting.MonitorSetting{
+		AutoTestChannelEnabled: false,
+	})
+	require.False(t, inheritsDisabled.shouldTest(true, 1000))
+
+	explicitlyEnabled := newChannelMonitorPolicy(channel, dto.ChannelOtherSettings{
+		MonitorEnabled: &enabled,
+	}, &operation_setting.MonitorSetting{
+		AutoTestChannelEnabled: false,
+	})
+	require.True(t, explicitlyEnabled.shouldTest(true, 1000))
+
+	explicitlyDisabled := newChannelMonitorPolicy(channel, dto.ChannelOtherSettings{
+		MonitorEnabled: &disabled,
+	}, &operation_setting.MonitorSetting{
+		AutoTestChannelEnabled: true,
+	})
+	require.False(t, explicitlyDisabled.shouldTest(true, 1000))
+}
+
 func TestChannelMonitorPolicyHonorsChannelInterval(t *testing.T) {
 	minutes := 10.0
 	policy := newChannelMonitorPolicy(&model.Channel{
@@ -112,7 +140,7 @@ func TestChannelMonitorPolicyHonorsChannelInterval(t *testing.T) {
 	}, dto.ChannelOtherSettings{
 		MonitorTestIntervalMinutes: &minutes,
 		MonitorLastTestTime:        1000,
-	}, &operation_setting.MonitorSetting{})
+	}, &operation_setting.MonitorSetting{AutoTestChannelEnabled: true})
 
 	require.False(t, policy.shouldTest(true, 1200))
 	require.True(t, policy.shouldTest(true, 1600))
@@ -126,6 +154,7 @@ func TestChannelMonitorPolicyHonorsGlobalIntervalWhenChannelInherits(t *testing.
 	}, dto.ChannelOtherSettings{
 		MonitorLastTestTime: 1000,
 	}, &operation_setting.MonitorSetting{
+		AutoTestChannelEnabled: true,
 		AutoTestChannelMinutes: 10,
 	})
 
@@ -135,12 +164,46 @@ func TestChannelMonitorPolicyHonorsGlobalIntervalWhenChannelInherits(t *testing.
 }
 
 func TestAutomaticChannelTestPollIntervalAllowsShorterChannelOverrides(t *testing.T) {
-	require.Equal(t, time.Minute, automaticChannelTestPollInterval(&operation_setting.MonitorSetting{
+	channel := &model.Channel{
+		Status:  common.ChannelStatusEnabled,
+		AutoBan: common.GetPointer(1),
+	}
+	interval, enabled := automaticChannelTestPollInterval(&operation_setting.MonitorSetting{
+		AutoTestChannelEnabled: true,
 		AutoTestChannelMinutes: 10,
-	}))
-	require.Equal(t, 30*time.Second, automaticChannelTestPollInterval(&operation_setting.MonitorSetting{
+	}, []*model.Channel{channel})
+	require.True(t, enabled)
+	require.Equal(t, time.Minute, interval)
+
+	channelOverrideEnabled := true
+	channelOverrideMinutes := 0.5
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		MonitorEnabled:             &channelOverrideEnabled,
+		MonitorTestIntervalMinutes: &channelOverrideMinutes,
+	})
+	interval, enabled = automaticChannelTestPollInterval(&operation_setting.MonitorSetting{
+		AutoTestChannelEnabled: false,
+		AutoTestChannelMinutes: 10,
+	}, []*model.Channel{channel})
+	require.True(t, enabled)
+	require.Equal(t, 30*time.Second, interval)
+}
+
+func TestAutomaticChannelTestPollIntervalSkipsDisabledChannels(t *testing.T) {
+	disabled := false
+	channel := &model.Channel{
+		Status:  common.ChannelStatusEnabled,
+		AutoBan: common.GetPointer(1),
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{MonitorEnabled: &disabled})
+
+	interval, enabled := automaticChannelTestPollInterval(&operation_setting.MonitorSetting{
+		AutoTestChannelEnabled: true,
 		AutoTestChannelMinutes: 0.5,
-	}))
+	}, []*model.Channel{channel})
+
+	require.False(t, enabled)
+	require.Equal(t, time.Minute, interval)
 }
 
 func TestSaveChannelMonitorSettingsOnlyUpdatesSettings(t *testing.T) {
@@ -174,4 +237,56 @@ func TestSaveChannelMonitorSettingsOnlyUpdatesSettings(t *testing.T) {
 	require.NoError(t, model.DB.First(&reloaded, channel.Id).Error)
 	require.Equal(t, common.ChannelStatusAutoDisabled, reloaded.Status)
 	require.Equal(t, 1, reloaded.GetOtherSettings().MonitorConsecutiveFailures)
+}
+
+func TestSaveChannelMonitorSettingsPreservesConcurrentConfigChanges(t *testing.T) {
+	oldDB := model.DB
+	t.Cleanup(func() {
+		model.DB = oldDB
+	})
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Channel{}))
+	model.DB = db
+
+	monitorEnabled := true
+	channel := model.Channel{
+		Key:     "sk-test",
+		Name:    "test",
+		Status:  common.ChannelStatusEnabled,
+		AutoBan: common.GetPointer(1),
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		MonitorEnabled: &monitorEnabled,
+	})
+	require.NoError(t, model.DB.Create(&channel).Error)
+
+	// 模拟监控任务持有旧快照后，管理员关闭了该渠道监控并修改间隔。
+	staleSettings := channel.GetOtherSettings()
+	staleSettings.MonitorLastTestTime = 1234
+	staleSettings.MonitorConsecutiveFailures = 2
+	monitorEnabled = false
+	intervalMinutes := 30.0
+	latestSettings := dto.ChannelOtherSettings{
+		MonitorEnabled:             &monitorEnabled,
+		MonitorTestIntervalMinutes: &intervalMinutes,
+	}
+	latestChannel := model.Channel{Id: channel.Id}
+	latestChannel.SetOtherSettings(latestSettings)
+	require.NoError(t, model.DB.Model(&model.Channel{}).
+		Where("id = ?", channel.Id).
+		Update("settings", latestChannel.OtherSettings).Error)
+
+	require.NoError(t, saveChannelMonitorSettings(&channel, staleSettings))
+
+	var reloaded model.Channel
+	require.NoError(t, model.DB.First(&reloaded, channel.Id).Error)
+	saved := reloaded.GetOtherSettings()
+	require.NotNil(t, saved.MonitorEnabled)
+	require.False(t, *saved.MonitorEnabled)
+	require.NotNil(t, saved.MonitorTestIntervalMinutes)
+	require.Equal(t, 30.0, *saved.MonitorTestIntervalMinutes)
+	require.Equal(t, int64(1234), saved.MonitorLastTestTime)
+	require.Equal(t, 2, saved.MonitorConsecutiveFailures)
 }

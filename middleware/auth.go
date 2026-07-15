@@ -120,6 +120,38 @@ func authHelper(c *gin.Context, minRole int) {
 		c.Abort()
 		return
 	}
+	if !useAccessToken && minRole >= common.RoleAdminUser {
+		currentUser, refreshErr := model.GetUserById(apiUserId, false)
+		if refreshErr != nil {
+			if errors.Is(refreshErr, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusUnauthorized, gin.H{
+					"success": false,
+					"message": common.TranslateMessage(c, i18n.MsgAuthUserInfoInvalid),
+				})
+			} else {
+				common.SysLog("refresh privileged session user failed: " + refreshErr.Error())
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"success": false,
+					"message": common.TranslateMessage(c, i18n.MsgDatabaseError),
+				})
+			}
+			c.Abort()
+			return
+		}
+
+		if username != currentUser.Username || role != currentUser.Role || status != currentUser.Status || session.Get("group") != currentUser.Group {
+			session.Set("username", currentUser.Username)
+			session.Set("role", currentUser.Role)
+			session.Set("status", currentUser.Status)
+			session.Set("group", currentUser.Group)
+			if saveErr := session.Save(); saveErr != nil {
+				common.SysLog("refresh privileged session failed: " + saveErr.Error())
+			}
+		}
+		username = currentUser.Username
+		role = currentUser.Role
+		status = currentUser.Status
+	}
 	if status.(int) == common.UserStatusDisabled {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
