@@ -50,8 +50,22 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { SectionPageLayout } from '@/components/layout'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
-import { getAdminInvoices, getUserInvoices, updateInvoiceRecord } from './api'
-import type { InvoiceRecord, InvoiceStatus } from './types'
+import {
+  createOrderInvoice,
+  getAdminInvoices,
+  getInvoiceConfig,
+  getInvoiceEligibleOrders,
+  getUserInvoices,
+  updateInvoiceRecord,
+} from './api'
+import { OrderInvoiceRequest } from './components/order-invoice-request'
+import type {
+  InvoiceConfig,
+  InvoiceEligibleOrder,
+  InvoiceRecord,
+  InvoiceRequest,
+  InvoiceStatus,
+} from './types'
 
 interface InvoicesProps {
   admin?: boolean
@@ -87,7 +101,14 @@ function getInvoiceTypeLabel(type: string, t: (key: string) => string) {
 }
 
 function getSourceLabel(type: string, t: (key: string) => string) {
-  return type === 'subscription' ? t('Subscription purchase') : t('Top-up')
+  switch (type) {
+    case 'subscription':
+      return t('Subscription purchase')
+    case 'batch':
+      return t('Combined orders')
+    default:
+      return t('Top-up')
+  }
 }
 
 export function Invoices({ admin = false }: InvoicesProps) {
@@ -97,6 +118,10 @@ export function Invoices({ admin = false }: InvoicesProps) {
   const [page, setPage] = useState(1)
   const [status, setStatus] = useState<InvoiceStatus | 'all'>('pending')
   const [loading, setLoading] = useState(false)
+  const [invoiceConfig, setInvoiceConfig] = useState<InvoiceConfig | null>(null)
+  const [invoiceOrders, setInvoiceOrders] = useState<InvoiceEligibleOrder[]>([])
+  const [ordersLoading, setOrdersLoading] = useState(false)
+  const [orderInvoiceSubmitting, setOrderInvoiceSubmitting] = useState(false)
   const [savingId, setSavingId] = useState<number | null>(null)
   const [editing, setEditing] = useState<
     Record<
@@ -144,9 +169,45 @@ export function Invoices({ admin = false }: InvoicesProps) {
     }
   }, [admin, page, status, t])
 
+  const loadInvoiceOrders = useCallback(async () => {
+    if (admin) return
+    setOrdersLoading(true)
+    try {
+      const [configResponse, ordersResponse] = await Promise.all([
+        getInvoiceConfig(),
+        getInvoiceEligibleOrders(),
+      ])
+      if (!configResponse.success || !configResponse.data) {
+        throw new Error(
+          configResponse.message || t('Failed to load invoice configuration')
+        )
+      }
+      if (!ordersResponse.success || !ordersResponse.data) {
+        throw new Error(
+          ordersResponse.message || t('Failed to load invoiceable orders')
+        )
+      }
+      setInvoiceConfig(configResponse.data)
+      setInvoiceOrders(ordersResponse.data.orders || [])
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t('Failed to load invoiceable orders')
+      )
+      setInvoiceOrders([])
+    } finally {
+      setOrdersLoading(false)
+    }
+  }, [admin, t])
+
   useEffect(() => {
     void loadInvoices()
   }, [loadInvoices])
+
+  useEffect(() => {
+    void loadInvoiceOrders()
+  }, [loadInvoiceOrders])
 
   const pageRange = useMemo(() => {
     if (total === 0) return '0-0'
@@ -170,6 +231,34 @@ export function Invoices({ admin = false }: InvoicesProps) {
       toast.error(t('Save failed, please retry'))
     } finally {
       setSavingId(null)
+    }
+  }
+
+  const submitOrderInvoice = async (
+    orders: InvoiceEligibleOrder[],
+    invoice: InvoiceRequest
+  ) => {
+    setOrderInvoiceSubmitting(true)
+    try {
+      const response = await createOrderInvoice({
+        orders: orders.map((order) => ({
+          source_type: order.source_type,
+          source_id: order.source_id,
+        })),
+        invoice: { ...invoice, required: true },
+      })
+      if (!response.success) {
+        toast.error(response.message || t('Failed to submit invoice request'))
+        return false
+      }
+      toast.success(t('Invoice request submitted'))
+      await Promise.all([loadInvoices(), loadInvoiceOrders()])
+      return true
+    } catch {
+      toast.error(t('Failed to submit invoice request'))
+      return false
+    } finally {
+      setOrderInvoiceSubmitting(false)
     }
   }
 
@@ -232,6 +321,17 @@ export function Invoices({ admin = false }: InvoicesProps) {
               </Button>
             </div>
           </div>
+
+          {!admin && (
+            <OrderInvoiceRequest
+              config={invoiceConfig}
+              orders={invoiceOrders}
+              loading={ordersLoading}
+              submitting={orderInvoiceSubmitting}
+              onRefresh={loadInvoiceOrders}
+              onSubmit={submitOrderInvoice}
+            />
+          )}
 
           {loading ? (
             <div className='space-y-3'>

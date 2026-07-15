@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 export type InvoiceType = 'personal' | 'company'
 export type InvoiceStatus = 'pending' | 'issued' | 'closed'
-export type InvoiceSourceType = 'topup' | 'subscription'
+export type InvoiceSourceType = 'topup' | 'subscription' | 'batch'
 export type InvoiceFeeRuleType = 'fixed' | 'percent'
 
 export interface InvoiceFeeRule {
@@ -68,6 +68,48 @@ export interface InvoiceRecord {
   create_time: number
   update_time: number
   issued_time: number
+}
+
+export interface InvoiceEligibleOrder {
+  source_type: InvoiceSourceType
+  source_id: string
+  payment_method: string
+  payment_provider: string
+  paid_amount: number
+  invoice_amount: number
+  currency: string
+  complete_time: number
+  invoiced: boolean
+  invoice_eligible: boolean
+  invoice_status: string
+}
+
+export interface InvoiceEligibleOrderList {
+  orders: InvoiceEligibleOrder[]
+  window_days: number
+  currency: string
+}
+
+export interface InvoiceOrderReference {
+  source_type: InvoiceSourceType
+  source_id: string
+}
+
+export interface CreateOrderInvoiceRequest {
+  orders: InvoiceOrderReference[]
+  invoice: InvoiceRequest
+}
+
+export interface InvoiceOrderSelectionRequest {
+  orders: InvoiceOrderReference[]
+}
+
+export interface InvoiceOrderPreview {
+  order_amount: number
+  invoice_fee: number
+  invoice_total_amount: number
+  fee_quota: number
+  currency: string
 }
 
 export interface InvoicePageData {
@@ -151,8 +193,7 @@ export function isInvoicePreviewRequestEnabled(
     ? request.type
     : normalizedConfig.types[0]
   return (
-    normalizedConfig.enabled &&
-    normalizedConfig.types.includes(invoiceType)
+    normalizedConfig.enabled && normalizedConfig.types.includes(invoiceType)
   )
 }
 

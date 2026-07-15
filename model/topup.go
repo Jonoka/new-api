@@ -20,6 +20,7 @@ type TopUp struct {
 	OriginalMoney        float64 `json:"original_money"`
 	DiscountMoney        float64 `json:"discount_money"`
 	ActualMoney          float64 `json:"actual_money"`
+	PaidAmountCNY        float64 `json:"paid_amount_cny"`
 	PromoCodeId          int     `json:"promo_code_id" gorm:"index"`
 	PromoCode            string  `json:"promo_code" gorm:"type:varchar(64);default:''"`
 	AffiliateSourceQuota int     `json:"affiliate_source_quota"`
@@ -91,6 +92,13 @@ func normalizeTopUpMoneySnapshot(topUp *TopUp) {
 	}
 	if topUp.Money == 0 && topUp.ActualMoney > 0 {
 		topUp.Money = topUp.ActualMoney
+	}
+	if topUp.PaidAmountCNY <= 0 {
+		paidAmount := invoiceOrderPaidAmount(topUp.Money, topUp.ActualMoney, topUp.PromoCodeId)
+		if paidAmount > 0 {
+			provider := invoiceOrderPaymentProvider(topUp.PaymentProvider, topUp.PaymentMethod)
+			topUp.PaidAmountCNY = invoiceOrderAmountCNY(paidAmount, provider)
+		}
 	}
 }
 

@@ -44,6 +44,7 @@ interface InvoiceRequestFormProps {
   onChange: (value: InvoiceRequest) => void
   invoiceFee?: number
   disabled?: boolean
+  showRequiredToggle?: boolean
 }
 
 function getTypeLabel(type: InvoiceType, t: (key: string) => string) {
@@ -56,6 +57,7 @@ export function InvoiceRequestForm({
   onChange,
   invoiceFee = 0,
   disabled = false,
+  showRequiredToggle = true,
 }: InvoiceRequestFormProps) {
   const { t } = useTranslation()
   const invoiceConfig = normalizeInvoiceConfig(config)
@@ -94,17 +96,19 @@ export function InvoiceRequestForm({
   return (
     <div className='space-y-3 rounded-lg border p-3'>
       <div className='flex items-start gap-2'>
-        <Checkbox
-          checked={invoice.required}
-          disabled={disabled}
-          onCheckedChange={(checked) =>
-            patchInvoice({
-              required: Boolean(checked),
-              type: currentType,
-            })
-          }
-          className='mt-0.5'
-        />
+        {showRequiredToggle && (
+          <Checkbox
+            checked={invoice.required}
+            disabled={disabled}
+            onCheckedChange={(checked) =>
+              patchInvoice({
+                required: Boolean(checked),
+                type: currentType,
+              })
+            }
+            className='mt-0.5'
+          />
+        )}
         <div className='min-w-0 flex-1'>
           <div className='text-sm font-medium'>{t('Need invoice')}</div>
           <p className='text-muted-foreground text-xs'>
@@ -165,9 +169,7 @@ export function InvoiceRequestForm({
             <Label>{t('Tax number')}</Label>
             <Input
               value={invoice.tax_no}
-              onChange={(event) =>
-                patchInvoice({ tax_no: event.target.value })
-              }
+              onChange={(event) => patchInvoice({ tax_no: event.target.value })}
               disabled={disabled}
               placeholder={t('Enter taxpayer identification number')}
             />

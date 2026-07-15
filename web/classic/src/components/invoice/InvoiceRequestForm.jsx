@@ -1,3 +1,22 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
 import React from 'react';
 import { Banner, Input, Radio, TextArea, Typography } from '@douyinfe/semi-ui';
 
@@ -25,12 +44,14 @@ const InvoiceRequestForm = ({
   value,
   onChange,
   invoiceFee = 0,
+  showRequiredToggle = true,
 }) => {
   const invoice = value || createEmptyInvoiceRequest();
   const enabled = !!config?.enabled;
-  const types = Array.isArray(config?.types) && config.types.length > 0
-    ? config.types
-    : ['personal', 'company'];
+  const types =
+    Array.isArray(config?.types) && config.types.length > 0
+      ? config.types
+      : ['personal', 'company'];
   const patchInvoice = (patch) => onChange?.({ ...invoice, ...patch });
 
   if (!enabled) {
@@ -39,20 +60,22 @@ const InvoiceRequestForm = ({
 
   return (
     <div className='space-y-3'>
-      <div className='flex items-center justify-between'>
-        <Text strong>{t('需要开发票')}</Text>
-        <Radio.Group
-          type='button'
-          buttonSize='small'
-          value={invoice.required ? 'yes' : 'no'}
-          onChange={(event) =>
-            patchInvoice({ required: event.target.value === 'yes' })
-          }
-        >
-          <Radio value='no'>{t('否')}</Radio>
-          <Radio value='yes'>{t('是')}</Radio>
-        </Radio.Group>
-      </div>
+      {showRequiredToggle && (
+        <div className='flex items-center justify-between'>
+          <Text strong>{t('需要开发票')}</Text>
+          <Radio.Group
+            type='button'
+            buttonSize='small'
+            value={invoice.required ? 'yes' : 'no'}
+            onChange={(event) =>
+              patchInvoice({ required: event.target.value === 'yes' })
+            }
+          >
+            <Radio value='no'>{t('否')}</Radio>
+            <Radio value='yes'>{t('是')}</Radio>
+          </Radio.Group>
+        </div>
+      )}
       {invoice.required && (
         <>
           <Banner

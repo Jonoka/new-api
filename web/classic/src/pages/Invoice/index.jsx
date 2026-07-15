@@ -34,6 +34,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { API, timestamp2string } from '../../helpers';
 import { isAdmin } from '../../helpers/utils';
+import InvoiceBatchRequestModal from '../../components/invoice/InvoiceBatchRequestModal';
 
 const { Text } = Typography;
 
@@ -46,6 +47,7 @@ const STATUS_OPTIONS = [
 const SOURCE_LABEL = {
   topup: '余额充值',
   subscription: '订阅购买',
+  batch: '合并订单',
 };
 
 const TYPE_LABEL = {
@@ -70,6 +72,7 @@ const InvoiceCenter = ({ adminOnly = false }) => {
     admin_remark: '',
   });
   const [saving, setSaving] = useState(false);
+  const [requestVisible, setRequestVisible] = useState(false);
 
   const loadInvoices = async () => {
     setLoading(true);
@@ -272,6 +275,20 @@ const InvoiceCenter = ({ adminOnly = false }) => {
             <Button onClick={loadInvoices}>{t('刷新')}</Button>
           </Space>
         )}
+        {!adminView && (
+          <div className='mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
+            <Text type='tertiary'>
+              {t('可选择近 30 天内未开过发票的支付订单合并申请。')}
+            </Text>
+            <Button
+              type='primary'
+              theme='solid'
+              onClick={() => setRequestVisible(true)}
+            >
+              {t('申请开票')}
+            </Button>
+          </div>
+        )}
         <Table
           columns={columns}
           dataSource={records}
@@ -338,6 +355,15 @@ const InvoiceCenter = ({ adminOnly = false }) => {
           )}
         </Form>
       </Modal>
+
+      {!adminView && (
+        <InvoiceBatchRequestModal
+          visible={requestVisible}
+          onCancel={() => setRequestVisible(false)}
+          onSuccess={loadInvoices}
+          t={t}
+        />
+      )}
     </div>
   );
 };
