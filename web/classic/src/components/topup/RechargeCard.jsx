@@ -76,6 +76,7 @@ const RechargeCard = ({
   payMethods,
   enableBepusdtTopUp = false,
   bepusdtChains = [],
+  enableOkpayTopUp = false,
   preTopUp,
   paymentLoading,
   payWay,
@@ -99,6 +100,7 @@ const RechargeCard = ({
   activeSubscriptions = [],
   allSubscriptions = [],
   reloadSubscriptionSelf,
+  reloadUserQuota,
   invoiceConfig,
   enableRedemption = true,
 }) => {
@@ -707,14 +709,17 @@ const RechargeCard = ({
                 payMethods={payMethods}
                 enableBepusdtTopUp={enableBepusdtTopUp}
                 bepusdtChains={bepusdtChains}
+                enableOkpayTopUp={enableOkpayTopUp}
                 enableOnlineTopUp={enableOnlineTopUp}
                 enableStripeTopUp={enableStripeTopUp}
                 enableCreemTopUp={enableCreemTopUp}
+                userQuota={userState?.user?.quota || 0}
                 billingPreference={billingPreference}
                 onChangeBillingPreference={onChangeBillingPreference}
                 activeSubscriptions={activeSubscriptions}
                 allSubscriptions={allSubscriptions}
                 reloadSubscriptionSelf={reloadSubscriptionSelf}
+                reloadUserQuota={reloadUserQuota}
                 invoiceConfig={invoiceConfig}
                 withCard={false}
               />

@@ -58,6 +58,8 @@ func paymentProviderFromSubscriptionPaymentMethod(paymentMethod string) string {
 		return model.PaymentProviderWaffoPancake
 	case model.PaymentMethodBepusdt:
 		return model.PaymentProviderBepusdt
+	case model.PaymentMethodOkpay:
+		return model.PaymentProviderOkpay
 	case model.PaymentMethodBalance:
 		return model.PaymentProviderBalance
 	default:

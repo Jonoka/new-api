@@ -2,6 +2,7 @@ package controller
 
 import (
 	"crypto/md5"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
+	"github.com/tidwall/gjson"
 )
 
 // OkpayPayRequest 用户发起 OKPay 支付请求
@@ -38,6 +40,12 @@ type OkpayAmountRequest struct {
 	Invoice   model.InvoiceRequest `json:"invoice"`
 }
 
+type SubscriptionOkpayPayRequest struct {
+	PlanId    int                  `json:"plan_id"`
+	PromoCode string               `json:"promo_code"`
+	Invoice   model.InvoiceRequest `json:"invoice"`
+}
+
 type okpayPaymentAmount struct {
 	FiatAmount     float64
 	CoinAmount     float64
@@ -47,10 +55,34 @@ type okpayPaymentAmount struct {
 	Coin           string
 }
 
+type okpayPaymentLinkResult struct {
+	ProviderOrderId string
+	PaymentUrl      string
+	Amount          string
+	PaymentAmount   okpayPaymentAmount
+}
+
 type okpayRateCacheEntry struct {
 	rate      float64
 	source    string
 	expiresAt time.Time
+}
+
+type okpayOrderedPair struct {
+	Key   string
+	Value string
+}
+
+type okpayCallbackPayload struct {
+	Pairs  []okpayOrderedPair
+	Values map[string]string
+}
+
+func (p *okpayCallbackPayload) Get(key string) string {
+	if p == nil {
+		return ""
+	}
+	return strings.TrimSpace(p.Values[key])
 }
 
 var (
@@ -89,19 +121,121 @@ func generateOkpaySignature(params map[string]string, merchantToken string) stri
 	return strings.ToUpper(fmt.Sprintf("%x", hash))
 }
 
-// verifyOkpayCallbackSignature 验证回调签名
-func verifyOkpayCallbackSignature(formValues url.Values, merchantToken string) bool {
-	params := make(map[string]string)
-	for key := range formValues {
-		value := strings.TrimSpace(formValues.Get(key))
-		if strings.EqualFold(key, "sign") || value == "" {
+// verifyOkpayCallbackSignature 验证回调签名。
+// OKPay 的不同版本既可能按原始字段顺序签名，也可能按字段名排序签名；
+// 因此先使用原始顺序验证，再使用排序后的字段兜底。
+func verifyOkpayCallbackSignature(payload *okpayCallbackPayload, merchantToken string) bool {
+	if payload == nil {
+		return false
+	}
+	actual := payload.Get("sign")
+	if actual == "" {
+		return false
+	}
+
+	pairs := make([]okpayOrderedPair, 0, len(payload.Pairs))
+	for _, pair := range payload.Pairs {
+		if strings.EqualFold(strings.TrimSpace(pair.Key), "sign") {
 			continue
 		}
-		params[key] = value
+		pairs = append(pairs, pair)
 	}
-	expected := generateOkpaySignature(params, merchantToken)
-	actual := strings.TrimSpace(formValues.Get("sign"))
-	return strings.EqualFold(expected, actual)
+	if strings.EqualFold(generateOkpayOrderedSignature(pairs, merchantToken), actual) {
+		return true
+	}
+
+	sort.SliceStable(pairs, func(i, j int) bool {
+		return pairs[i].Key < pairs[j].Key
+	})
+	return strings.EqualFold(generateOkpayOrderedSignature(pairs, merchantToken), actual)
+}
+
+func generateOkpayOrderedSignature(pairs []okpayOrderedPair, merchantToken string) string {
+	parts := make([]string, 0, len(pairs))
+	for _, pair := range pairs {
+		key := strings.TrimSpace(pair.Key)
+		value := strings.TrimSpace(pair.Value)
+		if key == "" || value == "" || strings.EqualFold(key, "sign") {
+			continue
+		}
+		parts = append(parts, key+"="+value)
+	}
+	query := strings.Join(parts, "&") + "&token=" + strings.TrimSpace(merchantToken)
+	hash := md5.Sum([]byte(query))
+	return strings.ToUpper(fmt.Sprintf("%x", hash))
+}
+
+// parseOkpayCallbackPayload 同时兼容 OKPay 的 Form 与 JSON 回调，并保留字段顺序。
+func parseOkpayCallbackPayload(body []byte) (*okpayCallbackPayload, error) {
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		return nil, errors.New("empty callback body")
+	}
+
+	pairs := make([]okpayOrderedPair, 0)
+	if strings.HasPrefix(trimmed, "{") {
+		if !gjson.Valid(trimmed) {
+			return nil, errors.New("invalid callback json")
+		}
+		root := gjson.Parse(trimmed)
+		if !root.IsObject() {
+			return nil, errors.New("invalid callback json object")
+		}
+		flattenOkpayJSONPairs("", root, &pairs)
+	} else {
+		for _, item := range strings.Split(trimmed, "&") {
+			if item == "" {
+				continue
+			}
+			parts := strings.SplitN(item, "=", 2)
+			key, err := url.QueryUnescape(parts[0])
+			if err != nil {
+				key = parts[0]
+			}
+			value := ""
+			if len(parts) == 2 {
+				value, err = url.QueryUnescape(parts[1])
+				if err != nil {
+					value = parts[1]
+				}
+			}
+			pairs = append(pairs, okpayOrderedPair{Key: strings.TrimSpace(key), Value: strings.TrimSpace(value)})
+		}
+	}
+	if len(pairs) == 0 {
+		return nil, errors.New("empty callback parameters")
+	}
+
+	values := make(map[string]string, len(pairs))
+	for _, pair := range pairs {
+		values[pair.Key] = pair.Value
+	}
+	return &okpayCallbackPayload{Pairs: pairs, Values: values}, nil
+}
+
+func flattenOkpayJSONPairs(prefix string, value gjson.Result, pairs *[]okpayOrderedPair) {
+	if value.IsObject() {
+		value.ForEach(func(key, child gjson.Result) bool {
+			childKey := key.String()
+			if prefix != "" {
+				childKey = prefix + "[" + childKey + "]"
+			}
+			flattenOkpayJSONPairs(childKey, child, pairs)
+			return true
+		})
+		return
+	}
+	if value.IsArray() {
+		index := 0
+		value.ForEach(func(_, child gjson.Result) bool {
+			childKey := fmt.Sprintf("%s[%d]", prefix, index)
+			flattenOkpayJSONPairs(childKey, child, pairs)
+			index++
+			return true
+		})
+		return
+	}
+	*pairs = append(*pairs, okpayOrderedPair{Key: strings.TrimSpace(prefix), Value: strings.TrimSpace(value.String())})
 }
 
 // getOkpayFiatPayMoney 计算站内 OKPay 标价金额（CNY）。
@@ -348,6 +482,94 @@ func RequestOkpayAmount(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+func createOkpayPaymentLink(c *gin.Context, tradeNo string, paymentAmount okpayPaymentAmount, name string, callbackUrl string, redirectUrl string) (*okpayPaymentLinkResult, error) {
+	amount := decimal.NewFromFloat(paymentAmount.CoinAmount).StringFixed(8)
+	payload := map[string]string{
+		"unique_id":    tradeNo,
+		"amount":       amount,
+		"return_url":   redirectUrl,
+		"callback_url": callbackUrl,
+		"coin":         paymentAmount.Coin,
+		"name":         name,
+		"id":           setting.OkpayMerchantId,
+	}
+	payload["sign"] = generateOkpaySignature(payload, setting.OkpayMerchantToken)
+
+	formValues := url.Values{}
+	for key, value := range payload {
+		formValues.Set(key, value)
+	}
+	gatewayUrl := strings.TrimRight(setting.OkpayGatewayUrl, "/") + "/payLink"
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, gatewayUrl, strings.NewReader(formValues.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("创建 OKPay 请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求 OKPay 失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取 OKPay 响应失败: %w", err)
+	}
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay API 响应 trade_no=%s status_code=%d body=%q", tradeNo, resp.StatusCode, string(body)))
+	if resp.StatusCode/100 != 2 {
+		return nil, fmt.Errorf("OKPay API HTTP %d", resp.StatusCode)
+	}
+
+	var raw map[string]interface{}
+	if err := common.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("解析 OKPay 响应失败: %w", err)
+	}
+	paymentUrl := ""
+	providerOrderId := ""
+	if data, ok := raw["data"].(map[string]interface{}); ok {
+		if value, ok := data["pay_url"].(string); ok {
+			paymentUrl = strings.TrimSpace(value)
+		}
+		providerOrderId = okpayResponseString(data["order_id"])
+	}
+	if paymentUrl == "" || providerOrderId == "" {
+		if items, ok := raw["data"].([]interface{}); ok && len(items) > 0 {
+			if first, ok := items[0].(map[string]interface{}); ok {
+				if paymentUrl == "" {
+					value, _ := first["pay_url"].(string)
+					paymentUrl = strings.TrimSpace(value)
+				}
+				if providerOrderId == "" {
+					providerOrderId = okpayResponseString(first["order_id"])
+				}
+			}
+		}
+	}
+	if paymentUrl == "" {
+		return nil, errors.New("OKPay 未返回 pay_url")
+	}
+	if providerOrderId == "" {
+		return nil, errors.New("OKPay 未返回 order_id")
+	}
+	return &okpayPaymentLinkResult{
+		ProviderOrderId: providerOrderId,
+		PaymentUrl:      paymentUrl,
+		Amount:          amount,
+		PaymentAmount:   paymentAmount,
+	}, nil
+}
+
+func okpayResponseString(value interface{}) string {
+	if value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return strings.TrimSpace(text)
+	}
+	return strings.TrimSpace(fmt.Sprintf("%v", value))
+}
+
 // RequestOkpayPay 创建 OKPay 支付订单
 func RequestOkpayPay(c *gin.Context) {
 	var req OkpayPayRequest
@@ -392,19 +614,29 @@ func RequestOkpayPay(c *gin.Context) {
 	if invoiceAmounts.Required {
 		totalFiatPayMoney = invoiceAmounts.TotalPayment
 	}
+	paymentAmount := okpayPaymentAmount{}
+	providerAmount := ""
+	providerCurrency := ""
+	if totalFiatPayMoney >= 0.01 {
+		paymentAmount = getOkpayPaymentAmountFromFiat(totalFiatPayMoney)
+		providerAmount = decimal.NewFromFloat(paymentAmount.CoinAmount).StringFixed(8)
+		providerCurrency = strings.ToUpper(strings.TrimSpace(paymentAmount.Coin))
+	}
 
 	tradeNo := fmt.Sprintf("USR%dNO%s%d", id, common.GetRandomString(6), time.Now().Unix())
 
 	amount := normalizeTopUpAmountForStorage(req.Amount)
 	topUp := &model.TopUp{
-		UserId:          id,
-		Amount:          amount,
-		Money:           totalFiatPayMoney,
-		TradeNo:         tradeNo,
-		PaymentMethod:   model.PaymentMethodOkpay,
-		PaymentProvider: model.PaymentProviderOkpay,
-		CreateTime:      time.Now().Unix(),
-		Status:          common.TopUpStatusPending,
+		UserId:           id,
+		Amount:           amount,
+		Money:            totalFiatPayMoney,
+		TradeNo:          tradeNo,
+		PaymentMethod:    model.PaymentMethodOkpay,
+		PaymentProvider:  model.PaymentProviderOkpay,
+		ProviderAmount:   providerAmount,
+		ProviderCurrency: providerCurrency,
+		CreateTime:       time.Now().Unix(),
+		Status:           common.TopUpStatusPending,
 	}
 	model.ApplyPromoCodeResultToTopUp(topUp, discount)
 	if discount != nil {
@@ -438,104 +670,130 @@ func RequestOkpayPay(c *gin.Context) {
 	callbackUrl := callBackAddress + "/api/okpay/notify"
 	redirectUrl := paymentReturnPath("/console/log")
 
-	// OKPay 金额需要 8 位小数
-	paymentAmount := getOkpayPaymentAmountFromFiat(totalFiatPayMoney)
-	dPayMoney := decimal.NewFromFloat(paymentAmount.CoinAmount)
-
-	payload := map[string]string{
-		"unique_id":    tradeNo,
-		"amount":       dPayMoney.StringFixed(8),
-		"return_url":   redirectUrl,
-		"callback_url": callbackUrl,
-		"coin":         paymentAmount.Coin,
-		"name":         fmt.Sprintf("TopUp-%s", tradeNo),
-		"id":           setting.OkpayMerchantId,
-	}
-	payload["sign"] = generateOkpaySignature(payload, setting.OkpayMerchantToken)
-
-	// form POST 到 OKPay
-	gatewayUrl := strings.TrimRight(setting.OkpayGatewayUrl, "/") + "/payLink"
-	formValues := url.Values{}
-	for k, v := range payload {
-		formValues.Set(k, v)
-	}
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.PostForm(gatewayUrl, formValues)
+	payment, err := createOkpayPaymentLink(c, tradeNo, paymentAmount, fmt.Sprintf("TopUp-%s", tradeNo), callbackUrl, redirectUrl)
 	if err != nil {
 		_ = model.UpdatePendingTopUpStatus(tradeNo, model.PaymentProviderOkpay, common.TopUpStatusFailed)
-		logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay 请求失败 user_id=%d trade_no=%s error=%q", id, tradeNo, err.Error()))
+		logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay 拉起支付失败 user_id=%d trade_no=%s error=%q", id, tradeNo, err.Error()))
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "拉起支付失败"})
 		return
 	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
+	if err := model.UpdateTopUpProviderSnapshot(tradeNo, model.PaymentProviderOkpay, payment.ProviderOrderId, payment.Amount, payment.PaymentAmount.Coin); err != nil {
 		_ = model.UpdatePendingTopUpStatus(tradeNo, model.PaymentProviderOkpay, common.TopUpStatusFailed)
-		logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay 读取响应失败 user_id=%d trade_no=%s error=%q", id, tradeNo, err.Error()))
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "拉起支付失败"})
+		logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay 保存第三方订单号失败 user_id=%d trade_no=%s provider_order_id=%s error=%q", id, tradeNo, payment.ProviderOrderId, err.Error()))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "保存支付订单失败"})
 		return
 	}
-
-	logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay API 响应 trade_no=%s status_code=%d body=%q", tradeNo, resp.StatusCode, string(body)))
-
-	if resp.StatusCode/100 != 2 {
-		_ = model.UpdatePendingTopUpStatus(tradeNo, model.PaymentProviderOkpay, common.TopUpStatusFailed)
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "拉起支付失败"})
-		return
-	}
-
-	var raw map[string]interface{}
-	err = common.Unmarshal(body, &raw)
-	if err != nil {
-		_ = model.UpdatePendingTopUpStatus(tradeNo, model.PaymentProviderOkpay, common.TopUpStatusFailed)
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "解析支付响应失败"})
-		return
-	}
-
-	// 提取 data.pay_url
-	payUrl := ""
-	if data, ok := raw["data"].(map[string]interface{}); ok {
-		if u, ok := data["pay_url"].(string); ok {
-			payUrl = strings.TrimSpace(u)
-		}
-	}
-	// 兼容 data 为数组的情况
-	if payUrl == "" {
-		if items, ok := raw["data"].([]interface{}); ok && len(items) > 0 {
-			if first, ok := items[0].(map[string]interface{}); ok {
-				if u, ok := first["pay_url"].(string); ok {
-					payUrl = strings.TrimSpace(u)
-				}
-			}
-		}
-	}
-
-	if payUrl == "" {
-		_ = model.UpdatePendingTopUpStatus(tradeNo, model.PaymentProviderOkpay, common.TopUpStatusFailed)
-		logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay 未返回 pay_url trade_no=%s body=%q", tradeNo, string(body)))
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "拉起支付失败"})
-		return
-	}
-
-	logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay 充值订单创建成功 user_id=%d trade_no=%s amount=%d fiat_money=%.2f CNY coin_amount=%s coin=%s rate=%.8f rate_source=%s auto_rate_failed=%t", id, tradeNo, req.Amount, totalFiatPayMoney, payload["amount"], paymentAmount.Coin, paymentAmount.Rate, paymentAmount.RateSource, paymentAmount.AutoRateFailed))
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay 充值订单创建成功 user_id=%d trade_no=%s provider_order_id=%s amount=%d fiat_money=%.2f CNY coin_amount=%s coin=%s rate=%.8f rate_source=%s auto_rate_failed=%t", id, tradeNo, payment.ProviderOrderId, req.Amount, totalFiatPayMoney, payment.Amount, payment.PaymentAmount.Coin, payment.PaymentAmount.Rate, payment.PaymentAmount.RateSource, payment.PaymentAmount.AutoRateFailed))
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "success",
 		"data": gin.H{
-			"payment_url":      payUrl,
-			"trade_no":         tradeNo,
-			"amount":           payload["amount"],
-			"amount_text":      fmt.Sprintf("%s %s", payload["amount"], paymentAmount.Coin),
-			"coin":             paymentAmount.Coin,
-			"fiat_amount":      strconv.FormatFloat(paymentAmount.FiatAmount, 'f', 2, 64),
-			"fiat_currency":    "CNY",
-			"rate":             strconv.FormatFloat(paymentAmount.Rate, 'f', -1, 64),
-			"rate_source":      paymentAmount.RateSource,
-			"auto_rate_failed": paymentAmount.AutoRateFailed,
+			"payment_url":       payment.PaymentUrl,
+			"trade_no":          tradeNo,
+			"provider_order_id": payment.ProviderOrderId,
+			"amount":            payment.Amount,
+			"amount_text":       fmt.Sprintf("%s %s", payment.Amount, payment.PaymentAmount.Coin),
+			"coin":              payment.PaymentAmount.Coin,
+			"fiat_amount":       strconv.FormatFloat(payment.PaymentAmount.FiatAmount, 'f', 2, 64),
+			"fiat_currency":     "CNY",
+			"rate":              strconv.FormatFloat(payment.PaymentAmount.Rate, 'f', -1, 64),
+			"rate_source":       payment.PaymentAmount.RateSource,
+			"auto_rate_failed":  payment.PaymentAmount.AutoRateFailed,
 		},
 	})
+}
+
+func writeOkpayCallbackStatus(c *gin.Context, success bool) {
+	status := "fail"
+	if success {
+		status = "success"
+	}
+	c.Data(http.StatusOK, "application/json; charset=utf-8", []byte(fmt.Sprintf(`{"status":"%s"}`, status)))
+}
+
+func validateOkpayCallbackSnapshot(callback *okpayCallbackPayload, providerOrderId string, providerAmount string, providerCurrency string) (bool, error) {
+	providerOrderId = strings.TrimSpace(providerOrderId)
+	providerAmount = strings.TrimSpace(providerAmount)
+	providerCurrency = strings.ToUpper(strings.TrimSpace(providerCurrency))
+	if providerOrderId == "" && providerAmount == "" && providerCurrency == "" {
+		return true, nil
+	}
+	if providerOrderId == "" || providerAmount == "" || providerCurrency == "" {
+		return false, errors.New("订单网关金额快照不完整")
+	}
+
+	callbackAmount := strings.TrimSpace(callback.Get("data[amount]"))
+	if callbackAmount == "" {
+		return false, errors.New("回调缺少支付金额")
+	}
+	expectedAmount, err := decimal.NewFromString(providerAmount)
+	if err != nil {
+		return false, fmt.Errorf("订单网关金额快照无效: %w", err)
+	}
+	actualAmount, err := decimal.NewFromString(callbackAmount)
+	if err != nil {
+		return false, fmt.Errorf("回调支付金额无效: %w", err)
+	}
+	if !actualAmount.Equal(expectedAmount) {
+		return false, fmt.Errorf("回调支付金额不匹配: expected=%s actual=%s", expectedAmount.String(), actualAmount.String())
+	}
+
+	callbackCurrency := strings.ToUpper(strings.TrimSpace(callback.Get("data[coin]")))
+	if callbackCurrency == "" {
+		return false, errors.New("回调缺少支付币种")
+	}
+	if callbackCurrency != providerCurrency {
+		return false, fmt.Errorf("回调支付币种不匹配: expected=%s actual=%s", providerCurrency, callbackCurrency)
+	}
+
+	callbackOrderId := strings.TrimSpace(callback.Get("data[order_id]"))
+	if callbackOrderId == "" {
+		return false, errors.New("回调缺少第三方订单号")
+	}
+	if callbackOrderId != providerOrderId {
+		return false, fmt.Errorf("回调第三方订单号不匹配: expected=%s actual=%s", providerOrderId, callbackOrderId)
+	}
+	return false, nil
+}
+
+func findOkpayTradeNoByBusinessReference(reference string) (string, bool) {
+	reference = strings.TrimSpace(reference)
+	if reference == "" {
+		return "", false
+	}
+	if topUp := model.GetTopUpByTradeNo(reference); topUp != nil && topUp.PaymentProvider == model.PaymentProviderOkpay {
+		return topUp.TradeNo, true
+	}
+	if order := model.GetSubscriptionOrderByTradeNo(reference); order != nil && order.PaymentProvider == model.PaymentProviderOkpay {
+		return order.TradeNo, true
+	}
+	return "", false
+}
+
+func resolveOkpayTradeNo(uniqueId string, providerOrderId string) (string, error) {
+	if tradeNo, ok := findOkpayTradeNoByBusinessReference(uniqueId); ok {
+		return tradeNo, nil
+	}
+
+	providerOrderId = strings.TrimSpace(providerOrderId)
+	if providerOrderId != "" {
+		topUp := model.GetTopUpByProviderOrderId(model.PaymentProviderOkpay, providerOrderId)
+		order := model.GetSubscriptionOrderByProviderOrderId(model.PaymentProviderOkpay, providerOrderId)
+		if topUp != nil && order != nil {
+			return "", errors.New("第三方订单号匹配到多个本地订单")
+		}
+		if topUp != nil {
+			return topUp.TradeNo, nil
+		}
+		if order != nil {
+			return order.TradeNo, nil
+		}
+		// 兼容历史网关把商户订单号放在 data[order_id] 的行为。
+		if tradeNo, ok := findOkpayTradeNoByBusinessReference(providerOrderId); ok {
+			return tradeNo, nil
+		}
+	}
+	return "", errors.New("OKPay 充值/订阅订单不存在")
 }
 
 // OkpayNotify 处理 OKPay 回调通知
@@ -555,15 +813,14 @@ func OkpayNotify(c *gin.Context) {
 
 	logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay webhook 收到请求 client_ip=%s body=%q", c.ClientIP(), string(bodyBytes)))
 
-	// 解析 form body
-	formValues, err := url.ParseQuery(strings.TrimSpace(string(bodyBytes)))
+	callback, err := parseOkpayCallbackPayload(bodyBytes)
 	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay webhook 解析 form 失败 client_ip=%s error=%q", c.ClientIP(), err.Error()))
+		logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay webhook 解析失败 client_ip=%s error=%q", c.ClientIP(), err.Error()))
 		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
 
-	sign := strings.TrimSpace(formValues.Get("sign"))
+	sign := callback.Get("sign")
 	if sign == "" {
 		logger.LogWarn(c.Request.Context(), fmt.Sprintf("OKPay webhook 缺少 sign client_ip=%s", c.ClientIP()))
 		c.AbortWithStatus(http.StatusBadRequest)
@@ -571,30 +828,36 @@ func OkpayNotify(c *gin.Context) {
 	}
 
 	// 验证签名
-	if !verifyOkpayCallbackSignature(formValues, setting.OkpayMerchantToken) {
+	if !verifyOkpayCallbackSignature(callback, setting.OkpayMerchantToken) {
 		logger.LogWarn(c.Request.Context(), fmt.Sprintf("OKPay webhook 验签失败 client_ip=%s sign=%q", c.ClientIP(), sign))
-		_, _ = c.Writer.Write([]byte("fail"))
+		writeOkpayCallbackStatus(c, false)
+		return
+	}
+	merchantId := callback.Get("id")
+	if configuredMerchantId := strings.TrimSpace(setting.OkpayMerchantId); merchantId != "" && configuredMerchantId != "" && merchantId != configuredMerchantId {
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("OKPay webhook 商户 ID 不匹配 client_ip=%s merchant_id=%q", c.ClientIP(), merchantId))
+		writeOkpayCallbackStatus(c, false)
 		return
 	}
 
-	requestStatus := strings.TrimSpace(formValues.Get("status"))
-	paymentStatus := strings.TrimSpace(formValues.Get("data[status]"))
-	uniqueID := strings.TrimSpace(formValues.Get("data[unique_id]"))
-	orderID := strings.TrimSpace(formValues.Get("data[order_id]"))
+	requestStatus := callback.Get("status")
+	paymentStatus := callback.Get("data[status]")
+	uniqueID := callback.Get("data[unique_id]")
+	orderID := callback.Get("data[order_id]")
 
 	logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay webhook 验签成功 unique_id=%s order_id=%s status=%s payment_status=%s client_ip=%s", uniqueID, orderID, requestStatus, paymentStatus, c.ClientIP()))
 
 	// 判断支付状态: request status 必须为 "success"，data[status] 为 "1" 表示成功
 	if !strings.EqualFold(requestStatus, "success") || paymentStatus != "1" {
 		logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay 订单非成功状态 unique_id=%s status=%s payment_status=%s", uniqueID, requestStatus, paymentStatus))
-		_, _ = c.Writer.Write([]byte("success"))
+		writeOkpayCallbackStatus(c, true)
 		return
 	}
 
-	tradeNo := uniqueID
-	if tradeNo == "" {
-		logger.LogWarn(c.Request.Context(), fmt.Sprintf("OKPay webhook 缺少 unique_id order_id=%s", orderID))
-		_, _ = c.Writer.Write([]byte("fail"))
+	tradeNo, err := resolveOkpayTradeNo(uniqueID, orderID)
+	if err != nil {
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("OKPay webhook 查单失败 unique_id=%s order_id=%s error=%q", uniqueID, orderID, err.Error()))
+		writeOkpayCallbackStatus(c, false)
 		return
 	}
 
@@ -603,28 +866,66 @@ func OkpayNotify(c *gin.Context) {
 
 	topUp := model.GetTopUpByTradeNo(tradeNo)
 	if topUp == nil {
-		logger.LogWarn(c.Request.Context(), fmt.Sprintf("OKPay 充值订单不存在 trade_no=%s order_id=%s", tradeNo, orderID))
-		_, _ = c.Writer.Write([]byte("fail"))
+		order := model.GetSubscriptionOrderByTradeNo(tradeNo)
+		if order == nil || order.PaymentProvider != model.PaymentProviderOkpay {
+			logger.LogWarn(c.Request.Context(), fmt.Sprintf("OKPay 充值/订阅订单不存在 trade_no=%s order_id=%s", tradeNo, orderID))
+			writeOkpayCallbackStatus(c, false)
+			return
+		}
+		if order.Status == common.TopUpStatusSuccess {
+			logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay 订阅订单已完成，幂等返回 trade_no=%s", tradeNo))
+			writeOkpayCallbackStatus(c, true)
+			return
+		}
+		legacySnapshot, err := validateOkpayCallbackSnapshot(callback, order.ProviderOrderId, order.ProviderAmount, order.ProviderCurrency)
+		if err != nil {
+			logger.LogWarn(c.Request.Context(), fmt.Sprintf("OKPay 订阅回调快照校验失败 trade_no=%s order_id=%s error=%q", tradeNo, orderID, err.Error()))
+			writeOkpayCallbackStatus(c, false)
+			return
+		}
+		if legacySnapshot {
+			logger.LogWarn(c.Request.Context(), fmt.Sprintf("OKPay 订阅订单缺少网关快照，按存量订单兼容处理 trade_no=%s order_id=%s", tradeNo, orderID))
+		}
+		if err := model.CompleteSubscriptionOrder(tradeNo, common.GetJsonString(callback.Values), model.PaymentProviderOkpay, model.PaymentMethodOkpay); err != nil {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay 订阅处理失败 trade_no=%s order_id=%s client_ip=%s error=%q", tradeNo, orderID, c.ClientIP(), err.Error()))
+			writeOkpayCallbackStatus(c, false)
+			return
+		}
+		logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay 订阅购买成功 trade_no=%s order_id=%s amount=%s coin=%s client_ip=%s", tradeNo, orderID, callback.Get("data[amount]"), callback.Get("data[coin]"), c.ClientIP()))
+		writeOkpayCallbackStatus(c, true)
 		return
 	}
-
-	if topUp.Status != common.TopUpStatusPending {
-		logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay 充值订单状态非 pending，忽略 trade_no=%s status=%s", tradeNo, topUp.Status))
-		_, _ = c.Writer.Write([]byte("success"))
+	if topUp.PaymentProvider != model.PaymentProviderOkpay {
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("OKPay 充值订单支付提供方不匹配 trade_no=%s provider=%s", tradeNo, topUp.PaymentProvider))
+		writeOkpayCallbackStatus(c, false)
 		return
+	}
+	if topUp.Status == common.TopUpStatusSuccess {
+		logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay 充值订单已完成，幂等返回 trade_no=%s", tradeNo))
+		writeOkpayCallbackStatus(c, true)
+		return
+	}
+	legacySnapshot, err := validateOkpayCallbackSnapshot(callback, topUp.ProviderOrderId, topUp.ProviderAmount, topUp.ProviderCurrency)
+	if err != nil {
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("OKPay 充值回调快照校验失败 trade_no=%s order_id=%s error=%q", tradeNo, orderID, err.Error()))
+		writeOkpayCallbackStatus(c, false)
+		return
+	}
+	if legacySnapshot {
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("OKPay 充值订单缺少网关快照，按存量订单兼容处理 trade_no=%s order_id=%s", tradeNo, orderID))
 	}
 
 	err = model.RechargeOkpay(tradeNo, c.ClientIP())
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("OKPay 充值处理失败 trade_no=%s order_id=%s client_ip=%s error=%q", tradeNo, orderID, c.ClientIP(), err.Error()))
-		_, _ = c.Writer.Write([]byte("fail"))
+		writeOkpayCallbackStatus(c, false)
 		return
 	}
 
 	logger.LogInfo(c.Request.Context(), fmt.Sprintf("OKPay 充值成功 trade_no=%s order_id=%s amount=%s coin=%s client_ip=%s",
 		tradeNo, orderID,
-		strings.TrimSpace(formValues.Get("data[amount]")),
-		strings.TrimSpace(formValues.Get("data[coin]")),
+		callback.Get("data[amount]"),
+		callback.Get("data[coin]"),
 		c.ClientIP()))
-	_, _ = c.Writer.Write([]byte("success"))
+	writeOkpayCallbackStatus(c, true)
 }

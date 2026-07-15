@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -759,6 +760,7 @@ func TestBepusdtWebhookCompletesSubscriptionOrder(t *testing.T) {
 	handleBepusdtPaymentSuccess(ctx, &bepusdtNotifyPayload{
 		OrderId:      order.TradeNo,
 		TradeId:      "trade_123",
+		Amount:       "19.99",
 		Status:       2,
 		ActualAmount: "2.77",
 	})
@@ -773,4 +775,330 @@ func TestBepusdtWebhookCompletesSubscriptionOrder(t *testing.T) {
 	var subCount int64
 	require.NoError(t, db.Model(&model.UserSubscription{}).Where("user_id = ? AND plan_id = ?", 901, plan.Id).Count(&subCount).Error)
 	assert.EqualValues(t, 1, subCount)
+}
+
+func TestSubscriptionOkpayPayCreatesPendingOrder(t *testing.T) {
+	db := setupSubscriptionPaymentControllerTestDB(t)
+	withConfirmedPaymentCompliance(t)
+	plan := seedSubscriptionPaymentUserAndPlan(t, db, func(plan *model.SubscriptionPlan) {
+		plan.PriceAmount = 10
+		plan.Currency = model.SubscriptionCurrencyUSD
+	})
+
+	var capturedForm url.Values
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		capturedForm = r.Form
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"order_id":"okpay-provider-order","pay_url":"https://pay.example.test/order"}}`))
+	}))
+	t.Cleanup(gateway.Close)
+
+	originalGateway := setting.OkpayGatewayUrl
+	originalMerchantID := setting.OkpayMerchantId
+	originalToken := setting.OkpayMerchantToken
+	originalExchangeRate := setting.OkpayExchangeRate
+	originalAutoRate := setting.OkpayAutoExchangeEnabled
+	originalFallbackRate := setting.OkpayUsdtCnyRate
+	originalCoin := setting.OkpayCoin
+	setting.OkpayGatewayUrl = gateway.URL
+	setting.OkpayMerchantId = "merchant-test"
+	setting.OkpayMerchantToken = "secret-test"
+	setting.OkpayExchangeRate = 7.2
+	setting.OkpayAutoExchangeEnabled = false
+	setting.OkpayUsdtCnyRate = 7.2
+	setting.OkpayCoin = "USDT"
+	resetOkpayRateCacheForTest()
+	t.Cleanup(func() {
+		setting.OkpayGatewayUrl = originalGateway
+		setting.OkpayMerchantId = originalMerchantID
+		setting.OkpayMerchantToken = originalToken
+		setting.OkpayExchangeRate = originalExchangeRate
+		setting.OkpayAutoExchangeEnabled = originalAutoRate
+		setting.OkpayUsdtCnyRate = originalFallbackRate
+		setting.OkpayCoin = originalCoin
+		resetOkpayRateCacheForTest()
+	})
+
+	ctx, recorder := newSubscriptionPaymentContext(t, SubscriptionOkpayPayRequest{PlanId: plan.Id}, 901)
+	SubscriptionRequestOkpayPay(ctx)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"message":"success"`)
+	assert.Contains(t, recorder.Body.String(), `"payment_url":"https://pay.example.test/order"`)
+	require.NotNil(t, capturedForm)
+	assert.Equal(t, "10.00000000", capturedForm.Get("amount"))
+	assert.Equal(t, "USDT", capturedForm.Get("coin"))
+
+	var order model.SubscriptionOrder
+	require.NoError(t, db.Where("payment_provider = ?", model.PaymentProviderOkpay).First(&order).Error)
+	assert.Equal(t, model.PaymentMethodOkpay, order.PaymentMethod)
+	assert.Equal(t, common.TopUpStatusPending, order.Status)
+	assert.InDelta(t, 72, order.Money, 0.000001)
+	assert.Equal(t, "okpay-provider-order", order.ProviderOrderId)
+	assert.Equal(t, "10.00000000", order.ProviderAmount)
+	assert.Equal(t, "USDT", order.ProviderCurrency)
+}
+
+func buildSignedOkpayJSONCallbackForTest(tradeNo string, providerOrderId string, amount string, coin string, merchantId string, merchantToken string) string {
+	parts := []string{
+		"code=200",
+		"data[order_id]=" + providerOrderId,
+	}
+	if tradeNo != "" {
+		parts = append(parts, "data[unique_id]="+tradeNo)
+	}
+	parts = append(parts,
+		"data[amount]="+amount,
+		"data[coin]="+coin,
+		"data[status]=1",
+		"data[type]=deposit",
+		"id="+merchantId,
+		"status=success",
+	)
+	unsigned := strings.Join(parts, "&")
+	return fmt.Sprintf(
+		`{"code":200,"data":{"order_id":%q,"unique_id":%q,"amount":%q,"coin":%q,"status":1,"type":"deposit"},"id":%q,"status":"success","sign":%q}`,
+		providerOrderId,
+		tradeNo,
+		amount,
+		coin,
+		merchantId,
+		okpaySignatureForTest(unsigned, merchantToken),
+	)
+}
+
+func TestOkpayJSONWebhookCompletesSubscriptionWhenNewPaymentsDisabled(t *testing.T) {
+	db := setupSubscriptionPaymentControllerTestDB(t)
+	plan := seedSubscriptionPaymentUserAndPlan(t, db, nil)
+	order := &model.SubscriptionOrder{
+		UserId:           901,
+		PlanId:           plan.Id,
+		Money:            72,
+		TradeNo:          "OKPAY_SUB_CALLBACK_TEST",
+		PaymentMethod:    model.PaymentMethodOkpay,
+		PaymentProvider:  model.PaymentProviderOkpay,
+		ProviderOrderId:  "provider-order",
+		ProviderAmount:   "10.00000000",
+		ProviderCurrency: "USDT",
+		CreateTime:       common.GetTimestamp(),
+		Status:           common.TopUpStatusPending,
+	}
+	require.NoError(t, order.Insert())
+
+	originalGateway := setting.OkpayGatewayUrl
+	originalMerchantID := setting.OkpayMerchantId
+	originalToken := setting.OkpayMerchantToken
+	setting.OkpayGatewayUrl = ""
+	setting.OkpayMerchantId = "merchant-callback"
+	setting.OkpayMerchantToken = "callback-secret"
+	t.Cleanup(func() {
+		setting.OkpayGatewayUrl = originalGateway
+		setting.OkpayMerchantId = originalMerchantID
+		setting.OkpayMerchantToken = originalToken
+	})
+
+	body := buildSignedOkpayJSONCallbackForTest(order.TradeNo, "provider-order", "10.00000000", "USDT", setting.OkpayMerchantId, setting.OkpayMerchantToken)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/okpay/notify", strings.NewReader(body))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	OkpayNotify(ctx)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.JSONEq(t, `{"status":"success"}`, recorder.Body.String())
+	assert.Contains(t, recorder.Header().Get("Content-Type"), "application/json")
+
+	var savedOrder model.SubscriptionOrder
+	require.NoError(t, db.Where("trade_no = ?", order.TradeNo).First(&savedOrder).Error)
+	assert.Equal(t, common.TopUpStatusSuccess, savedOrder.Status)
+	var subCount int64
+	require.NoError(t, db.Model(&model.UserSubscription{}).Where("user_id = ? AND plan_id = ?", 901, plan.Id).Count(&subCount).Error)
+	assert.EqualValues(t, 1, subCount)
+}
+
+func TestOkpayWebhookKeepsLegacyOrderWithoutGatewaySnapshotPayable(t *testing.T) {
+	db := setupSubscriptionPaymentControllerTestDB(t)
+	plan := seedSubscriptionPaymentUserAndPlan(t, db, nil)
+	order := &model.SubscriptionOrder{
+		UserId:          901,
+		PlanId:          plan.Id,
+		Money:           72,
+		TradeNo:         "OKPAY_LEGACY_CALLBACK_TEST",
+		PaymentMethod:   model.PaymentMethodOkpay,
+		PaymentProvider: model.PaymentProviderOkpay,
+		CreateTime:      common.GetTimestamp(),
+		Status:          common.TopUpStatusPending,
+	}
+	require.NoError(t, order.Insert())
+
+	originalMerchantID := setting.OkpayMerchantId
+	originalToken := setting.OkpayMerchantToken
+	setting.OkpayMerchantId = "merchant-legacy"
+	setting.OkpayMerchantToken = "legacy-secret"
+	t.Cleanup(func() {
+		setting.OkpayMerchantId = originalMerchantID
+		setting.OkpayMerchantToken = originalToken
+	})
+
+	body := buildSignedOkpayJSONCallbackForTest(order.TradeNo, "legacy-provider-order", "10.00000000", "USDT", setting.OkpayMerchantId, setting.OkpayMerchantToken)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/okpay/notify", strings.NewReader(body))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	OkpayNotify(ctx)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.JSONEq(t, `{"status":"success"}`, recorder.Body.String())
+	var savedOrder model.SubscriptionOrder
+	require.NoError(t, db.Where("trade_no = ?", order.TradeNo).First(&savedOrder).Error)
+	assert.Equal(t, common.TopUpStatusSuccess, savedOrder.Status)
+}
+
+func TestOkpayWebhookStrictlyValidatesStoredGatewaySnapshot(t *testing.T) {
+	testCases := []struct {
+		name                    string
+		callbackTradeNo         bool
+		callbackProviderOrderId string
+		callbackAmount          string
+		callbackCurrency        string
+		expectSuccess           bool
+	}{
+		{name: "matching snapshot", callbackTradeNo: true, callbackProviderOrderId: "provider-strict", callbackAmount: "10.00000000", callbackCurrency: "USDT", expectSuccess: true},
+		{name: "provider order fallback", callbackTradeNo: false, callbackProviderOrderId: "provider-strict", callbackAmount: "10.00000000", callbackCurrency: "USDT", expectSuccess: true},
+		{name: "amount mismatch", callbackTradeNo: true, callbackProviderOrderId: "provider-strict", callbackAmount: "9.99999999", callbackCurrency: "USDT", expectSuccess: false},
+		{name: "currency mismatch", callbackTradeNo: true, callbackProviderOrderId: "provider-strict", callbackAmount: "10.00000000", callbackCurrency: "TRX", expectSuccess: false},
+		{name: "provider order mismatch", callbackTradeNo: true, callbackProviderOrderId: "provider-other", callbackAmount: "10.00000000", callbackCurrency: "USDT", expectSuccess: false},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			db := setupSubscriptionPaymentControllerTestDB(t)
+			plan := seedSubscriptionPaymentUserAndPlan(t, db, nil)
+			order := &model.SubscriptionOrder{
+				UserId:           901,
+				PlanId:           plan.Id,
+				Money:            72,
+				TradeNo:          "OKPAY_STRICT_" + strings.ReplaceAll(testCase.name, " ", "_"),
+				PaymentMethod:    model.PaymentMethodOkpay,
+				PaymentProvider:  model.PaymentProviderOkpay,
+				ProviderOrderId:  "provider-strict",
+				ProviderAmount:   "10.00000000",
+				ProviderCurrency: "USDT",
+				CreateTime:       common.GetTimestamp(),
+				Status:           common.TopUpStatusPending,
+			}
+			require.NoError(t, order.Insert())
+
+			originalMerchantID := setting.OkpayMerchantId
+			originalToken := setting.OkpayMerchantToken
+			setting.OkpayMerchantId = "merchant-strict"
+			setting.OkpayMerchantToken = "strict-secret"
+			t.Cleanup(func() {
+				setting.OkpayMerchantId = originalMerchantID
+				setting.OkpayMerchantToken = originalToken
+			})
+
+			callbackTradeNo := ""
+			if testCase.callbackTradeNo {
+				callbackTradeNo = order.TradeNo
+			}
+			body := buildSignedOkpayJSONCallbackForTest(
+				callbackTradeNo,
+				testCase.callbackProviderOrderId,
+				testCase.callbackAmount,
+				testCase.callbackCurrency,
+				setting.OkpayMerchantId,
+				setting.OkpayMerchantToken,
+			)
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/api/okpay/notify", strings.NewReader(body))
+			ctx.Request.Header.Set("Content-Type", "application/json")
+
+			OkpayNotify(ctx)
+
+			assert.Equal(t, http.StatusOK, recorder.Code)
+			if testCase.expectSuccess {
+				assert.JSONEq(t, `{"status":"success"}`, recorder.Body.String())
+			} else {
+				assert.JSONEq(t, `{"status":"fail"}`, recorder.Body.String())
+			}
+
+			var savedOrder model.SubscriptionOrder
+			require.NoError(t, db.Where("trade_no = ?", order.TradeNo).First(&savedOrder).Error)
+			var subCount int64
+			require.NoError(t, db.Model(&model.UserSubscription{}).Where("user_id = ? AND plan_id = ?", 901, plan.Id).Count(&subCount).Error)
+			if testCase.expectSuccess {
+				assert.Equal(t, common.TopUpStatusSuccess, savedOrder.Status)
+				assert.EqualValues(t, 1, subCount)
+			} else {
+				assert.Equal(t, common.TopUpStatusPending, savedOrder.Status)
+				assert.EqualValues(t, 0, subCount)
+			}
+		})
+	}
+}
+
+func TestBepusdtWebhookRejectsMismatchedSubscriptionAmount(t *testing.T) {
+	db := setupSubscriptionPaymentControllerTestDB(t)
+	plan := seedSubscriptionPaymentUserAndPlan(t, db, nil)
+	order := &model.SubscriptionOrder{
+		UserId:          901,
+		PlanId:          plan.Id,
+		Money:           19.99,
+		TradeNo:         "BEPUSDT_SUB_AMOUNT_MISMATCH",
+		PaymentMethod:   model.PaymentMethodBepusdt,
+		PaymentProvider: model.PaymentProviderBepusdt,
+		CreateTime:      common.GetTimestamp(),
+		Status:          common.TopUpStatusPending,
+	}
+	require.NoError(t, order.Insert())
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/bepusdt/notify", nil)
+	handleBepusdtPaymentSuccess(ctx, &bepusdtNotifyPayload{
+		OrderId: order.TradeNo,
+		TradeId: "trade_amount_mismatch",
+		Amount:  "9.99",
+		Status:  2,
+	})
+
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	var savedOrder model.SubscriptionOrder
+	require.NoError(t, db.Where("trade_no = ?", order.TradeNo).First(&savedOrder).Error)
+	assert.Equal(t, common.TopUpStatusPending, savedOrder.Status)
+	var subCount int64
+	require.NoError(t, db.Model(&model.UserSubscription{}).Where("user_id = ? AND plan_id = ?", 901, plan.Id).Count(&subCount).Error)
+	assert.EqualValues(t, 0, subCount)
+}
+
+func TestCryptoWebhookAvailabilityKeepsExistingOrdersReachable(t *testing.T) {
+	paymentSetting := operation_setting.GetPaymentSetting()
+	originalConfirmed := paymentSetting.ComplianceConfirmed
+	originalBepusdtToken := setting.BepusdtAuthToken
+	originalBepusdtChains := setting.BepusdtChains
+	originalOkpayGateway := setting.OkpayGatewayUrl
+	originalOkpayMerchantID := setting.OkpayMerchantId
+	originalOkpayToken := setting.OkpayMerchantToken
+	paymentSetting.ComplianceConfirmed = false
+	setting.BepusdtAuthToken = "existing-bepusdt-secret"
+	setting.BepusdtChains = "[]"
+	setting.OkpayGatewayUrl = ""
+	setting.OkpayMerchantId = "existing-okpay-merchant"
+	setting.OkpayMerchantToken = "existing-okpay-secret"
+	t.Cleanup(func() {
+		paymentSetting.ComplianceConfirmed = originalConfirmed
+		setting.BepusdtAuthToken = originalBepusdtToken
+		setting.BepusdtChains = originalBepusdtChains
+		setting.OkpayGatewayUrl = originalOkpayGateway
+		setting.OkpayMerchantId = originalOkpayMerchantID
+		setting.OkpayMerchantToken = originalOkpayToken
+	})
+
+	assert.True(t, isBepusdtWebhookEnabled())
+	assert.True(t, isOkpayWebhookEnabled())
 }

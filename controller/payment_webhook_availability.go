@@ -119,7 +119,8 @@ func isBepusdtTopUpEnabled() bool {
 }
 
 func isBepusdtWebhookEnabled() bool {
-	return isBepusdtTopUpEnabled()
+	// 存量订单的回调不应因管理员关闭新订单入口或调整链列表而失效。
+	return strings.TrimSpace(setting.BepusdtAuthToken) != ""
 }
 
 func isOkpayTopUpEnabled() bool {
@@ -132,5 +133,7 @@ func isOkpayTopUpEnabled() bool {
 }
 
 func isOkpayWebhookEnabled() bool {
-	return isOkpayTopUpEnabled()
+	// 回调只依赖验签身份；网关地址和支付合规开关仅控制新订单创建。
+	return strings.TrimSpace(setting.OkpayMerchantId) != "" &&
+		strings.TrimSpace(setting.OkpayMerchantToken) != ""
 }

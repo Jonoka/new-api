@@ -199,6 +199,22 @@ func SubscriptionRequestAmount(c *gin.Context) {
 				return
 			}
 		}
+	case paymentMethod == model.PaymentMethodOkpay:
+		displayCurrency = model.SubscriptionCurrencyCNY
+		displayDiscount, err = convertSubscriptionDiscountToOkpayMoney(plan, discount)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		if displayDiscount != nil {
+			displayAmount = displayDiscount.PaidAmount
+		} else {
+			displayAmount, err = getSubscriptionOkpayPayMoney(plan, payMoneyUSD)
+			if err != nil {
+				common.ApiError(c, err)
+				return
+			}
+		}
 	case paymentMethod == model.PaymentMethodBalance:
 		displayCurrency = model.SubscriptionCurrencyUSD
 		displayAmount = payMoneyUSD

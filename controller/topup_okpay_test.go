@@ -1,6 +1,10 @@
 package controller
 
 import (
+	"crypto/md5"
+	"fmt"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,6 +13,11 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/stretchr/testify/require"
 )
+
+func okpaySignatureForTest(raw string, token string) string {
+	hash := md5.Sum([]byte(raw + "&token=" + token))
+	return strings.ToUpper(fmt.Sprintf("%x", hash))
+}
 
 func resetOkpayRateCacheForTest() {
 	okpayRateCacheMu.Lock()
@@ -127,4 +136,45 @@ func TestCalculateOkpayAffiliateSourceQuotaUsesPurchasedCreditRatio(t *testing.T
 	quota := calculateOkpayAffiliateSourceQuota(10, 72, 36)
 
 	require.Equal(t, int(5*common.QuotaPerUnit), quota)
+}
+
+func TestVerifyOkpayCallbackSignatureMatchesDocumentOrder(t *testing.T) {
+	const token = "123456"
+	const bodyWithoutSign = "code=200&data[order_id]=ac7b86615fdb137576ae35879f7ed844&data[unique_id]=BWIN-20250922152023LDVNSyxLQko&data[pay_user_id]=7238234930&data[amount]=6.00000000&data[coin]=USDT&data[status]=1&data[type]=deposit&id=1&status=success"
+	const documentedSignature = "95BE540FB7D1996770E2B4CDBC6F184D"
+
+	payload, err := parseOkpayCallbackPayload([]byte(bodyWithoutSign + "&sign=" + documentedSignature))
+	require.NoError(t, err)
+	require.Equal(t, "BWIN-20250922152023LDVNSyxLQko", payload.Get("data[unique_id]"))
+	require.True(t, verifyOkpayCallbackSignature(payload, token))
+}
+
+func TestVerifyOkpayJSONCallbackSignature(t *testing.T) {
+	const token = "123456"
+	const signature = "95BE540FB7D1996770E2B4CDBC6F184D"
+	body := `{"code":200,"data":{"order_id":"ac7b86615fdb137576ae35879f7ed844","unique_id":"BWIN-20250922152023LDVNSyxLQko","pay_user_id":7238234930,"amount":"6.00000000","coin":"USDT","status":1,"type":"deposit"},"id":1,"status":"success","sign":"` + signature + `"}`
+
+	payload, err := parseOkpayCallbackPayload([]byte(body))
+	require.NoError(t, err)
+	require.Equal(t, "ac7b86615fdb137576ae35879f7ed844", payload.Get("data[order_id]"))
+	require.Equal(t, "1", payload.Get("data[status]"))
+	require.True(t, verifyOkpayCallbackSignature(payload, token))
+}
+
+func TestVerifyOkpayCallbackSignatureFallsBackToSortedKeys(t *testing.T) {
+	const token = "123456"
+	const raw = "id=1&status=success&code=200&data[amount]=6.00000000&data[coin]=USDT&data[order_id]=gateway-order&data[status]=1&data[unique_id]=trade-no"
+	pairs := strings.Split(raw, "&")
+	sort.Strings(pairs)
+	signature := okpaySignatureForTest(strings.Join(pairs, "&"), token)
+
+	payload, err := parseOkpayCallbackPayload([]byte(raw + "&sign=" + signature))
+	require.NoError(t, err)
+	require.True(t, verifyOkpayCallbackSignature(payload, token))
+}
+
+func TestVerifyOkpayCallbackRejectsInvalidSignature(t *testing.T) {
+	payload, err := parseOkpayCallbackPayload([]byte("status=success&data[unique_id]=trade-no&sign=invalid"))
+	require.NoError(t, err)
+	require.False(t, verifyOkpayCallbackSignature(payload, "123456"))
 }

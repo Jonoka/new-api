@@ -65,6 +65,7 @@ import {
   paySubscriptionWaffoPancake,
   paySubscriptionBalance,
   paySubscriptionBepusdt,
+  paySubscriptionOkpay,
   previewSubscriptionAmount,
 } from '../../api'
 import {
@@ -93,6 +94,7 @@ interface Props {
   enableCreem?: boolean
   enableWaffoPancake?: boolean
   enableBepusdt?: boolean
+  enableOkpay?: boolean
   bepusdtChains?: BepusdtChain[]
   enableOnlineTopUp?: boolean
   epayMethods?: PaymentMethod[]
@@ -245,10 +247,16 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const hasWaffoPancake =
     props.enableWaffoPancake && !!plan.waffo_pancake_product_id
   const hasBepusdt = hasConfiguredBepusdt
+  const hasOkpay = !!props.enableOkpay
   const hasEpay =
     props.enableOnlineTopUp && (props.epayMethods || []).length > 0
   const hasAnyPayment =
-    hasStripe || hasCreem || hasWaffoPancake || hasBepusdt || hasEpay
+    hasStripe ||
+    hasCreem ||
+    hasWaffoPancake ||
+    hasBepusdt ||
+    hasOkpay ||
+    hasEpay
   const selectedEpayMethodLabel =
     (props.epayMethods || []).find((m) => m.type === selectedEpayMethod)
       ?.name ||
@@ -296,7 +304,13 @@ export function SubscriptionPurchaseDialog(props: Props) {
     invoiceRequest
   )
   const invoiceDisabled = paying || amountLoading
-  const externalPaymentOptions = [
+  const externalPaymentOptions: Array<{
+    key: string
+    kind: string
+    value: string
+    label: string
+    icon?: string
+  }> = [
     ...(hasEpay
       ? (props.epayMethods || []).map((method) => ({
           key: `epay:${method.type}`,
@@ -316,6 +330,9 @@ export function SubscriptionPurchaseDialog(props: Props) {
           },
         ]
       : []),
+    ...(hasOkpay
+      ? [{ key: 'okpay', kind: 'okpay', value: 'okpay', label: 'OKPay' }]
+      : []),
     ...(hasStripe
       ? [{ key: 'stripe', kind: 'stripe', value: 'stripe', label: 'Stripe' }]
       : []),
@@ -333,21 +350,29 @@ export function SubscriptionPurchaseDialog(props: Props) {
         ]
       : []),
   ]
-  const selectedPaymentLabel =
-    externalPaymentOptions.find((option) => {
-      if (option.kind === 'epay') {
-        return (
-          selectedPaymentKind === 'epay' && option.value === selectedEpayMethod
-        )
-      }
-      return selectedPaymentKind === option.kind
-    })?.label || ''
+  const handleOpenBepusdtChains = async () => {
+    if (!invoiceValid) return
+    setSelectedPaymentKind('bepusdt')
+    const preview = await loadAmountPreview(
+      'bepusdt',
+      promoCode.trim(),
+      false,
+      invoiceRequest
+    )
+    if (preview?.message === 'success') {
+      setBepusdtChainOpen(true)
+    }
+  }
 
   const handleSelectPayment = (kind: string, value: string) => {
     setSelectedPaymentKind(kind)
     if (kind === 'epay') {
       setSelectedEpayMethod(value)
       void loadAmountPreview(value, promoCode.trim(), true, invoiceRequest)
+      return
+    }
+    if (kind === 'bepusdt') {
+      void handleOpenBepusdtChains()
       return
     }
     void loadAmountPreview(value, promoCode.trim(), true, invoiceRequest)
@@ -559,16 +584,31 @@ export function SubscriptionPurchaseDialog(props: Props) {
     }
   }
 
-  const handleOpenBepusdtChains = async () => {
+  const handlePayOkpay = async () => {
     if (!invoiceValid) return
-    const preview = await loadAmountPreview(
-      'bepusdt',
-      promoCode.trim(),
-      false,
-      invoiceRequest
-    )
-    if (preview?.message === 'success') {
-      setBepusdtChainOpen(true)
+    setPaying(true)
+    try {
+      const res = await paySubscriptionOkpay({
+        plan_id: plan.id,
+        promo_code: promoCode,
+        ...getInvoicePayload(invoiceRequest),
+      })
+      if (res.message === 'success' && res.data?.completed) {
+        handleCompletedPurchase()
+      } else if (res.message === 'success' && res.data?.payment_url) {
+        toast.success(t('Redirecting to payment page...'))
+        window.location.href = res.data.payment_url
+      } else {
+        toast.error(
+          res.message && res.message !== 'success'
+            ? res.message
+            : t('Payment request failed')
+        )
+      }
+    } catch {
+      toast.error(t('Payment request failed'))
+    } finally {
+      setPaying(false)
     }
   }
 
@@ -846,16 +886,15 @@ export function SubscriptionPurchaseDialog(props: Props) {
                     </Button>
                   </div>
                 )}
-                {selectedPaymentKind === 'bepusdt' && hasBepusdt && (
+                {selectedPaymentKind === 'okpay' && hasOkpay && (
                   <Button
-                    variant='outline'
                     className='w-full'
-                    onClick={handleOpenBepusdtChains}
+                    onClick={handlePayOkpay}
                     disabled={
                       paying || amountLoading || limitReached || !invoiceValid
                     }
                   >
-                    {selectedPaymentLabel || 'USDT'}
+                    OKPay
                   </Button>
                 )}
                 {selectedPaymentKind === 'stripe' && hasStripe && (
@@ -929,11 +968,6 @@ export function SubscriptionPurchaseDialog(props: Props) {
               <span className='text-muted-foreground'>{t('Amount Due')}</span>
               <span className='text-lg font-semibold'>{amountDueText}</span>
             </div>
-            <Alert>
-              <AlertDescription>
-                {t('USDT subscription payments have no platform service fee.')}
-              </AlertDescription>
-            </Alert>
           </div>
           <AlertDialogFooter className='grid grid-cols-2 gap-2 sm:flex'>
             <AlertDialogCancel disabled={paying}>
