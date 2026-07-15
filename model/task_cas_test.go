@@ -264,12 +264,19 @@ func TestUpdateWithStatus_ConcurrentWinner(t *testing.T) {
 	assert.Equal(t, 1, winCount, "exactly one goroutine should win the CAS")
 }
 
-func TestGetAllUnFinishSyncTasksSkipsCanvasImageWrapperTasks(t *testing.T) {
+func TestGetAllUnFinishSyncTasksSkipsLocalImageWrapperTasks(t *testing.T) {
 	truncateTables(t)
 
 	insertTask(t, &Task{
 		TaskID:    "task_canvas_wrapper",
 		Platform:  constant.TaskPlatformCanvasImage,
+		Status:    TaskStatusInProgress,
+		Progress:  "10%",
+		ChannelId: 0,
+	})
+	insertTask(t, &Task{
+		TaskID:    "task_api_image_wrapper",
+		Platform:  constant.TaskPlatformImage,
 		Status:    TaskStatusInProgress,
 		Progress:  "10%",
 		ChannelId: 0,

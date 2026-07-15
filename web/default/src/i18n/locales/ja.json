@@ -700,6 +700,7 @@
     "Cancel": "キャンセル",
     "Cancelled": "キャンセル",
     "Cancelled at": "キャンセル日時",
+    "Canvas": "Canvas",
     "Canvas app domain": "Canvas アプリのドメイン",
     "Canvas icon": "Canvas アイコン",
     "Capabilities": "機能",
@@ -5079,6 +5080,10 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "Image Task Data Retention": "画像タスクデータの保持",
+    "Completed Canvas and /v1/images/tasks image result data is cleared after the configured time. Task status, billing, and audit records are retained.": "Canvas および /v1/images/tasks の非同期画像タスクが完了すると、設定時間後に画像結果データが自動的に消去されます。タスク状態、請求、監査記録は保持されます。",
+    "Image Data Retention (hours)": "画像データ保持時間（時間）",
+    "Use 0 to disable automatic cleanup. Extending the time cannot restore data that has already been cleared.": "0 に設定すると自動消去を無効にできます。保持時間を延長しても、すでに消去されたデータは復元できません。"
   }
 }

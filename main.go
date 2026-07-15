@@ -126,6 +126,9 @@ func main() {
 	// Game prediction auto judge task skeleton.
 	service.StartGamePredictionJudgeTask()
 
+	// 清理超过保留期的图片异步任务响应体。
+	service.StartImageTaskDataCleanupTask()
+
 	// Wire task polling adaptor factory (breaks service -> relay import cycle)
 	service.GetTaskAdaptorFunc = func(platform constant.TaskPlatform) service.TaskPollingAdaptor {
 		a := relay.GetTaskAdaptor(platform)

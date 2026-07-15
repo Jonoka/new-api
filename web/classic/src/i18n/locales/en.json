@@ -4086,6 +4086,10 @@
     "Well-Known URL 必须以 http:// 或 https:// 开头": "Well-Known URL must start with http:// or https://",
     "whsec_xxx 的 Webhook 签名密钥，敏感信息不显示": "Webhook signature key for whsec_xxx, sensitive information not displayed",
     "Worker地址": "Worker Address",
-    "Worker密钥": "Worker Key"
+    "Worker密钥": "Worker Key",
+    "异步图片数据清理": "Asynchronous Image Data Cleanup",
+    "Canvas 和 /v1/images/tasks 异步图片任务完成后，图片结果数据将在设定时间后自动清理；任务状态、计费和审计记录仍会保留。": "Completed Canvas and /v1/images/tasks image result data is cleared after the configured time. Task status, billing, and audit records are retained.",
+    "图片数据保留时间（小时）": "Image Data Retention (hours)",
+    "设置为 0 可关闭自动清理；已清理的数据无法通过延长时间恢复。": "Use 0 to disable automatic cleanup. Extending the time cannot restore data that has already been cleared."
   }
 }

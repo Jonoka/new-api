@@ -68,6 +68,7 @@ export default function SettingsPerformance(props) {
     'performance_setting.disk_cache_threshold_mb': 10,
     'performance_setting.disk_cache_max_size_mb': 1024,
     'performance_setting.disk_cache_path': '',
+    'performance_setting.image_task_data_retention_hours': 1,
     'performance_setting.monitor_enabled': false,
     'performance_setting.monitor_cpu_threshold': 90,
     'performance_setting.monitor_memory_threshold': 90,
@@ -186,7 +187,11 @@ export default function SettingsPerformance(props) {
   }
 
   async function cleanupLogFiles() {
-    if (logCleanupValue == null || isNaN(logCleanupValue) || logCleanupValue < 1) {
+    if (
+      logCleanupValue == null ||
+      isNaN(logCleanupValue) ||
+      logCleanupValue < 1
+    ) {
       showError(t('请输入有效的数值'));
       return;
     }
@@ -222,7 +227,10 @@ export default function SettingsPerformance(props) {
           currentInputs[key] =
             props.options[key] === 'true' || props.options[key] === true;
         } else if (typeof inputs[key] === 'number') {
-          currentInputs[key] = parseInt(props.options[key]) || inputs[key];
+          const parsedValue = Number(props.options[key]);
+          currentInputs[key] = Number.isFinite(parsedValue)
+            ? parsedValue
+            : inputs[key];
         } else {
           currentInputs[key] = props.options[key];
         }
@@ -325,6 +333,34 @@ export default function SettingsPerformance(props) {
                   />
                 </Col>
               )}
+            </Row>
+          </Form.Section>
+
+          <Form.Section text={t('异步图片数据清理')}>
+            <Banner
+              type='info'
+              description={t(
+                'Canvas 和 /v1/images/tasks 异步图片任务完成后，图片结果数据将在设定时间后自动清理；任务状态、计费和审计记录仍会保留。',
+              )}
+              style={{ marginBottom: 16 }}
+            />
+            <Row gutter={16}>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  field={'performance_setting.image_task_data_retention_hours'}
+                  label={t('图片数据保留时间（小时）')}
+                  extraText={t(
+                    '设置为 0 可关闭自动清理；已清理的数据无法通过延长时间恢复。',
+                  )}
+                  min={0}
+                  max={8760}
+                  step={1}
+                  precision={0}
+                  onChange={handleFieldChange(
+                    'performance_setting.image_task_data_retention_hours',
+                  )}
+                />
+              </Col>
             </Row>
           </Form.Section>
 
@@ -474,24 +510,24 @@ export default function SettingsPerformance(props) {
                   >
                     &nbsp;
                   </Text>
-                <Popconfirm
-                  title={t('确认清理日志文件？')}
-                  content={
-                    logCleanupMode === 'by_count'
-                      ? t(
-                          '将只保留最近 {{value}} 个日志文件，其余将被删除。',
-                          { value: logCleanupValue },
-                        )
-                      : t('将删除 {{value}} 天前的日志文件。', {
-                          value: logCleanupValue,
-                        })
-                  }
-                  onConfirm={cleanupLogFiles}
-                >
-                  <Button type='danger' loading={logCleanupLoading}>
-                    {t('清理日志文件')}
-                  </Button>
-                </Popconfirm>
+                  <Popconfirm
+                    title={t('确认清理日志文件？')}
+                    content={
+                      logCleanupMode === 'by_count'
+                        ? t(
+                            '将只保留最近 {{value}} 个日志文件，其余将被删除。',
+                            { value: logCleanupValue },
+                          )
+                        : t('将删除 {{value}} 天前的日志文件。', {
+                            value: logCleanupValue,
+                          })
+                    }
+                    onConfirm={cleanupLogFiles}
+                  >
+                    <Button type='danger' loading={logCleanupLoading}>
+                      {t('清理日志文件')}
+                    </Button>
+                  </Popconfirm>
                 </div>
               </Col>
             </Row>
