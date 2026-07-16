@@ -226,6 +226,8 @@ export type BillingSettings = {
   PayMethods: string
   'payment_setting.amount_options': string
   'payment_setting.amount_discount': string
+  'payment_setting.balance_subscription_enabled': boolean
+  'payment_setting.balance_subscription_promo_enabled': boolean
   InvoiceEnabled: boolean
   InvoiceTypes: string
   InvoiceFeeRules: string

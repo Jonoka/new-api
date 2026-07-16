@@ -164,10 +164,17 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
       ...(userIsAdmin
         ? [
             {
-              title: t('用户ID'),
-              dataIndex: 'user_id',
-              key: 'user_id',
-              render: (userId) => <Text>{userId ?? '-'}</Text>,
+              title: t('用户'),
+              dataIndex: 'username',
+              key: 'username',
+              render: (username, record) => (
+                <div className='flex flex-col'>
+                  <Text>{username || '-'}</Text>
+                  <Text type='tertiary' size='small'>
+                    ID: {record.user_id ?? '-'}
+                  </Text>
+                </div>
+              ),
             },
           ]
         : []),
@@ -227,14 +234,14 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
           if (record.status === 'pending') {
             actions.push(
               <Button
-                key="complete"
+                key='complete'
                 size='small'
                 type='primary'
                 theme='outline'
                 onClick={() => confirmAdminComplete(record.trade_no)}
               >
                 {t('补单')}
-              </Button>
+              </Button>,
             );
           }
           return actions.length > 0 ? <>{actions}</> : null;
@@ -263,7 +270,7 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
       <div className='mb-3'>
         <Input
           prefix={<IconSearch />}
-          placeholder={t('订单号')}
+          placeholder={t('订单号、用户名或用户ID')}
           value={keyword}
           onChange={handleKeywordChange}
           showClear

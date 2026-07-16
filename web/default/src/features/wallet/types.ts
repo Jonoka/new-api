@@ -219,6 +219,10 @@ export interface TopupInfo {
   bepusdt_min_topup?: number
   /** Whether OKPay topup is enabled */
   enable_okpay_topup?: boolean
+  /** Whether subscriptions can be purchased with account balance */
+  enable_balance_subscription?: boolean
+  /** Whether promo codes are allowed for balance subscription purchases */
+  enable_balance_subscription_promo?: boolean
   /** Minimum topup amount for OKPay */
   okpay_min_topup?: number
   /** Whether redemption code usage is enabled */
@@ -342,6 +346,8 @@ export interface TopupRecord {
   id: number
   /** User ID */
   user_id: number
+  /** Username (admin billing history only) */
+  username?: string
   /** Topup amount (quota) */
   amount: number
   /** Payment amount (actual money paid) */

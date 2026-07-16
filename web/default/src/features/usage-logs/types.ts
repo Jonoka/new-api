@@ -103,6 +103,13 @@ export interface LogOtherData {
     payment_method?: string
     callback_payment_method?: string
     caller_ip?: string
+    request_ip?: string
+    callback_ip?: string
+    trade_no?: string
+    balance_before?: number
+    credited_quota?: number
+    balance_after?: number
+    paid_amount_cny?: number
     server_ip?: string
     version?: string
     node_name?: string

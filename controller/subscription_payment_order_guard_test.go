@@ -726,7 +726,7 @@ func TestPurchaseSubscriptionWithBalance_UsesCnyPlanAsUsdBase(t *testing.T) {
 		operation_setting.Price = originalPrice
 	})
 
-	require.NoError(t, model.PurchaseSubscriptionWithBalance(901, plan.Id, ""))
+	require.NoError(t, model.PurchaseSubscriptionWithBalance(901, plan.Id, "", ""))
 
 	var user model.User
 	require.NoError(t, db.First(&user, 901).Error)

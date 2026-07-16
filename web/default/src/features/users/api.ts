@@ -51,6 +51,7 @@ export async function searchUsers(
 ): Promise<GetUsersResponse> {
   const {
     keyword = '',
+    search_type = 'all',
     group = '',
     role = '',
     status = '',
@@ -59,6 +60,7 @@ export async function searchUsers(
   } = params
   const queryParams = new URLSearchParams()
   queryParams.set('keyword', keyword)
+  queryParams.set('search_type', search_type)
   queryParams.set('group', group)
   if (role) queryParams.set('role', role)
   if (status) queryParams.set('status', status)

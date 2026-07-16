@@ -23,17 +23,20 @@ func setupInvoiceOrderControllerTest(t *testing.T) {
 	originalEnabled := model.InvoiceEnabled
 	originalRules := model.InvoiceFeeRules
 	originalTypes := model.InvoiceTypes
+	originalKinds := model.InvoiceKinds
 	originalPrice := operation_setting.Price
 	originalQuotaPerUnit := common.QuotaPerUnit
 	model.InvoiceEnabled = true
 	model.InvoiceFeeRules = `[{"min":0,"type":"percent","value":10}]`
 	model.InvoiceTypes = `["personal","company"]`
+	model.InvoiceKinds = `["normal","special"]`
 	operation_setting.Price = 7
 	common.QuotaPerUnit = 500000
 	t.Cleanup(func() {
 		model.InvoiceEnabled = originalEnabled
 		model.InvoiceFeeRules = originalRules
 		model.InvoiceTypes = originalTypes
+		model.InvoiceKinds = originalKinds
 		operation_setting.Price = originalPrice
 		common.QuotaPerUnit = originalQuotaPerUnit
 	})
@@ -67,7 +70,7 @@ func TestApplyInvoiceOrdersUsesAuthenticatedUserAndForcesRequired(t *testing.T) 
 
 	ctx, recorder := invoiceOrderControllerContext(t, `{
 		"orders":[{"source_type":"topup","source_id":"TOP-CONTROLLER"}],
-		"invoice":{"type":"company","title":"控制器测试公司","tax_no":"91310000CTRL"}
+		"invoice":{"type":"company","kind":"special","title":"控制器测试公司","tax_no":"91310000CTRL"}
 	}`, 1201)
 	ApplyInvoiceOrders(ctx)
 
@@ -91,6 +94,7 @@ func TestApplyInvoiceOrdersUsesAuthenticatedUserAndForcesRequired(t *testing.T) 
 	var saved model.TopUp
 	require.NoError(t, model.DB.Where("trade_no = ?", "TOP-CONTROLLER").First(&saved).Error)
 	assert.True(t, saved.InvoiceRequired)
+	assert.Equal(t, model.InvoiceKindSpecial, saved.InvoiceKind)
 }
 
 func TestPreviewInvoiceOrdersReturnsFrontendFieldNames(t *testing.T) {

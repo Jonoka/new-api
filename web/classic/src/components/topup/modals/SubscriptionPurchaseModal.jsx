@@ -100,6 +100,8 @@ const SubscriptionPurchaseModal = ({
   enableOnlineTopUp = false,
   enableStripeTopUp = false,
   enableCreemTopUp = false,
+  enableBalanceSubscription = true,
+  enableBalanceSubscriptionPromo = true,
   purchaseLimitInfo = null,
   promoCode,
   setPromoCode,
@@ -179,12 +181,16 @@ const SubscriptionPurchaseModal = ({
     ...(hasBepusdt
       ? [{ key: 'bepusdt', kind: 'bepusdt', value: 'bepusdt', label: 'USDT' }]
       : []),
-    {
-      key: 'balance',
-      kind: 'balance',
-      value: 'balance',
-      label: t('余额'),
-    },
+    ...(enableBalanceSubscription
+      ? [
+          {
+            key: 'balance',
+            kind: 'balance',
+            value: 'balance',
+            label: t('余额'),
+          },
+        ]
+      : []),
     ...(hasStripe
       ? [{ key: 'stripe', kind: 'stripe', value: 'stripe', label: 'Stripe' }]
       : []),
@@ -215,6 +221,8 @@ const SubscriptionPurchaseModal = ({
   const availableQuota = Math.max(0, Number(userQuota || 0));
   const insufficientBalance =
     !balanceAmountReady || availableQuota < balanceCost;
+  const balancePromoBlocked =
+    !enableBalanceSubscriptionPromo && !!promoCode?.trim();
 
   const handlePaymentOptionClick = (option) => {
     onSelectPaymentKind?.(option.kind, option.value);
@@ -448,12 +456,19 @@ const SubscriptionPurchaseModal = ({
                 OKPay
               </Button>
             )}
-            {selectedPaymentKind === 'balance' && (
+            {selectedPaymentKind === 'balance' && enableBalanceSubscription && (
               <div className='space-y-2'>
                 <div className='flex items-center justify-between rounded-lg border border-solid border-[var(--semi-color-border)] px-3 py-2 text-sm'>
                   <span>{t('余额')}</span>
                   <span>{renderQuota(availableQuota)}</span>
                 </div>
+                {balancePromoBlocked && (
+                  <Banner
+                    type='warning'
+                    description={t('余额购买订阅暂不支持优惠码')}
+                    closeIcon={null}
+                  />
+                )}
                 <Button
                   theme='solid'
                   type='primary'
@@ -462,7 +477,10 @@ const SubscriptionPurchaseModal = ({
                   onClick={onPayBalance}
                   loading={paying}
                   disabled={
-                    purchaseLimitReached || amountLoading || insufficientBalance
+                    purchaseLimitReached ||
+                    amountLoading ||
+                    insufficientBalance ||
+                    balancePromoBlocked
                   }
                 >
                   {t('余额')}
