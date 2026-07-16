@@ -31,3 +31,13 @@ func TestParseTaskResultSuccessAliases(t *testing.T) {
 		})
 	}
 }
+
+func TestParseTaskResultAcceptsPercentStringProgress(t *testing.T) {
+	adaptor := &TaskAdaptor{}
+	info, err := adaptor.ParseTaskResult([]byte(`{"task_id":"upstream_task","status":"processing","progress":"10%"}`))
+
+	require.NoError(t, err)
+	require.NotNil(t, info)
+	assert.Equal(t, model.TaskStatusInProgress, info.Status)
+	assert.Equal(t, "10%", info.Progress)
+}

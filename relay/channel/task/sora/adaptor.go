@@ -45,9 +45,9 @@ type responseTask struct {
 	TaskID             string `json:"task_id,omitempty"` //兼容旧接口
 	Object             string `json:"object"`
 	Model              string `json:"model"`
-	Status             string `json:"status"`
-	Progress           int    `json:"progress"`
-	CreatedAt          int64  `json:"created_at"`
+	Status             string           `json:"status"`
+	Progress           flexibleProgress `json:"progress"`
+	CreatedAt          int64            `json:"created_at"`
 	CompletedAt        int64  `json:"completed_at,omitempty"`
 	ExpiresAt          int64  `json:"expires_at,omitempty"`
 	Seconds            string `json:"seconds,omitempty"`
@@ -57,6 +57,37 @@ type responseTask struct {
 		Message string `json:"message"`
 		Code    string `json:"code"`
 	} `json:"error,omitempty"`
+}
+
+type flexibleProgress struct {
+	value int
+}
+
+func (p flexibleProgress) MarshalJSON() ([]byte, error) {
+	return common.Marshal(p.value)
+}
+
+func (p *flexibleProgress) UnmarshalJSON(data []byte) error {
+	var numeric int
+	if err := common.Unmarshal(data, &numeric); err == nil {
+		p.value = numeric
+		return nil
+	}
+	var text string
+	if err := common.Unmarshal(data, &text); err != nil {
+		return err
+	}
+	text = strings.TrimSpace(strings.TrimSuffix(text, "%"))
+	if text == "" {
+		p.value = 0
+		return nil
+	}
+	value, err := strconv.Atoi(text)
+	if err != nil {
+		return err
+	}
+	p.value = value
+	return nil
 }
 
 // ============================
@@ -336,8 +367,8 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 		}
 	default:
 	}
-	if resTask.Progress > 0 && resTask.Progress < 100 {
-		taskResult.Progress = fmt.Sprintf("%d%%", resTask.Progress)
+	if resTask.Progress.value > 0 && resTask.Progress.value < 100 {
+		taskResult.Progress = fmt.Sprintf("%d%%", resTask.Progress.value)
 	}
 
 	return &taskResult, nil
