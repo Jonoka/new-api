@@ -13,6 +13,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestGetRequestURLUsesConfiguredImageTasksEndpoint(t *testing.T) {
+	got, err := (&Adaptor{}).GetRequestURL(&relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeImagesGenerations,
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI, ChannelBaseUrl: "https://images.example",
+			ChannelOtherSettings: dto.ChannelOtherSettings{ImageAsyncMode: dto.ImageAsyncModeTasksEndpoint, ImageTasksEndpoint: "/v1/images/tasks"}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "https://images.example/v1/images/tasks", got)
+}
+
+func TestConvertImageRequestTasksEndpointDoesNotInjectLegacyBodyFlags(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	converted, err := (&Adaptor{}).ConvertImageRequest(c, &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeImagesGenerations,
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelOtherSettings: dto.ChannelOtherSettings{ImageAsyncMode: dto.ImageAsyncModeTasksEndpoint}},
+	}, dto.ImageRequest{Model: "gpt-image-2", Quality: "high"})
+	require.NoError(t, err)
+	body, err := json.Marshal(converted)
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(body, &got))
+	require.NotContains(t, got, "async")
+	require.NotContains(t, got, "wait_for_result")
+}
+
 func TestConvertImageRequestForcesGPTImage2HighTierToAsyncTask(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -21,8 +47,9 @@ func TestConvertImageRequestForcesGPTImage2HighTierToAsyncTask(t *testing.T) {
 		RelayMode:       relayconstant.RelayModeImagesGenerations,
 		OriginModelName: "gpt-image-2",
 		ChannelMeta: &relaycommon.ChannelMeta{
-			ApiType:           constant.APITypeOpenAI,
-			UpstreamModelName: "gpt-image-2",
+			ApiType:                 constant.APITypeOpenAI,
+			UpstreamModelName:       "gpt-image-2",
+			ChannelOtherSettings: dto.ChannelOtherSettings{ImageAsyncMode: dto.ImageAsyncModeBodyFlags},
 		},
 	}, dto.ImageRequest{Model: "gpt-image-2", Prompt: "test", Size: "3840x2160", Quality: "high"})
 

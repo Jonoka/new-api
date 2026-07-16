@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
@@ -19,8 +20,22 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func isSuccessfulImageResponse(statusCode int, info *relaycommon.RelayInfo) bool {
+	if statusCode == http.StatusOK {
+		return true
+	}
+	return statusCode == http.StatusAccepted && info != nil && info.RelayMode == relayconstant.RelayModeImagesGenerations && info.ChannelOtherSettings.ImageAsyncMode == dto.ImageAsyncModeTasksEndpoint
+}
+
 func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
+	isTasksEndpointGeneration := info.RelayMode == relayconstant.RelayModeImagesGenerations && info.ChannelOtherSettings.ImageAsyncMode == dto.ImageAsyncModeTasksEndpoint
+	if isTasksEndpointGeneration && info.Billing != nil {
+		info.ForcePreConsume = true
+		if err := info.Billing.Reserve(info.PriceData.Quota); err != nil {
+			return types.NewErrorWithStatusCode(err, types.ErrorCodePreConsumeTokenQuotaFailed, http.StatusForbidden, types.ErrOptionWithSkipRetry())
+		}
+	}
 
 	imageReq, ok := info.Request.(*dto.ImageRequest)
 	if !ok {
@@ -97,7 +112,7 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	if resp != nil {
 		httpResp = resp.(*http.Response)
 		markActualStreamFromResponse(c, info, httpResp)
-		if httpResp.StatusCode != http.StatusOK {
+		if !isSuccessfulImageResponse(httpResp.StatusCode, info) {
 			if httpResp.StatusCode == http.StatusCreated && info.ApiType == constant.APITypeReplicate {
 				// replicate channel returns 201 Created when using Prefer: wait, treat it as success.
 				httpResp.StatusCode = http.StatusOK
@@ -156,6 +171,10 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		logContent = append(logContent, fmt.Sprintf("生成数量 %d", imageN))
 	}
 
-	service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), logContent)
+	// tasks_endpoint submissions are handoffs. Keep pre-consumption refundable
+	// until the controller has persisted a pollable task; polling owns settlement.
+	if !isTasksEndpointGeneration {
+		service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), logContent)
+	}
 	return nil
 }

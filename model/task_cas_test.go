@@ -287,3 +287,25 @@ func TestGetAllUnFinishSyncTasksSkipsCanvasImageWrapperTasks(t *testing.T) {
 	require.Len(t, tasks, 1)
 	assert.Equal(t, "task_upstream", tasks[0].TaskID)
 }
+
+func TestGetAllUnFinishSyncTasksIncludesHandedOffCanvasImageTasks(t *testing.T) {
+	truncateTables(t)
+
+	insertTask(t, &Task{
+		TaskID:    "task_canvas_handoff",
+		Platform:  constant.TaskPlatformImage,
+		Status:    TaskStatusQueued,
+		Progress:  "0%",
+		ChannelId: 12,
+		PrivateData: TaskPrivateData{
+			ClientPlatform: string(constant.TaskPlatformCanvasImage),
+			TaskProtocol:   TaskProtocolOpenAIImageTasks,
+			PollPath:       "/v1/images/tasks/{task_id}",
+		},
+	})
+
+	tasks := GetAllUnFinishSyncTasks(100)
+
+	require.Len(t, tasks, 1)
+	assert.Equal(t, "task_canvas_handoff", tasks[0].TaskID)
+}

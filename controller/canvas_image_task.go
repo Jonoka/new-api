@@ -15,6 +15,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -29,6 +30,8 @@ const (
 	canvasImageTaskActionGenerations = "images/generations"
 	canvasImageTaskActionEdits       = "images/edits"
 )
+
+var updateCanvasImageTask = func(task *model.Task) error { return task.Update() }
 
 type canvasImageTaskRelayRequest struct {
 	TaskID   string
@@ -242,6 +245,44 @@ func normalizeCanvasImageTaskAction(action string) string {
 }
 
 func finishCanvasImageTask(task *model.Task, channelID int, recorder *httptest.ResponseRecorder, relayInfo *relaycommon.RelayInfo) {
+	body := bytes.TrimSpace(recorder.Body.Bytes())
+	if recorder.Code >= http.StatusOK && recorder.Code < http.StatusMultipleChoices && relayInfo != nil && relayInfo.ChannelOtherSettings.ImageAsyncMode == dto.ImageAsyncModeTasksEndpoint {
+		_, upstreamTaskID, status, progress := parseImageTaskSubmitResponseBody(body)
+		if upstreamTaskID != "" && (status == "" || status == string(model.TaskStatusSubmitted) || status == string(model.TaskStatusQueued) || status == string(model.TaskStatusInProgress)) {
+			if status == "" || status == string(model.TaskStatusSubmitted) {
+				status = string(model.TaskStatusQueued)
+			}
+			if progress == "" {
+				progress = "0%"
+			}
+			now := time.Now().Unix()
+			task.UpdatedAt = now
+			task.Status = model.TaskStatus(status)
+			task.Progress = progress
+			task.ChannelId = channelID
+			task.Platform = constant.TaskPlatformImage
+			task.PrivateData.ClientPlatform = string(constant.TaskPlatformCanvasImage)
+			task.PrivateData.UpstreamTaskID = upstreamTaskID
+			freezeImageTaskPollingProtocol(task, relayInfo)
+			applyCanvasImageTaskBillingSnapshot(task, relayInfo)
+			task.Data = json.RawMessage(append([]byte(nil), body...))
+			if err := updateCanvasImageTask(task); err != nil {
+				common.SysError(fmt.Sprintf("canvas image async handoff update failed: task_id=%s err=%v", task.TaskID, err))
+				refundCanvasImageSubmit(relayInfo)
+				failCanvasImageTask(task, "failed to persist upstream async image task", body)
+			}
+			return
+		}
+		if status != string(model.TaskStatusSuccess) {
+			reason := "upstream returned no image task id"
+			if status == string(model.TaskStatusFailure) {
+				reason = extractCanvasImageRelayError(body)
+			}
+			refundCanvasImageSubmit(relayInfo)
+			failCanvasImageTask(task, reason, body)
+			return
+		}
+	}
 	now := time.Now().Unix()
 	task.FinishTime = now
 	task.UpdatedAt = now
@@ -251,17 +292,33 @@ func finishCanvasImageTask(task *model.Task, channelID int, recorder *httptest.R
 	}
 	applyCanvasImageTaskBillingSnapshot(task, relayInfo)
 
-	body := bytes.TrimSpace(recorder.Body.Bytes())
 	if recorder.Code >= http.StatusOK && recorder.Code < http.StatusMultipleChoices && len(body) > 0 {
 		task.Status = model.TaskStatusSuccess
 		task.Data = json.RawMessage(append([]byte(nil), body...))
 		task.FailReason = ""
 		_ = task.Update()
+		settleCanvasImageSubmit(relayInfo, task.Quota)
 		recalculateCanvasImageTaskQuota(task, body, relayInfo)
 		return
 	}
 
 	failCanvasImageTask(task, extractCanvasImageRelayError(body), body)
+}
+
+func refundCanvasImageSubmit(relayInfo *relaycommon.RelayInfo) {
+	if relayInfo == nil || relayInfo.Billing == nil {
+		return
+	}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	relayInfo.Billing.Refund(c)
+}
+
+func settleCanvasImageSubmit(relayInfo *relaycommon.RelayInfo, quota int) {
+	if relayInfo != nil && relayInfo.Billing != nil {
+		if err := relayInfo.Billing.Settle(quota); err != nil {
+			common.SysError("failed to settle terminal canvas image task: " + err.Error())
+		}
+	}
 }
 
 func applyCanvasImageTaskBillingSnapshot(task *model.Task, relayInfo *relaycommon.RelayInfo) {

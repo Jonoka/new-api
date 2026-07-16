@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -14,8 +15,11 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -181,6 +185,86 @@ func TestFinishCanvasImageTaskStoresSuccessfulRelayResponse(t *testing.T) {
 	require.Equal(t, 12, reloaded.ChannelId)
 	require.JSONEq(t, `{"data":[{"url":"https://example.com/image.png"}]}`, string(reloaded.Data))
 	require.Empty(t, reloaded.FailReason)
+}
+
+func TestFinishCanvasImageTaskHandsOffQueuedTasksEndpointResponse(t *testing.T) {
+	setupCanvasImageTaskTestDB(t)
+	recorder := httptest.NewRecorder()
+	recorder.WriteHeader(http.StatusAccepted)
+	_, err := recorder.WriteString(`{"task_id":"upstream_async","status":"queued"}`)
+	require.NoError(t, err)
+
+	task := &model.Task{TaskID: "task_canvas_async", Platform: constant.TaskPlatformCanvasImage, UserId: 1, Status: model.TaskStatusInProgress}
+	require.NoError(t, task.Insert())
+	relayInfo := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
+		ChannelId:   34,
+		ChannelType: constant.ChannelTypeOpenAI,
+		ChannelOtherSettings: dto.ChannelOtherSettings{
+			ImageAsyncMode:     dto.ImageAsyncModeTasksEndpoint,
+			ImageTasksEndpoint: "/v1/images/tasks",
+		},
+	}}
+
+	finishCanvasImageTask(task, 34, recorder, relayInfo)
+
+	reloaded, exists, err := model.GetByTaskId(1, "task_canvas_async")
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.EqualValues(t, constant.TaskPlatformImage, reloaded.Platform)
+	require.Equal(t, string(constant.TaskPlatformCanvasImage), reloaded.PrivateData.ClientPlatform)
+	require.Equal(t, "upstream_async", reloaded.PrivateData.UpstreamTaskID)
+	require.EqualValues(t, model.TaskStatusQueued, reloaded.Status)
+	require.Equal(t, "/v1/images/tasks/{task_id}", reloaded.PrivateData.PollPath)
+}
+
+func TestFinishCanvasImageTaskRejectsAndRefundsMissingTaskID(t *testing.T) {
+	setupCanvasImageTaskTestDB(t)
+	spy := &imageTaskBillingSpy{}
+	recorder := httptest.NewRecorder()
+	recorder.WriteHeader(http.StatusAccepted)
+	_, _ = recorder.WriteString(`{"status":"queued"}`)
+	task := &model.Task{TaskID: "task_canvas_missing", UserId: 1, Status: model.TaskStatusInProgress}
+	require.NoError(t, task.Insert())
+	relayInfo := &relaycommon.RelayInfo{Billing: spy, ChannelMeta: &relaycommon.ChannelMeta{ChannelOtherSettings: dto.ChannelOtherSettings{ImageAsyncMode: dto.ImageAsyncModeTasksEndpoint}}}
+	finishCanvasImageTask(task, 34, recorder, relayInfo)
+	reloaded, exists, err := model.GetByTaskId(1, task.TaskID)
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.EqualValues(t, model.TaskStatusFailure, reloaded.Status)
+	require.Equal(t, 1, spy.refunds)
+}
+
+func TestFinishCanvasImageTaskRefundsHandoffPersistenceFailure(t *testing.T) {
+	setupCanvasImageTaskTestDB(t)
+	originalUpdate := updateCanvasImageTask
+	t.Cleanup(func() { updateCanvasImageTask = originalUpdate })
+	updateCanvasImageTask = func(*model.Task) error { return errors.New("db unavailable") }
+	spy := &imageTaskBillingSpy{}
+	recorder := httptest.NewRecorder()
+	recorder.WriteHeader(http.StatusAccepted)
+	_, _ = recorder.WriteString(`{"task_id":"upstream_async","status":"queued"}`)
+	task := &model.Task{TaskID: "task_canvas_update_fail", UserId: 1, Status: model.TaskStatusInProgress}
+	require.NoError(t, task.Insert())
+	relayInfo := &relaycommon.RelayInfo{Billing: spy, ChannelMeta: &relaycommon.ChannelMeta{ChannelOtherSettings: dto.ChannelOtherSettings{ImageAsyncMode: dto.ImageAsyncModeTasksEndpoint}}}
+	finishCanvasImageTask(task, 34, recorder, relayInfo)
+	require.Equal(t, 1, spy.refunds)
+}
+
+func TestFinishCanvasImageTaskRefundsImmediateTerminalFailure(t *testing.T) {
+	setupCanvasImageTaskTestDB(t)
+	spy := &imageTaskBillingSpy{}
+	recorder := httptest.NewRecorder()
+	recorder.WriteHeader(http.StatusOK)
+	_, _ = recorder.WriteString(`{"task_id":"failed_async","status":"failed","error":{"message":"rejected"}}`)
+	task := &model.Task{TaskID: "task_canvas_terminal_fail", UserId: 1, Status: model.TaskStatusInProgress}
+	require.NoError(t, task.Insert())
+	relayInfo := &relaycommon.RelayInfo{Billing: spy, ChannelMeta: &relaycommon.ChannelMeta{ChannelOtherSettings: dto.ChannelOtherSettings{ImageAsyncMode: dto.ImageAsyncModeTasksEndpoint}}}
+	finishCanvasImageTask(task, 34, recorder, relayInfo)
+	reloaded, exists, err := model.GetByTaskId(1, task.TaskID)
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.EqualValues(t, model.TaskStatusFailure, reloaded.Status)
+	require.Equal(t, 1, spy.refunds)
 }
 
 func TestExecuteCanvasImageRelayRoutesEditTasks(t *testing.T) {

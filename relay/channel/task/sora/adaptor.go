@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"path"
 	"strconv"
 	"strings"
@@ -276,7 +277,11 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	}
 
 	uriPath := fmt.Sprintf("/v1/videos/%s", taskID)
-	if rawPath, _ := body["request_path"].(string); strings.HasPrefix(rawPath, "/v1/video/generations") {
+	pollPath, _ := body["poll_path"].(string)
+	if strings.TrimSpace(pollPath) != "" {
+		uriPath = strings.ReplaceAll(pollPath, "{task_id}", url.PathEscape(taskID))
+	}
+	if rawPath, _ := body["request_path"].(string); strings.TrimSpace(pollPath) == "" && strings.HasPrefix(rawPath, "/v1/video/generations") {
 		uriPath = path.Join("/v1/video/generations", taskID)
 	}
 	uri := baseUrl + uriPath

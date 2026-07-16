@@ -95,6 +95,10 @@ func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
 }
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
+	if info.RelayMode == relayconstant.RelayModeImagesGenerations && info.ChannelOtherSettings.ImageAsyncMode == dto.ImageAsyncModeTasksEndpoint {
+		endpoint := info.ChannelOtherSettings.ImageTasksSubmitPath()
+		return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, endpoint, info.ChannelType), nil
+	}
 	if info.RelayMode == relayconstant.RelayModeRealtime {
 		if strings.HasPrefix(info.ChannelBaseUrl, "https://") {
 			baseUrl := strings.TrimPrefix(info.ChannelBaseUrl, "https://")
@@ -451,12 +455,13 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
-	if shouldForceGPTImage2HighTierAsync(info, request) {
+	isTasksEndpointGeneration := info.RelayMode == relayconstant.RelayModeImagesGenerations && info.ChannelOtherSettings.ImageAsyncMode == dto.ImageAsyncModeTasksEndpoint
+	if !isTasksEndpointGeneration && shouldForceGPTImage2HighTierAsync(info, request) {
 		async := true
 		waitForResult := false
 		request.Async = &async
 		request.WaitForResult = &waitForResult
-	} else if shouldDefaultGPTImage2RequestToSync(info, request) {
+	} else if !isTasksEndpointGeneration && shouldDefaultGPTImage2RequestToSync(info, request) {
 		async := false
 		request.Async = &async
 	}

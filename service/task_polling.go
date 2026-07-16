@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -113,7 +114,7 @@ func TaskPollingLoop() {
 					nullTaskIds = append(nullTaskIds, task.ID)
 					continue
 				}
-				taskM[upstreamID] = task
+				taskM[taskPollingKey(task.ChannelId, upstreamID)] = task
 				taskChannelM[task.ChannelId] = append(taskChannelM[task.ChannelId], upstreamID)
 			}
 			if len(nullTaskIds) > 0 {
@@ -135,6 +136,10 @@ func TaskPollingLoop() {
 		}
 		common.SysLog("任务进度轮询完成")
 	}
+}
+
+func taskPollingKey(channelID int, upstreamID string) string {
+	return fmt.Sprintf("%d\x00%s", channelID, upstreamID)
 }
 
 // DispatchPlatformUpdate 按平台分发轮询更新
@@ -173,7 +178,7 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 		// Collect DB primary key IDs for bulk update (taskIds are upstream IDs, not task_id column values)
 		var failedIDs []int64
 		for _, upstreamID := range taskIds {
-			if t, ok := taskM[upstreamID]; ok {
+			if t, ok := taskM[taskPollingKey(channelId, upstreamID)]; ok {
 				failedIDs = append(failedIDs, t.ID)
 			}
 		}
@@ -221,7 +226,7 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 	}
 
 	for _, responseItem := range responseItems.Data {
-		task := taskM[responseItem.TaskID]
+		task := taskM[taskPollingKey(channelId, responseItem.TaskID)]
 		if !taskNeedsUpdate(task, responseItem) {
 			continue
 		}
@@ -307,7 +312,7 @@ func updateVideoTasks(ctx context.Context, platform constant.TaskPlatform, chann
 		// Collect DB primary key IDs for bulk update (taskIds are upstream IDs, not task_id column values)
 		var failedIDs []int64
 		for _, upstreamID := range taskIds {
-			if t, ok := taskM[upstreamID]; ok {
+			if t, ok := taskM[taskPollingKey(channelId, upstreamID)]; ok {
 				failedIDs = append(failedIDs, t.ID)
 			}
 		}
@@ -348,7 +353,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	}
 	proxy := ch.GetSetting().Proxy
 
-	task := taskM[taskId]
+	task := taskM[taskPollingKey(ch.Id, taskId)]
 	if task == nil {
 		logger.LogError(ctx, fmt.Sprintf("Task %s not found in taskM", taskId))
 		return fmt.Errorf("task %s not found", taskId)
@@ -363,6 +368,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		"task_id":      task.GetUpstreamTaskID(),
 		"action":       task.Action,
 		"request_path": task.PrivateData.RequestPath,
+		"poll_path":    task.PrivateData.PollPath,
 	}, proxy)
 	if err != nil {
 		return fmt.Errorf("fetchTask failed for task %s: %w", taskId, err)
@@ -394,7 +400,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		return fmt.Errorf("parseTaskResult failed for task %s: %w", taskId, err)
 	}
 
-	task.Data = redactVideoResponseBody(responseBody)
+	task.Data = normalizePolledTaskData(task, responseBody)
 
 	logger.LogDebug(ctx, "updateVideoSingleTask taskResult: %+v", taskResult)
 
@@ -501,6 +507,21 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	}
 
 	return nil
+}
+
+func normalizePolledTaskData(task *model.Task, body []byte) []byte {
+	if task == nil || task.PrivateData.TaskProtocol != model.TaskProtocolOpenAIImageTasks {
+		return redactVideoResponseBody(body)
+	}
+	var payload map[string]json.RawMessage
+	if err := common.Unmarshal(body, &payload); err != nil {
+		return body
+	}
+	result := payload["result"]
+	if len(result) == 0 || string(result) == "null" {
+		return body
+	}
+	return append([]byte(nil), result...)
 }
 
 func redactVideoResponseBody(body []byte) []byte {

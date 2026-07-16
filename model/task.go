@@ -102,6 +102,9 @@ type TaskPrivateData struct {
 	UpstreamTaskID string `json:"upstream_task_id,omitempty"` // 上游真实 task ID
 	ResultURL      string `json:"result_url,omitempty"`       // 任务成功后的结果 URL（视频地址等）
 	RequestPath    string `json:"request_path,omitempty"`     // 提交任务时的本地请求路径，用于轮询选择上游兼容路径
+	PollPath       string `json:"poll_path,omitempty"`        // 提交成功时冻结的上游轮询路径模板
+	TaskProtocol   string `json:"task_protocol,omitempty"`    // 提交成功时冻结的上游任务协议
+	ClientPlatform string `json:"client_platform,omitempty"`  // 对外响应协议（例如 canvas_image）
 	// 计费上下文：用于异步退款/差额结算（轮询阶段读取）
 	BillingSource         string                       `json:"billing_source,omitempty"`          // "wallet" 或 "subscription"
 	SubscriptionId        int                          `json:"subscription_id,omitempty"`         // 订阅 ID，用于订阅退款
@@ -119,6 +122,8 @@ type TaskBillingContext struct {
 	OriginModelName string             `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
 	PerCallBilling  bool               `json:"per_call_billing,omitempty"`  // 按次计费：跳过轮询阶段的差额结算
 }
+
+const TaskProtocolOpenAIImageTasks = "openai_image_tasks"
 
 // GetUpstreamTaskID 获取上游真实 task ID（用于与 provider 通信）
 // 旧数据没有 UpstreamTaskID 时，TaskID 本身就是上游 ID

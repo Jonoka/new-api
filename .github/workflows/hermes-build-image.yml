@@ -27,6 +27,16 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run targeted async image tests
+        run: |
+          go test ./controller ./dto ./model ./relay ./relay/channel/openai ./relay/channel/task/sora ./service
+
       - name: Resolve image tags
         id: tags
         shell: bash

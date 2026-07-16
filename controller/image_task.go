@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
@@ -36,18 +36,22 @@ func RelayImageTaskSubmit(c *gin.Context) {
 	capture := &imageTaskResponseCapture{ResponseWriter: c.Writer}
 	c.Writer = capture
 	relayImageTaskRelay(c, types.RelayFormatOpenAIImage)
+	c.Writer = capture.ResponseWriter
 	if capture.Status() < http.StatusOK || capture.Status() >= http.StatusMultipleChoices {
+		capture.flush()
 		return
 	}
 
 	value, ok := c.Get("relay_info")
 	if !ok {
 		common.SysLog("skip image task insert: relay info missing after successful response")
+		capture.flush()
 		return
 	}
 	relayInfo, ok := value.(*relaycommon.RelayInfo)
 	if !ok || relayInfo == nil {
 		common.SysLog("skip image task insert: invalid relay info after successful response")
+		capture.flush()
 		return
 	}
 
@@ -55,6 +59,15 @@ func RelayImageTaskSubmit(c *gin.Context) {
 	taskID, upstreamTaskID, taskStatus, progress := parseImageTaskSubmitResponseBody(body)
 	if strings.TrimSpace(taskID) == "" {
 		common.SysLog(fmt.Sprintf("skip image task insert: no task id in response, status=%d, body=%s", capture.Status(), common.LocalLogPreview(string(body))))
+		if relayInfo.ChannelOtherSettings.ImageAsyncMode != dto.ImageAsyncModeTasksEndpoint {
+			capture.flush()
+			return
+		}
+		refundImageSubmit(c, relayInfo)
+		capture.statusCode = http.StatusBadGateway
+		capture.buf.Reset()
+		_, _ = capture.buf.WriteString(`{"error":{"message":"upstream returned no image task id"}}`)
+		capture.flush()
 		return
 	}
 	if strings.TrimSpace(upstreamTaskID) == "" {
@@ -62,9 +75,15 @@ func RelayImageTaskSubmit(c *gin.Context) {
 	}
 
 	task := model.InitTask(constant.TaskPlatform(c.GetString("platform")), relayInfo)
+	if relayInfo.ChannelOtherSettings.ImageAsyncMode == dto.ImageAsyncModeTasksEndpoint {
+		task.Platform = constant.TaskPlatformImage
+	} else if relayInfo.ChannelType > 0 {
+		task.Platform = constant.TaskPlatform(strconv.Itoa(relayInfo.ChannelType))
+	}
 	task.TaskID = taskID
 	task.PrivateData.UpstreamTaskID = upstreamTaskID
 	task.PrivateData.RequestPath = c.Request.URL.Path
+	freezeImageTaskPollingProtocol(task, relayInfo)
 	task.PrivateData.BillingSource = relayInfo.BillingSource
 	task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
 	task.PrivateData.TokenId = relayInfo.TokenId
@@ -78,6 +97,9 @@ func RelayImageTaskSubmit(c *gin.Context) {
 	}
 	task.PrivateData.TieredBillingSnapshot = relayInfo.TieredBillingSnapshot
 	task.Quota = relayInfo.PriceData.Quota
+	if relayInfo.FinalPreConsumedQuota > 0 {
+		task.Quota = relayInfo.FinalPreConsumedQuota
+	}
 	if relayInfo.TaskRelayInfo != nil {
 		task.Action = relayInfo.TaskRelayInfo.Action
 	}
@@ -90,14 +112,51 @@ func RelayImageTaskSubmit(c *gin.Context) {
 	if progress != "" {
 		task.Progress = progress
 	}
+	if task.Status == model.TaskStatusFailure {
+		refundImageSubmit(c, relayInfo)
+	}
 	if len(body) > 0 {
 		task.Data = body
 	}
 	if insertErr := insertImageTask(task); insertErr != nil {
 		common.SysError("insert image task error: " + insertErr.Error())
+		if task.Status != model.TaskStatusFailure {
+			refundImageSubmit(c, relayInfo)
+		}
+		capture.statusCode = http.StatusInternalServerError
+		capture.buf.Reset()
+		_, _ = capture.buf.WriteString(`{"error":{"message":"failed to persist image task"}}`)
+		capture.flush()
 		return
 	}
+	if task.Status == model.TaskStatusSuccess {
+		settleImageSubmit(relayInfo, task.Quota)
+	}
+	capture.flush()
 	common.SysLog(fmt.Sprintf("insert image task success: task_id=%s upstream_task_id=%s channel_id=%d status=%s", task.TaskID, task.PrivateData.UpstreamTaskID, task.ChannelId, task.Status))
+}
+
+func refundImageSubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) {
+	if relayInfo != nil && relayInfo.Billing != nil {
+		relayInfo.Billing.Refund(c)
+	}
+}
+
+func settleImageSubmit(relayInfo *relaycommon.RelayInfo, quota int) {
+	if relayInfo != nil && relayInfo.Billing != nil {
+		if err := relayInfo.Billing.Settle(quota); err != nil {
+			common.SysError("failed to settle terminal image task: " + err.Error())
+		}
+	}
+}
+
+func freezeImageTaskPollingProtocol(task *model.Task, relayInfo *relaycommon.RelayInfo) {
+	if task == nil || relayInfo == nil || relayInfo.ChannelOtherSettings.ImageAsyncMode != dto.ImageAsyncModeTasksEndpoint {
+		return
+	}
+	endpoint := relayInfo.ChannelOtherSettings.ImageTasksSubmitPath()
+	task.PrivateData.PollPath = strings.TrimRight(endpoint, "/") + "/{task_id}"
+	task.PrivateData.TaskProtocol = model.TaskProtocolOpenAIImageTasks
 }
 
 func parseImageTaskSubmitResponseBody(body []byte) (taskID, upstreamTaskID, status, progress string) {
@@ -222,7 +281,7 @@ func buildRelayImageTaskResponse(task *model.Task) gin.H {
 		response["error"] = gin.H{"message": task.FailReason}
 		response["msg"] = task.FailReason
 	}
-	if task.Platform == constant.TaskPlatformCanvasImage && task.Status == model.TaskStatusSuccess && len(bytes.TrimSpace(task.Data)) > 0 {
+	if (task.Platform == constant.TaskPlatformCanvasImage || task.PrivateData.ClientPlatform == string(constant.TaskPlatformCanvasImage)) && task.Status == model.TaskStatusSuccess && len(bytes.TrimSpace(task.Data)) > 0 {
 		for key, value := range buildRelayCanvasImageTaskResult(task) {
 			response[key] = value
 		}
@@ -317,17 +376,57 @@ func signCanvasImageTaskContentToken(taskID string, userID int, index int, expir
 
 type imageTaskResponseCapture struct {
 	gin.ResponseWriter
-	buf bytes.Buffer
+	buf         bytes.Buffer
+	statusCode  int
+	wroteHeader bool
+}
+
+func (w *imageTaskResponseCapture) WriteHeader(code int) {
+	if w.wroteHeader {
+		return
+	}
+	w.statusCode = code
+	w.wroteHeader = true
+}
+
+func (w *imageTaskResponseCapture) Status() int {
+	if w.statusCode == 0 {
+		return http.StatusOK
+	}
+	return w.statusCode
+}
+
+func (w *imageTaskResponseCapture) flush() {
+	w.ResponseWriter.Header().Del("Content-Length")
+	w.ResponseWriter.WriteHeader(w.Status())
+	if w.buf.Len() > 0 {
+		_, _ = w.ResponseWriter.Write(w.buf.Bytes())
+	}
+}
+
+// Flush intentionally buffers upstream output. Some relay copy helpers flush
+// after writing; committing the real writer here would make persistence errors
+// impossible to report to the client.
+func (w *imageTaskResponseCapture) Flush() {}
+
+func (w *imageTaskResponseCapture) WriteHeaderNow() {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
 }
 
 func (w *imageTaskResponseCapture) Write(data []byte) (int, error) {
-	w.buf.Write(data)
-	return w.ResponseWriter.Write(data)
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.buf.Write(data)
 }
 
 func (w *imageTaskResponseCapture) WriteString(s string) (int, error) {
-	w.buf.WriteString(s)
-	return io.WriteString(w.ResponseWriter, s)
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.buf.WriteString(s)
 }
 
 func (w *imageTaskResponseCapture) Body() []byte {

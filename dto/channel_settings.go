@@ -1,5 +1,11 @@
 package dto
 
+import (
+	"net/url"
+	"path"
+	"strings"
+)
+
 type ChannelSettings struct {
 	ForceFormat            bool   `json:"force_format,omitempty"`
 	ThinkingToContent      bool   `json:"thinking_to_content,omitempty"`
@@ -23,7 +29,18 @@ const (
 	AwsKeyTypeApiKey AwsKeyType = "api_key"
 )
 
+type ImageAsyncMode string
+
+const DefaultImageTasksEndpoint = "/v1/images/tasks"
+
+const (
+	ImageAsyncModeBodyFlags     ImageAsyncMode = "body_flags"
+	ImageAsyncModeTasksEndpoint ImageAsyncMode = "tasks_endpoint"
+)
+
 type ChannelOtherSettings struct {
+	ImageAsyncMode                       ImageAsyncMode `json:"image_async_mode,omitempty"`
+	ImageTasksEndpoint                   string         `json:"image_tasks_endpoint,omitempty"`
 	AzureResponsesVersion                 string        `json:"azure_responses_version,omitempty"`
 	VertexKeyType                         VertexKeyType `json:"vertex_key_type,omitempty"` // "json" or "api_key"
 	OpenRouterEnterprise                  *bool         `json:"openrouter_enterprise,omitempty"`
@@ -55,6 +72,40 @@ type ChannelOtherSettings struct {
 	MonitorLastTestTime                   int64         `json:"monitor_last_test_time,omitempty"`                     // 上次自动监控测试时间
 	MonitorConsecutiveFailures            int           `json:"monitor_consecutive_failures,omitempty"`               // 连续失败次数
 	MonitorConsecutiveSuccesses           int           `json:"monitor_consecutive_successes,omitempty"`              // 连续成功次数
+}
+
+func (s ChannelOtherSettings) ImageTasksSubmitPath() string {
+	endpoint := strings.TrimSpace(s.ImageTasksEndpoint)
+	if endpoint == "" {
+		return DefaultImageTasksEndpoint
+	}
+	if parsed, err := url.Parse(endpoint); err != nil || parsed.IsAbs() || parsed.Host != "" || strings.HasPrefix(endpoint, "//") {
+		return DefaultImageTasksEndpoint
+	}
+	if endpoint[0] != '/' {
+		endpoint = "/" + endpoint
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil || parsed.IsAbs() || parsed.Host != "" || parsed.RawQuery != "" || parsed.Fragment != "" || strings.HasPrefix(endpoint, "//") || strings.Contains(endpoint, "\\") {
+		return DefaultImageTasksEndpoint
+	}
+	decoded, err := url.PathUnescape(parsed.EscapedPath())
+	if err != nil {
+		return DefaultImageTasksEndpoint
+	}
+	if strings.Contains(decoded, "%") || strings.ContainsAny(decoded, "?#\\") || strings.IndexFunc(decoded, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+		return DefaultImageTasksEndpoint
+	}
+	for _, segment := range strings.Split(decoded, "/") {
+		if segment == "." || segment == ".." {
+			return DefaultImageTasksEndpoint
+		}
+	}
+	cleaned := path.Clean(parsed.Path)
+	if cleaned == "." || cleaned == "/" || !strings.HasPrefix(cleaned, "/") {
+		return DefaultImageTasksEndpoint
+	}
+	return cleaned
 }
 
 func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {
