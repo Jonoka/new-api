@@ -15,6 +15,8 @@ import (
 const (
 	InvoiceTypePersonal = "personal"
 	InvoiceTypeCompany  = "company"
+	InvoiceKindNormal   = "normal"
+	InvoiceKindSpecial  = "special"
 
 	InvoiceSourceTopUp        = "topup"
 	InvoiceSourceSubscription = "subscription"
@@ -29,6 +31,7 @@ const (
 
 const (
 	defaultInvoiceTypes    = `["personal","company"]`
+	defaultInvoiceKinds    = `["normal"]`
 	defaultInvoiceFeeRules = `[
   {"min":0,"max":500,"type":"fixed","value":50},
   {"min":501,"max":2000,"type":"fixed","value":100},
@@ -40,6 +43,7 @@ const (
 var (
 	InvoiceEnabled  = false
 	InvoiceTypes    = defaultInvoiceTypes
+	InvoiceKinds    = defaultInvoiceKinds
 	InvoiceFeeRules = defaultInvoiceFeeRules
 )
 
@@ -54,6 +58,7 @@ type InvoiceFeeRule struct {
 type InvoiceRequest struct {
 	Required bool   `json:"required"`
 	Type     string `json:"type"`
+	Kind     string `json:"kind"`
 	Title    string `json:"title"`
 	TaxNo    string `json:"tax_no"`
 	Email    string `json:"email"`
@@ -68,6 +73,7 @@ type InvoiceRecord struct {
 	SourceId      string             `json:"source_id" gorm:"type:varchar(255);index;uniqueIndex:idx_invoice_source,priority:2"`
 	PaymentMethod string             `json:"payment_method" gorm:"type:varchar(50)"`
 	InvoiceType   string             `json:"invoice_type" gorm:"type:varchar(32)"`
+	InvoiceKind   string             `json:"invoice_kind" gorm:"type:varchar(32)"`
 	Title         string             `json:"title" gorm:"type:varchar(255)"`
 	TaxNo         string             `json:"tax_no" gorm:"type:varchar(128)"`
 	Email         string             `json:"email" gorm:"type:varchar(255)"`
@@ -92,6 +98,13 @@ func InvoiceTypesJSON() string {
 	return InvoiceTypes
 }
 
+func InvoiceKindsJSON() string {
+	if strings.TrimSpace(InvoiceKinds) == "" {
+		return defaultInvoiceKinds
+	}
+	return InvoiceKinds
+}
+
 func InvoiceFeeRulesJSON() string {
 	if strings.TrimSpace(InvoiceFeeRules) == "" {
 		return defaultInvoiceFeeRules
@@ -109,6 +122,19 @@ func UpdateInvoiceTypesByJSONString(value string) error {
 		return err
 	}
 	InvoiceTypes = string(data)
+	return nil
+}
+
+func UpdateInvoiceKindsByJSONString(value string) error {
+	kinds, err := ParseInvoiceKinds(value)
+	if err != nil {
+		return err
+	}
+	data, err := common.Marshal(kinds)
+	if err != nil {
+		return err
+	}
+	InvoiceKinds = string(data)
 	return nil
 }
 
@@ -147,6 +173,32 @@ func ParseInvoiceTypes(value string) ([]string, error) {
 	}
 	if len(result) == 0 {
 		return nil, errors.New("至少需要启用一种发票类型")
+	}
+	return result, nil
+}
+
+func ParseInvoiceKinds(value string) ([]string, error) {
+	if strings.TrimSpace(value) == "" {
+		value = defaultInvoiceKinds
+	}
+	var raw []string
+	if err := common.Unmarshal([]byte(value), &raw); err != nil {
+		return nil, errors.New("开票票种配置不是有效 JSON")
+	}
+	seen := map[string]bool{}
+	result := make([]string, 0, len(raw))
+	for _, item := range raw {
+		kind := normalizeInvoiceKind(item)
+		if kind == "" {
+			return nil, errors.New("开票票种仅支持 normal/special")
+		}
+		if !seen[kind] {
+			seen[kind] = true
+			result = append(result, kind)
+		}
+	}
+	if len(result) == 0 {
+		return nil, errors.New("至少需要启用一种开票票种")
 	}
 	return result, nil
 }
@@ -194,6 +246,14 @@ func GetInvoiceTypes() []string {
 	return types
 }
 
+func GetInvoiceKinds() []string {
+	kinds, err := ParseInvoiceKinds(InvoiceKindsJSON())
+	if err != nil {
+		return []string{InvoiceKindNormal}
+	}
+	return kinds
+}
+
 func GetInvoiceFeeRules() []InvoiceFeeRule {
 	rules, err := ParseInvoiceFeeRules(InvoiceFeeRulesJSON())
 	if err != nil {
@@ -206,6 +266,7 @@ func InvoiceConfigSnapshot() map[string]interface{} {
 	return map[string]interface{}{
 		"enabled":   InvoiceEnabled,
 		"types":     GetInvoiceTypes(),
+		"kinds":     GetInvoiceKinds(),
 		"fee_rules": GetInvoiceFeeRules(),
 		"currency":  "CNY",
 	}
@@ -243,7 +304,9 @@ func CalculateInvoiceFee(baseAmountCNY float64) (float64, error) {
 }
 
 func ValidateInvoiceRequest(req InvoiceRequest, baseAmountCNY float64) (InvoiceRequest, float64, error) {
+	rawKind := strings.TrimSpace(req.Kind)
 	req.Type = normalizeInvoiceType(req.Type)
+	req.Kind = normalizeInvoiceKind(req.Kind)
 	req.Title = strings.TrimSpace(req.Title)
 	req.TaxNo = strings.TrimSpace(req.TaxNo)
 	req.Email = strings.TrimSpace(req.Email)
@@ -262,6 +325,21 @@ func ValidateInvoiceRequest(req InvoiceRequest, baseAmountCNY float64) (InvoiceR
 	if !InvoiceTypeEnabled(req.Type) {
 		return req, 0, errors.New("当前不支持该发票类型")
 	}
+	if rawKind != "" && req.Kind == "" {
+		return req, 0, errors.New("开票票种仅支持 normal/special")
+	}
+	if req.Kind == "" {
+		kinds := GetInvoiceKinds()
+		if len(kinds) > 0 {
+			req.Kind = kinds[0]
+		}
+	}
+	if req.Kind == "" {
+		return req, 0, errors.New("请选择开票票种")
+	}
+	if !InvoiceKindEnabled(req.Kind) {
+		return req, 0, errors.New("当前不支持该开票票种")
+	}
 	if req.Title == "" {
 		return req, 0, errors.New("请填写发票抬头")
 	}
@@ -276,7 +354,9 @@ func ValidateInvoiceRequest(req InvoiceRequest, baseAmountCNY float64) (InvoiceR
 }
 
 func ValidateInvoicePreviewRequest(req InvoiceRequest, baseAmountCNY float64) (InvoiceRequest, float64, error) {
+	rawKind := strings.TrimSpace(req.Kind)
 	req.Type = normalizeInvoiceType(req.Type)
+	req.Kind = normalizeInvoiceKind(req.Kind)
 	req.Title = strings.TrimSpace(req.Title)
 	req.TaxNo = strings.TrimSpace(req.TaxNo)
 	req.Email = strings.TrimSpace(req.Email)
@@ -301,6 +381,21 @@ func ValidateInvoicePreviewRequest(req InvoiceRequest, baseAmountCNY float64) (I
 	if !InvoiceTypeEnabled(req.Type) {
 		return req, 0, errors.New("当前不支持该发票类型")
 	}
+	if rawKind != "" && req.Kind == "" {
+		return req, 0, errors.New("开票票种仅支持 normal/special")
+	}
+	if req.Kind == "" {
+		kinds := GetInvoiceKinds()
+		if len(kinds) > 0 {
+			req.Kind = kinds[0]
+		}
+	}
+	if req.Kind == "" {
+		return req, 0, errors.New("请选择开票票种")
+	}
+	if !InvoiceKindEnabled(req.Kind) {
+		return req, 0, errors.New("当前不支持该开票票种")
+	}
 	fee, err := CalculateInvoiceFee(baseAmountCNY)
 	if err != nil {
 		return req, 0, err
@@ -318,12 +413,33 @@ func InvoiceTypeEnabled(invoiceType string) bool {
 	return false
 }
 
+func InvoiceKindEnabled(invoiceKind string) bool {
+	invoiceKind = normalizeInvoiceKind(invoiceKind)
+	for _, kind := range GetInvoiceKinds() {
+		if kind == invoiceKind {
+			return true
+		}
+	}
+	return false
+}
+
 func normalizeInvoiceType(invoiceType string) string {
 	switch strings.ToLower(strings.TrimSpace(invoiceType)) {
 	case InvoiceTypePersonal:
 		return InvoiceTypePersonal
 	case InvoiceTypeCompany:
 		return InvoiceTypeCompany
+	default:
+		return ""
+	}
+}
+
+func normalizeInvoiceKind(invoiceKind string) string {
+	switch strings.ToLower(strings.TrimSpace(invoiceKind)) {
+	case InvoiceKindNormal:
+		return InvoiceKindNormal
+	case InvoiceKindSpecial:
+		return InvoiceKindSpecial
 	default:
 		return ""
 	}
@@ -358,6 +474,7 @@ func AddInvoiceSnapshotToTopUp(topUp *TopUp, req InvoiceRequest, baseAmountCNY f
 	}
 	topUp.InvoiceRequired = true
 	topUp.InvoiceType = req.Type
+	topUp.InvoiceKind = req.Kind
 	topUp.InvoiceTitle = req.Title
 	topUp.InvoiceTaxNo = req.TaxNo
 	topUp.InvoiceEmail = req.Email
@@ -374,6 +491,7 @@ func AddInvoiceSnapshotToSubscriptionOrder(order *SubscriptionOrder, req Invoice
 	}
 	order.InvoiceRequired = true
 	order.InvoiceType = req.Type
+	order.InvoiceKind = req.Kind
 	order.InvoiceTitle = req.Title
 	order.InvoiceTaxNo = req.TaxNo
 	order.InvoiceEmail = req.Email
@@ -394,6 +512,7 @@ func CreateInvoiceRecordFromTopUpTx(tx *gorm.DB, topUp *TopUp) error {
 		SourceId:      topUp.TradeNo,
 		PaymentMethod: topUp.PaymentMethod,
 		InvoiceType:   topUp.InvoiceType,
+		InvoiceKind:   topUp.InvoiceKind,
 		Title:         topUp.InvoiceTitle,
 		TaxNo:         topUp.InvoiceTaxNo,
 		Email:         topUp.InvoiceEmail,
@@ -428,6 +547,7 @@ func CreateInvoiceRecordFromSubscriptionOrderTx(tx *gorm.DB, order *Subscription
 		SourceId:      order.TradeNo,
 		PaymentMethod: order.PaymentMethod,
 		InvoiceType:   order.InvoiceType,
+		InvoiceKind:   order.InvoiceKind,
 		Title:         order.InvoiceTitle,
 		TaxNo:         order.InvoiceTaxNo,
 		Email:         order.InvoiceEmail,

@@ -91,6 +91,7 @@ export interface GetUsersResponse {
 
 export interface SearchUsersParams {
   keyword?: string
+  search_type?: 'all' | 'id' | 'username'
   group?: string
   role?: string
   status?: string

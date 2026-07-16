@@ -71,3 +71,40 @@ func TestSearchUsersTextKeywordKeepsFuzzyMatching(t *testing.T) {
 	assert.Equal(t, 8102, users[0].Id)
 	assert.Equal(t, 8101, users[1].Id)
 }
+
+func TestSearchUsersSupportsExplicitSearchType(t *testing.T) {
+	truncateTables(t)
+
+	insertUserSearchFixture(t, &User{
+		Id:       6281,
+		Username: "target-user",
+	})
+	insertUserSearchFixture(t, &User{
+		Id:          7001,
+		Username:    "user-6281",
+		DisplayName: "6281-display",
+		Email:       "6281@example.com",
+	})
+
+	idUsers, idTotal, err := SearchUsers("6281", "", nil, nil, 0, 10, "id")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), idTotal)
+	require.Len(t, idUsers, 1)
+	assert.Equal(t, 6281, idUsers[0].Id)
+
+	usernameUsers, usernameTotal, err := SearchUsers("6281", "", nil, nil, 0, 10, "username")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), usernameTotal)
+	require.Len(t, usernameUsers, 1)
+	assert.Equal(t, 7001, usernameUsers[0].Id)
+
+	invalidIDUsers, invalidIDTotal, err := SearchUsers("user-6281", "", nil, nil, 0, 10, "id")
+	require.NoError(t, err)
+	assert.Zero(t, invalidIDTotal)
+	assert.Empty(t, invalidIDUsers)
+
+	emptyIDUsers, emptyIDTotal, err := SearchUsers("", "", nil, nil, 0, 10, "id")
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), emptyIDTotal)
+	assert.Len(t, emptyIDUsers, 2)
+}

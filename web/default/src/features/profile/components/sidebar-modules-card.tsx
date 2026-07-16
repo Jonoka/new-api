@@ -106,7 +106,7 @@ export function SidebarModulesCard() {
       parseCustomNavItems(
         parseSidebarModulesFromStatus(status as Record<string, unknown> | null)
           .customItems
-      ),
+      ).filter((item) => item.section !== 'header'),
     [status]
   )
 

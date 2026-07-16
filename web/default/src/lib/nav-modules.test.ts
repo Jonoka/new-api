@@ -92,4 +92,23 @@ describe('navigation module configuration', () => {
       'https://canvas.maolaoapi.com'
     )
   })
+
+  test('preserves header placement on sidebar-managed custom items', () => {
+    const modules = parseSidebarModulesFromStatus({
+      SidebarModulesAdmin: JSON.stringify({
+        customItems: [
+          {
+            id: 'api-docs',
+            title: 'API Docs',
+            url: '/docs',
+            enabled: true,
+            order: 10,
+            section: 'header',
+          },
+        ],
+      }),
+    })
+
+    assert.equal(modules.customItems[0].section, 'header')
+  })
 })

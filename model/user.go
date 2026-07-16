@@ -242,7 +242,7 @@ func GetAllUsers(pageInfo *common.PageInfo) (users []*User, total int64, err err
 	return users, total, nil
 }
 
-func SearchUsers(keyword string, group string, role *int, status *int, startIdx int, num int) ([]*User, int64, error) {
+func SearchUsers(keyword string, group string, role *int, status *int, startIdx int, num int, searchTypes ...string) ([]*User, int64, error) {
 	var users []*User
 	var total int64
 	var err error
@@ -262,18 +262,36 @@ func SearchUsers(keyword string, group string, role *int, status *int, startIdx 
 	query := tx.Unscoped().Model(&User{})
 
 	keyword = strings.TrimSpace(keyword)
-	likeCondition := "username LIKE ? OR email LIKE ? OR display_name LIKE ?"
+	searchType := "all"
+	if len(searchTypes) > 0 {
+		searchType = strings.ToLower(strings.TrimSpace(searchTypes[0]))
+	}
 	likeKeyword := "%" + keyword + "%"
-	likeArgs := []interface{}{likeKeyword, likeKeyword, likeKeyword}
 	exactUserID := 0
 	hasExactUserID := false
-	if keywordInt, parseErr := strconv.Atoi(keyword); parseErr == nil {
-		likeCondition = "id = ? OR " + likeCondition
-		likeArgs = append([]interface{}{keywordInt}, likeArgs...)
-		exactUserID = keywordInt
-		hasExactUserID = true
+	if keyword != "" {
+		switch searchType {
+		case "id":
+			keywordInt, parseErr := strconv.Atoi(keyword)
+			if parseErr != nil || keywordInt <= 0 {
+				query = query.Where("1 = 0")
+			} else {
+				query = query.Where("id = ?", keywordInt)
+			}
+		case "username":
+			query = query.Where("username LIKE ?", likeKeyword)
+		default:
+			likeCondition := "username LIKE ? OR email LIKE ? OR display_name LIKE ?"
+			likeArgs := []interface{}{likeKeyword, likeKeyword, likeKeyword}
+			if keywordInt, parseErr := strconv.Atoi(keyword); parseErr == nil && keywordInt > 0 {
+				likeCondition = "id = ? OR " + likeCondition
+				likeArgs = append([]interface{}{keywordInt}, likeArgs...)
+				exactUserID = keywordInt
+				hasExactUserID = true
+			}
+			query = query.Where("("+likeCondition+")", likeArgs...)
+		}
 	}
-	query = query.Where("("+likeCondition+")", likeArgs...)
 	if group != "" {
 		query = query.Where(commonGroupCol+" = ?", group)
 	}

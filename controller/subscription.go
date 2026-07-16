@@ -117,8 +117,17 @@ func SubscriptionRequestBalancePay(c *gin.Context) {
 		common.ApiErrorMsg(c, "参数错误")
 		return
 	}
+	paymentSetting := operation_setting.GetPaymentSetting()
+	if !paymentSetting.BalanceSubscriptionEnabled {
+		common.ApiErrorMsg(c, "余额购买订阅已关闭")
+		return
+	}
+	if strings.TrimSpace(req.PromoCode) != "" && !paymentSetting.BalanceSubscriptionPromoEnabled {
+		common.ApiErrorMsg(c, "余额购买订阅暂不支持优惠码")
+		return
+	}
 
-	if err := model.PurchaseSubscriptionWithBalance(userId, req.PlanId, req.PromoCode, req.Invoice); err != nil {
+	if err := model.PurchaseSubscriptionWithBalance(userId, req.PlanId, req.PromoCode, c.ClientIP(), req.Invoice); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -155,6 +164,18 @@ func SubscriptionRequestAmount(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	paymentMethod := strings.ToLower(strings.TrimSpace(req.PaymentMethod))
+	if paymentMethod == model.PaymentMethodBalance {
+		paymentSetting := operation_setting.GetPaymentSetting()
+		if !paymentSetting.BalanceSubscriptionEnabled {
+			common.ApiErrorMsg(c, "余额购买订阅已关闭")
+			return
+		}
+		if strings.TrimSpace(req.PromoCode) != "" && !paymentSetting.BalanceSubscriptionPromoEnabled {
+			common.ApiErrorMsg(c, "余额购买订阅暂不支持优惠码")
+			return
+		}
+	}
 	payMoneyUSD := planPriceUSD
 	discount, err := model.CalculatePromoCodeDiscount(req.PromoCode, model.PromoCodeTargetSubscription, plan.Id, planPriceUSD)
 	if err != nil {
@@ -169,7 +190,6 @@ func SubscriptionRequestAmount(c *gin.Context) {
 		return
 	}
 
-	paymentMethod := strings.ToLower(strings.TrimSpace(req.PaymentMethod))
 	displayCurrency := model.NormalizeSubscriptionPlanCurrency(plan.Currency)
 	displayAmount, err := model.SubscriptionPlanCurrencyAmountFromUSD(payMoneyUSD, displayCurrency)
 	if err != nil {

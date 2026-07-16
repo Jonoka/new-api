@@ -97,6 +97,8 @@ interface Props {
   enableOkpay?: boolean
   bepusdtChains?: BepusdtChain[]
   enableOnlineTopUp?: boolean
+  enableBalance?: boolean
+  enableBalancePromo?: boolean
   epayMethods?: PaymentMethod[]
   invoiceConfig?: InvoiceConfig | null
   purchaseLimit?: number
@@ -142,7 +144,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
     }
     if (selectedPaymentKind) return selectedPaymentKind
     if (selectedEpayMethod) return selectedEpayMethod
-    return 'balance'
+    return props.enableBalance !== false ? 'balance' : ''
   }
 
   async function loadAmountPreview(
@@ -238,7 +240,13 @@ export function SubscriptionPurchaseDialog(props: Props) {
     if (!props.open || !planId) return
     void loadAmountPreview(getPreviewPaymentMethod(), promoCode.trim(), true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.open, planId, selectedEpayMethod, selectedPaymentKind])
+  }, [
+    props.open,
+    planId,
+    selectedEpayMethod,
+    selectedPaymentKind,
+    props.enableBalance,
+  ])
 
   if (!plan) return null
 
@@ -250,6 +258,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const hasOkpay = !!props.enableOkpay
   const hasEpay =
     props.enableOnlineTopUp && (props.epayMethods || []).length > 0
+  const hasBalance = props.enableBalance !== false
   const hasAnyPayment =
     hasStripe ||
     hasCreem ||
@@ -291,6 +300,8 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const userQuota = Math.max(0, Number(props.userQuota || 0))
   const balanceAmountReady = paidPriceUSD > 0 || amountDue <= 0
   const insufficientBalance = !balanceAmountReady || userQuota < balanceCost
+  const balancePromoBlocked =
+    props.enableBalancePromo === false && promoCode.trim() !== ''
   const limitReached =
     (props.purchaseLimit || 0) > 0 &&
     (props.purchaseCount || 0) >= (props.purchaseLimit || 0)
@@ -559,6 +570,13 @@ export function SubscriptionPurchaseDialog(props: Props) {
 
   const handlePayBalance = async () => {
     if (!invoiceValid) return
+    if (!hasBalance) return
+    if (balancePromoBlocked) {
+      toast.error(
+        t('Promo codes are disabled for balance subscription purchases.')
+      )
+      return
+    }
     setPaying(true)
     try {
       const res = await paySubscriptionBalance({
@@ -768,50 +786,66 @@ export function SubscriptionPurchaseDialog(props: Props) {
               </Alert>
             )}
 
-            <div className='flex flex-col gap-2 rounded-md border p-3'>
-              <div className='flex items-center justify-between gap-2 text-xs'>
-                <span className='text-muted-foreground'>{t('Required')}</span>
-                <span>{formatQuota(balanceCost)}</span>
+            {hasBalance && (
+              <div className='flex flex-col gap-2 rounded-md border p-3'>
+                <div className='flex items-center justify-between gap-2 text-xs'>
+                  <span className='text-muted-foreground'>{t('Required')}</span>
+                  <span>{formatQuota(balanceCost)}</span>
+                </div>
+                <div className='flex items-center justify-between gap-2 text-xs'>
+                  <span className='text-muted-foreground'>
+                    {t('Available')}
+                  </span>
+                  <span>{formatQuota(userQuota)}</span>
+                </div>
+                {balanceAmountReady && insufficientBalance && (
+                  <Alert variant='destructive'>
+                    <AlertDescription>
+                      {t('Insufficient balance')}
+                    </AlertDescription>
+                  </Alert>
+                )}
+                {balancePromoBlocked && (
+                  <Alert variant='destructive'>
+                    <AlertDescription>
+                      {t(
+                        'Promo codes are disabled for balance subscription purchases.'
+                      )}
+                    </AlertDescription>
+                  </Alert>
+                )}
+                <Button
+                  variant='outline'
+                  onClick={handlePayBalance}
+                  disabled={
+                    paying ||
+                    amountLoading ||
+                    limitReached ||
+                    !balanceAmountReady ||
+                    insufficientBalance ||
+                    balancePromoBlocked ||
+                    !invoiceValid
+                  }
+                >
+                  {t('Pay with Balance')}
+                </Button>
               </div>
-              <div className='flex items-center justify-between gap-2 text-xs'>
-                <span className='text-muted-foreground'>{t('Available')}</span>
-                <span>{formatQuota(userQuota)}</span>
-              </div>
-              {balanceAmountReady && insufficientBalance && (
-                <Alert variant='destructive'>
-                  <AlertDescription>
-                    {t('Insufficient balance')}
-                  </AlertDescription>
-                </Alert>
-              )}
-              <Button
-                variant='outline'
-                onClick={handlePayBalance}
-                disabled={
-                  paying ||
-                  amountLoading ||
-                  limitReached ||
-                  !balanceAmountReady ||
-                  insufficientBalance ||
-                  !invoiceValid
-                }
-              >
-                {t('Pay with Balance')}
-              </Button>
-            </div>
+            )}
 
-            <div className='space-y-2'>
-              <Input
-                value={promoCode}
-                onChange={(event) => {
-                  setPromoCode(event.target.value)
-                  setPromoDiscount(null)
-                  setAmountPreview(null)
-                }}
-                onBlur={handlePromoCodeBlur}
-                placeholder={t('Enter promo code')}
-              />
-            </div>
+            {(props.enableBalancePromo !== false || hasAnyPayment) && (
+              <div className='space-y-2'>
+                <Input
+                  value={promoCode}
+                  onChange={(event) => {
+                    setPromoCode(event.target.value)
+                    setPromoDiscount(null)
+                    setAmountPreview(null)
+                  }}
+                  onBlur={handlePromoCodeBlur}
+                  placeholder={t('Enter promo code')}
+                />
+              </div>
+            )}
 
             <InvoiceRequestForm
               config={normalizedInvoiceConfig}
@@ -931,6 +965,16 @@ export function SubscriptionPurchaseDialog(props: Props) {
                   </Button>
                 )}
               </div>
+            )}
+
+            {!hasBalance && !hasAnyPayment && (
+              <Alert variant='destructive'>
+                <AlertDescription>
+                  {t(
+                    'No payment methods available. Please contact administrator.'
+                  )}
+                </AlertDescription>
+              </Alert>
             )}
           </div>
         </DialogContent>

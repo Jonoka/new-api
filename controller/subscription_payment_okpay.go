@@ -151,6 +151,7 @@ func SubscriptionRequestOkpayPay(c *gin.Context) {
 		TradeNo:          tradeNo,
 		PaymentMethod:    model.PaymentMethodOkpay,
 		PaymentProvider:  model.PaymentProviderOkpay,
+		RequestIP:        c.ClientIP(),
 		ProviderAmount:   providerAmount,
 		ProviderCurrency: providerCurrency,
 		CreateTime:       time.Now().Unix(),

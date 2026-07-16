@@ -25,6 +25,7 @@ func setupInvoiceOrderTestDB(t *testing.T) *gorm.DB {
 	originalEnabled := InvoiceEnabled
 	originalRules := InvoiceFeeRules
 	originalTypes := InvoiceTypes
+	originalKinds := InvoiceKinds
 	originalPrice := operation_setting.Price
 	originalQuotaPerUnit := common.QuotaPerUnit
 
@@ -35,6 +36,7 @@ func setupInvoiceOrderTestDB(t *testing.T) *gorm.DB {
 	InvoiceEnabled = true
 	InvoiceFeeRules = `[{"min":0,"type":"percent","value":10}]`
 	InvoiceTypes = `["personal","company"]`
+	InvoiceKinds = `["normal","special"]`
 	operation_setting.Price = 7
 	common.QuotaPerUnit = 500000
 
@@ -65,6 +67,7 @@ func setupInvoiceOrderTestDB(t *testing.T) *gorm.DB {
 		InvoiceEnabled = originalEnabled
 		InvoiceFeeRules = originalRules
 		InvoiceTypes = originalTypes
+		InvoiceKinds = originalKinds
 		operation_setting.Price = originalPrice
 		common.QuotaPerUnit = originalQuotaPerUnit
 	})
@@ -100,6 +103,7 @@ func validCombinedInvoiceRequest() InvoiceRequest {
 	return InvoiceRequest{
 		Required: true,
 		Type:     InvoiceTypeCompany,
+		Kind:     InvoiceKindSpecial,
 		Title:    "测试公司",
 		TaxNo:    "91310000TEST",
 		Email:    "invoice@example.com",
@@ -204,6 +208,7 @@ func TestCreateCombinedInvoiceWithBalanceChargesFeeAndPreventsReuse(t *testing.T
 	require.NoError(t, err)
 	require.NotNil(t, record)
 	assert.Equal(t, InvoiceSourceCombined, record.SourceType)
+	assert.Equal(t, InvoiceKindSpecial, record.InvoiceKind)
 	assert.Equal(t, 140.0, record.BaseAmount)
 	assert.Equal(t, 14.0, record.FeeAmount)
 	assert.Equal(t, 154.0, record.TotalAmount)
@@ -220,13 +225,16 @@ func TestCreateCombinedInvoiceWithBalanceChargesFeeAndPreventsReuse(t *testing.T
 	var savedTopUp TopUp
 	require.NoError(t, db.Where("trade_no = ?", topUp.TradeNo).First(&savedTopUp).Error)
 	assert.True(t, savedTopUp.InvoiceRequired)
+	assert.Equal(t, InvoiceKindSpecial, savedTopUp.InvoiceKind)
 	assert.Equal(t, InvoiceStatusPending, savedTopUp.InvoiceStatus)
 	var savedSubscription SubscriptionOrder
 	require.NoError(t, db.Where("trade_no = ?", subscription.TradeNo).First(&savedSubscription).Error)
 	assert.True(t, savedSubscription.InvoiceRequired)
+	assert.Equal(t, InvoiceKindSpecial, savedSubscription.InvoiceKind)
 	var savedMirror TopUp
 	require.NoError(t, db.Where("trade_no = ?", subscription.TradeNo).First(&savedMirror).Error)
 	assert.True(t, savedMirror.InvoiceRequired)
+	assert.Equal(t, InvoiceKindSpecial, savedMirror.InvoiceKind)
 
 	_, err = CreateCombinedInvoiceWithBalance(1002, references, validCombinedInvoiceRequest())
 	require.ErrorContains(t, err, "已经申请过发票")

@@ -50,6 +50,8 @@ const PaymentSetting = ({
     PayMethods: '',
     AmountOptions: '',
     AmountDiscount: '',
+    'payment_setting.balance_subscription_enabled': true,
+    'payment_setting.balance_subscription_promo_enabled': true,
     InvoiceEnabled: false,
     InvoiceTypes: '["personal","company"]',
     InvoiceFeeRules:
@@ -174,11 +176,7 @@ const PaymentSetting = ({
                 item.key === 'payment_setting.amount_discount'
                   ? 'AmountDiscount'
                   : item.key
-              ] = JSON.stringify(
-                JSON.parse(item.value),
-                null,
-                2,
-              );
+              ] = JSON.stringify(JSON.parse(item.value), null, 2);
             } catch (error) {
               newInputs[
                 item.key === 'payment_setting.amount_discount'
@@ -188,6 +186,8 @@ const PaymentSetting = ({
             }
             break;
           case 'payment_setting.compliance_confirmed':
+          case 'payment_setting.balance_subscription_enabled':
+          case 'payment_setting.balance_subscription_promo_enabled':
           case 'InvoiceEnabled':
             newInputs[item.key] = toBoolean(item.value);
             break;

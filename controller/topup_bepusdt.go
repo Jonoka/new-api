@@ -467,6 +467,7 @@ func RequestBepusdtPay(c *gin.Context) {
 		TradeNo:         tradeNo,
 		PaymentMethod:   model.PaymentMethodBepusdt,
 		PaymentProvider: model.PaymentProviderBepusdt,
+		RequestIP:       c.ClientIP(),
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}
@@ -488,7 +489,7 @@ func RequestBepusdtPay(c *gin.Context) {
 			return
 		}
 		if completedNow {
-			model.RecordTopupLog(completedTopUp.UserId, fmt.Sprintf("使用优惠码充值成功，充值金额: %v，支付金额：0.00", logger.LogQuota(quotaToAdd)), c.ClientIP(), completedTopUp.PaymentMethod, "promo")
+			model.RecordTopupOrderLog(completedTopUp, fmt.Sprintf("使用优惠码充值成功，充值金额: %v，支付金额：0.00", logger.LogQuota(quotaToAdd)), "promo")
 		}
 		c.JSON(http.StatusOK, freeTopUpResponse(completedTopUp, quotaToAdd, discount))
 		return
@@ -615,6 +616,7 @@ func SubscriptionRequestBepusdtPay(c *gin.Context) {
 		TradeNo:         tradeNo,
 		PaymentMethod:   model.PaymentMethodBepusdt,
 		PaymentProvider: model.PaymentProviderBepusdt,
+		RequestIP:       c.ClientIP(),
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}

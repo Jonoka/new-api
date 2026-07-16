@@ -46,6 +46,7 @@ export const useUsersData = () => {
   // Form initial values
   const formInitValues = {
     searchKeyword: '',
+    searchType: 'username',
     searchGroup: '',
     searchRole: '',
   };
@@ -58,6 +59,7 @@ export const useUsersData = () => {
     const formValues = formApi ? formApi.getValues() : {};
     return {
       searchKeyword: formValues.searchKeyword || '',
+      searchType: formValues.searchType || 'username',
       searchGroup: formValues.searchGroup || '',
       searchRole: formValues.searchRole || '',
     };
@@ -94,17 +96,20 @@ export const useUsersData = () => {
     searchKeyword = null,
     searchGroup = null,
     searchRole = null,
+    searchType = null,
   ) => {
     // If no parameters passed, get values from form
     if (
       searchKeyword === null ||
       searchGroup === null ||
-      searchRole === null
+      searchRole === null ||
+      searchType === null
     ) {
       const formValues = getFormValues();
       searchKeyword = formValues.searchKeyword;
       searchGroup = formValues.searchGroup;
       searchRole = formValues.searchRole;
+      searchType = formValues.searchType;
     }
 
     if (searchKeyword === '' && searchGroup === '' && searchRole === '') {
@@ -114,7 +119,7 @@ export const useUsersData = () => {
     }
     setSearching(true);
     const res = await API.get(
-      `/api/user/search?keyword=${encodeURIComponent(searchKeyword)}&group=${encodeURIComponent(searchGroup)}&role=${encodeURIComponent(searchRole)}&p=${startIdx}&page_size=${pageSize}`,
+      `/api/user/search?keyword=${encodeURIComponent(searchKeyword)}&search_type=${encodeURIComponent(searchType)}&group=${encodeURIComponent(searchGroup)}&role=${encodeURIComponent(searchRole)}&p=${startIdx}&page_size=${pageSize}`,
     );
     const { success, message, data } = res.data;
     if (success) {
@@ -223,11 +228,9 @@ export const useUsersData = () => {
       searchKeyword === '' && searchGroup === '' && searchRole === ''
         ? loadUsers(1, size)
         : searchUsers(1, size, searchKeyword, searchGroup, searchRole);
-    request
-      .then()
-      .catch((reason) => {
-        showError(reason);
-      });
+    request.then().catch((reason) => {
+      showError(reason);
+    });
   };
 
   // Handle table row styling for disabled/deleted users
@@ -249,13 +252,7 @@ export const useUsersData = () => {
     if (searchKeyword === '' && searchGroup === '' && searchRole === '') {
       await loadUsers(page, pageSize);
     } else {
-      await searchUsers(
-        page,
-        pageSize,
-        searchKeyword,
-        searchGroup,
-        searchRole,
-      );
+      await searchUsers(page, pageSize, searchKeyword, searchGroup, searchRole);
     }
   };
 

@@ -713,6 +713,12 @@ const RechargeCard = ({
                 enableOnlineTopUp={enableOnlineTopUp}
                 enableStripeTopUp={enableStripeTopUp}
                 enableCreemTopUp={enableCreemTopUp}
+                enableBalanceSubscription={
+                  topupInfo?.enable_balance_subscription !== false
+                }
+                enableBalanceSubscriptionPromo={
+                  topupInfo?.enable_balance_subscription_promo !== false
+                }
                 userQuota={userState?.user?.quota || 0}
                 billingPreference={billingPreference}
                 onChangeBillingPreference={onChangeBillingPreference}

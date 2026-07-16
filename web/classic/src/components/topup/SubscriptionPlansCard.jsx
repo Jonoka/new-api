@@ -90,6 +90,8 @@ const SubscriptionPlansCard = ({
   enableOnlineTopUp = false,
   enableStripeTopUp = false,
   enableCreemTopUp = false,
+  enableBalanceSubscription = true,
+  enableBalanceSubscriptionPromo = true,
   userQuota = 0,
   billingPreference,
   onChangeBillingPreference,
@@ -132,7 +134,7 @@ const SubscriptionPlansCard = ({
     if (selectedPaymentKind) return selectedPaymentKind;
     if (hasBepusdt) return 'bepusdt';
     if (selectedEpayMethod) return selectedEpayMethod;
-    return 'balance';
+    return enableBalanceSubscription ? 'balance' : '';
   };
 
   const isInvoiceRequestReady = (request) => {
@@ -222,7 +224,21 @@ const SubscriptionPlansCard = ({
     const firstEpayMethod = epayMethods?.[0]?.type || '';
     setSelectedPlan(p);
     setSelectedEpayMethod(firstEpayMethod);
-    setSelectedPaymentKind('balance');
+    setSelectedPaymentKind(
+      enableBalanceSubscription
+        ? 'balance'
+        : firstEpayMethod
+          ? 'epay'
+          : hasBepusdt
+            ? 'bepusdt'
+            : enableOkpayTopUp
+              ? 'okpay'
+              : enableStripeTopUp && p?.plan?.stripe_price_id
+                ? 'stripe'
+                : enableCreemTopUp && p?.plan?.creem_product_id
+                  ? 'creem'
+                  : '',
+    );
     setSelectedBepusdtTradeType('');
     setPromoCode('');
     setPromoDiscount(null);
@@ -534,6 +550,11 @@ const SubscriptionPlansCard = ({
 
   const payBalance = async () => {
     if (!ensureInvoiceReady()) return;
+    if (!enableBalanceSubscription) return;
+    if (!enableBalanceSubscriptionPromo && promoCode.trim()) {
+      showError(t('余额购买订阅暂不支持优惠码'));
+      return;
+    }
     setSelectedPaymentKind('balance');
     setPaying(true);
     try {
@@ -1033,6 +1054,8 @@ const SubscriptionPlansCard = ({
         enableOnlineTopUp={enableOnlineTopUp}
         enableStripeTopUp={enableStripeTopUp}
         enableCreemTopUp={enableCreemTopUp}
+        enableBalanceSubscription={enableBalanceSubscription}
+        enableBalanceSubscriptionPromo={enableBalanceSubscriptionPromo}
         purchaseLimitInfo={
           selectedPlan?.plan?.id
             ? {

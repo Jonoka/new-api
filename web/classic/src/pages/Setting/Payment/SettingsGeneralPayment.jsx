@@ -320,6 +320,8 @@ export default function SettingsGeneralPayment(props) {
     PayMethods: '',
     AmountOptions: '',
     AmountDiscount: '',
+    'payment_setting.balance_subscription_enabled': true,
+    'payment_setting.balance_subscription_promo_enabled': true,
     InvoiceEnabled: false,
     InvoiceTypes: DEFAULT_INVOICE_TYPES,
     InvoiceFeeRules: DEFAULT_INVOICE_FEE_RULES,
@@ -336,6 +338,13 @@ export default function SettingsGeneralPayment(props) {
         PayMethods: props.options.PayMethods || '',
         AmountOptions: props.options.AmountOptions || '',
         AmountDiscount: props.options.AmountDiscount || '',
+        'payment_setting.balance_subscription_enabled':
+          props.options['payment_setting.balance_subscription_enabled'] !==
+          false,
+        'payment_setting.balance_subscription_promo_enabled':
+          props.options[
+            'payment_setting.balance_subscription_promo_enabled'
+          ] !== false,
         InvoiceEnabled: !!props.options.InvoiceEnabled,
         InvoiceTypes: props.options.InvoiceTypes || DEFAULT_INVOICE_TYPES,
         InvoiceFeeRules:
@@ -420,6 +429,24 @@ export default function SettingsGeneralPayment(props) {
         options.push({
           key: 'payment_setting.amount_discount',
           value: inputs.AmountDiscount,
+        });
+      }
+      if (
+        originInputs['payment_setting.balance_subscription_enabled'] !==
+        inputs['payment_setting.balance_subscription_enabled']
+      ) {
+        options.push({
+          key: 'payment_setting.balance_subscription_enabled',
+          value: inputs['payment_setting.balance_subscription_enabled'],
+        });
+      }
+      if (
+        originInputs['payment_setting.balance_subscription_promo_enabled'] !==
+        inputs['payment_setting.balance_subscription_promo_enabled']
+      ) {
+        options.push({
+          key: 'payment_setting.balance_subscription_promo_enabled',
+          value: inputs['payment_setting.balance_subscription_promo_enabled'],
         });
       }
       if (originInputs.InvoiceEnabled !== inputs.InvoiceEnabled) {
@@ -541,6 +568,32 @@ export default function SettingsGeneralPayment(props) {
                 extraText={t(
                   '设置不同充值金额对应的折扣，键为充值金额，值为折扣率，例如：{"100": 0.95, "200": 0.9, "500": 0.85}',
                 )}
+              />
+            </Col>
+          </Row>
+          <Row
+            gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
+            style={{ marginTop: 16 }}
+          >
+            <Col xs={24} sm={24} md={12} lg={12} xl={12}>
+              <Form.Switch
+                field='payment_setting.balance_subscription_enabled'
+                label={t('余额购买订阅')}
+                checkedText={t('开')}
+                uncheckedText={t('关')}
+                extraText={t('允许用户使用账户余额购买订阅套餐')}
+              />
+            </Col>
+            <Col xs={24} sm={24} md={12} lg={12} xl={12}>
+              <Form.Switch
+                field='payment_setting.balance_subscription_promo_enabled'
+                label={t('余额购买订阅使用优惠码')}
+                checkedText={t('开')}
+                uncheckedText={t('关')}
+                disabled={
+                  !inputs['payment_setting.balance_subscription_enabled']
+                }
+                extraText={t('允许余额购买订阅时使用优惠码')}
               />
             </Col>
           </Row>

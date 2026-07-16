@@ -85,6 +85,7 @@ func InitOptionMap() {
 	common.OptionMap["MinTopUp"] = strconv.Itoa(operation_setting.MinTopUp)
 	common.OptionMap["InvoiceEnabled"] = strconv.FormatBool(InvoiceEnabled)
 	common.OptionMap["InvoiceTypes"] = InvoiceTypesJSON()
+	common.OptionMap["InvoiceKinds"] = InvoiceKindsJSON()
 	common.OptionMap["InvoiceFeeRules"] = InvoiceFeeRulesJSON()
 	common.OptionMap["StripeMinTopUp"] = strconv.Itoa(setting.StripeMinTopUp)
 	common.OptionMap["StripeApiSecret"] = setting.StripeApiSecret
@@ -457,6 +458,8 @@ func updateOptionMap(key string, value string) (err error) {
 		operation_setting.MinTopUp, _ = strconv.Atoi(value)
 	case "InvoiceTypes":
 		err = UpdateInvoiceTypesByJSONString(value)
+	case "InvoiceKinds":
+		err = UpdateInvoiceKindsByJSONString(value)
 	case "InvoiceFeeRules":
 		err = UpdateInvoiceFeeRulesByJSONString(value)
 	case "StripeApiSecret":

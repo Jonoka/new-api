@@ -467,6 +467,7 @@ func applyInvoiceSnapshotToOrderTx(tx *gorm.DB, userId int, order resolvedInvoic
 	updates := map[string]interface{}{
 		"invoice_required":    true,
 		"invoice_type":        req.Type,
+		"invoice_kind":        req.Kind,
 		"invoice_title":       req.Title,
 		"invoice_tax_no":      req.TaxNo,
 		"invoice_email":       req.Email,
@@ -556,6 +557,7 @@ func CreateCombinedInvoiceWithBalance(userId int, references []InvoiceOrderRefer
 			SourceId:      fmt.Sprintf("INVUSR%d%s%d", userId, common.GetRandomString(8), time.Now().UnixNano()),
 			PaymentMethod: PaymentMethodBalance,
 			InvoiceType:   normalizedReq.Type,
+			InvoiceKind:   normalizedReq.Kind,
 			Title:         normalizedReq.Title,
 			TaxNo:         normalizedReq.TaxNo,
 			Email:         normalizedReq.Email,

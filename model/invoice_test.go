@@ -40,3 +40,93 @@ func TestParseInvoiceFeeRulesClearsMaxFeeForFixedRules(t *testing.T) {
 	require.Len(t, rules, 1)
 	assert.Equal(t, 0.0, rules[0].MaxFee)
 }
+
+func TestParseInvoiceKindsNormalizesAndDeduplicates(t *testing.T) {
+	kinds, err := ParseInvoiceKinds(`[" normal ","SPECIAL","normal"]`)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{InvoiceKindNormal, InvoiceKindSpecial}, kinds)
+}
+
+func TestParseInvoiceKindsRejectsUnsupportedKind(t *testing.T) {
+	_, err := ParseInvoiceKinds(`["electronic"]`)
+
+	require.ErrorContains(t, err, "normal/special")
+}
+
+func TestValidateInvoiceRequestDefaultsToConfiguredInvoiceKind(t *testing.T) {
+	originalEnabled := InvoiceEnabled
+	originalTypes := InvoiceTypes
+	originalKinds := InvoiceKinds
+	originalRules := InvoiceFeeRules
+	InvoiceEnabled = true
+	InvoiceTypes = `["company"]`
+	InvoiceKinds = `["normal"]`
+	InvoiceFeeRules = `[{"min":0,"type":"fixed","value":0}]`
+	t.Cleanup(func() {
+		InvoiceEnabled = originalEnabled
+		InvoiceTypes = originalTypes
+		InvoiceKinds = originalKinds
+		InvoiceFeeRules = originalRules
+	})
+
+	req, _, err := ValidateInvoiceRequest(InvoiceRequest{
+		Required: true,
+		Type:     InvoiceTypeCompany,
+		Title:    "测试企业",
+		TaxNo:    "91310000TEST",
+	}, 100)
+
+	require.NoError(t, err)
+	assert.Equal(t, InvoiceKindNormal, req.Kind)
+}
+
+func TestValidateInvoiceRequestRejectsDisabledInvoiceKind(t *testing.T) {
+	originalEnabled := InvoiceEnabled
+	originalTypes := InvoiceTypes
+	originalKinds := InvoiceKinds
+	originalRules := InvoiceFeeRules
+	InvoiceEnabled = true
+	InvoiceTypes = `["company"]`
+	InvoiceKinds = `["normal"]`
+	InvoiceFeeRules = `[{"min":0,"type":"fixed","value":0}]`
+	t.Cleanup(func() {
+		InvoiceEnabled = originalEnabled
+		InvoiceTypes = originalTypes
+		InvoiceKinds = originalKinds
+		InvoiceFeeRules = originalRules
+	})
+
+	_, _, err := ValidateInvoiceRequest(InvoiceRequest{
+		Required: true,
+		Type:     InvoiceTypeCompany,
+		Kind:     InvoiceKindSpecial,
+		Title:    "测试企业",
+		TaxNo:    "91310000TEST",
+	}, 100)
+
+	require.ErrorContains(t, err, "当前不支持该开票票种")
+}
+
+func TestValidateInvoiceRequestRejectsUnknownInvoiceKind(t *testing.T) {
+	originalEnabled := InvoiceEnabled
+	originalTypes := InvoiceTypes
+	originalKinds := InvoiceKinds
+	InvoiceEnabled = true
+	InvoiceTypes = `["personal"]`
+	InvoiceKinds = `["normal"]`
+	t.Cleanup(func() {
+		InvoiceEnabled = originalEnabled
+		InvoiceTypes = originalTypes
+		InvoiceKinds = originalKinds
+	})
+
+	_, _, err := ValidateInvoiceRequest(InvoiceRequest{
+		Required: true,
+		Type:     InvoiceTypePersonal,
+		Kind:     "electronic",
+		Title:    "测试个人",
+	}, 100)
+
+	require.ErrorContains(t, err, "normal/special")
+}

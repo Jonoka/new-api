@@ -61,11 +61,28 @@ const UsersFilters = ({
       className='w-full md:w-auto order-1 md:order-2'
     >
       <div className='flex flex-col md:flex-row items-center gap-2 w-full md:w-auto'>
+        <div className='w-full md:w-32'>
+          <Form.Select
+            field='searchType'
+            optionList={[
+              { label: t('用户 ID'), value: 'id' },
+              { label: t('用户名'), value: 'username' },
+            ]}
+            onChange={() => {
+              setTimeout(() => {
+                searchUsers(1, pageSize);
+              }, 100);
+            }}
+            className='w-full'
+            pure
+            size='small'
+          />
+        </div>
         <div className='relative w-full md:w-64'>
           <Form.Input
             field='searchKeyword'
             prefix={<IconSearch />}
-            placeholder={t('支持搜索用户的 ID、用户名、显示名称和邮箱地址')}
+            placeholder={t('请输入搜索内容')}
             showClear
             pure
             size='small'

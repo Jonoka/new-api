@@ -137,6 +137,8 @@ const paymentSchema = z.object({
       })
     }
   }),
+  BalanceSubscriptionEnabled: z.boolean(),
+  BalanceSubscriptionPromoEnabled: z.boolean(),
   InvoiceEnabled: z.boolean(),
   InvoiceTypes: z.string().superRefine((value, ctx) => {
     const error = getJsonError(value, (parsed) => Array.isArray(parsed))
@@ -523,6 +525,8 @@ export function PaymentSettingsSection({
       PayMethods: values.PayMethods.trim(),
       AmountOptions: values.AmountOptions.trim(),
       AmountDiscount: values.AmountDiscount.trim(),
+      BalanceSubscriptionEnabled: values.BalanceSubscriptionEnabled,
+      BalanceSubscriptionPromoEnabled: values.BalanceSubscriptionPromoEnabled,
       InvoiceEnabled: values.InvoiceEnabled,
       InvoiceTypes: values.InvoiceTypes.trim(),
       InvoiceFeeRules: values.InvoiceFeeRules.trim(),
@@ -591,6 +595,9 @@ export function PaymentSettingsSection({
       PayMethods: initialRef.current.PayMethods.trim(),
       AmountOptions: initialRef.current.AmountOptions.trim(),
       AmountDiscount: initialRef.current.AmountDiscount.trim(),
+      BalanceSubscriptionEnabled: initialRef.current.BalanceSubscriptionEnabled,
+      BalanceSubscriptionPromoEnabled:
+        initialRef.current.BalanceSubscriptionPromoEnabled,
       InvoiceEnabled: initialRef.current.InvoiceEnabled,
       InvoiceTypes: initialRef.current.InvoiceTypes.trim(),
       InvoiceFeeRules: initialRef.current.InvoiceFeeRules.trim(),
@@ -707,6 +714,26 @@ export function PaymentSettingsSection({
       updates.push({
         key: 'payment_setting.amount_discount',
         value: sanitized.AmountDiscount,
+      })
+    }
+
+    if (
+      sanitized.BalanceSubscriptionEnabled !==
+      initial.BalanceSubscriptionEnabled
+    ) {
+      updates.push({
+        key: 'payment_setting.balance_subscription_enabled',
+        value: sanitized.BalanceSubscriptionEnabled,
+      })
+    }
+
+    if (
+      sanitized.BalanceSubscriptionPromoEnabled !==
+      initial.BalanceSubscriptionPromoEnabled
+    ) {
+      updates.push({
+        key: 'payment_setting.balance_subscription_promo_enabled',
+        value: sanitized.BalanceSubscriptionPromoEnabled,
       })
     }
 
@@ -1397,6 +1424,59 @@ export function PaymentSettingsSection({
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
+                )}
+              />
+            </div>
+
+            <div className='grid gap-4 md:grid-cols-2'>
+              <FormField
+                control={form.control}
+                name='BalanceSubscriptionEnabled'
+                render={({ field }) => (
+                  <SettingsSwitchItem>
+                    <SettingsSwitchContent>
+                      <FormLabel>
+                        {t('Balance subscription purchases')}
+                      </FormLabel>
+                      <FormDescription>
+                        {t(
+                          'Allow users to purchase subscription plans with account balance.'
+                        )}
+                      </FormDescription>
+                    </SettingsSwitchContent>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </SettingsSwitchItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='BalanceSubscriptionPromoEnabled'
+                render={({ field }) => (
+                  <SettingsSwitchItem>
+                    <SettingsSwitchContent>
+                      <FormLabel>
+                        {t('Balance subscription promo codes')}
+                      </FormLabel>
+                      <FormDescription>
+                        {t(
+                          'Allow promo codes when purchasing subscriptions with account balance.'
+                        )}
+                      </FormDescription>
+                    </SettingsSwitchContent>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                        disabled={!form.watch('BalanceSubscriptionEnabled')}
+                      />
+                    </FormControl>
+                  </SettingsSwitchItem>
                 )}
               />
             </div>

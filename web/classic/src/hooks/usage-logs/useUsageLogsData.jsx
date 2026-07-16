@@ -164,7 +164,9 @@ export const useLogsData = () => {
   };
 
   // Column visibility state
-  const [visibleColumns, setVisibleColumns] = useState(getInitialVisibleColumns);
+  const [visibleColumns, setVisibleColumns] = useState(
+    getInitialVisibleColumns,
+  );
   const [showColumnSelector, setShowColumnSelector] = useState(false);
   const [billingDisplayMode, setBillingDisplayMode] = useState(
     getInitialBillingDisplayMode,
@@ -383,7 +385,10 @@ export const useLogsData = () => {
       let other = getLogOther(logs[i].other);
       let expandDataLocal = [];
 
-      if (isAdminUser && (logs[i].type === 0 || logs[i].type === 2 || logs[i].type === 6)) {
+      if (
+        isAdminUser &&
+        (logs[i].type === 0 || logs[i].type === 2 || logs[i].type === 6)
+      ) {
         expandDataLocal.push({
           key: t('渠道信息'),
           value: `${logs[i].channel} - ${logs[i].channel_name || '[未知]'}`,
@@ -430,7 +435,10 @@ export const useLogsData = () => {
           expandDataLocal.push({
             key: t('日志详情'),
             value: other?.claude
-              ? renderClaudeLogContent({ ...other, displayMode: billingDisplayMode })
+              ? renderClaudeLogContent({
+                  ...other,
+                  displayMode: billingDisplayMode,
+                })
               : renderLogContent({ ...other, displayMode: billingDisplayMode }),
           });
         }
@@ -520,7 +528,14 @@ export const useLogsData = () => {
           expandDataLocal.push({
             key: t('失败原因'),
             value: (
-              <div style={{ maxWidth: 600, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.6 }}>
+              <div
+                style={{
+                  maxWidth: 600,
+                  whiteSpace: 'normal',
+                  wordBreak: 'break-word',
+                  lineHeight: 1.6,
+                }}
+              >
                 {other.reason}
               </div>
             ),
@@ -537,7 +552,8 @@ export const useLogsData = () => {
         const ss = other.stream_status;
         const isOk = ss.status === 'ok';
         const statusLabel = isOk ? '✓ ' + t('正常') : '✗ ' + t('异常');
-        let streamValue = statusLabel + ' (' + (ss.end_reason || 'unknown') + ')';
+        let streamValue =
+          statusLabel + ' (' + (ss.end_reason || 'unknown') + ')';
         if (ss.error_count > 0) {
           streamValue += ` [${t('软错误')}: ${ss.error_count}]`;
         }
@@ -552,7 +568,14 @@ export const useLogsData = () => {
           expandDataLocal.push({
             key: t('流错误详情'),
             value: (
-              <div style={{ maxWidth: 600, whiteSpace: 'pre-line', wordBreak: 'break-word', lineHeight: 1.6 }}>
+              <div
+                style={{
+                  maxWidth: 600,
+                  whiteSpace: 'pre-line',
+                  wordBreak: 'break-word',
+                  lineHeight: 1.6,
+                }}
+              >
                 {ss.errors.join('\n')}
               </div>
             ),
@@ -644,6 +667,12 @@ export const useLogsData = () => {
       if (isAdminUser && logs[i].type === 1) {
         const adminInfo = other?.admin_info;
         if (adminInfo) {
+          if (adminInfo.trade_no) {
+            expandDataLocal.push({
+              key: t('订单号'),
+              value: adminInfo.trade_no,
+            });
+          }
           if (adminInfo.payment_method) {
             expandDataLocal.push({
               key: t('订单支付方式'),
@@ -656,28 +685,34 @@ export const useLogsData = () => {
               value: adminInfo.callback_payment_method,
             });
           }
-          if (adminInfo.caller_ip) {
+          if (adminInfo.request_ip || adminInfo.caller_ip) {
             expandDataLocal.push({
-              key: t('回调调用者IP'),
-              value: adminInfo.caller_ip,
+              key: t('付款请求IP'),
+              value: adminInfo.request_ip || adminInfo.caller_ip,
             });
           }
-          if (adminInfo.server_ip) {
+          if (adminInfo.balance_before !== undefined) {
             expandDataLocal.push({
-              key: t('服务器IP'),
-              value: adminInfo.server_ip,
+              key: t('充值前余额'),
+              value: renderQuota(adminInfo.balance_before),
             });
           }
-          if (adminInfo.node_name) {
+          if (adminInfo.credited_quota !== undefined) {
             expandDataLocal.push({
-              key: t('节点名称'),
-              value: adminInfo.node_name,
+              key: t('到账额度'),
+              value: renderQuota(adminInfo.credited_quota),
             });
           }
-          if (adminInfo.version) {
+          if (adminInfo.balance_after !== undefined) {
             expandDataLocal.push({
-              key: t('系统版本'),
-              value: adminInfo.version,
+              key: t('充值后余额'),
+              value: renderQuota(adminInfo.balance_after),
+            });
+          }
+          if (adminInfo.paid_amount_cny !== undefined) {
+            expandDataLocal.push({
+              key: t('实付金额（人民币）'),
+              value: `¥${Number(adminInfo.paid_amount_cny).toFixed(2)}`,
             });
           }
         } else {
@@ -686,7 +721,7 @@ export const useLogsData = () => {
             value: (
               <span style={{ color: 'var(--semi-color-warning)' }}>
                 {t(
-                  '该记录由旧版本实例写入，缺少审计信息，建议将实例升级至最新版本以便记录服务器IP、回调IP、支付方式与系统版本等审计字段。',
+                  '该记录写入时尚未记录充值审计详情，因此无法查看订单号和余额快照。',
                 )}
               </span>
             ),

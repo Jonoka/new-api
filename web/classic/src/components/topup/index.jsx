@@ -133,6 +133,8 @@ const TopUp = () => {
   const [topupInfo, setTopupInfo] = useState({
     amount_options: [],
     discount: {},
+    enable_balance_subscription: true,
+    enable_balance_subscription_promo: true,
     enable_redemption: true,
     payment_compliance_confirmed: true,
   });
@@ -841,6 +843,10 @@ const TopUp = () => {
           setTopUpLink(data.topup_link || '');
           setTopupInfo((prev) => ({
             ...prev,
+            enable_balance_subscription:
+              data.enable_balance_subscription !== false,
+            enable_balance_subscription_promo:
+              data.enable_balance_subscription_promo !== false,
             enable_redemption: data.enable_redemption !== false,
             invoice: data.invoice || { enabled: false },
             payment_compliance_confirmed:
