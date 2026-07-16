@@ -54,6 +54,18 @@ web/             — Frontend themes container
 
 ## Rules
 
+### Rule 0: Production VPS — NEVER Compile, Test, or Build Locally
+
+This checkout is on a production VPS. This rule overrides all local testing/build instructions below.
+
+- NEVER run `go test`, `go build`, `go run`, `go install`, or `go generate` here.
+- NEVER use `docker run` with `golang` or any container to compile/build/test.
+- NEVER run raw `docker build` or `docker buildx build`.
+- NEVER delegate these operations to a subagent, script, Makefile, or nested shell.
+- Use GitHub Actions for tests/builds and deploy only verified GHCR images.
+- The only exceptions are `/home/hermes/bin/newapi-build-lowcpu` and `/home/hermes/bin/gpt2api-build-lowcpu`, and only after explicit user approval for a VPS-local fallback.
+- NEVER bypass the guards via `/usr/bin/docker`, direct buildkit/containerd calls, PATH changes, or manually setting wrapper bypass variables.
+
 ### Rule 1: JSON Package — Use `common/json.go`
 
 All JSON marshal/unmarshal operations MUST use the wrapper functions in `common/json.go`:
