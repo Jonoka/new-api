@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { getCustomNavIcon } from '../../../helpers/customNav';
 import SkeletonWrapper from '../components/SkeletonWrapper';
 
 const Navigation = ({
@@ -37,7 +38,26 @@ const Navigation = ({
     const commonLinkClasses = `${baseClasses} ${spacingClasses} ${hoverClasses}`;
 
     return mainNavLinks.map((link) => {
-      const linkContent = <span>{link.text}</span>;
+      const linkContent = (
+        <>
+          {link.iconName ? getCustomNavIcon(link.iconName) : null}
+          <span>{link.text}</span>
+        </>
+      );
+
+      const requiresLogin =
+        !userState.user &&
+        (link.itemKey === 'console' ||
+          (link.itemKey === 'pricing' && pricingRequireAuth) ||
+          link.requiresAuth);
+
+      if (requiresLogin) {
+        return (
+          <Link key={link.itemKey} to='/login' className={commonLinkClasses}>
+            {linkContent}
+          </Link>
+        );
+      }
 
       if (link.isExternal) {
         return (
@@ -53,16 +73,8 @@ const Navigation = ({
         );
       }
 
-      let targetPath = link.to;
-      if (link.itemKey === 'console' && !userState.user) {
-        targetPath = '/login';
-      }
-      if (link.itemKey === 'pricing' && pricingRequireAuth && !userState.user) {
-        targetPath = '/login';
-      }
-
       return (
-        <Link key={link.itemKey} to={targetPath} className={commonLinkClasses}>
+        <Link key={link.itemKey} to={link.to} className={commonLinkClasses}>
           {linkContent}
         </Link>
       );

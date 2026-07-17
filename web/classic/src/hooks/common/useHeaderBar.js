@@ -37,7 +37,9 @@ export const useHeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
   const [collapsed, toggleCollapsed] = useSidebarCollapsed();
   const [logoLoaded, setLogoLoaded] = useState(false);
   const navigate = useNavigate();
-  const [currentLang, setCurrentLang] = useState(normalizeLanguage(i18n.language));
+  const [currentLang, setCurrentLang] = useState(
+    normalizeLanguage(i18n.language),
+  );
   const location = useLocation();
 
   const loading = statusState?.status === undefined;
@@ -77,6 +79,20 @@ export const useHeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
     }
     return null;
   }, [headerNavModulesConfig]);
+
+  const sidebarNavModules = useMemo(() => {
+    const sidebarNavModulesConfig = statusState?.status?.SidebarModulesAdmin;
+    if (!sidebarNavModulesConfig) return null;
+
+    try {
+      return typeof sidebarNavModulesConfig === 'string'
+        ? JSON.parse(sidebarNavModulesConfig)
+        : sidebarNavModulesConfig;
+    } catch (error) {
+      console.error('解析侧边栏模块配置失败:', error);
+      return null;
+    }
+  }, [statusState?.status?.SidebarModulesAdmin]);
 
   // 获取模型广场权限配置
   const pricingRequireAuth = useMemo(() => {
@@ -237,6 +253,7 @@ export const useHeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
     theme,
     drawerOpen,
     headerNavModules,
+    sidebarNavModules,
     pricingRequireAuth,
 
     // Actions
