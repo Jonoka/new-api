@@ -117,7 +117,7 @@ func TestOpenaiHandlerWithUsageDoesNotDoubleCountAliases(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	responseBody := []byte(`{"usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30,"input_tokens":10,"output_tokens":20,"prompt_tokens_details":{"image_tokens":3,"text_tokens":7},"input_tokens_details":{"image_tokens":3,"text_tokens":7}}}`)
+	responseBody := []byte(`{"data":[{"url":"https://example.com/image.png"}],"usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30,"input_tokens":10,"output_tokens":20,"prompt_tokens_details":{"image_tokens":3,"text_tokens":7},"input_tokens_details":{"image_tokens":3,"text_tokens":7}}}`)
 	resp := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(responseBody))}
 	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI}}
 
@@ -130,6 +130,42 @@ func TestOpenaiHandlerWithUsageDoesNotDoubleCountAliases(t *testing.T) {
 	require.Equal(t, 30, usage.TotalTokens)
 	require.Equal(t, 3, usage.PromptTokensDetails.ImageTokens)
 	require.Equal(t, 7, usage.PromptTokensDetails.TextTokens)
+}
+
+func TestOpenaiHandlerWithUsageBillsDeliveredImageCount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	responseBody := []byte(`{"data":[{"b64_json":"first"},{"url":"https://example.com/second.png"}],"usage":{}}`)
+	resp := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(responseBody))}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI},
+		PriceData:   types.PriceData{UsePrice: true},
+	}
+
+	_, newAPIError := OpenaiHandlerWithUsage(c, info, resp)
+
+	require.Nil(t, newAPIError)
+	require.Equal(t, 2.0, info.PriceData.OtherRatios["n"])
+	require.JSONEq(t, string(responseBody), recorder.Body.String())
+}
+
+func TestOpenaiHandlerWithUsageRejectsEmptyImageResult(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	responseBody := []byte(`{"data":[],"usage":{}}`)
+	resp := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(responseBody))}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI},
+		PriceData:   types.PriceData{UsePrice: true},
+	}
+
+	_, newAPIError := OpenaiHandlerWithUsage(c, info, resp)
+
+	require.NotNil(t, newAPIError)
+	require.Contains(t, newAPIError.Error(), "no deliverable images")
+	require.Empty(t, recorder.Body.String())
 }
 
 func TestOaiStreamHandlerNormalizesAliasOnlyUsage(t *testing.T) {

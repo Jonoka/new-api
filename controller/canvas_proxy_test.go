@@ -102,6 +102,23 @@ func TestBuildAPIImageTaskResponseReturnsRegularContentURLs(t *testing.T) {
 	require.JSONEq(t, `{"data":[{"url":"/v1/images/tasks/task_api/content/0"}]}`, string(encoded))
 }
 
+func TestBuildAPIImageTaskResponsePrefersStableContentURLWhenBase64Exists(t *testing.T) {
+	task := &model.Task{
+		TaskID:   "task_api_with_cdn",
+		Status:   model.TaskStatusSuccess,
+		Progress: "100%",
+		Data:     json.RawMessage(`{"data":[{"url":"https://cdn.example.com/image.png","b64_json":"abc"}]}`),
+	}
+
+	response := buildAPIImageTaskResponse(task)
+
+	result, ok := response["result"].(gin.H)
+	require.True(t, ok)
+	encoded, err := json.Marshal(result)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"data":[{"url":"/v1/images/tasks/task_api_with_cdn/content/0"}]}`, string(encoded))
+}
+
 func TestBuildAPIImageTaskResponseMarksExpiredData(t *testing.T) {
 	previous := common.GetImageTaskDataRetentionHours()
 	common.SetImageTaskDataRetentionHours(1)

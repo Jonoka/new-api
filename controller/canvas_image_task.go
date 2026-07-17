@@ -423,12 +423,10 @@ func buildImageTaskResult(task *model.Task, responsePrefix string) gin.H {
 		next := gin.H{}
 		itemURL := strings.TrimSpace(item.URL)
 		switch {
-		case isCanvasImageDataURL(itemURL):
+		case strings.TrimSpace(item.B64JSON) != "" || isCanvasImageDataURL(itemURL):
 			next["url"] = imageTaskContentPath(responsePrefix, task.TaskID, index)
 		case itemURL != "":
 			next["url"] = itemURL
-		case strings.TrimSpace(item.B64JSON) != "":
-			next["url"] = imageTaskContentPath(responsePrefix, task.TaskID, index)
 		default:
 			continue
 		}

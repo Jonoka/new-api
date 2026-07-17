@@ -733,6 +733,16 @@ func OpenaiHandlerWithUsage(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 
+	deliveredImageCount, countErr := countDeliveredOpenAIImages(responseBody)
+	if countErr != nil {
+		return nil, types.NewOpenAIError(countErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
+	if info != nil && info.PriceData.UsePrice {
+		// 图片按次计费必须以实际可交付数量为准。上游可能返回 2xx，
+		// 但 data 数量少于请求 n；此时不能继续按请求数量全额结算。
+		info.PriceData.AddOtherRatio("n", float64(deliveredImageCount))
+	}
+
 	// 写入新的 response body
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
@@ -752,6 +762,26 @@ func OpenaiHandlerWithUsage(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	}
 	applyUsagePostProcessing(info, usage, responseBody)
 	return usage, nil
+}
+
+func countDeliveredOpenAIImages(responseBody []byte) (int, error) {
+	var imageResponse struct {
+		Data []dto.ImageData `json:"data"`
+	}
+	if err := common.Unmarshal(responseBody, &imageResponse); err != nil {
+		return 0, err
+	}
+
+	delivered := 0
+	for _, image := range imageResponse.Data {
+		if strings.TrimSpace(image.Url) != "" || strings.TrimSpace(image.B64Json) != "" {
+			delivered++
+		}
+	}
+	if delivered == 0 {
+		return 0, fmt.Errorf("upstream image response contains no deliverable images")
+	}
+	return delivered, nil
 }
 
 func applyUsagePostProcessing(info *relaycommon.RelayInfo, usage *dto.Usage, responseBody []byte) {
