@@ -33,6 +33,30 @@ func syncResponsesStreamStateFromBody(c *gin.Context, info *relaycommon.RelayInf
 	common.SetContextKey(c, appconstant.ContextKeyIsStream, info.IsStream)
 }
 
+func responsesRequestFromRelayInput(request any) (*dto.OpenAIResponsesRequest, error) {
+	switch req := request.(type) {
+	case *dto.OpenAIResponsesRequest:
+		return req, nil
+	case *dto.OpenAIResponsesCompactionRequest:
+		return &dto.OpenAIResponsesRequest{
+			Model:                req.Model,
+			Input:                req.Input,
+			Instructions:         req.Instructions,
+			PreviousResponseID:   req.PreviousResponseID,
+			Tools:                req.Tools,
+			ParallelToolCalls:    req.ParallelToolCalls,
+			Reasoning:            req.Reasoning,
+			ServiceTier:          req.ServiceTier,
+			PromptCacheKey:       req.PromptCacheKey,
+			PromptCacheOptions:   req.PromptCacheOptions,
+			PromptCacheRetention: req.PromptCacheRetention,
+			Text:                 req.Text,
+		}, nil
+	default:
+		return nil, fmt.Errorf("invalid request type, expected dto.OpenAIResponsesRequest or dto.OpenAIResponsesCompactionRequest, got %T", request)
+	}
+}
+
 func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
 	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
@@ -48,20 +72,10 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		}
 	}
 
-	var responsesReq *dto.OpenAIResponsesRequest
-	switch req := info.Request.(type) {
-	case *dto.OpenAIResponsesRequest:
-		responsesReq = req
-	case *dto.OpenAIResponsesCompactionRequest:
-		responsesReq = &dto.OpenAIResponsesRequest{
-			Model:              req.Model,
-			Input:              req.Input,
-			Instructions:       req.Instructions,
-			PreviousResponseID: req.PreviousResponseID,
-		}
-	default:
+	responsesReq, err := responsesRequestFromRelayInput(info.Request)
+	if err != nil {
 		return types.NewErrorWithStatusCode(
-			fmt.Errorf("invalid request type, expected dto.OpenAIResponsesRequest or dto.OpenAIResponsesCompactionRequest, got %T", info.Request),
+			err,
 			types.ErrorCodeInvalidRequest,
 			http.StatusBadRequest,
 			types.ErrOptionWithSkipRetry(),

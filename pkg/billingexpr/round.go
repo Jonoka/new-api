@@ -8,3 +8,8 @@ import "github.com/QuantumNous/new-api/common"
 func QuotaRound(f float64) int {
 	return common.QuotaRound(f)
 }
+
+// QuotaRoundStrict 拒绝无法安全写入额度列的预扣估算值。
+func QuotaRoundStrict(f float64) (int, error) {
+	return common.QuotaRoundStrict(f)
+}

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -14,6 +15,38 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCalculateTextQuotaSummaryBillsNativeCacheWriteAndClampsRemainingTokens(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	var usage dto.Usage
+	require.NoError(t, common.Unmarshal([]byte(`{
+		"prompt_tokens":100,
+		"completion_tokens":0,
+		"prompt_tokens_details":{"cached_tokens":80,"cache_write_tokens":30}
+	}`), &usage))
+
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-cache-test",
+		PriceData: types.PriceData{
+			ModelRatio:         1,
+			CompletionRatio:    1,
+			CacheRatio:         0.1,
+			CacheCreationRatio: 1,
+			GroupRatioInfo:     types.GroupRatioInfo{GroupRatio: 1},
+		},
+		StartTime: time.Now(),
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, &usage)
+
+	// cached_tokens 与 cache_write_tokens 可能重叠，普通输入最低按 0 计算。
+	// 计费结果为 80*0.1 + 30*1 = 38。
+	require.Equal(t, 30, summary.CacheCreationTokens)
+	require.Equal(t, 38, summary.Quota)
+}
 
 func TestCalculateTextQuotaSummaryUnifiedForClaudeSemantic(t *testing.T) {
 	gin.SetMode(gin.TestMode)

@@ -1,6 +1,7 @@
 package common
 
 import (
+	"errors"
 	"math"
 	"testing"
 
@@ -63,6 +64,19 @@ func TestQuotaFromFloatChecked(t *testing.T) {
 		assert.Equal(t, QuotaClampNaN, clamp.Kind)
 		assert.Equal(t, 0, clamp.Clamped)
 	}
+}
+
+func TestQuotaFromFloatStrictRejectsSaturation(t *testing.T) {
+	quota, err := QuotaFromFloatStrict(42.9)
+	assert.NoError(t, err)
+	assert.Equal(t, 42, quota)
+
+	quota, err = QuotaFromFloatStrict(overflowingQuotaProduct)
+	assert.Zero(t, quota)
+	var clamp *QuotaClamp
+	assert.True(t, errors.As(err, &clamp))
+	assert.Equal(t, QuotaClampOverflow, clamp.Kind)
+	assert.Equal(t, MaxQuota, clamp.Clamped)
 }
 
 func TestQuotaRoundChecked(t *testing.T) {

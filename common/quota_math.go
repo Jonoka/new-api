@@ -27,6 +27,14 @@ type QuotaClamp struct {
 	Clamped  int     `json:"clamped"`
 }
 
+// Error 让同一个类型既可用于结算审计，也可作为预扣阶段的失败原因。
+func (c *QuotaClamp) Error() string {
+	if c == nil {
+		return ""
+	}
+	return fmt.Sprintf("quota conversion (%s) %s: original=%g, clamped=%d", c.Op, c.Kind, c.Original, c.Clamped)
+}
+
 func (c *QuotaClamp) AuditMap() map[string]interface{} {
 	if c == nil {
 		return nil
@@ -64,6 +72,18 @@ func QuotaFromFloatChecked(value float64) (int, *QuotaClamp) {
 	return saturateQuota(value, "QuotaFromFloat")
 }
 
+func strictQuota(quota int, clamp *QuotaClamp) (int, error) {
+	if clamp != nil {
+		return 0, clamp
+	}
+	return quota, nil
+}
+
+// QuotaFromFloatStrict 用于预扣：数值超出数据库额度范围时直接拒绝，不能用饱和值继续扣费。
+func QuotaFromFloatStrict(value float64) (int, error) {
+	return strictQuota(QuotaFromFloatChecked(value))
+}
+
 func QuotaRound(value float64) int {
 	quota, _ := QuotaRoundChecked(value)
 	return quota
@@ -71,6 +91,11 @@ func QuotaRound(value float64) int {
 
 func QuotaRoundChecked(value float64) (int, *QuotaClamp) {
 	return saturateQuota(math.Round(value), "QuotaRound")
+}
+
+// QuotaRoundStrict 是带四舍五入语义的严格预扣转换。
+func QuotaRoundStrict(value float64) (int, error) {
+	return strictQuota(QuotaRoundChecked(value))
 }
 
 func QuotaFromDecimal(d decimal.Decimal) int {

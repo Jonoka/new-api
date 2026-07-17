@@ -118,6 +118,37 @@ func TestResponsesUsageTopLevelZeroAliasIsNotDetailCacheCreation(t *testing.T) {
 	require.Equal(t, 0, usage.GetCacheCreationTokens())
 }
 
+func TestResponsesUsageReadsDirectlyAssignedCacheCreationAliases(t *testing.T) {
+	tests := []struct {
+		name    string
+		details InputTokenDetails
+		want    int
+	}{
+		{
+			name:    "cache_write_tokens",
+			details: InputTokenDetails{CacheWriteTokens: 23},
+			want:    23,
+		},
+		{
+			name:    "cache_creation_tokens",
+			details: InputTokenDetails{CacheCreationTokens: 24},
+			want:    24,
+		},
+		{
+			name:    "legacy cached_creation_tokens",
+			details: InputTokenDetails{CachedCreationTokens: 25},
+			want:    25,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			usage := Usage{PromptTokensDetails: tt.details}
+			require.Equal(t, tt.want, usage.GetCacheCreationTokens())
+		})
+	}
+}
+
 func TestOpenAITextResponseUnmarshalKeepsEnvelopeAndUsage(t *testing.T) {
 	var response OpenAITextResponse
 	body := `{"id":"chatcmpl-test","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30,"cache_write_tokens":4}}`

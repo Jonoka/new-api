@@ -303,6 +303,28 @@ func (u Usage) GetCacheCreationTokens() int {
 	if tokens, ok := u.GetDetailCacheCreationTokens(); ok {
 		return tokens
 	}
+
+	// 内部转换代码可能直接给字段赋值而没有设置 presence 标记。
+	// 与 JSON 别名解析保持相同优先级：先新字段，再兼容旧字段；
+	// 同一字段优先 Responses 的 input_tokens_details。
+	if u.InputTokensDetails != nil && u.InputTokensDetails.CacheWriteTokens != 0 {
+		return nonNegativeTokenCount(u.InputTokensDetails.CacheWriteTokens)
+	}
+	if u.PromptTokensDetails.CacheWriteTokens != 0 {
+		return nonNegativeTokenCount(u.PromptTokensDetails.CacheWriteTokens)
+	}
+	if u.InputTokensDetails != nil && u.InputTokensDetails.CacheCreationTokens != 0 {
+		return nonNegativeTokenCount(u.InputTokensDetails.CacheCreationTokens)
+	}
+	if u.PromptTokensDetails.CacheCreationTokens != 0 {
+		return nonNegativeTokenCount(u.PromptTokensDetails.CacheCreationTokens)
+	}
+	if u.InputTokensDetails != nil && u.InputTokensDetails.CachedCreationTokens != 0 {
+		return nonNegativeTokenCount(u.InputTokensDetails.CachedCreationTokens)
+	}
+	if u.PromptTokensDetails.CachedCreationTokens != 0 {
+		return nonNegativeTokenCount(u.PromptTokensDetails.CachedCreationTokens)
+	}
 	return u.GetTopLevelCacheCreationTokens()
 }
 
@@ -537,6 +559,7 @@ func (o *OpenAIResponsesResponse) GetSize() string {
 }
 
 type IncompleteDetails struct {
+	Reason    string `json:"reason,omitempty"`
 	Reasoning string `json:"reasoning"`
 }
 

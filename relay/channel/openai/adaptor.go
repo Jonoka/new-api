@@ -106,6 +106,16 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 			info.ChannelBaseUrl = baseUrl
 		}
 	}
+	if info.RelayMode == relayconstant.RelayModeResponses && shouldUseChatCompletionsForResponses(info) {
+		if info.ChannelType == constant.ChannelTypeAzure {
+			return "", errors.New("responses_to_chat_enabled is not supported for Azure channels")
+		}
+		if info.ChannelType == constant.ChannelTypeCustom {
+			url := strings.ReplaceAll(info.ChannelBaseUrl, "{model}", info.UpstreamModelName)
+			return url, nil
+		}
+		return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, "/v1/chat/completions", info.ChannelType), nil
+	}
 	switch info.ChannelType {
 	case constant.ChannelTypeAzure:
 		apiVersion := info.ApiVersion
@@ -648,6 +658,24 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	if info != nil && request.Reasoning != nil && request.Reasoning.Effort != "" {
 		info.ReasoningEffort = request.Reasoning.Effort
 	}
+	if shouldUseChatCompletionsForResponses(info) {
+		chatRequest, err := service.ResponsesRequestToChatCompletionsRequest(&request)
+		if err != nil {
+			return nil, err
+		}
+		if (info.IsStream || (request.Stream != nil && *request.Stream)) && info.SupportStreamOptions {
+			if chatRequest.StreamOptions == nil {
+				chatRequest.StreamOptions = &dto.StreamOptions{}
+			}
+			chatRequest.StreamOptions.IncludeUsage = true
+		}
+		converted, err := a.ConvertOpenAIRequest(c, info, chatRequest)
+		if err != nil {
+			return nil, err
+		}
+		info.FinalRequestRelayFormat = types.RelayFormatOpenAI
+		return converted, nil
+	}
 	return request, nil
 }
 
@@ -678,10 +706,18 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 	case relayconstant.RelayModeRerank:
 		usage, err = common_handler.RerankHandler(c, info, resp)
 	case relayconstant.RelayModeResponses:
-		if info.IsStream {
-			usage, err = OaiResponsesStreamHandler(c, info, resp)
+		if shouldUseChatCompletionsForResponses(info) {
+			if info.IsStream {
+				usage, err = OaiChatToResponsesStreamHandler(c, info, resp)
+			} else {
+				usage, err = OaiChatToResponsesHandler(c, info, resp)
+			}
 		} else {
-			usage, err = OaiResponsesHandler(c, info, resp)
+			if info.IsStream {
+				usage, err = OaiResponsesStreamHandler(c, info, resp)
+			} else {
+				usage, err = OaiResponsesHandler(c, info, resp)
+			}
 		}
 	case relayconstant.RelayModeResponsesCompact:
 		usage, err = OaiResponsesCompactionHandler(c, resp)

@@ -266,6 +266,25 @@ func TestTryTieredSettle_CacheTokensAffectSettlement(t *testing.T) {
 	}
 }
 
+func TestBuildTieredTokenParamsUsesNativeCacheWriteAndClampsPrompt(t *testing.T) {
+	usage := &dto.Usage{
+		PromptTokens: 100,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:     80,
+			CacheWriteTokens: 30,
+		},
+	}
+
+	params := BuildTieredTokenParams(usage, false, map[string]bool{
+		"cr": true,
+		"cc": true,
+	})
+
+	if params.P != 0 || params.CR != 80 || params.CC != 30 || params.Len != 100 {
+		t.Fatalf("params = %#v, want P=0 CR=80 CC=30 Len=100", params)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Request probe tests
 // ---------------------------------------------------------------------------
