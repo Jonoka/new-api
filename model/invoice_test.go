@@ -54,6 +54,17 @@ func TestParseInvoiceKindsRejectsUnsupportedKind(t *testing.T) {
 	require.ErrorContains(t, err, "normal/special")
 }
 
+func TestValidateOptionValueRejectsInvalidInvoiceConfiguration(t *testing.T) {
+	require.NoError(t, validateOptionValue("InvoiceTypes", `["personal","company"]`))
+	require.NoError(t, validateOptionValue("InvoiceKinds", `["normal","special"]`))
+	require.NoError(t, validateOptionValue("InvoiceFeeRules", `[{"min":0,"type":"fixed","value":0}]`))
+
+	require.Error(t, validateOptionValue("InvoiceTypes", `[]`))
+	require.Error(t, validateOptionValue("InvoiceKinds", `[]`))
+	require.Error(t, validateOptionValue("InvoiceKinds", `["electronic"]`))
+	require.Error(t, validateOptionValue("InvoiceFeeRules", `[]`))
+}
+
 func TestValidateInvoiceRequestDefaultsToConfiguredInvoiceKind(t *testing.T) {
 	originalEnabled := InvoiceEnabled
 	originalTypes := InvoiceTypes

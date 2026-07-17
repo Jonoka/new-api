@@ -222,7 +222,7 @@ export function Wallet(props: WalletProps) {
           promoCode,
           isInvoicePreviewRequestEnabled(invoiceConfig, request)
             ? request
-            : createEmptyInvoiceRequest(request.type)
+            : createEmptyInvoiceRequest(request.type, request.kind)
         )
       }
     },
@@ -261,7 +261,8 @@ export function Wallet(props: WalletProps) {
 
       // Calculate payment amount and show confirmation dialog
       const nextInvoiceRequest = createEmptyInvoiceRequest(
-        invoiceConfig.types[0]
+        invoiceConfig.types[0],
+        invoiceConfig.kinds[0]
       )
       setInvoiceRequest(nextInvoiceRequest)
       await calculatePaymentAmount(
@@ -330,7 +331,12 @@ export function Wallet(props: WalletProps) {
       setConfirmDialogOpen(false)
       setSelectedBepusdtTradeType('')
       setSelectedWaffoMethodIndex(null)
-      setInvoiceRequest(createEmptyInvoiceRequest(invoiceConfig.types[0]))
+      setInvoiceRequest(
+        createEmptyInvoiceRequest(
+          invoiceConfig.types[0],
+          invoiceConfig.kinds[0]
+        )
+      )
       await fetchUser()
     }
   }
@@ -371,7 +377,8 @@ export function Wallet(props: WalletProps) {
     try {
       const waffoMethod = method as { name?: string; icon?: string }
       const nextInvoiceRequest = createEmptyInvoiceRequest(
-        invoiceConfig.types[0]
+        invoiceConfig.types[0],
+        invoiceConfig.kinds[0]
       )
       setSelectedPaymentMethod({
         type: 'waffo',
@@ -480,7 +487,12 @@ export function Wallet(props: WalletProps) {
           if (!open) {
             setSelectedBepusdtTradeType('')
             setSelectedWaffoMethodIndex(null)
-            setInvoiceRequest(createEmptyInvoiceRequest(invoiceConfig.types[0]))
+            setInvoiceRequest(
+              createEmptyInvoiceRequest(
+                invoiceConfig.types[0],
+                invoiceConfig.kinds[0]
+              )
+            )
           }
         }}
         onConfirm={handlePaymentConfirm}

@@ -55,6 +55,11 @@ const TYPE_LABEL = {
   company: '对公',
 };
 
+const KIND_LABEL = {
+  normal: '增值税普通发票',
+  special: '增值税专用发票',
+};
+
 const InvoiceCenter = ({ adminOnly = false }) => {
   const { t } = useTranslation();
   const userIsAdmin = useMemo(() => isAdmin(), []);
@@ -165,10 +170,16 @@ const InvoiceCenter = ({ adminOnly = false }) => {
       render: (value) => <Text copyable>{value}</Text>,
     },
     {
-      title: t('发票类型'),
+      title: t('发票抬头类型'),
       dataIndex: 'invoice_type',
       key: 'invoice_type',
       render: (value) => t(TYPE_LABEL[value] || value || '-'),
+    },
+    {
+      title: t('开票票种'),
+      dataIndex: 'invoice_kind',
+      key: 'invoice_kind',
+      render: (value) => t(KIND_LABEL[value] || value || KIND_LABEL.normal),
     },
     {
       title: t('发票抬头'),

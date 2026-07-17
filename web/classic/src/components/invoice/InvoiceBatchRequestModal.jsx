@@ -44,10 +44,9 @@ const orderKey = (order) => `${order.source_type}:${order.source_id}`;
 const isOrderSelectable = (order) =>
   Boolean(order?.invoice_eligible) && !order?.invoiced;
 
-const createInvoiceRequest = (type = 'personal') => ({
-  ...createEmptyInvoiceRequest(),
+const createInvoiceRequest = (type = 'personal', kind = 'normal') => ({
+  ...createEmptyInvoiceRequest(type, kind),
   required: true,
-  type,
 });
 
 const formatCny = (value) => `¥${Number(value || 0).toFixed(2)}`;
@@ -114,9 +113,17 @@ const InvoiceBatchRequestModal = ({ visible, onCancel, onSuccess, t }) => {
         const defaultType = Array.isArray(nextConfig.types)
           ? nextConfig.types[0]
           : 'personal';
+        const defaultKind = Array.isArray(nextConfig.kinds)
+          ? nextConfig.kinds[0]
+          : 'normal';
         setConfig(nextConfig);
         setOrders(nextOrders);
-        setInvoice(createInvoiceRequest(defaultType || 'personal'));
+        setInvoice(
+          createInvoiceRequest(
+            defaultType || 'personal',
+            defaultKind || 'normal',
+          ),
+        );
       } catch (error) {
         if (!cancelled) {
           Toast.error({ content: error.message || t('加载失败') });
@@ -170,7 +177,7 @@ const InvoiceBatchRequestModal = ({ visible, onCancel, onSuccess, t }) => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [invoice.type, selectedOrderRefs, t, visible]);
+  }, [invoice.kind, invoice.type, selectedOrderRefs, t, visible]);
 
   const handleSelectionChange = (keys) => {
     const selectableKeys = keys.filter((key) =>

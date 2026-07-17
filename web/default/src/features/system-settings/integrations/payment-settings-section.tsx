@@ -88,6 +88,7 @@ import {
 } from './waffo-settings-section'
 
 const DEFAULT_INVOICE_TYPES = '["personal","company"]'
+const DEFAULT_INVOICE_KINDS = '["normal"]'
 const DEFAULT_INVOICE_FEE_RULES =
   '[{"min":0,"max":500,"type":"fixed","value":50},{"min":501,"max":2000,"type":"fixed","value":100},{"min":2001,"max":5000,"type":"fixed","value":175},{"min":5000,"type":"percent","value":5}]'
 
@@ -141,6 +142,15 @@ const paymentSchema = z.object({
   BalanceSubscriptionPromoEnabled: z.boolean(),
   InvoiceEnabled: z.boolean(),
   InvoiceTypes: z.string().superRefine((value, ctx) => {
+    const error = getJsonError(value, (parsed) => Array.isArray(parsed))
+    if (error) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: error,
+      })
+    }
+  }),
+  InvoiceKinds: z.string().superRefine((value, ctx) => {
     const error = getJsonError(value, (parsed) => Array.isArray(parsed))
     if (error) {
       ctx.addIssue({
@@ -419,6 +429,7 @@ export function PaymentSettingsSection({
       AmountOptions: formatJsonForEditor(initialFormValues.AmountOptions),
       AmountDiscount: formatJsonForEditor(initialFormValues.AmountDiscount),
       InvoiceTypes: formatJsonForEditor(initialFormValues.InvoiceTypes),
+      InvoiceKinds: formatJsonForEditor(initialFormValues.InvoiceKinds),
       InvoiceFeeRules: formatJsonForEditor(initialFormValues.InvoiceFeeRules),
       CreemProducts: formatJsonForEditor(initialFormValues.CreemProducts),
       BepusdtChains: formatJsonForEditor(initialFormValues.BepusdtChains),
@@ -494,6 +505,7 @@ export function PaymentSettingsSection({
       AmountOptions: formatJsonForEditor(parsedDefaults.AmountOptions),
       AmountDiscount: formatJsonForEditor(parsedDefaults.AmountDiscount),
       InvoiceTypes: formatJsonForEditor(parsedDefaults.InvoiceTypes),
+      InvoiceKinds: formatJsonForEditor(parsedDefaults.InvoiceKinds),
       InvoiceFeeRules: formatJsonForEditor(parsedDefaults.InvoiceFeeRules),
       CreemProducts: formatJsonForEditor(parsedDefaults.CreemProducts),
       BepusdtChains: formatJsonForEditor(parsedDefaults.BepusdtChains),
@@ -529,6 +541,7 @@ export function PaymentSettingsSection({
       BalanceSubscriptionPromoEnabled: values.BalanceSubscriptionPromoEnabled,
       InvoiceEnabled: values.InvoiceEnabled,
       InvoiceTypes: values.InvoiceTypes.trim(),
+      InvoiceKinds: values.InvoiceKinds.trim(),
       InvoiceFeeRules: values.InvoiceFeeRules.trim(),
       StripeApiSecret: values.StripeApiSecret.trim(),
       StripeWebhookSecret: values.StripeWebhookSecret.trim(),
@@ -600,6 +613,7 @@ export function PaymentSettingsSection({
         initialRef.current.BalanceSubscriptionPromoEnabled,
       InvoiceEnabled: initialRef.current.InvoiceEnabled,
       InvoiceTypes: initialRef.current.InvoiceTypes.trim(),
+      InvoiceKinds: initialRef.current.InvoiceKinds.trim(),
       InvoiceFeeRules: initialRef.current.InvoiceFeeRules.trim(),
       StripeApiSecret: initialRef.current.StripeApiSecret.trim(),
       StripeWebhookSecret: initialRef.current.StripeWebhookSecret.trim(),
@@ -749,6 +763,13 @@ export function PaymentSettingsSection({
       normalizeJsonForComparison(initial.InvoiceTypes)
     ) {
       updates.push({ key: 'InvoiceTypes', value: sanitized.InvoiceTypes })
+    }
+
+    if (
+      normalizeJsonForComparison(sanitized.InvoiceKinds) !==
+      normalizeJsonForComparison(initial.InvoiceKinds)
+    ) {
+      updates.push({ key: 'InvoiceKinds', value: sanitized.InvoiceKinds })
     }
 
     if (
@@ -1510,27 +1531,39 @@ export function PaymentSettingsSection({
               render={({ field: typesField }) => (
                 <FormField
                   control={form.control}
-                  name='InvoiceFeeRules'
-                  render={({ field: feeRulesField }) => (
-                    <FormItem>
-                      <FormLabel>{t('Invoice configuration')}</FormLabel>
-                      <FormControl>
-                        <InvoiceSettingsVisualEditor
-                          typesValue={typesField.value || DEFAULT_INVOICE_TYPES}
-                          feeRulesValue={
-                            feeRulesField.value || DEFAULT_INVOICE_FEE_RULES
-                          }
-                          onTypesChange={typesField.onChange}
-                          onFeeRulesChange={feeRulesField.onChange}
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        {t(
-                          'Invoice fee rules are calculated in CNY and added to the payable amount when users request an invoice.'
-                        )}
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
+                  name='InvoiceKinds'
+                  render={({ field: kindsField }) => (
+                    <FormField
+                      control={form.control}
+                      name='InvoiceFeeRules'
+                      render={({ field: feeRulesField }) => (
+                        <FormItem>
+                          <FormLabel>{t('Invoice configuration')}</FormLabel>
+                          <FormControl>
+                            <InvoiceSettingsVisualEditor
+                              typesValue={
+                                typesField.value || DEFAULT_INVOICE_TYPES
+                              }
+                              kindsValue={
+                                kindsField.value || DEFAULT_INVOICE_KINDS
+                              }
+                              feeRulesValue={
+                                feeRulesField.value || DEFAULT_INVOICE_FEE_RULES
+                              }
+                              onTypesChange={typesField.onChange}
+                              onKindsChange={kindsField.onChange}
+                              onFeeRulesChange={feeRulesField.onChange}
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            {t(
+                              'Invoice fee rules are calculated in CNY and added to the payable amount when users request an invoice.'
+                            )}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
                   )}
                 />
               )}

@@ -1060,6 +1060,7 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 				AffiliateSourceQuota: order.AffiliateSourceQuota,
 				InvoiceRequired:      order.InvoiceRequired,
 				InvoiceType:          order.InvoiceType,
+				InvoiceKind:          order.InvoiceKind,
 				InvoiceTitle:         order.InvoiceTitle,
 				InvoiceTaxNo:         order.InvoiceTaxNo,
 				InvoiceEmail:         order.InvoiceEmail,
@@ -1090,6 +1091,7 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 	topup.AffiliateSourceQuota = order.AffiliateSourceQuota
 	topup.InvoiceRequired = order.InvoiceRequired
 	topup.InvoiceType = order.InvoiceType
+	topup.InvoiceKind = order.InvoiceKind
 	topup.InvoiceTitle = order.InvoiceTitle
 	topup.InvoiceTaxNo = order.InvoiceTaxNo
 	topup.InvoiceEmail = order.InvoiceEmail

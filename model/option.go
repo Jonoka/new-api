@@ -681,14 +681,25 @@ func updateOptionMap(key string, value string) (err error) {
 }
 
 func validateOptionValue(key string, value string) error {
-	if key != "performance_setting.image_task_data_retention_hours" {
+	switch key {
+	case "InvoiceTypes":
+		_, err := ParseInvoiceTypes(value)
+		return err
+	case "InvoiceKinds":
+		_, err := ParseInvoiceKinds(value)
+		return err
+	case "InvoiceFeeRules":
+		_, err := ParseInvoiceFeeRules(value)
+		return err
+	case "performance_setting.image_task_data_retention_hours":
+		hours, err := strconv.Atoi(value)
+		if err != nil || hours < 0 || hours > common.MaxImageTaskDataRetentionHours {
+			return fmt.Errorf("图片数据保留时间必须是 0 到 %d 之间的整数小时", common.MaxImageTaskDataRetentionHours)
+		}
+		return nil
+	default:
 		return nil
 	}
-	hours, err := strconv.Atoi(value)
-	if err != nil || hours < 0 || hours > common.MaxImageTaskDataRetentionHours {
-		return fmt.Errorf("图片数据保留时间必须是 0 到 %d 之间的整数小时", common.MaxImageTaskDataRetentionHours)
-	}
-	return nil
 }
 
 // handleConfigUpdate 处理分层配置更新，返回是否已处理
