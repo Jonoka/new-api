@@ -72,6 +72,7 @@ func TestInjectCanvasGroupIntoMultipartBody(t *testing.T) {
 func TestBuildCanvasImageTaskResponseReturnsLightweightContentURLs(t *testing.T) {
 	task := &model.Task{
 		TaskID:   "task_canvas",
+		UserId:   1,
 		Status:   model.TaskStatusSuccess,
 		Progress: "100%",
 		Data:     json.RawMessage(`{"data":[{"b64_json":"abc"}]}`),
@@ -85,7 +86,8 @@ func TestBuildCanvasImageTaskResponseReturnsLightweightContentURLs(t *testing.T)
 	require.True(t, ok)
 	encoded, err := json.Marshal(result)
 	require.NoError(t, err)
-	require.JSONEq(t, `{"data":[{"url":"/canvas/v1/images/tasks/task_canvas/content/0"}]}`, string(encoded))
+	require.Contains(t, string(encoded), `"url":"/canvas/v1/images/tasks/task_canvas/content/0?user_id=1&expires=`)
+	require.Contains(t, string(encoded), `&token=`)
 	require.NotContains(t, string(encoded), "b64_json")
 	require.NotContains(t, string(encoded), "abc")
 }
