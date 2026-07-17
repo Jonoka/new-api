@@ -83,6 +83,7 @@ const CUSTOM_NAV_ICONS = {
 export const CUSTOM_NAV_ICON_OPTIONS = Object.keys(CUSTOM_NAV_ICONS);
 
 export const CUSTOM_NAV_SECTION_OPTIONS = [
+  { value: 'header', label: '顶栏区域' },
   { value: 'chat', label: '聊天区域' },
   { value: 'console', label: '控制台区域' },
   { value: 'personal', label: '个人中心区域' },
@@ -210,6 +211,22 @@ export function parseCustomNavItems(value, options = {}) {
     })
     .filter((item) => item && (includeDisabled || item.enabled))
     .sort((a, b) => a.order - b.order || a.title.localeCompare(b.title));
+}
+
+/**
+ * 合并顶栏独立配置和在侧边栏配置中指定为顶栏区域的自定义项。
+ * 独立顶栏配置优先，避免同一菜单在迁移期间重复展示。
+ */
+export function parseTopNavCustomItems(headerItems, sidebarItems) {
+  const parsedHeaderItems = parseCustomNavItems(headerItems);
+  const headerItemIds = new Set(parsedHeaderItems.map((item) => item.id));
+  const placedHeaderItems = parseCustomNavItems(sidebarItems).filter(
+    (item) => item.section === 'header' && !headerItemIds.has(item.id),
+  );
+
+  return [...parsedHeaderItems, ...placedHeaderItems].sort(
+    (a, b) => a.order - b.order || a.title.localeCompare(b.title),
+  );
 }
 
 export function createCustomNavItem(section = 'chat') {

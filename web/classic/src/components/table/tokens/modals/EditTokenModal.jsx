@@ -59,10 +59,9 @@ import {
   IconKey,
   IconPlus,
   IconDelete,
-  IconChevronUp,
-  IconChevronDown,
   IconSearch,
 } from '@douyinfe/semi-icons';
+import { GripVertical } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { StatusContext } from '../../../../context/Status';
 
@@ -82,6 +81,8 @@ const GroupMultiPicker = ({
 }) => {
   const [popVisible, setPopVisible] = useState(false);
   const [searchText, setSearchText] = useState('');
+  const [draggedGroup, setDraggedGroup] = useState(null);
+  const [dragOverGroup, setDragOverGroup] = useState(null);
 
   const isAutoSelected = selectedGroups.includes('auto');
 
@@ -124,6 +125,47 @@ const GroupMultiPicker = ({
     onChange(newGroups);
   };
 
+  const resetDragState = () => {
+    setDraggedGroup(null);
+    setDragOverGroup(null);
+  };
+
+  const handleDragStart = (event, value) => {
+    setDraggedGroup(value);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', value);
+  };
+
+  const handleDragOver = (event, value) => {
+    event.preventDefault();
+    if (!draggedGroup || draggedGroup === value) return;
+    event.dataTransfer.dropEffect = 'move';
+    setDragOverGroup(value);
+  };
+
+  const handleDrop = (event, targetValue) => {
+    event.preventDefault();
+    const sourceValue =
+      draggedGroup || event.dataTransfer.getData('text/plain');
+    if (!sourceValue || sourceValue === targetValue) {
+      resetDragState();
+      return;
+    }
+
+    const sourceIndex = selectedGroups.indexOf(sourceValue);
+    const targetIndex = selectedGroups.indexOf(targetValue);
+    if (sourceIndex < 0 || targetIndex < 0) {
+      resetDragState();
+      return;
+    }
+
+    const reorderedGroups = [...selectedGroups];
+    const [movedGroup] = reorderedGroups.splice(sourceIndex, 1);
+    reorderedGroups.splice(targetIndex, 0, movedGroup);
+    onChange(reorderedGroups);
+    resetDragState();
+  };
+
   const groupMap = {};
   groups.forEach((g) => {
     groupMap[g.value] = g;
@@ -155,40 +197,52 @@ const GroupMultiPicker = ({
             return (
               <div
                 key={value}
+                onDragOver={(event) => handleDragOver(event, value)}
+                onDrop={(event) => handleDrop(event, value)}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: 8,
                   padding: '6px 10px',
                   borderRadius: 8,
-                  border: '1px solid var(--semi-color-border)',
+                  border:
+                    dragOverGroup === value
+                      ? '1px solid var(--semi-color-primary)'
+                      : '1px solid var(--semi-color-border)',
                   backgroundColor: 'var(--semi-color-bg-2)',
+                  opacity: draggedGroup === value ? 0.55 : 1,
+                  transition: 'border-color 0.15s, opacity 0.15s',
                 }}
               >
-                {/* Order controls */}
+                {/* 拖拽手柄；键盘上下键同时提供无障碍排序能力 */}
                 {selectedGroups.length > 1 && (
-                  <div
-                    style={{ display: 'flex', flexDirection: 'column', gap: 0 }}
+                  <span
+                    draggable
+                    role='button'
+                    tabIndex={0}
+                    aria-label={t('排序')}
+                    title={t('排序')}
+                    onDragStart={(event) => handleDragStart(event, value)}
+                    onDragEnd={resetDragState}
+                    onKeyDown={(event) => {
+                      if (event.key === 'ArrowUp') {
+                        event.preventDefault();
+                        handleMove(index, -1);
+                      } else if (event.key === 'ArrowDown') {
+                        event.preventDefault();
+                        handleMove(index, 1);
+                      }
+                    }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      color: 'var(--semi-color-text-2)',
+                      cursor: 'grab',
+                      flexShrink: 0,
+                    }}
                   >
-                    <Button
-                      icon={<IconChevronUp size='extra-small' />}
-                      size='small'
-                      theme='borderless'
-                      type='tertiary'
-                      disabled={index === 0}
-                      onClick={() => handleMove(index, -1)}
-                      style={{ padding: 0, height: 16 }}
-                    />
-                    <Button
-                      icon={<IconChevronDown size='extra-small' />}
-                      size='small'
-                      theme='borderless'
-                      type='tertiary'
-                      disabled={index === selectedGroups.length - 1}
-                      onClick={() => handleMove(index, 1)}
-                      style={{ padding: 0, height: 16 }}
-                    />
-                  </div>
+                    <GripVertical size={16} />
+                  </span>
                 )}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div
