@@ -35,7 +35,6 @@ import {
   IllustrationNoResultDark,
 } from '@douyinfe/semi-illustrations';
 import {
-  stringToColor,
   calculateModelPrice,
   formatPriceInfo,
   formatDynamicPriceSummary,
@@ -44,7 +43,6 @@ import {
 import PricingCardSkeleton from './PricingCardSkeleton';
 import ModelPerformanceBadge from './ModelPerformanceBadge';
 import { useMinimumLoadingTime } from '../../../../../hooks/common/useMinimumLoadingTime';
-import { renderLimitedItems } from '../../../../common/ui/RenderUtils';
 import { useIsMobile } from '../../../../../hooks/common/useIsMobile';
 
 const CARD_STYLES = {
@@ -154,9 +152,8 @@ const PricingCardView = ({
     return record.description || '';
   };
 
-  // 渲染标签
-  const renderTags = (record) => {
-    // 计费类型标签（左边）
+  // 卡片底部只保留计费类型，避免模型标签挤压性能状态区域
+  const renderBillingTag = (record) => {
     let billingTag = (
       <Tag key='billing' shape='circle' color='white' size='small'>
         -
@@ -176,53 +173,7 @@ const PricingCardView = ({
       );
     }
 
-    // 自定义标签（右边）
-    const customTags = [];
-    const endpointTags = (record.supported_endpoint_types || []).map(
-      (endpoint, idx) => (
-        <Tag key={`endpoint-${idx}`} shape='circle' color='blue' size='small'>
-          {endpoint}
-        </Tag>
-      ),
-    );
-    if (record.tags) {
-      const tagArr = record.tags.split(',').filter(Boolean);
-      tagArr.forEach((tg, idx) => {
-        customTags.push(
-          <Tag
-            key={`custom-${idx}`}
-            shape='circle'
-            color={stringToColor(tg)}
-            size='small'
-          >
-            {tg}
-          </Tag>,
-        );
-      });
-    }
-
-    return (
-      <div className='flex min-w-0 flex-1 items-center justify-between'>
-        <div className='flex items-center gap-2'>{billingTag}</div>
-        <div className='flex items-center gap-1'>
-          {(endpointTags.length > 0 || customTags.length > 0) &&
-            renderLimitedItems({
-              items: [
-                ...endpointTags.map((tag, idx) => ({
-                  key: `endpoint-${idx}`,
-                  element: tag,
-                })),
-                ...customTags.map((tag, idx) => ({
-                  key: `custom-${idx}`,
-                  element: tag,
-                })),
-              ],
-              renderItem: (item, idx) => item.element,
-              maxDisplay: 3,
-            })}
-        </div>
-      </div>
-    );
+    return billingTag;
   };
 
   // 显示骨架屏
@@ -251,7 +202,7 @@ const PricingCardView = ({
 
   return (
     <div className='px-2 pt-2'>
-      <div className='grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-4'>
+      <div className='grid grid-cols-1 gap-4 xl:grid-cols-2 min-[1800px]:grid-cols-3'>
         {paginatedModels.map((model, index) => {
           const modelKey = getModelKey(model);
           const isSelected = selectedRowKeys.includes(modelKey);
@@ -332,9 +283,9 @@ const PricingCardView = ({
 
                 {/* 底部区域 */}
                 <div className='mt-auto'>
-                  {/* 标签区域 */}
-                  <div className='flex items-end justify-between gap-2'>
-                    {renderTags(model)}
+                  {/* 计费类型与性能状态 */}
+                  <div className='flex items-end gap-3'>
+                    <div className='shrink-0'>{renderBillingTag(model)}</div>
                     <ModelPerformanceBadge
                       performance={performanceMap[model.model_name]}
                       t={t}

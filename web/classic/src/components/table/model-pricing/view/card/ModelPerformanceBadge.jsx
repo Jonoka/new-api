@@ -34,30 +34,24 @@ const ModelPerformanceBadge = ({ performance, t }) => {
   const latestPoint = series[series.length - 1];
 
   return (
-    <div className='hidden sm:flex shrink-0 items-end gap-2 text-right tabular-nums'>
-      <div className='flex items-center gap-1.5 whitespace-nowrap pb-px'>
-        <span
-          title={t('吞吐量')}
-          className='text-[10px] text-semi-color-text-2'
-        >
+    <div className='hidden min-w-0 flex-1 items-end justify-end gap-2 text-right tabular-nums sm:flex'>
+      <div className='flex shrink-0 items-center gap-2 whitespace-nowrap pb-px text-[13px]'>
+        <span title={t('吞吐量')} className='text-semi-color-text-2'>
           TPS&nbsp;
-          <span className='font-mono text-semi-color-text-1'>
+          <span className='font-mono font-medium text-semi-color-text-0'>
             {formatThroughput(avg_tps)}
           </span>
         </span>
-        <span
-          title={t('平均延迟')}
-          className='text-[10px] text-semi-color-text-2'
-        >
+        <span title={t('平均延迟')} className='text-semi-color-text-2'>
           {t('延迟')}&nbsp;
-          <span className='font-mono text-semi-color-text-1'>
+          <span className='font-mono font-medium text-semi-color-text-0'>
             {formatLatency(avg_latency_ms)}
           </span>
         </span>
       </div>
-      <div className='flex min-w-0 flex-col items-end'>
+      <div className='flex min-w-0 flex-col items-start'>
         {latestPoint && (
-          <div className='mb-0.5 text-[9px] leading-none text-semi-color-text-2'>
+          <div className='mb-1 text-[10px] leading-none text-semi-color-text-2'>
             {formatBucketTime(latestPoint.ts)}
           </div>
         )}
@@ -66,7 +60,6 @@ const ModelPerformanceBadge = ({ performance, t }) => {
             series={series}
             overall={success_rate}
             maxPoints={24}
-            compact
           />
         </div>
       </div>
