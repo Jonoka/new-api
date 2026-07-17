@@ -3,11 +3,30 @@ import test from 'node:test';
 
 import {
   buildLatencyBarHeights,
+  buildPerformanceSlots,
   buildPerformanceView,
   getSuccessRateLevel,
   getUptimeAxisMin,
   normalizePerformanceSeries,
 } from './utils.js';
+
+test('状态区固定生成 24 个时间槽并在缺失小时保留占位', () => {
+  const slots = buildPerformanceSlots(
+    [
+      { ts: 3600, avg_latency_ms: 100, success_rate: 100 },
+      { ts: 10800, avg_latency_ms: 300, success_rate: 98 },
+    ],
+    24,
+  );
+
+  assert.equal(slots.length, 24);
+  assert.equal(slots.at(-1).ts, 10800);
+  assert.equal(slots.at(-1).is_placeholder, false);
+  assert.equal(slots.at(-2).ts, 7200);
+  assert.equal(slots.at(-2).is_placeholder, true);
+  assert.equal(slots.at(-3).ts, 3600);
+  assert.equal(slots.at(-3).is_placeholder, false);
+});
 
 test('状态柱高度随延迟升高而降低，并忽略无效延迟的缩放影响', () => {
   const heights = buildLatencyBarHeights([

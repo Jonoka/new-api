@@ -20,7 +20,6 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import SuccessRateSparkline from '../../performance/SuccessRateSparkline';
 import {
-  formatBucketTime,
   formatLatency,
   formatThroughput,
   normalizePerformanceSeries,
@@ -35,7 +34,7 @@ const ModelPerformanceBadge = ({ performance, t }) => {
 
   return (
     <div className='hidden min-w-0 items-end justify-self-center gap-2 text-center tabular-nums sm:flex'>
-      <div className='flex shrink-0 items-center gap-2 whitespace-nowrap pb-px text-[13px]'>
+      <div className='flex shrink-0 items-center gap-2 whitespace-nowrap pb-px text-xs'>
         <span title={t('吞吐量')} className='text-semi-color-text-2'>
           TPS&nbsp;
           <span className='font-mono font-medium text-semi-color-text-0'>
@@ -49,19 +48,13 @@ const ModelPerformanceBadge = ({ performance, t }) => {
           </span>
         </span>
       </div>
-      <div className='flex min-w-0 flex-col items-center'>
-        {latestPoint && (
-          <div className='mb-1 text-[10px] leading-none text-semi-color-text-2'>
-            {formatBucketTime(latestPoint.ts)}
-          </div>
-        )}
-        <div title={t('成功率')}>
-          <SuccessRateSparkline
-            series={series}
-            overall={success_rate}
-            maxPoints={24}
-          />
-        </div>
+      <div title={t('成功率')}>
+        <SuccessRateSparkline
+          series={series}
+          overall={success_rate}
+          maxPoints={24}
+          latestTimestamp={latestPoint?.ts}
+        />
       </div>
     </div>
   );

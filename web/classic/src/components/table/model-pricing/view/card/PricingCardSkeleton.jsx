@@ -81,28 +81,20 @@ const PricingCardSkeleton = ({
               </div>
             </div>
 
-            {/* 模型描述骨架 */}
-            <div className='mb-4'>
-              <Skeleton.Paragraph
-                rows={2}
-                style={{ marginBottom: 0 }}
-                title={false}
+            {/* 计费类型与性能状态骨架 */}
+            <div className='flex items-end justify-between'>
+              <Skeleton.Button
+                size='small'
+                style={{ width: 64, height: 18, borderRadius: 10 }}
               />
-            </div>
-
-            {/* 标签区域骨架 */}
-            <div className='flex flex-wrap gap-2'>
-              {Array.from({ length: 2 + (index % 3) }).map((_, tagIndex) => (
-                <Skeleton.Button
-                  key={tagIndex}
-                  size='small'
-                  style={{
-                    width: 64,
-                    height: 18,
-                    borderRadius: 10,
-                  }}
+              <div className='hidden items-end gap-2 sm:flex'>
+                <Skeleton.Title
+                  style={{ width: 120, height: 12, marginBottom: 0 }}
                 />
-              ))}
+                <Skeleton.Title
+                  style={{ width: 180, height: 16, marginBottom: 0 }}
+                />
+              </div>
             </div>
 
             {/* 倍率信息骨架（可选） */}

@@ -154,12 +154,7 @@ const PricingCardView = ({
     );
   };
 
-  // 获取模型描述
-  const getModelDescription = (record) => {
-    return record.description || '';
-  };
-
-  // 卡片底部只保留计费类型，避免模型标签挤压性能状态区域
+  // 卡片不展示模型描述与模型标签，底部只保留计费类型和性能状态。
   const renderBillingTag = (record) => {
     let billingTag = (
       <Tag key='billing' shape='circle' color='white' size='small'>
@@ -292,22 +287,12 @@ const PricingCardView = ({
                   </div>
                 </div>
 
-                {/* 模型描述 - 占据剩余空间 */}
-                <div className='flex-1 mb-4'>
-                  <p
-                    className='text-xs line-clamp-2 leading-relaxed'
-                    style={{ color: 'var(--semi-color-text-2)' }}
-                  >
-                    {getModelDescription(model)}
-                  </p>
-                </div>
-
                 {/* 底部区域 */}
                 <div className='mt-auto'>
                   {/* 计费类型与性能状态 */}
                   <div className='relative flex min-h-[20px] items-end sm:min-h-[32px]'>
                     <div>{renderBillingTag(model)}</div>
-                    <div className='absolute bottom-0 left-1/2 hidden -translate-x-1/2 sm:block'>
+                    <div className='absolute bottom-0 left-1/2 ml-2 hidden -translate-x-1/2 sm:block'>
                       <ModelPerformanceBadge
                         performance={performanceMap[model.model_name]}
                         t={t}
