@@ -33,22 +33,28 @@ const ModelPerformanceBadge = ({ performance, t }) => {
   const latestPoint = series[series.length - 1];
 
   return (
-    <div className='hidden min-w-0 items-end justify-self-center gap-2 text-center tabular-nums sm:flex'>
-      <div className='flex shrink-0 items-center gap-2 whitespace-nowrap pb-px text-xs'>
-        <span title={t('吞吐量')} className='text-semi-color-text-2'>
-          TPS&nbsp;
+    <div className='hidden min-w-0 items-center gap-3 text-xs tabular-nums sm:flex'>
+      <div className='flex shrink-0 items-center gap-3 whitespace-nowrap'>
+        <span
+          title={t('吞吐量')}
+          className='inline-flex items-baseline gap-1 text-semi-color-text-2'
+        >
+          <span>{t('吞吐量')}</span>
           <span className='font-mono font-medium text-semi-color-text-0'>
             {formatThroughput(avg_tps)}
           </span>
         </span>
-        <span title={t('平均延迟')} className='text-semi-color-text-2'>
-          {t('延迟')}&nbsp;
+        <span
+          title={t('平均延迟')}
+          className='inline-flex items-baseline gap-1 text-semi-color-text-2'
+        >
+          <span>{t('延迟')}</span>
           <span className='font-mono font-medium text-semi-color-text-0'>
             {formatLatency(avg_latency_ms)}
           </span>
         </span>
       </div>
-      <div title={t('成功率')}>
+      <div className='relative' title={t('成功率')}>
         <SuccessRateSparkline
           series={series}
           overall={success_rate}

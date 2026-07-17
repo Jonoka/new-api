@@ -204,7 +204,7 @@ const PricingCardView = ({
 
   return (
     <div className='px-2 pt-2'>
-      <div className='grid grid-cols-1 gap-4 xl:grid-cols-2 min-[1800px]:grid-cols-3'>
+      <div className='grid grid-cols-1 items-start gap-4 xl:grid-cols-2 min-[1800px]:grid-cols-3'>
         {paginatedModels.map((model, index) => {
           const modelKey = getModelKey(model);
           const isSelected = selectedRowKeys.includes(modelKey);
@@ -227,11 +227,15 @@ const PricingCardView = ({
           return (
             <Card
               key={modelKey || index}
-              className={`!rounded-2xl transition-all duration-200 hover:shadow-lg border cursor-pointer ${isSelected ? CARD_STYLES.selected : CARD_STYLES.default}`}
-              bodyStyle={{ height: '100%' }}
+              className={`w-full self-start !rounded-2xl transition-all duration-200 hover:shadow-lg border cursor-pointer ${isSelected ? CARD_STYLES.selected : CARD_STYLES.default}`}
+              bodyStyle={{
+                minHeight: isMobile ? undefined : 152,
+                display: 'flex',
+                flexDirection: 'column',
+              }}
               onClick={() => openModelDetail && openModelDetail(model)}
             >
-              <div className='flex flex-col h-full'>
+              <div className='flex min-h-0 flex-1 flex-col'>
                 {/* 头部：图标 + 模型名称 + 操作按钮 */}
                 <div className='flex items-start justify-between mb-3'>
                   <div className='flex items-start space-x-3 flex-1 min-w-0'>
@@ -290,14 +294,12 @@ const PricingCardView = ({
                 {/* 底部区域 */}
                 <div className='mt-auto'>
                   {/* 计费类型与性能状态 */}
-                  <div className='relative flex min-h-[20px] items-end sm:min-h-[32px]'>
-                    <div>{renderBillingTag(model)}</div>
-                    <div className='absolute bottom-0 left-1/2 ml-2 hidden -translate-x-1/2 sm:block'>
-                      <ModelPerformanceBadge
-                        performance={performanceMap[model.model_name]}
-                        t={t}
-                      />
-                    </div>
+                  <div className='flex min-h-[20px] min-w-0 flex-wrap items-center gap-2'>
+                    <div className='shrink-0'>{renderBillingTag(model)}</div>
+                    <ModelPerformanceBadge
+                      performance={performanceMap[model.model_name]}
+                      t={t}
+                    />
                   </div>
 
                   {/* 倍率信息（可选） */}

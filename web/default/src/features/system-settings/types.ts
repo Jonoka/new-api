@@ -208,6 +208,7 @@ export type BillingSettings = {
   QuotaPerUnit: number
   USDExchangeRate: number
   'general_setting.quota_display_type': string
+  'general_setting.auto_usd_exchange_rate': boolean
   'general_setting.custom_currency_symbol': string
   'general_setting.custom_currency_exchange_rate': number
   DisplayInCurrencyEnabled: boolean

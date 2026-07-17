@@ -92,6 +92,8 @@ const BILLING_SECTIONS = [
             quota_display_type: parseCurrencyDisplayType(
               settings['general_setting.quota_display_type']
             ),
+            auto_usd_exchange_rate:
+              settings['general_setting.auto_usd_exchange_rate'] ?? true,
             custom_currency_symbol:
               settings['general_setting.custom_currency_symbol'] ?? '¤',
             custom_currency_exchange_rate:

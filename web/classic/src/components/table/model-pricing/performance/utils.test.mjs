@@ -3,30 +3,12 @@ import test from 'node:test';
 
 import {
   buildLatencyBarHeights,
-  buildPerformanceSlots,
   buildPerformanceView,
+  getSuccessRateHex,
   getSuccessRateLevel,
   getUptimeAxisMin,
   normalizePerformanceSeries,
 } from './utils.js';
-
-test('状态区固定生成 24 个时间槽并在缺失小时保留占位', () => {
-  const slots = buildPerformanceSlots(
-    [
-      { ts: 3600, avg_latency_ms: 100, success_rate: 100 },
-      { ts: 10800, avg_latency_ms: 300, success_rate: 98 },
-    ],
-    24,
-  );
-
-  assert.equal(slots.length, 24);
-  assert.equal(slots.at(-1).ts, 10800);
-  assert.equal(slots.at(-1).is_placeholder, false);
-  assert.equal(slots.at(-2).ts, 7200);
-  assert.equal(slots.at(-2).is_placeholder, true);
-  assert.equal(slots.at(-3).ts, 3600);
-  assert.equal(slots.at(-3).is_placeholder, false);
-});
 
 test('状态柱高度随延迟升高而降低，并忽略无效延迟的缩放影响', () => {
   const heights = buildLatencyBarHeights([
@@ -39,8 +21,8 @@ test('状态柱高度随延迟升高而降低，并忽略无效延迟的缩放�
   assert.equal(heights[0], 100);
   assert.ok(heights[0] > heights[1]);
   assert.ok(heights[1] > heights[2]);
-  assert.equal(heights[2], 35);
-  assert.equal(heights[3], 35);
+  assert.equal(heights[2], 50);
+  assert.equal(heights[3], 50);
   assert.deepEqual(
     buildLatencyBarHeights([{ avg_latency_ms: 500 }, { avg_latency_ms: 500 }]),
     [100, 100],
@@ -107,6 +89,11 @@ test('PackyAPI 风格成功率颜色和可用率轴下限保持稳定', () => {
   assert.equal(getSuccessRateLevel(99), 'healthy');
   assert.equal(getSuccessRateLevel(98.6), 'warning');
   assert.equal(getSuccessRateLevel(89.5), 'critical');
+  assert.equal(getSuccessRateHex(100), '#10b981');
+  assert.equal(getSuccessRateHex(99.3), '#34d399');
+  assert.equal(getSuccessRateHex(98.6), '#f59e0b');
+  assert.equal(getSuccessRateHex(93.7), '#d97706');
+  assert.equal(getSuccessRateHex(89.5), '#f43f5e');
   assert.equal(getUptimeAxisMin([99.9, 98]), 95);
   assert.equal(getUptimeAxisMin([94.5]), 90);
   assert.equal(getUptimeAxisMin([83]), 70);

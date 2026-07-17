@@ -64,6 +64,7 @@ const createPricingSchema = (t: (key: string) => string) =>
       DisplayTokenStatEnabled: z.boolean(),
       general_setting: z.object({
         quota_display_type: z.enum(['USD', 'CNY', 'TOKENS', 'CUSTOM']),
+        auto_usd_exchange_rate: z.boolean(),
         custom_currency_symbol: z.string().max(8).optional(),
         custom_currency_exchange_rate: z.coerce
           .number()
@@ -135,12 +136,30 @@ export function PricingSection({ defaultValues }: PricingSectionProps) {
     })
 
   const displayType = form.watch('general_setting.quota_display_type') ?? 'USD'
+  const autoUsdExchangeRate = form.watch(
+    'general_setting.auto_usd_exchange_rate'
+  )
   const displayInCurrencyEnabled = form.watch('DisplayInCurrencyEnabled')
   const showTokensOnlyOption = displayType === 'TOKENS'
   const showQuotaPerUnit =
     displayType === 'TOKENS' ||
     defaultValues.QuotaPerUnit !== DEFAULT_CURRENCY_CONFIG.quotaPerUnit
   const showDisplayInCurrencyOption = displayInCurrencyEnabled === false
+
+  let exchangeRateLabel = t('USD Exchange Rate')
+  let exchangeRateDescription = t(
+    'Real exchange rate between USD and your payment gateway currency'
+  )
+
+  if (displayType === 'CNY') {
+    exchangeRateLabel = autoUsdExchangeRate
+      ? t('Fallback USDT/CNY rate')
+      : t('CNY per USD')
+
+    if (autoUsdExchangeRate) {
+      exchangeRateDescription = t('Used when live rate fetching fails')
+    }
+  }
 
   return (
     <>
@@ -227,19 +246,33 @@ export function PricingSection({ defaultValues }: PricingSectionProps) {
               )}
             />
 
+            {displayType === 'CNY' && (
+              <FormField
+                control={form.control}
+                name='general_setting.auto_usd_exchange_rate'
+                render={({ field }) => (
+                  <SettingsSwitchItem>
+                    <SettingsSwitchContent>
+                      <FormLabel>{t('Auto USDT/CNY rate')}</FormLabel>
+                    </SettingsSwitchContent>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </SettingsSwitchItem>
+                )}
+              />
+            )}
+
             {displayType !== 'TOKENS' && (
               <FormField
                 control={form.control}
                 name='USDExchangeRate'
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>
-                      {displayType === 'CNY'
-                        ? t('CNY per USD')
-                        : displayType === 'USD'
-                          ? t('USD Exchange Rate')
-                          : t('USD Exchange Rate')}
-                    </FormLabel>
+                    <FormLabel>{exchangeRateLabel}</FormLabel>
                     <FormControl>
                       <Input
                         type='number'
@@ -247,11 +280,7 @@ export function PricingSection({ defaultValues }: PricingSectionProps) {
                         {...safeNumberFieldProps(field)}
                       />
                     </FormControl>
-                    <FormDescription>
-                      {t(
-                        'Real exchange rate between USD and your payment gateway currency'
-                      )}
-                    </FormDescription>
+                    <FormDescription>{exchangeRateDescription}</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}

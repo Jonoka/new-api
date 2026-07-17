@@ -74,14 +74,6 @@ export const getSuccessRateLevel = (value) => {
   return 'critical';
 };
 
-export const getSuccessRateBarClass = (value) => {
-  const level = getSuccessRateLevel(value);
-  if (level === 'healthy') return 'bg-semi-color-success';
-  if (level === 'warning') return 'bg-semi-color-warning';
-  if (level === 'critical') return 'bg-semi-color-danger';
-  return 'bg-semi-color-fill-2';
-};
-
 export const getSuccessRateTextClass = (value) => {
   const level = getSuccessRateLevel(value);
   if (level === 'healthy') return 'text-semi-color-success';
@@ -91,16 +83,18 @@ export const getSuccessRateTextClass = (value) => {
 };
 
 export const getSuccessRateHex = (value) => {
-  const level = getSuccessRateLevel(value);
-  if (level === 'healthy') return '#10b981';
-  if (level === 'warning') return '#f59e0b';
-  if (level === 'critical') return '#ef4444';
-  return '#9ca3af';
+  if (!Number.isFinite(Number(value))) return '#9ca3af';
+  const rate = clampSuccessRate(value);
+  if (rate >= 99.9) return '#10b981';
+  if (rate >= 99) return '#34d399';
+  if (rate >= 95) return '#f59e0b';
+  if (rate >= 90) return '#d97706';
+  return '#f43f5e';
 };
 
-export const buildLatencyBarHeights = (series, minimumHeight = 35) => {
+export const buildLatencyBarHeights = (series, minimumHeight = 50) => {
   const points = Array.isArray(series) ? series : [];
-  const floor = Math.min(80, Math.max(20, finiteNumber(minimumHeight, 35)));
+  const floor = Math.min(80, Math.max(20, finiteNumber(minimumHeight, 50)));
   const latencies = points
     .map((point) => finiteNumber(point?.avg_latency_ms))
     .filter((latency) => latency > 0);
@@ -136,50 +130,6 @@ export const normalizePerformanceSeries = (series) => {
     }))
     .filter((point) => point.ts > 0)
     .sort((left, right) => left.ts - right.ts);
-};
-
-const inferPerformanceBucketSeconds = (points) => {
-  const differences = points
-    .slice(1)
-    .map((point, index) => point.ts - points[index].ts)
-    .filter((difference) => difference > 0);
-
-  if (differences.length === 0) return 3600;
-
-  // 性能统计目前支持分钟、5 分钟和小时桶，优先选择能解释全部时间差的最大粒度。
-  return (
-    [3600, 300, 60].find((seconds) =>
-      differences.every((difference) => difference % seconds === 0),
-    ) || Math.min(...differences)
-  );
-};
-
-export const buildPerformanceSlots = (series, maxPoints = 24) => {
-  const limit = Math.max(1, Math.floor(finiteNumber(maxPoints, 24)));
-  const points = normalizePerformanceSeries(series).slice(-limit);
-  if (points.length === 0) return [];
-
-  const bucketSeconds = inferPerformanceBucketSeconds(points);
-  const latestTimestamp = points[points.length - 1].ts;
-  const pointsByTimestamp = new Map(points.map((point) => [point.ts, point]));
-
-  return Array.from({ length: limit }, (_, index) => {
-    const timestamp = latestTimestamp - (limit - index - 1) * bucketSeconds;
-    const point = pointsByTimestamp.get(timestamp);
-
-    if (point) {
-      return { ...point, is_placeholder: false };
-    }
-
-    return {
-      ts: timestamp,
-      avg_ttft_ms: 0,
-      avg_latency_ms: 0,
-      success_rate: 0,
-      avg_tps: 0,
-      is_placeholder: true,
-    };
-  });
 };
 
 export const getUptimeAxisMin = (values) => {
