@@ -34,7 +34,7 @@ const ModelPerformanceBadge = ({ performance, t }) => {
   const latestPoint = series[series.length - 1];
 
   return (
-    <div className='hidden min-w-0 flex-1 items-end justify-end gap-2 text-right tabular-nums sm:flex'>
+    <div className='hidden min-w-0 items-end justify-self-center gap-2 text-center tabular-nums sm:flex'>
       <div className='flex shrink-0 items-center gap-2 whitespace-nowrap pb-px text-[13px]'>
         <span title={t('吞吐量')} className='text-semi-color-text-2'>
           TPS&nbsp;
@@ -49,7 +49,7 @@ const ModelPerformanceBadge = ({ performance, t }) => {
           </span>
         </span>
       </div>
-      <div className='flex min-w-0 flex-col items-start'>
+      <div className='flex min-w-0 flex-col items-center'>
         {latestPoint && (
           <div className='mb-1 text-[10px] leading-none text-semi-color-text-2'>
             {formatBucketTime(latestPoint.ts)}

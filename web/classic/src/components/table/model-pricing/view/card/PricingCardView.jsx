@@ -305,12 +305,15 @@ const PricingCardView = ({
                 {/* 底部区域 */}
                 <div className='mt-auto'>
                   {/* 计费类型与性能状态 */}
-                  <div className='flex items-end gap-3'>
-                    <div className='shrink-0'>{renderBillingTag(model)}</div>
+                  <div className='grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-end gap-3'>
+                    <div className='justify-self-start'>
+                      {renderBillingTag(model)}
+                    </div>
                     <ModelPerformanceBadge
                       performance={performanceMap[model.model_name]}
                       t={t}
                     />
+                    <div aria-hidden='true' />
                   </div>
 
                   {/* 倍率信息（可选） */}
