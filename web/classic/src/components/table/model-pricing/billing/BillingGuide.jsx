@@ -45,6 +45,8 @@ import {
   calculateTokenCost,
   formatBillingMoney,
   formatBillingNumber,
+  getBillingDiscountColor,
+  getBillingDiscountText,
   getBillingFactors,
   getBillingGuideGroups,
   getBillingGuideModels,
@@ -78,16 +80,6 @@ const formatFixedNumber = (value, digits = 4) =>
 
 const formatUnitPrice = (symbol, value) =>
   `${symbol}${formatFixedNumber(value, 4)}/M`;
-
-const getDiscountText = (factor, t) => {
-  if (factor < 0.9995) {
-    return t('{{discount}}折', {
-      discount: formatFixedNumber(factor * 10, 1),
-    });
-  }
-  if (factor <= 1.0005) return t('原价');
-  return t('{{ratio}}倍', { ratio: formatFixedNumber(factor, 2) });
-};
 
 const FormulaItem = ({ index, title, formula, active, children }) => (
   <div className='p-3' style={active ? ACTIVE_CARD_STYLE : CARD_STYLE}>
@@ -515,8 +507,11 @@ const BillingGuide = ({
                   >
                     {selectedModel.model_name}
                   </strong>
-                  <Tag color='blue' shape='circle'>
-                    {getDiscountText(factors.compositeFactor, t)}
+                  <Tag
+                    color={getBillingDiscountColor(factors.compositeFactor)}
+                    shape='circle'
+                  >
+                    {getBillingDiscountText(factors.compositeFactor, t)}
                   </Tag>
                 </div>
                 <div className='flex flex-col gap-1.5'>
@@ -582,7 +577,7 @@ const BillingGuide = ({
               <span>{t('综合折扣')}</span>
               <strong style={{ color: 'var(--semi-color-primary)' }}>
                 {formatBillingNumber(factors.compositeFactor, 3)} →{' '}
-                {getDiscountText(factors.compositeFactor, t)}
+                {getBillingDiscountText(factors.compositeFactor, t)}
               </strong>
             </div>
           </div>
@@ -609,8 +604,12 @@ const BillingGuide = ({
         <div className={isMobile ? 'w-full' : 'min-w-0 flex-1'}>
           {renderSelector()}
         </div>
-        <Tag className={isMobile ? 'mt-3' : ''} color='blue' shape='circle'>
-          {getDiscountText(factors.compositeFactor, t)}
+        <Tag
+          className={isMobile ? 'mt-3' : ''}
+          color={getBillingDiscountColor(factors.compositeFactor)}
+          shape='circle'
+        >
+          {getBillingDiscountText(factors.compositeFactor, t)}
         </Tag>
         <div
           className={`${isMobile ? 'mt-3 text-left' : 'min-w-[150px] text-right'}`}

@@ -158,6 +158,9 @@ const PricingVendorIntro = memo(
     tokenUnit,
     setTokenUnit,
     onOpenBillingGuide,
+    billingWelcomeVisible,
+    onCloseBillingWelcome,
+    onDismissBillingWelcome,
   }) => {
     const [currentOffset, setCurrentOffset] = useState(0);
     const [descModalVisible, setDescModalVisible] = useState(false);
@@ -295,6 +298,9 @@ const PricingVendorIntro = memo(
           tokenUnit={tokenUnit}
           setTokenUnit={setTokenUnit}
           onOpenBillingGuide={onOpenBillingGuide}
+          billingWelcomeVisible={billingWelcomeVisible}
+          onCloseBillingWelcome={onCloseBillingWelcome}
+          onDismissBillingWelcome={onDismissBillingWelcome}
           t={t}
         />
       ),
@@ -319,6 +325,9 @@ const PricingVendorIntro = memo(
         tokenUnit,
         setTokenUnit,
         onOpenBillingGuide,
+        billingWelcomeVisible,
+        onCloseBillingWelcome,
+        onDismissBillingWelcome,
         t,
       ],
     );

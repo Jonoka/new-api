@@ -44,6 +44,11 @@ import PricingCardSkeleton from './PricingCardSkeleton';
 import ModelPerformanceBadge from './ModelPerformanceBadge';
 import { useMinimumLoadingTime } from '../../../../../hooks/common/useMinimumLoadingTime';
 import { useIsMobile } from '../../../../../hooks/common/useIsMobile';
+import {
+  getBillingDiscountColor,
+  getBillingDiscountText,
+  getBillingFactors,
+} from '../../billing/utils';
 
 const CARD_STYLES = {
   container:
@@ -70,6 +75,8 @@ const PricingCardView = ({
   siteDisplayType,
   tokenUnit,
   displayPrice,
+  priceRate,
+  usdExchangeRate,
   showRatio,
   t,
   selectedRowKeys = [],
@@ -216,6 +223,11 @@ const PricingCardView = ({
             currency,
             quotaDisplayType: siteDisplayType,
           });
+          const discountFactor = getBillingFactors({
+            groupRatio: priceData.usedGroupRatio,
+            priceRate,
+            usdExchangeRate,
+          }).compositeFactor;
 
           return (
             <Card
@@ -230,9 +242,18 @@ const PricingCardView = ({
                   <div className='flex items-start space-x-3 flex-1 min-w-0'>
                     {getModelIcon(model)}
                     <div className='flex-1 min-w-0'>
-                      <h3 className='text-lg font-bold text-gray-900 truncate'>
-                        {model.model_name}
-                      </h3>
+                      <div className='flex min-w-0 items-center gap-2'>
+                        <h3 className='min-w-0 truncate text-lg font-bold text-gray-900'>
+                          {model.model_name}
+                        </h3>
+                        <Tag
+                          className='shrink-0 !rounded !px-1.5'
+                          color={getBillingDiscountColor(discountFactor)}
+                          size='small'
+                        >
+                          {getBillingDiscountText(discountFactor, t)}
+                        </Tag>
+                      </div>
                       <div className='flex flex-col gap-1 text-xs mt-1'>
                         {priceData.isDynamicPricing
                           ? formatDynamicPriceSummary(

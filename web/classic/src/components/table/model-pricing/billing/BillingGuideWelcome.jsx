@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Button, Modal } from '@douyinfe/semi-ui';
+import { Button } from '@douyinfe/semi-ui';
 import { IconHelpCircle } from '@douyinfe/semi-icons';
 
 const BILLING_GUIDE_MASK_STYLE = {
@@ -27,61 +27,40 @@ const BILLING_GUIDE_MASK_STYLE = {
   WebkitBackdropFilter: 'blur(5px)',
 };
 
-const BillingGuideWelcome = ({
-  visible,
-  onViewDetails,
-  onDismiss,
-  isMobile,
-  t,
-}) => (
-  <Modal
-    visible={visible}
-    header={
-      <h2 id='semi-modal-title' className='sr-only'>
-        {t('模型广场如何计费？')}
-      </h2>
-    }
-    footer={null}
-    closable={false}
-    maskClosable={false}
-    width={isMobile ? '92%' : 440}
-    maskStyle={BILLING_GUIDE_MASK_STYLE}
-    bodyStyle={{ padding: isMobile ? 22 : 28 }}
-  >
-    <div className='flex flex-col items-center text-center'>
-      <div
-        className='flex h-12 w-12 items-center justify-center rounded-full'
-        style={{
-          color: 'var(--semi-color-primary)',
-          backgroundColor: 'var(--semi-color-primary-light-default)',
-        }}
-      >
-        <IconHelpCircle size='extra-large' />
-      </div>
-
-      <div
-        className='mt-4 text-lg font-semibold'
-        style={{ color: 'var(--semi-color-text-0)' }}
-      >
-        {t('模型广场如何计费？')}
-      </div>
-      <div
-        className='mt-2 max-w-sm text-sm leading-6'
-        style={{ color: 'var(--semi-color-text-2)' }}
-      >
-        {t('用两分钟了解折扣从哪里来、费用如何计算，以及完整的计费逻辑。')}
-      </div>
-
-      <div className='mt-6 flex w-full gap-3'>
-        <Button block theme='light' type='tertiary' onClick={onDismiss}>
-          {t('不再显示')}
-        </Button>
-        <Button block theme='solid' type='primary' onClick={onViewDetails}>
-          {t('查看计费说明')}
-        </Button>
-      </div>
+const BillingGuideWelcome = ({ onViewDetails, onDismiss, t }) => (
+  <div className='flex w-full flex-col items-center p-1 text-center'>
+    <div
+      className='flex h-10 w-10 items-center justify-center rounded-full'
+      style={{
+        color: 'var(--semi-color-primary)',
+        backgroundColor: 'var(--semi-color-primary-light-default)',
+      }}
+    >
+      <IconHelpCircle size='large' />
     </div>
-  </Modal>
+
+    <div
+      className='mt-3 text-base font-semibold'
+      style={{ color: 'var(--semi-color-text-0)' }}
+    >
+      {t('模型广场如何计费？')}
+    </div>
+    <div
+      className='mt-1.5 text-sm leading-5'
+      style={{ color: 'var(--semi-color-text-2)' }}
+    >
+      {t('用两分钟了解折扣从哪里来、费用如何计算，以及完整的计费逻辑。')}
+    </div>
+
+    <div className='mt-4 flex w-full flex-col gap-2'>
+      <Button block theme='solid' type='primary' onClick={onViewDetails}>
+        {t('查看计费说明')}
+      </Button>
+      <Button block theme='light' type='tertiary' onClick={onDismiss}>
+        {t('不再显示')}
+      </Button>
+    </div>
+  </div>
 );
 
 export { BILLING_GUIDE_MASK_STYLE };

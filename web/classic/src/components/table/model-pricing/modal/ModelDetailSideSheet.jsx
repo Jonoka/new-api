@@ -47,6 +47,8 @@ const ModelDetailSideSheet = ({
   siteDisplayType,
   tokenUnit,
   displayPrice,
+  priceRate,
+  usdExchangeRate,
   showRatio,
   usableGroup,
   vendorsMap,
@@ -145,6 +147,8 @@ const ModelDetailSideSheet = ({
                     siteDisplayType={siteDisplayType}
                     tokenUnit={tokenUnit}
                     displayPrice={displayPrice}
+                    priceRate={priceRate}
+                    usdExchangeRate={usdExchangeRate}
                     showRatio={showRatio}
                     usableGroup={usableGroup}
                     autoGroups={autoGroups}

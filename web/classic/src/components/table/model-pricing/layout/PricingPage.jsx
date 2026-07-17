@@ -23,7 +23,6 @@ import PricingSidebar from './PricingSidebar';
 import PricingContent from './content/PricingContent';
 import ModelDetailSideSheet from '../modal/ModelDetailSideSheet';
 import BillingGuide from '../billing/BillingGuide';
-import BillingGuideWelcome from '../billing/BillingGuideWelcome';
 import {
   getBillingGuideStorage,
   getBillingGuideModels,
@@ -57,16 +56,20 @@ const PricingPage = () => {
     markBillingGuideSeen(storage);
   }, []);
 
+  const closeBillingWelcome = React.useCallback(() => {
+    setBillingWelcomeVisible(false);
+  }, []);
+
   const openBillingGuide = React.useCallback(() => {
     rememberBillingGuide();
-    setBillingWelcomeVisible(false);
+    closeBillingWelcome();
     setBillingGuideVisible(true);
-  }, [rememberBillingGuide]);
+  }, [closeBillingWelcome, rememberBillingGuide]);
 
   const dismissBillingWelcome = React.useCallback(() => {
     rememberBillingGuide();
-    setBillingWelcomeVisible(false);
-  }, [rememberBillingGuide]);
+    closeBillingWelcome();
+  }, [closeBillingWelcome, rememberBillingGuide]);
 
   React.useEffect(() => {
     if (!billingGuideAvailable) {
@@ -100,6 +103,9 @@ const PricingPage = () => {
     viewMode,
     setViewMode,
     onOpenBillingGuide: billingGuideAvailable ? openBillingGuide : undefined,
+    billingWelcomeVisible,
+    onCloseBillingWelcome: closeBillingWelcome,
+    onDismissBillingWelcome: dismissBillingWelcome,
   };
 
   return (
@@ -135,19 +141,13 @@ const PricingPage = () => {
         currency={pricingData.currency}
         siteDisplayType={pricingData.siteDisplayType}
         tokenUnit={pricingData.tokenUnit}
+        priceRate={pricingData.priceRate}
+        usdExchangeRate={pricingData.usdExchangeRate}
         displayPrice={pricingData.displayPrice}
         showRatio={allProps.showRatio}
         vendorsMap={pricingData.vendorsMap}
         endpointMap={pricingData.endpointMap}
         autoGroups={pricingData.autoGroups}
-        t={pricingData.t}
-      />
-
-      <BillingGuideWelcome
-        visible={billingWelcomeVisible}
-        onViewDetails={openBillingGuide}
-        onDismiss={dismissBillingWelcome}
-        isMobile={isMobile}
         t={pricingData.t}
       />
 

@@ -140,6 +140,28 @@ export const getBillingFactors = ({
   };
 };
 
+const formatCompactNumber = (value, digits = 4) =>
+  Number(value || 0)
+    .toFixed(digits)
+    .replace(/(\.\d*?[1-9])0+$/u, '$1')
+    .replace(/\.0+$/u, '');
+
+export const getBillingDiscountText = (factor, t) => {
+  const normalizedFactor = toFiniteNumber(factor, 1);
+  if (normalizedFactor < 0.9995) {
+    return t('{{discount}}折', {
+      discount: formatCompactNumber(normalizedFactor * 10, 1),
+    });
+  }
+  if (normalizedFactor <= 1.0005) return t('原价');
+  return t('{{ratio}}倍', {
+    ratio: formatCompactNumber(normalizedFactor, 2),
+  });
+};
+
+export const getBillingDiscountColor = (factor) =>
+  toFiniteNumber(factor, 1) < 0.5 ? 'red' : 'green';
+
 export const getBillingCurrency = ({
   currency = 'USD',
   usdExchangeRate = 1,

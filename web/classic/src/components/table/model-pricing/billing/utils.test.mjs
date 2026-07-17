@@ -20,6 +20,8 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict';
 import {
   calculateTokenCost,
+  getBillingDiscountColor,
+  getBillingDiscountText,
   getBillingFactors,
   getBillingGuideGroups,
   getBillingGuideModels,
@@ -83,6 +85,14 @@ const factors = getBillingFactors({
 });
 assert.equal(factors.forexFactor, 1 / 7);
 assert.equal(factors.compositeFactor, 1 / 14);
+
+const translate = (key, values = {}) =>
+  key.replace(/\{\{(\w+)\}\}/gu, (_matched, name) => values[name]);
+assert.equal(getBillingDiscountText(1 / 14, translate), '0.7折');
+assert.equal(getBillingDiscountText(1, translate), '原价');
+assert.equal(getBillingDiscountText(1.25, translate), '1.25倍');
+assert.equal(getBillingDiscountColor(0.4999), 'red');
+assert.equal(getBillingDiscountColor(0.5), 'green');
 
 const prices = getBillingUnitPricesFromPriceData({
   priceData: {

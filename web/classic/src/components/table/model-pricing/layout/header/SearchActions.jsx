@@ -18,7 +18,14 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { memo, useCallback } from 'react';
-import { Input, Button, Switch, Select, Divider } from '@douyinfe/semi-ui';
+import {
+  Input,
+  Button,
+  Switch,
+  Select,
+  Divider,
+  Popover,
+} from '@douyinfe/semi-ui';
 import {
   IconSearch,
   IconCopy,
@@ -26,6 +33,15 @@ import {
   IconHelpCircle,
   IconChevronRight,
 } from '@douyinfe/semi-icons';
+import BillingGuideWelcome, {
+  BILLING_GUIDE_MASK_STYLE,
+} from '../../billing/BillingGuideWelcome';
+
+const BILLING_GUIDE_POPOVER_STYLE = {
+  width: 300,
+  maxWidth: 'calc(100vw - 24px)',
+  borderRadius: 16,
+};
 
 const SearchActions = memo(
   ({
@@ -49,6 +65,9 @@ const SearchActions = memo(
     tokenUnit,
     setTokenUnit,
     onOpenBillingGuide,
+    billingWelcomeVisible = false,
+    onCloseBillingWelcome,
+    onDismissBillingWelcome,
     t,
   }) => {
     const supportsCurrencyDisplay = siteDisplayType !== 'TOKENS';
@@ -90,21 +109,52 @@ const SearchActions = memo(
         </div>
 
         {onOpenBillingGuide && (
-          <Button
-            theme='outline'
-            type='tertiary'
-            icon={<IconHelpCircle />}
-            onClick={handleBillingGuideClick}
-            aria-label={t('计费说明')}
-            title={t('计费说明')}
-          >
-            {!isMobile && (
-              <span className='flex items-center gap-1'>
-                {t('计费说明')}
-                <IconChevronRight size='small' />
-              </span>
+          <>
+            {billingWelcomeVisible && (
+              <div
+                aria-hidden='true'
+                className='fixed inset-0'
+                style={{ ...BILLING_GUIDE_MASK_STYLE, zIndex: 1029 }}
+                onClick={onCloseBillingWelcome}
+              />
             )}
-          </Button>
+            <Popover
+              visible={billingWelcomeVisible}
+              trigger='custom'
+              position={isMobile ? 'bottomRight' : 'bottom'}
+              content={
+                <BillingGuideWelcome
+                  onViewDetails={handleBillingGuideClick}
+                  onDismiss={onDismissBillingWelcome}
+                  t={t}
+                />
+              }
+              showArrow
+              closeOnEsc
+              spacing={10}
+              margin={12}
+              zIndex={1030}
+              style={BILLING_GUIDE_POPOVER_STYLE}
+              onClickOutSide={onCloseBillingWelcome}
+              onEscKeyDown={onCloseBillingWelcome}
+            >
+              <Button
+                theme='outline'
+                type='tertiary'
+                icon={<IconHelpCircle />}
+                onClick={handleBillingGuideClick}
+                aria-label={t('计费说明')}
+                title={t('计费说明')}
+              >
+                {!isMobile && (
+                  <span className='flex items-center gap-1'>
+                    {t('计费说明')}
+                    <IconChevronRight size='small' />
+                  </span>
+                )}
+              </Button>
+            </Popover>
+          </>
         )}
 
         <Button

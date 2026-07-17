@@ -48,6 +48,9 @@ const PricingTopSection = memo(
     tokenUnit,
     setTokenUnit,
     onOpenBillingGuide,
+    billingWelcomeVisible,
+    onCloseBillingWelcome,
+    onDismissBillingWelcome,
     t,
   }) => {
     const [showFilterModal, setShowFilterModal] = useState(false);
@@ -78,6 +81,9 @@ const PricingTopSection = memo(
                 tokenUnit={tokenUnit}
                 setTokenUnit={setTokenUnit}
                 onOpenBillingGuide={onOpenBillingGuide}
+                billingWelcomeVisible={billingWelcomeVisible}
+                onCloseBillingWelcome={onCloseBillingWelcome}
+                onDismissBillingWelcome={onDismissBillingWelcome}
                 t={t}
               />
             </div>
@@ -115,6 +121,9 @@ const PricingTopSection = memo(
             tokenUnit={tokenUnit}
             setTokenUnit={setTokenUnit}
             onOpenBillingGuide={onOpenBillingGuide}
+            billingWelcomeVisible={billingWelcomeVisible}
+            onCloseBillingWelcome={onCloseBillingWelcome}
+            onDismissBillingWelcome={onDismissBillingWelcome}
           />
         )}
       </>

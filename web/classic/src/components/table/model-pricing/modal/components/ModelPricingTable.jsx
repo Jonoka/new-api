@@ -20,7 +20,15 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Avatar, Typography, Table, Tag } from '@douyinfe/semi-ui';
 import { IconCoinMoneyStroked } from '@douyinfe/semi-icons';
-import { calculateModelPrice, getModelPriceItems } from '../../../../../helpers';
+import {
+  calculateModelPrice,
+  getModelPriceItems,
+} from '../../../../../helpers';
+import {
+  getBillingDiscountColor,
+  getBillingDiscountText,
+  getBillingFactors,
+} from '../../billing/utils';
 
 const { Text } = Typography;
 
@@ -31,6 +39,8 @@ const ModelPricingTable = ({
   siteDisplayType,
   tokenUnit,
   displayPrice,
+  priceRate,
+  usdExchangeRate,
   showRatio,
   usableGroup,
   autoGroups = [],
@@ -63,13 +73,18 @@ const ModelPricingTable = ({
         : { inputPrice: '-', outputPrice: '-', price: '-' };
 
       // 获取分组倍率
-      const groupRatioValue =
-        groupRatio && groupRatio[group] ? groupRatio[group] : 1;
+      const groupRatioValue = groupRatio?.[group] ?? 1;
+      const discountFactor = getBillingFactors({
+        groupRatio: groupRatioValue,
+        priceRate,
+        usdExchangeRate,
+      }).compositeFactor;
 
       return {
         key: group,
         group: group,
         ratio: groupRatioValue,
+        discountFactor,
         billingType:
           modelData?.billing_mode === 'tiered_expr'
             ? t('动态计费')
@@ -157,6 +172,21 @@ const ModelPricingTable = ({
           </div>
         );
       },
+    });
+
+    columns.push({
+      title: t('综合折扣'),
+      dataIndex: 'discountFactor',
+      width: 104,
+      render: (factor) => (
+        <Tag
+          className='!rounded !px-1.5'
+          color={getBillingDiscountColor(factor)}
+          size='small'
+        >
+          {getBillingDiscountText(factor, t)}
+        </Tag>
+      ),
     });
 
     return (
