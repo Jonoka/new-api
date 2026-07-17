@@ -98,13 +98,30 @@ export const getSuccessRateHex = (value) => {
   return '#9ca3af';
 };
 
-export const getSuccessRateHeightClass = (value) => {
-  const rate = clampSuccessRate(value);
-  if (rate >= 99.9) return 'h-full';
-  if (rate >= 99) return 'h-[88%]';
-  if (rate >= 95) return 'h-[72%]';
-  if (rate >= 90) return 'h-[55%]';
-  return 'h-[40%]';
+export const buildLatencyBarHeights = (series, minimumHeight = 35) => {
+  const points = Array.isArray(series) ? series : [];
+  const floor = Math.min(80, Math.max(20, finiteNumber(minimumHeight, 35)));
+  const latencies = points
+    .map((point) => finiteNumber(point?.avg_latency_ms))
+    .filter((latency) => latency > 0);
+
+  if (latencies.length === 0) {
+    return points.map(() => floor);
+  }
+
+  // 对数缩放可避免单个极慢请求把其他时间桶的高度差全部压平。
+  const minimum = Math.log1p(Math.min(...latencies));
+  const maximum = Math.log1p(Math.max(...latencies));
+  const range = maximum - minimum;
+
+  return points.map((point) => {
+    const latency = finiteNumber(point?.avg_latency_ms);
+    if (latency <= 0) return floor;
+    if (range <= Number.EPSILON) return 100;
+
+    const ratio = (Math.log1p(latency) - minimum) / range;
+    return Math.round((100 - ratio * (100 - floor)) * 10) / 10;
+  });
 };
 
 export const normalizePerformanceSeries = (series) => {

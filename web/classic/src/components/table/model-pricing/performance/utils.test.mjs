@@ -2,11 +2,31 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  buildLatencyBarHeights,
   buildPerformanceView,
   getSuccessRateLevel,
   getUptimeAxisMin,
   normalizePerformanceSeries,
 } from './utils.js';
+
+test('状态柱高度随延迟升高而降低，并忽略无效延迟的缩放影响', () => {
+  const heights = buildLatencyBarHeights([
+    { avg_latency_ms: 100 },
+    { avg_latency_ms: 1000 },
+    { avg_latency_ms: 10000 },
+    { avg_latency_ms: 0 },
+  ]);
+
+  assert.equal(heights[0], 100);
+  assert.ok(heights[0] > heights[1]);
+  assert.ok(heights[1] > heights[2]);
+  assert.equal(heights[2], 35);
+  assert.equal(heights[3], 35);
+  assert.deepEqual(
+    buildLatencyBarHeights([{ avg_latency_ms: 500 }, { avg_latency_ms: 500 }]),
+    [100, 100],
+  );
+});
 
 test('性能序列按时间排序并过滤无效时间桶', () => {
   const series = normalizePerformanceSeries([

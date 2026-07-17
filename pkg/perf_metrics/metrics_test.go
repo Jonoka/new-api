@@ -66,16 +66,16 @@ func TestBuildModelSummariesMergesBucketsAndKeepsWeightedTotals(t *testing.T) {
 	}
 
 	first := got.Series[0]
-	if first.Ts != 100 || first.AvgTtftMs != 0 || first.AvgLatencyMs != 0 || first.SuccessRate != 100 || first.AvgTps != 0 {
+	if first.Ts != 100 || first.AvgTtftMs != 0 || first.AvgLatencyMs != 1000 || first.SuccessRate != 100 || first.AvgTps != 0 {
 		t.Fatalf("首个序列点 = %+v，期望按 bucket_ts 升序", first)
 	}
 	second := got.Series[1]
-	if second.Ts != 200 || second.AvgTtftMs != 0 || second.AvgLatencyMs != 0 || second.SuccessRate != 75 || second.AvgTps != 0 {
+	if second.Ts != 200 || second.AvgTtftMs != 0 || second.AvgLatencyMs != 200 || second.SuccessRate != 75 || second.AvgTps != 0 {
 		t.Fatalf("合并后的第二个序列点 = %+v", second)
 	}
 }
 
-func TestSummaryBucketPointRoundsRateAndHidesDetailedMetrics(t *testing.T) {
+func TestSummaryBucketPointIncludesLatencyAndHidesOtherDetailedMetrics(t *testing.T) {
 	point := summaryBucketPoint(300, counters{
 		requestCount:   3,
 		successCount:   2,
@@ -86,11 +86,11 @@ func TestSummaryBucketPointRoundsRateAndHidesDetailedMetrics(t *testing.T) {
 		generationMs:   1000,
 	})
 
-	if point.Ts != 300 || point.SuccessRate != 66.67 {
-		t.Fatalf("摘要序列点 = %+v，期望成功率保留两位小数", point)
+	if point.Ts != 300 || point.AvgLatencyMs != 300 || point.SuccessRate != 66.67 {
+		t.Fatalf("摘要序列点 = %+v，期望包含平均延迟且成功率保留两位小数", point)
 	}
-	if point.AvgTtftMs != 0 || point.AvgLatencyMs != 0 || point.AvgTps != 0 {
-		t.Fatalf("摘要序列不应公开分时性能明细：%+v", point)
+	if point.AvgTtftMs != 0 || point.AvgTps != 0 {
+		t.Fatalf("摘要序列不应公开首 Token 延迟和吞吐明细：%+v", point)
 	}
 
 	payload, err := common.Marshal(ModelSummary{
@@ -108,7 +108,7 @@ func TestSummaryBucketPointRoundsRateAndHidesDetailedMetrics(t *testing.T) {
 	for _, expected := range []string{
 		`"series":[{"ts":300`,
 		`"avg_ttft_ms":0`,
-		`"avg_latency_ms":0`,
+		`"avg_latency_ms":300`,
 		`"success_rate":66.67`,
 		`"avg_tps":0`,
 	} {

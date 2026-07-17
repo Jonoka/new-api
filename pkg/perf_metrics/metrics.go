@@ -246,11 +246,12 @@ func buildModelSummaries(modelBuckets map[string]map[int64]counters) []ModelSumm
 	return models
 }
 
-// 摘要接口只公开卡片需要的分时成功率，避免批量接口携带冗余的分时性能明细。
+// 摘要接口只公开卡片需要的分时延迟与成功率，避免批量接口携带冗余明细。
 func summaryBucketPoint(ts int64, value counters) BucketPoint {
 	return BucketPoint{
-		Ts:          ts,
-		SuccessRate: math.Round(successRate(value)*100) / 100,
+		Ts:           ts,
+		AvgLatencyMs: avg(value.totalLatencyMs, value.requestCount),
+		SuccessRate:  math.Round(successRate(value)*100) / 100,
 	}
 }
 

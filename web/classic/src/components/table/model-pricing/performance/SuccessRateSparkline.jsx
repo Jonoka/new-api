@@ -19,10 +19,11 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { useMemo } from 'react';
 import {
+  buildLatencyBarHeights,
   formatBucketTime,
+  formatLatency,
   formatSuccessRate,
   getSuccessRateBarClass,
-  getSuccessRateHeightClass,
   getSuccessRateTextClass,
   normalizePerformanceSeries,
 } from './utils';
@@ -50,6 +51,7 @@ const SuccessRateSparkline = ({
     ? Number(overall)
     : points.reduce((sum, point) => sum + point.success_rate, 0) /
       points.length;
+  const barHeights = buildLatencyBarHeights(points);
   const barWidth = compact ? 'w-0.5' : 'w-1';
   const gap = compact ? 'gap-px' : 'gap-[2px]';
   const height = compact ? 'h-3.5' : 'h-4';
@@ -61,19 +63,19 @@ const SuccessRateSparkline = ({
         role='img'
         aria-label={formatSuccessRate(computedOverall, 2)}
       >
-        {points.map((point) => (
+        {points.map((point, index) => (
           <span
             key={`${point.ts}-${point.success_rate}`}
             className={`flex items-end rounded-sm ${barWidth} ${height}`}
-            title={`${formatBucketTime(point.ts)} · ${formatSuccessRate(
-              point.success_rate,
-              2,
-            )}`}
+            title={`${formatBucketTime(point.ts)} · ${formatLatency(
+              point.avg_latency_ms,
+            )} · ${formatSuccessRate(point.success_rate, 2)}`}
           >
             <span
               className={`w-full rounded-sm ${getSuccessRateBarClass(
                 point.success_rate,
-              )} ${getSuccessRateHeightClass(point.success_rate)}`}
+              )}`}
+              style={{ height: `${barHeights[index]}%` }}
             />
           </span>
         ))}
