@@ -47,6 +47,7 @@ const PricingTopSection = memo(
     setViewMode,
     tokenUnit,
     setTokenUnit,
+    onOpenBillingGuide,
     t,
   }) => {
     const [showFilterModal, setShowFilterModal] = useState(false);
@@ -76,6 +77,7 @@ const PricingTopSection = memo(
                 setViewMode={setViewMode}
                 tokenUnit={tokenUnit}
                 setTokenUnit={setTokenUnit}
+                onOpenBillingGuide={onOpenBillingGuide}
                 t={t}
               />
             </div>
@@ -112,6 +114,7 @@ const PricingTopSection = memo(
             setViewMode={setViewMode}
             tokenUnit={tokenUnit}
             setTokenUnit={setTokenUnit}
+            onOpenBillingGuide={onOpenBillingGuide}
           />
         )}
       </>

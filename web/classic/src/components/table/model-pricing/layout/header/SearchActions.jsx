@@ -19,7 +19,13 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { memo, useCallback } from 'react';
 import { Input, Button, Switch, Select, Divider } from '@douyinfe/semi-ui';
-import { IconSearch, IconCopy, IconFilter } from '@douyinfe/semi-icons';
+import {
+  IconSearch,
+  IconCopy,
+  IconFilter,
+  IconHelpCircle,
+  IconChevronRight,
+} from '@douyinfe/semi-icons';
 
 const SearchActions = memo(
   ({
@@ -42,6 +48,7 @@ const SearchActions = memo(
     setViewMode,
     tokenUnit,
     setTokenUnit,
+    onOpenBillingGuide,
     t,
   }) => {
     const supportsCurrencyDisplay = siteDisplayType !== 'TOKENS';
@@ -64,9 +71,13 @@ const SearchActions = memo(
       setTokenUnit?.(tokenUnit === 'K' ? 'M' : 'K');
     }, [tokenUnit, setTokenUnit]);
 
+    const handleBillingGuideClick = useCallback(() => {
+      onOpenBillingGuide?.();
+    }, [onOpenBillingGuide]);
+
     return (
       <div className='flex items-center gap-2 w-full'>
-        <div className='flex-1'>
+        <div className='min-w-0 flex-1'>
           <Input
             prefix={<IconSearch />}
             placeholder={t('模糊搜索模型名称')}
@@ -78,15 +89,35 @@ const SearchActions = memo(
           />
         </div>
 
+        {onOpenBillingGuide && (
+          <Button
+            theme='outline'
+            type='tertiary'
+            icon={<IconHelpCircle />}
+            onClick={handleBillingGuideClick}
+            aria-label={t('计费说明')}
+            title={t('计费说明')}
+          >
+            {!isMobile && (
+              <span className='flex items-center gap-1'>
+                {t('计费说明')}
+                <IconChevronRight size='small' />
+              </span>
+            )}
+          </Button>
+        )}
+
         <Button
           theme='outline'
           type='primary'
           icon={<IconCopy />}
           onClick={handleCopyClick}
           disabled={selectedRowKeys.length === 0}
+          aria-label={t('复制')}
+          title={t('复制')}
           className='!bg-blue-500 hover:!bg-blue-600 !text-white disabled:!bg-gray-300 disabled:!text-gray-500'
         >
-          {t('复制')}
+          {!isMobile && t('复制')}
         </Button>
 
         {!isMobile && (
@@ -96,7 +127,9 @@ const SearchActions = memo(
             {/* 充值价格显示开关 */}
             {supportsCurrencyDisplay && (
               <div className='flex items-center gap-2'>
-                <span className='text-sm text-gray-600'>{t('充值价格显示')}</span>
+                <span className='text-sm text-gray-600'>
+                  {t('充值价格显示')}
+                </span>
                 <Switch
                   checked={showWithRecharge}
                   onChange={setShowWithRecharge}
@@ -149,9 +182,9 @@ const SearchActions = memo(
             type='tertiary'
             icon={<IconFilter />}
             onClick={handleFilterClick}
-          >
-            {t('筛选')}
-          </Button>
+            aria-label={t('筛选')}
+            title={t('筛选')}
+          />
         )}
       </div>
     );

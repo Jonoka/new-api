@@ -407,6 +407,8 @@ export const useModelPricingData = () => {
     // 计算属性
     priceRate,
     usdExchangeRate,
+    customExchangeRate,
+    customCurrencySymbol,
     filteredModels,
     rowSelection,
 
