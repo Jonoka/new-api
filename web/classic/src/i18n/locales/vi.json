@@ -4434,6 +4434,10 @@
     "异步图片数据清理": "Dọn dẹp dữ liệu hình ảnh bất đồng bộ",
     "Canvas 和 /v1/images/tasks 异步图片任务完成后，图片结果数据将在设定时间后自动清理；任务状态、计费和审计记录仍会保留。": "Dữ liệu kết quả hình ảnh của các tác vụ bất đồng bộ Canvas và /v1/images/tasks đã hoàn tất sẽ được xóa sau thời gian cấu hình. Trạng thái tác vụ cùng dữ liệu thanh toán và kiểm toán vẫn được giữ lại.",
     "图片数据保留时间（小时）": "Thời gian lưu dữ liệu hình ảnh (giờ)",
-    "设置为 0 可关闭自动清理；已清理的数据无法通过延长时间恢复。": "Đặt 0 để tắt tự động dọn dẹp. Việc kéo dài thời gian không thể khôi phục dữ liệu đã bị xóa."
+    "设置为 0 可关闭自动清理；已清理的数据无法通过延长时间恢复。": "Đặt 0 để tắt tự động dọn dẹp. Việc kéo dài thời gian không thể khôi phục dữ liệu đã bị xóa.",
+    "发票抬头类型": "Loại tiêu đề hóa đơn",
+    "开票票种": "Loại hóa đơn",
+    "增值税普通发票": "Hóa đơn VAT thông thường",
+    "增值税专用发票": "Hóa đơn VAT đặc biệt"
   }
 }

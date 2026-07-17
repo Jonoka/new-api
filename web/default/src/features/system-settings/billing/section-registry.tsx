@@ -149,6 +149,7 @@ const BILLING_SECTIONS = [
             true,
           InvoiceEnabled: settings.InvoiceEnabled ?? false,
           InvoiceTypes: settings.InvoiceTypes ?? '["personal","company"]',
+          InvoiceKinds: settings.InvoiceKinds ?? '["normal"]',
           InvoiceFeeRules:
             settings.InvoiceFeeRules ??
             '[{"min":0,"max":500,"type":"fixed","value":50},{"min":501,"max":2000,"type":"fixed","value":100},{"min":2001,"max":5000,"type":"fixed","value":175},{"min":5000,"type":"percent","value":5}]',

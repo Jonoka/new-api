@@ -100,6 +100,12 @@ function getInvoiceTypeLabel(type: string, t: (key: string) => string) {
   return type === 'company' ? t('Company invoice') : t('Personal invoice')
 }
 
+function getInvoiceKindLabel(kind: string, t: (key: string) => string) {
+  return kind === 'special'
+    ? t('VAT special invoice')
+    : t('VAT general invoice')
+}
+
 function getSourceLabel(type: string, t: (key: string) => string) {
   switch (type) {
     case 'subscription':
@@ -401,7 +407,15 @@ export function Invoices({ admin = false }: InvoicesProps) {
                       <div className='grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4'>
                         <div>
                           <Label className='text-muted-foreground text-xs'>
-                            {t('Invoice type')}
+                            {t('Invoice kind')}
+                          </Label>
+                          <div>
+                            {getInvoiceKindLabel(record.invoice_kind, t)}
+                          </div>
+                        </div>
+                        <div>
+                          <Label className='text-muted-foreground text-xs'>
+                            {t('Invoice title type')}
                           </Label>
                           <div>
                             {getInvoiceTypeLabel(record.invoice_type, t)}

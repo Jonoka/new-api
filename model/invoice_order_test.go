@@ -110,6 +110,32 @@ func validCombinedInvoiceRequest() InvoiceRequest {
 	}
 }
 
+func TestUpsertSubscriptionTopUpTxCopiesInvoiceKind(t *testing.T) {
+	db := setupInvoiceOrderTestDB(t)
+	order := &SubscriptionOrder{
+		UserId:          1000,
+		TradeNo:         "SUB-INVOICE-KIND-MIRROR",
+		InvoiceRequired: true,
+		InvoiceType:     InvoiceTypeCompany,
+		InvoiceKind:     InvoiceKindSpecial,
+		InvoiceTitle:    "测试公司",
+		InvoiceTaxNo:    "91310000TEST",
+		Status:          common.TopUpStatusSuccess,
+		CreateTime:      common.GetTimestamp(),
+	}
+
+	require.NoError(t, upsertSubscriptionTopUpTx(db, order))
+	var created TopUp
+	require.NoError(t, db.Where("trade_no = ?", order.TradeNo).First(&created).Error)
+	assert.Equal(t, InvoiceKindSpecial, created.InvoiceKind)
+
+	order.InvoiceKind = InvoiceKindNormal
+	require.NoError(t, upsertSubscriptionTopUpTx(db, order))
+	var updated TopUp
+	require.NoError(t, db.Where("trade_no = ?", order.TradeNo).First(&updated).Error)
+	assert.Equal(t, InvoiceKindNormal, updated.InvoiceKind)
+}
+
 func TestGetRecentInvoiceOrdersMarksUsedOrdersAndDeduplicatesSubscriptionMirror(t *testing.T) {
 	db := setupInvoiceOrderTestDB(t)
 	createInvoiceOrderTestUser(t, db, 1001, 2_000_000)

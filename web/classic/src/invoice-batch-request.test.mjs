@@ -13,6 +13,14 @@ const pageSource = readFileSync(
   resolve(root, 'pages/Invoice/index.jsx'),
   'utf8',
 );
+const formSource = readFileSync(
+  resolve(root, 'components/invoice/InvoiceRequestForm.jsx'),
+  'utf8',
+);
+const settingsSource = readFileSync(
+  resolve(root, 'pages/Setting/Payment/SettingsGeneralPayment.jsx'),
+  'utf8',
+);
 
 test('classic invoice center exposes the batch invoice workflow to users only', () => {
   assert.match(pageSource, /!adminView && \(/);
@@ -45,4 +53,22 @@ test('classic batch invoice clears stale previews as soon as selection changes',
     modalSource,
     /let cancelled = false;\s+setPreview\(null\);\s+setPreviewError\(''\);\s+setPreviewLoading\(true\);\s+const timer/,
   );
+});
+
+test('classic invoice requests explicitly include the configured invoice kind', () => {
+  assert.match(formSource, /kind = 'normal'/);
+  assert.match(formSource, /Array\.isArray\(config\?\.kinds\)/);
+  assert.match(formSource, /patchInvoice\(\{ kind: event\.target\.value \}\)/);
+  assert.match(
+    modalSource,
+    /defaultKind = Array\.isArray\(nextConfig\.kinds\)/,
+  );
+  assert.match(modalSource, /invoice\.kind, invoice\.type/);
+});
+
+test('classic invoice settings expose normal and special invoice kinds', () => {
+  assert.match(settingsSource, /InvoiceKinds: DEFAULT_INVOICE_KINDS/);
+  assert.match(settingsSource, /<Checkbox value='normal'>/);
+  assert.match(settingsSource, /<Checkbox value='special'/);
+  assert.match(pageSource, /dataIndex: 'invoice_kind'/);
 });

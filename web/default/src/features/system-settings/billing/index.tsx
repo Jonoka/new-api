@@ -71,6 +71,7 @@ const defaultBillingSettings: BillingSettings = {
   'payment_setting.balance_subscription_promo_enabled': true,
   InvoiceEnabled: false,
   InvoiceTypes: '["personal","company"]',
+  InvoiceKinds: '["normal"]',
   InvoiceFeeRules:
     '[{"min":0,"max":500,"type":"fixed","value":50},{"min":501,"max":2000,"type":"fixed","value":100},{"min":2001,"max":5000,"type":"fixed","value":175},{"min":5000,"type":"percent","value":5}]',
   'payment_setting.compliance_confirmed': false,

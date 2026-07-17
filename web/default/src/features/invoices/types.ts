@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 export type InvoiceType = 'personal' | 'company'
+export type InvoiceKind = 'normal' | 'special'
 export type InvoiceStatus = 'pending' | 'issued' | 'closed'
 export type InvoiceSourceType = 'topup' | 'subscription' | 'batch'
 export type InvoiceFeeRuleType = 'fixed' | 'percent'
@@ -33,6 +34,7 @@ export interface InvoiceFeeRule {
 export interface InvoiceConfig {
   enabled: boolean
   types: InvoiceType[]
+  kinds: InvoiceKind[]
   fee_rules?: InvoiceFeeRule[]
   currency: 'CNY' | string
 }
@@ -40,6 +42,7 @@ export interface InvoiceConfig {
 export interface InvoiceRequest {
   required: boolean
   type: InvoiceType
+  kind: InvoiceKind
   title: string
   tax_no: string
   email: string
@@ -54,6 +57,7 @@ export interface InvoiceRecord {
   source_id: string
   payment_method: string
   invoice_type: InvoiceType
+  invoice_kind: InvoiceKind | ''
   title: string
   tax_no: string
   email: string
@@ -134,6 +138,7 @@ export interface AdminUpdateInvoiceRequest {
 export const DEFAULT_INVOICE_CONFIG: InvoiceConfig = {
   enabled: false,
   types: ['personal', 'company'],
+  kinds: ['normal'],
   fee_rules: [],
   currency: 'CNY',
 }
@@ -147,21 +152,29 @@ export function normalizeInvoiceConfig(
         (type): type is InvoiceType => type === 'personal' || type === 'company'
       )
     : []
+  const kinds = Array.isArray(config.kinds)
+    ? config.kinds.filter(
+        (kind): kind is InvoiceKind => kind === 'normal' || kind === 'special'
+      )
+    : []
 
   return {
     enabled: Boolean(config.enabled),
     types: types.length > 0 ? types : DEFAULT_INVOICE_CONFIG.types,
+    kinds: kinds.length > 0 ? kinds : DEFAULT_INVOICE_CONFIG.kinds,
     fee_rules: Array.isArray(config.fee_rules) ? config.fee_rules : [],
     currency: config.currency || 'CNY',
   }
 }
 
 export function createEmptyInvoiceRequest(
-  defaultType: InvoiceType = 'personal'
+  defaultType: InvoiceType = 'personal',
+  defaultKind: InvoiceKind = 'normal'
 ): InvoiceRequest {
   return {
     required: false,
     type: defaultType,
+    kind: defaultKind,
     title: '',
     tax_no: '',
     email: '',
@@ -178,6 +191,7 @@ export function isInvoiceRequestValid(
   const normalizedConfig = normalizeInvoiceConfig(config)
   if (!normalizedConfig.enabled) return false
   if (!normalizedConfig.types.includes(request.type)) return false
+  if (!normalizedConfig.kinds.includes(request.kind)) return false
   if (!request.title.trim()) return false
   if (request.type === 'company' && !request.tax_no.trim()) return false
   return true
@@ -189,11 +203,10 @@ export function isInvoicePreviewRequestEnabled(
 ): boolean {
   if (!request?.required) return false
   const normalizedConfig = normalizeInvoiceConfig(config)
-  const invoiceType = normalizedConfig.types.includes(request.type)
-    ? request.type
-    : normalizedConfig.types[0]
   return (
-    normalizedConfig.enabled && normalizedConfig.types.includes(invoiceType)
+    normalizedConfig.enabled &&
+    normalizedConfig.types.includes(request.type) &&
+    normalizedConfig.kinds.includes(request.kind)
   )
 }
 

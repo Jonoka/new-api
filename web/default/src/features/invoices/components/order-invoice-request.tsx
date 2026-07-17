@@ -125,7 +125,10 @@ export function OrderInvoiceRequest({
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState('')
   const [invoice, setInvoice] = useState<InvoiceRequest>(() => ({
-    ...createEmptyInvoiceRequest(normalizedConfig.types[0]),
+    ...createEmptyInvoiceRequest(
+      normalizedConfig.types[0],
+      normalizedConfig.kinds[0]
+    ),
     required: true,
   }))
 
@@ -140,12 +143,27 @@ export function OrderInvoiceRequest({
   }, [orders])
 
   useEffect(() => {
-    if (normalizedConfig.types.includes(invoice.type)) return
+    if (
+      normalizedConfig.types.includes(invoice.type) &&
+      normalizedConfig.kinds.includes(invoice.kind)
+    ) {
+      return
+    }
     setInvoice((current) => ({
       ...current,
-      type: normalizedConfig.types[0],
+      type: normalizedConfig.types.includes(current.type)
+        ? current.type
+        : normalizedConfig.types[0],
+      kind: normalizedConfig.kinds.includes(current.kind)
+        ? current.kind
+        : normalizedConfig.kinds[0],
     }))
-  }, [invoice.type, normalizedConfig.types])
+  }, [
+    invoice.kind,
+    invoice.type,
+    normalizedConfig.kinds,
+    normalizedConfig.types,
+  ])
 
   const selectedOrders = useMemo(
     () =>
@@ -257,7 +275,10 @@ export function OrderInvoiceRequest({
     setSelectedKeys(new Set())
     setPreview(null)
     setInvoice({
-      ...createEmptyInvoiceRequest(normalizedConfig.types[0]),
+      ...createEmptyInvoiceRequest(
+        normalizedConfig.types[0],
+        normalizedConfig.kinds[0]
+      ),
       required: true,
     })
   }

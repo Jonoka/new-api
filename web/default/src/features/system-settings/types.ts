@@ -230,6 +230,7 @@ export type BillingSettings = {
   'payment_setting.balance_subscription_promo_enabled': boolean
   InvoiceEnabled: boolean
   InvoiceTypes: string
+  InvoiceKinds: string
   InvoiceFeeRules: string
   'payment_setting.compliance_confirmed': boolean
   'payment_setting.compliance_terms_version': string

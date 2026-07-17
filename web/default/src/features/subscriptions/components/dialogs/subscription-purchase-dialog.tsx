@@ -159,7 +159,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
       request
     )
       ? request
-      : createEmptyInvoiceRequest(request.type)
+      : createEmptyInvoiceRequest(request.type, request.kind)
     setAmountLoading(true)
     try {
       const res = await previewSubscriptionAmount({
@@ -219,7 +219,10 @@ export function SubscriptionPurchaseDialog(props: Props) {
       setBepusdtConfirmOpen(false)
       setSelectedBepusdtTradeType('')
       setInvoiceRequest(
-        createEmptyInvoiceRequest(normalizedInvoiceConfig.types[0])
+        createEmptyInvoiceRequest(
+          normalizedInvoiceConfig.types[0],
+          normalizedInvoiceConfig.kinds[0]
+        )
       )
       setAmountLoading(false)
     }
