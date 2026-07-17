@@ -51,6 +51,7 @@ export const useModelPricingData = () => {
   const [usableGroup, setUsableGroup] = useState({});
   const [endpointMap, setEndpointMap] = useState({});
   const [autoGroups, setAutoGroups] = useState([]);
+  const [performanceMap, setPerformanceMap] = useState({});
 
   const [statusState] = useContext(StatusContext);
   const [userState] = useContext(UserContext);
@@ -260,6 +261,32 @@ export const useModelPricingData = () => {
     setLoading(false);
   };
 
+  // 性能摘要独立加载，接口不可用或暂无数据时不影响模型价格列表。
+  const loadPerformance = async () => {
+    try {
+      const res = await API.get('/api/perf-metrics/summary', {
+        params: { hours: 24 },
+        skipErrorHandler: true,
+      });
+      const models = res.data?.success ? res.data?.data?.models : [];
+      if (!Array.isArray(models)) {
+        setPerformanceMap({});
+        return;
+      }
+
+      const nextMap = {};
+      models.forEach((model) => {
+        if (model?.model_name) {
+          nextMap[model.model_name] = model;
+        }
+      });
+      setPerformanceMap(nextMap);
+    } catch (_error) {
+      // 旧后端、权限限制或性能统计未启用时，卡片不展示伪造数据。
+      setPerformanceMap({});
+    }
+  };
+
   const refresh = async () => {
     await loadPricing();
   };
@@ -317,6 +344,7 @@ export const useModelPricingData = () => {
 
   useEffect(() => {
     refresh().then();
+    loadPerformance().then();
   }, []);
 
   // 当筛选条件变化时重置到第一页
@@ -374,6 +402,7 @@ export const useModelPricingData = () => {
     usableGroup,
     endpointMap,
     autoGroups,
+    performanceMap,
 
     // 计算属性
     priceRate,

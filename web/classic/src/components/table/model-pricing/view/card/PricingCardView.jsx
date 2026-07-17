@@ -42,6 +42,7 @@ import {
   getLobeHubIcon,
 } from '../../../../../helpers';
 import PricingCardSkeleton from './PricingCardSkeleton';
+import ModelPerformanceBadge from './ModelPerformanceBadge';
 import { useMinimumLoadingTime } from '../../../../../hooks/common/useMinimumLoadingTime';
 import { renderLimitedItems } from '../../../../common/ui/RenderUtils';
 import { useIsMobile } from '../../../../../hooks/common/useIsMobile';
@@ -76,6 +77,7 @@ const PricingCardView = ({
   selectedRowKeys = [],
   setSelectedRowKeys,
   openModelDetail,
+  performanceMap = {},
 }) => {
   const showSkeleton = useMinimumLoadingTime(loading);
   const startIndex = (currentPage - 1) * pageSize;
@@ -176,6 +178,13 @@ const PricingCardView = ({
 
     // 自定义标签（右边）
     const customTags = [];
+    const endpointTags = (record.supported_endpoint_types || []).map(
+      (endpoint, idx) => (
+        <Tag key={`endpoint-${idx}`} shape='circle' color='blue' size='small'>
+          {endpoint}
+        </Tag>
+      ),
+    );
     if (record.tags) {
       const tagArr = record.tags.split(',').filter(Boolean);
       tagArr.forEach((tg, idx) => {
@@ -196,12 +205,18 @@ const PricingCardView = ({
       <div className='flex items-center justify-between'>
         <div className='flex items-center gap-2'>{billingTag}</div>
         <div className='flex items-center gap-1'>
-          {customTags.length > 0 &&
+          {(endpointTags.length > 0 || customTags.length > 0) &&
             renderLimitedItems({
-              items: customTags.map((tag, idx) => ({
-                key: `custom-${idx}`,
-                element: tag,
-              })),
+              items: [
+                ...endpointTags.map((tag, idx) => ({
+                  key: `endpoint-${idx}`,
+                  element: tag,
+                })),
+                ...customTags.map((tag, idx) => ({
+                  key: `custom-${idx}`,
+                  element: tag,
+                })),
+              ],
               renderItem: (item, idx) => item.element,
               maxDisplay: 3,
             })}
@@ -268,11 +283,13 @@ const PricingCardView = ({
                         {model.model_name}
                       </h3>
                       <div className='flex flex-col gap-1 text-xs mt-1'>
-                        {priceData.isDynamicPricing ? (
-                          formatDynamicPriceSummary(priceData.billingExpr, t, priceData.usedGroupRatio)
-                        ) : (
-                          formatPriceInfo(priceData, t, siteDisplayType)
-                        )}
+                        {priceData.isDynamicPricing
+                          ? formatDynamicPriceSummary(
+                              priceData.billingExpr,
+                              t,
+                              priceData.usedGroupRatio,
+                            )
+                          : formatPriceInfo(priceData, t, siteDisplayType)}
                       </div>
                     </div>
                   </div>
@@ -316,7 +333,13 @@ const PricingCardView = ({
                 {/* 底部区域 */}
                 <div className='mt-auto'>
                   {/* 标签区域 */}
-                  {renderTags(model)}
+                  <div className='flex items-end justify-between gap-2'>
+                    {renderTags(model)}
+                    <ModelPerformanceBadge
+                      performance={performanceMap[model.model_name]}
+                      t={t}
+                    />
+                  </div>
 
                   {/* 倍率信息（可选） */}
                   {showRatio && (
