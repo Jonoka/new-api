@@ -202,7 +202,7 @@ const PricingCardView = ({
     }
 
     return (
-      <div className='flex items-center justify-between'>
+      <div className='flex min-w-0 flex-1 items-center justify-between'>
         <div className='flex items-center gap-2'>{billingTag}</div>
         <div className='flex items-center gap-1'>
           {(endpointTags.length > 0 || customTags.length > 0) &&

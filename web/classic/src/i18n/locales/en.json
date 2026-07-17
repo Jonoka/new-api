@@ -4099,6 +4099,21 @@
     "发票抬头类型": "Invoice title type",
     "开票票种": "Invoice category",
     "增值税普通发票": "VAT ordinary invoice",
-    "增值税专用发票": "VAT special invoice"
+    "增值税专用发票": "VAT special invoice",
+    "持续每秒 Token 数": "Sustained tokens per second",
+    "最近 24 小时无异常": "No anomalies in the last 24 hours",
+    "最近 24 小时发生 {{count}} 个异常时段": "Anomalous periods in the last 24 hours: {{count}}",
+    "各分组性能": "Performance by group",
+    "平均延迟、首 Token 延迟、TPS 和成功率": "Average latency, TTFT, TPS, and success rate",
+    "首 Token 延迟": "Time to first token",
+    "TPS 和成功率": "TPS and success rate",
+    "延迟趋势（最近 24 小时）": "Latency trend (last 24 hours)",
+    "平均首 Token 延迟": "Average time to first token",
+    "可用率（最近 24 小时）": "Availability (last 24 hours)",
+    "过去 24 小时请求成功率": "Request success rate over the last 24 hours",
+    "暂无性能数据": "No performance data available",
+    "暂无延迟数据": "No latency data available",
+    "暂无可用率数据": "No availability data",
+    "性能": "Performance"
   }
 }

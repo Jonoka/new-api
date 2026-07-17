@@ -3912,6 +3912,25 @@
     "发票抬头类型": "Type d’en-tête de facture",
     "开票票种": "Catégorie de facture",
     "增值税普通发票": "Facture de TVA ordinaire",
-    "增值税专用发票": "Facture de TVA spéciale"
+    "增值税专用发票": "Facture de TVA spéciale",
+    "持续每秒 Token 数": "Débit soutenu de tokens par seconde",
+    "最近 24 小时无异常": "Aucune anomalie au cours des dernières 24 heures",
+    "最近 24 小时发生 {{count}} 个异常时段": "Périodes anormales au cours des dernières 24 heures : {{count}}",
+    "各分组性能": "Performances par groupe",
+    "平均延迟、首 Token 延迟、TPS 和成功率": "Latence moyenne, TTFT, TPS et taux de réussite",
+    "平均延迟": "Latence moyenne",
+    "首 Token 延迟": "Temps jusqu’au premier token",
+    "TPS 和成功率": "TPS et taux de réussite",
+    "延迟趋势（最近 24 小时）": "Évolution de la latence (dernières 24 heures)",
+    "平均首 Token 延迟": "Temps moyen jusqu’au premier token",
+    "可用率（最近 24 小时）": "Disponibilité (dernières 24 heures)",
+    "过去 24 小时请求成功率": "Taux de réussite des requêtes au cours des dernières 24 heures",
+    "暂无性能数据": "Aucune donnée de performance disponible",
+    "暂无延迟数据": "Aucune donnée de latence disponible",
+    "暂无可用率数据": "Aucune donnée de disponibilité",
+    "性能": "Performance",
+    "成功率": "Taux de réussite",
+    "延迟": "Latence",
+    "吞吐量": "Débit"
   }
 }

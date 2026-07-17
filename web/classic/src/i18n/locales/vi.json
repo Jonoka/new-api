@@ -4441,6 +4441,25 @@
     "发票抬头类型": "Loại tiêu đề hóa đơn",
     "开票票种": "Loại hóa đơn",
     "增值税普通发票": "Hóa đơn VAT thông thường",
-    "增值税专用发票": "Hóa đơn VAT đặc biệt"
+    "增值税专用发票": "Hóa đơn VAT đặc biệt",
+    "持续每秒 Token 数": "Tốc độ token duy trì (token/giây)",
+    "最近 24 小时无异常": "Không có bất thường trong 24 giờ qua",
+    "最近 24 小时发生 {{count}} 个异常时段": "Số khoảng thời gian bất thường trong 24 giờ qua: {{count}}",
+    "各分组性能": "Hiệu suất theo nhóm",
+    "平均延迟、首 Token 延迟、TPS 和成功率": "Độ trễ trung bình, TTFT, TPS và tỷ lệ thành công",
+    "平均延迟": "Độ trễ trung bình",
+    "首 Token 延迟": "Thời gian đến token đầu tiên",
+    "TPS 和成功率": "TPS và tỷ lệ thành công",
+    "延迟趋势（最近 24 小时）": "Xu hướng độ trễ (24 giờ qua)",
+    "平均首 Token 延迟": "Thời gian trung bình đến token đầu tiên",
+    "可用率（最近 24 小时）": "Tỷ lệ khả dụng (24 giờ qua)",
+    "过去 24 小时请求成功率": "Tỷ lệ yêu cầu thành công trong 24 giờ qua",
+    "暂无性能数据": "Chưa có dữ liệu hiệu suất",
+    "暂无延迟数据": "Chưa có dữ liệu độ trễ",
+    "暂无可用率数据": "Chưa có dữ liệu về tỷ lệ khả dụng",
+    "性能": "Hiệu suất",
+    "成功率": "Tỷ lệ thành công",
+    "延迟": "Độ trễ",
+    "吞吐量": "Thông lượng"
   }
 }

@@ -18,56 +18,55 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-
-const formatLatency = (value) => {
-  if (!Number.isFinite(value) || value <= 0) return '—';
-  if (value >= 1000) return `${(value / 1000).toFixed(2)}s`;
-  return `${Math.round(value)}ms`;
-};
-
-const formatThroughput = (value) => {
-  if (!Number.isFinite(value) || value <= 0) return '—';
-  if (value >= 1000) return `${(value / 1000).toFixed(1)}K`;
-  return `${value.toFixed(value < 10 ? 2 : 1)}`;
-};
-
-const getStatusColor = (successRate) => {
-  if (!Number.isFinite(successRate) || successRate < 99) {
-    return 'bg-red-500';
-  }
-  if (successRate < 99.9) return 'bg-amber-500';
-  return 'bg-emerald-500';
-};
+import SuccessRateSparkline from '../../performance/SuccessRateSparkline';
+import {
+  formatBucketTime,
+  formatLatency,
+  formatThroughput,
+  normalizePerformanceSeries,
+} from '../../performance/utils';
 
 const ModelPerformanceBadge = ({ performance, t }) => {
   if (!performance) return null;
 
   const { avg_latency_ms, avg_tps, success_rate } = performance;
-  const successLabel = Number.isFinite(success_rate)
-    ? `${success_rate.toFixed(1)}%`
-    : '—';
+  const series = normalizePerformanceSeries(performance.series);
+  const latestPoint = series[series.length - 1];
 
   return (
-    <div className='flex shrink-0 items-end gap-2 text-right tabular-nums'>
-      <div title={t('平均延迟')}>
-        <div className='text-[10px] leading-4 text-gray-400'>{t('延迟')}</div>
-        <div className='font-mono text-xs leading-4 text-gray-600'>
-          {formatLatency(avg_latency_ms)}
-        </div>
+    <div className='hidden sm:flex shrink-0 items-end gap-2 text-right tabular-nums'>
+      <div className='flex items-center gap-1.5 whitespace-nowrap pb-px'>
+        <span
+          title={t('吞吐量')}
+          className='text-[10px] text-semi-color-text-2'
+        >
+          TPS&nbsp;
+          <span className='font-mono text-semi-color-text-1'>
+            {formatThroughput(avg_tps)}
+          </span>
+        </span>
+        <span
+          title={t('平均延迟')}
+          className='text-[10px] text-semi-color-text-2'
+        >
+          {t('延迟')}&nbsp;
+          <span className='font-mono text-semi-color-text-1'>
+            {formatLatency(avg_latency_ms)}
+          </span>
+        </span>
       </div>
-      <div title={t('吞吐量')}>
-        <div className='text-[10px] leading-4 text-gray-400'>TPS</div>
-        <div className='font-mono text-xs leading-4 text-gray-600'>
-          {formatThroughput(avg_tps)}
-        </div>
-      </div>
-      <div title={`${t('成功率')}: ${successLabel}`}>
-        <div className='text-[10px] leading-4 text-gray-400'>{t('状态')}</div>
-        <div className='flex h-4 items-center justify-end gap-0.5'>
-          <span className='h-2 w-1 rounded-full bg-gray-200' />
-          <span className='h-2.5 w-1 rounded-full bg-gray-300' />
-          <span
-            className={`h-3 w-1 rounded-full ${getStatusColor(success_rate)}`}
+      <div className='flex min-w-0 flex-col items-end'>
+        {latestPoint && (
+          <div className='mb-0.5 text-[9px] leading-none text-semi-color-text-2'>
+            {formatBucketTime(latestPoint.ts)}
+          </div>
+        )}
+        <div title={t('成功率')}>
+          <SuccessRateSparkline
+            series={series}
+            overall={success_rate}
+            maxPoints={24}
+            compact
           />
         </div>
       </div>

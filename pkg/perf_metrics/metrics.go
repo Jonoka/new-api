@@ -15,6 +15,7 @@ import (
 )
 
 var hotBuckets sync.Map
+var metricsSnapshotMu sync.RWMutex
 
 // seriesSchema is a stable client cache/schema marker. Do not change it when
 // hiding fields or making response-only privacy hardening changes.
@@ -77,6 +78,9 @@ func Record(sample Sample) {
 }
 
 func Query(params QueryParams) (QueryResult, error) {
+	metricsSnapshotMu.RLock()
+	defer metricsSnapshotMu.RUnlock()
+
 	if params.Hours <= 0 {
 		params.Hours = 24
 	}
@@ -123,6 +127,9 @@ func Query(params QueryParams) (QueryResult, error) {
 }
 
 func QuerySummaryAll(hours int, groups []string) (SummaryAllResult, error) {
+	metricsSnapshotMu.RLock()
+	defer metricsSnapshotMu.RUnlock()
+
 	if hours <= 0 {
 		hours = 24
 	}
@@ -133,20 +140,22 @@ func QuerySummaryAll(hours int, groups []string) (SummaryAllResult, error) {
 	startTs := endTs - int64(hours)*3600
 	allowedGroups := allowedGroupSet(groups)
 
-	rows, err := model.GetPerfMetricsSummaryAll(startTs, endTs, groups)
+	rows, err := model.GetPerfMetricsSummaryBucketsAll(startTs, endTs, groups)
 	if err != nil {
 		return SummaryAllResult{}, err
 	}
 
-	totals := map[string]counters{}
+	modelBuckets := map[string]map[int64]counters{}
 	for _, row := range rows {
-		totals[row.ModelName] = counters{
+		mergeModelBucket(modelBuckets, row.ModelName, row.BucketTs, counters{
 			requestCount:   row.RequestCount,
 			successCount:   row.SuccessCount,
 			totalLatencyMs: row.TotalLatencyMs,
+			ttftSumMs:      row.TtftSumMs,
+			ttftCount:      row.TtftCount,
 			outputTokens:   row.OutputTokens,
 			generationMs:   row.GenerationMs,
-		}
+		})
 	}
 
 	hotBuckets.Range(func(key, value any) bool {
@@ -163,40 +172,86 @@ func QuerySummaryAll(hours int, groups []string) (SummaryAllResult, error) {
 		if snap.requestCount == 0 {
 			return true
 		}
-		cur := totals[k.model]
-		cur.requestCount += snap.requestCount
-		cur.successCount += snap.successCount
-		cur.totalLatencyMs += snap.totalLatencyMs
-		cur.outputTokens += snap.outputTokens
-		cur.generationMs += snap.generationMs
-		totals[k.model] = cur
+		mergeModelBucket(modelBuckets, k.model, k.bucketTs, snap)
 		return true
 	})
 
-	models := make([]ModelSummary, 0, len(totals))
-	for name, total := range totals {
+	return SummaryAllResult{Models: buildModelSummaries(modelBuckets)}, nil
+}
+
+func mergeModelBucket(modelBuckets map[string]map[int64]counters, modelName string, bucketTs int64, value counters) {
+	if value.requestCount == 0 {
+		return
+	}
+	if _, ok := modelBuckets[modelName]; !ok {
+		modelBuckets[modelName] = map[int64]counters{}
+	}
+	current := modelBuckets[modelName][bucketTs]
+	current.requestCount += value.requestCount
+	current.successCount += value.successCount
+	current.totalLatencyMs += value.totalLatencyMs
+	current.ttftSumMs += value.ttftSumMs
+	current.ttftCount += value.ttftCount
+	current.outputTokens += value.outputTokens
+	current.generationMs += value.generationMs
+	modelBuckets[modelName][bucketTs] = current
+}
+
+func buildModelSummaries(modelBuckets map[string]map[int64]counters) []ModelSummary {
+	models := make([]ModelSummary, 0, len(modelBuckets))
+	for modelName, buckets := range modelBuckets {
+		timestamps := make([]int64, 0, len(buckets))
+		for ts := range buckets {
+			timestamps = append(timestamps, ts)
+		}
+		sort.Slice(timestamps, func(i, j int) bool {
+			return timestamps[i] < timestamps[j]
+		})
+
+		total := counters{}
+		series := make([]BucketPoint, 0, len(timestamps))
+		for _, ts := range timestamps {
+			value := buckets[ts]
+			if value.requestCount == 0 {
+				continue
+			}
+			total.requestCount += value.requestCount
+			total.successCount += value.successCount
+			total.totalLatencyMs += value.totalLatencyMs
+			total.ttftSumMs += value.ttftSumMs
+			total.ttftCount += value.ttftCount
+			total.outputTokens += value.outputTokens
+			total.generationMs += value.generationMs
+			series = append(series, summaryBucketPoint(ts, value))
+		}
 		if total.requestCount == 0 {
 			continue
 		}
-		avgLatency := total.totalLatencyMs / total.requestCount
-		successRate := float64(total.successCount) / float64(total.requestCount) * 100
-		avgTps := 0.0
-		if total.generationMs > 0 {
-			avgTps = float64(total.outputTokens) / (float64(total.generationMs) / 1000.0)
-		}
+
 		models = append(models, ModelSummary{
-			ModelName:    name,
-			AvgLatencyMs: avgLatency,
-			SuccessRate:  math.Round(successRate*100) / 100,
-			AvgTps:       math.Round(avgTps*100) / 100,
+			ModelName:    modelName,
+			AvgLatencyMs: avg(total.totalLatencyMs, total.requestCount),
+			SuccessRate:  math.Round(successRate(total)*100) / 100,
+			AvgTps:       math.Round(avgTps(total)*100) / 100,
+			Series:       series,
 			RequestCount: total.requestCount,
 		})
 	}
 	sort.Slice(models, func(i, j int) bool {
+		if models[i].RequestCount == models[j].RequestCount {
+			return models[i].ModelName < models[j].ModelName
+		}
 		return models[i].RequestCount > models[j].RequestCount
 	})
+	return models
+}
 
-	return SummaryAllResult{Models: models}, nil
+// 摘要接口只公开卡片需要的分时成功率，避免批量接口携带冗余的分时性能明细。
+func summaryBucketPoint(ts int64, value counters) BucketPoint {
+	return BucketPoint{
+		Ts:          ts,
+		SuccessRate: math.Round(successRate(value)*100) / 100,
+	}
 }
 
 func allowedGroupSet(groups []string) map[string]struct{} {
