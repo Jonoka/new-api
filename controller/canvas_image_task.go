@@ -529,7 +529,7 @@ func buildCanvasImageTaskResult(task *model.Task) gin.H {
 		case strings.TrimSpace(item.URL) != "":
 			next["url"] = item.URL
 		case strings.TrimSpace(item.B64JSON) != "":
-			next["url"] = canvasImageTaskContentPath(task.TaskID, index)
+			next["url"] = signedCanvasImageTaskContentPath(task, index)
 		default:
 			continue
 		}
