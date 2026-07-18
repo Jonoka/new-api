@@ -378,7 +378,26 @@ func ModelPrice2JSONString() string {
 }
 
 func UpdateModelPriceByJSONString(jsonStr string) error {
-	return types.LoadFromJsonStringWithCallback(modelPriceMap, jsonStr, InvalidateExposedDataCache)
+	prices := make(map[string]float64)
+	if err := common.UnmarshalJsonStr(jsonStr, &prices); err != nil {
+		return err
+	}
+	// 持久化配置按“覆盖项”理解。升级前保存的稀疏配置不包含后续新增的
+	// 内置模型价格，必须在运行时补齐，否则价格单位存在但基础价格缺失，
+	// 管理端会把按秒视频模型误判成按量计费。
+	merged := make(map[string]float64, len(defaultModelPrice)+len(prices))
+	for modelName, price := range defaultModelPrice {
+		merged[modelName] = price
+	}
+	for modelName, price := range prices {
+		// 显式配置（包括 0）始终覆盖内置默认值。
+		merged[modelName] = price
+	}
+	normalized, err := common.Marshal(merged)
+	if err != nil {
+		return err
+	}
+	return types.LoadFromJsonStringWithCallback(modelPriceMap, string(normalized), InvalidateExposedDataCache)
 }
 
 func ModelPriceUnit2JSONString() string {

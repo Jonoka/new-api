@@ -71,3 +71,33 @@ func TestUpdateModelPriceUnitInvalidatesPricingCache(t *testing.T) {
 	require.Empty(t, pricingMap)
 	require.True(t, lastGetPricingTime.IsZero())
 }
+
+func TestUpdateModelPriceReturnsEffectiveDefaultsToAdmin(t *testing.T) {
+	originalOptionMap := common.OptionMap
+	originalPrices := ratio_setting.ModelPrice2JSONString()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptionMap
+		common.OptionMapRWMutex.Unlock()
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(originalPrices))
+		InvalidatePricingCache()
+	})
+
+	common.OptionMapRWMutex.Lock()
+	common.OptionMap = make(map[string]string)
+	common.OptionMapRWMutex.Unlock()
+	pricingMap = []Pricing{{ModelName: "cached-model"}}
+	lastGetPricingTime = time.Now()
+
+	require.NoError(t, updateOptionMap("ModelPrice", `{"custom-video":0.12}`))
+
+	common.OptionMapRWMutex.RLock()
+	effective := common.OptionMap["ModelPrice"]
+	common.OptionMapRWMutex.RUnlock()
+	var prices map[string]float64
+	require.NoError(t, common.UnmarshalJsonStr(effective, &prices))
+	require.Equal(t, 0.12, prices["custom-video"])
+	require.Equal(t, 0.08, prices["grok-imagine-video-1.5"])
+	require.Empty(t, pricingMap)
+	require.True(t, lastGetPricingTime.IsZero())
+}

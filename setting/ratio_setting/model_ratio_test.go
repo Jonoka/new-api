@@ -65,6 +65,48 @@ func TestDefaultXAIModelPricesArePerSecondBasePrices(t *testing.T) {
 	}
 }
 
+func TestUpdateModelPriceMergesBuiltInDefaultsAndPreservesOverrides(t *testing.T) {
+	original := modelPriceMap.ReadAll()
+	defer func() {
+		modelPriceMap.Clear()
+		modelPriceMap.AddAll(original)
+	}()
+
+	if err := UpdateModelPriceByJSONString(`{"custom-video":0,"grok-imagine-video-1.5":0.09}`); err != nil {
+		t.Fatalf("UpdateModelPriceByJSONString() error = %v", err)
+	}
+
+	prices := GetModelPriceMap()
+	if got := prices["custom-video"]; got != 0 {
+		t.Fatalf("custom-video explicit zero price = %v, want 0", got)
+	}
+	if got := prices["grok-imagine-video-1.5"]; got != 0.09 {
+		t.Fatalf("grok-imagine-video-1.5 override = %v, want 0.09", got)
+	}
+	if got := prices["grok-imagine-video"]; got != 0.05 {
+		t.Fatalf("sparse update dropped built-in grok price: %v", got)
+	}
+}
+
+func TestUpdateModelPriceInvalidJsonDoesNotChangeCurrentConfig(t *testing.T) {
+	original := modelPriceMap.ReadAll()
+	defer func() {
+		modelPriceMap.Clear()
+		modelPriceMap.AddAll(original)
+	}()
+
+	if err := UpdateModelPriceByJSONString(`{"custom-video":0.12}`); err != nil {
+		t.Fatalf("UpdateModelPriceByJSONString() error = %v", err)
+	}
+	before := ModelPrice2JSONString()
+	if err := UpdateModelPriceByJSONString(`{"custom-video":`); err == nil {
+		t.Fatal("UpdateModelPriceByJSONString(invalid JSON) error = nil")
+	}
+	if after := ModelPrice2JSONString(); after != before {
+		t.Fatalf("invalid update changed prices: before=%s after=%s", before, after)
+	}
+}
+
 func TestUpdateModelPriceUnitRejectsInvalidUnitWithoutChangingCurrentConfig(t *testing.T) {
 	original := modelPriceUnitMap.ReadAll()
 	defer func() {

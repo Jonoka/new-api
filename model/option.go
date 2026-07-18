@@ -637,6 +637,10 @@ func updateOptionMap(key string, value string) (err error) {
 		err = ratio_setting.UpdateCompletionRatioByJSONString(value)
 	case "ModelPrice":
 		err = ratio_setting.UpdateModelPriceByJSONString(value)
+		if err == nil {
+			// 返回包含内置默认值的有效配置，确保价格与价格单位在管理端成对出现。
+			common.OptionMap[key] = ratio_setting.ModelPrice2JSONString()
+		}
 	case "ModelPriceUnit":
 		err = ratio_setting.UpdateModelPriceUnitByJSONString(value)
 		if err == nil {

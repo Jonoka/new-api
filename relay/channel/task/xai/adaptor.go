@@ -22,7 +22,6 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
@@ -246,28 +245,7 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 // AdjustBillingOnComplete 在 xAI 返回实际视频时长时进行差额结算。
 // 上游未返回时长时返回 0，继续保留按请求时长计算的预扣额度。
 func (a *TaskAdaptor) AdjustBillingOnComplete(task *model.Task, taskResult *relaycommon.TaskInfo) int {
-	if task == nil || taskResult == nil || taskResult.DurationSeconds <= 0 {
-		return 0
-	}
-	billing := task.PrivateData.BillingContext
-	if billing == nil || billing.ModelPriceUnit != types.ModelPriceUnitSecond {
-		return 0
-	}
-
-	quotaValue := billing.ModelPrice * common.QuotaPerUnit * billing.GroupRatio * float64(taskResult.DurationSeconds)
-	for key, ratio := range billing.OtherRatios {
-		if key == "seconds" || !(ratio > 0) || math.IsInf(ratio, 1) || ratio == 1 {
-			continue
-		}
-		quotaValue *= ratio
-	}
-
-	if billing.OtherRatios == nil {
-		billing.OtherRatios = make(map[string]float64)
-	}
-	billing.OtherRatios["seconds"] = float64(taskResult.DurationSeconds)
-	quota, _ := common.QuotaFromFloatChecked(quotaValue)
-	return quota
+	return taskcommon.AdjustPerSecondBillingOnComplete(task, taskResult)
 }
 
 func (a *TaskAdaptor) BuildRequestURL(_ *relaycommon.RelayInfo) (string, error) {
