@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,43 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestBuildTaskConsumptionLogContentShowsEffectiveVariantPrice(t *testing.T) {
+	quota, err := common.QuotaFromFloatStrict(0.7 * common.QuotaPerUnit)
+	require.NoError(t, err)
+	info := &relaycommon.RelayInfo{
+		TaskRelayInfo:   &relaycommon.TaskRelayInfo{Action: "textGenerate"},
+		OriginModelName: "grok-imagine-video",
+		PriceData: types.PriceData{
+			UsePrice:       true,
+			ModelPrice:     0.07,
+			ModelPriceUnit: types.ModelPriceUnitSecond,
+			Quota:          quota,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+			OtherRatios:    map[string]float64{"seconds": 10},
+			BillingMeta: map[string]string{
+				"resolution":           "720p",
+				"variant_price_status": "matched",
+			},
+		},
+	}
+	content := buildTaskConsumptionLogContent(info)
+	for _, want := range []string{
+		"按秒计费",
+		"计费分辨率 720p",
+		"档位单价 $0.070000 / 秒",
+		"时长 10 秒",
+		"分组倍率 1",
+		"合计 $0.700000",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("log content %q does not contain %q", content, want)
+		}
+	}
+	if strings.Contains(content, "resolution: 1.40") {
+		t.Fatalf("log content still exposes legacy ratio: %q", content)
+	}
+}
 
 func TestMain(m *testing.M) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -409,6 +447,10 @@ func TestRecalculatePersistsQuotaAndBillingContext(t *testing.T) {
 
 	task := makeTask(userID, channelID, preConsumed, 0, BillingSourceWallet, 0)
 	task.PrivateData.BillingContext.OtherRatios = map[string]float64{"seconds": 8}
+	task.PrivateData.BillingContext.BillingMeta = map[string]string{
+		"resolution":           "720p",
+		"variant_price_status": "matched",
+	}
 	require.NoError(t, model.DB.Create(task).Error)
 
 	// 模拟适配器在终态响应中拿到实际时长后更新计费快照。
@@ -420,6 +462,8 @@ func TestRecalculatePersistsQuotaAndBillingContext(t *testing.T) {
 	assert.Equal(t, actualQuota, reloaded.Quota)
 	require.NotNil(t, reloaded.PrivateData.BillingContext)
 	assert.Equal(t, float64(10), reloaded.PrivateData.BillingContext.OtherRatios["seconds"])
+	assert.Equal(t, "720p", reloaded.PrivateData.BillingContext.BillingMeta["resolution"])
+	assert.Equal(t, "matched", reloaded.PrivateData.BillingContext.BillingMeta["variant_price_status"])
 }
 
 func TestRecalculate_Subscription_NegativeDelta(t *testing.T) {

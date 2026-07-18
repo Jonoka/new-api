@@ -14,6 +14,7 @@ func TestNormalizeVideoResolution(t *testing.T) {
 	tests := map[string]string{
 		"SD":        "480p",
 		"1280x720":  "720p",
+		"720x1280":  "720p",
 		"full_hd":   "1080p",
 		"2560x1440": "2k",
 		"4K":        "4k",

@@ -174,6 +174,25 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	return ratios
 }
 
+func (a *TaskAdaptor) EstimateTaskBillingSpec(c *gin.Context, _ *relaycommon.RelayInfo) channel.TaskBillingSpec {
+	req, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return channel.TaskBillingSpec{}
+	}
+	payload, err := a.convertToRequestPayload(&req)
+	if err != nil {
+		return channel.TaskBillingSpec{}
+	}
+	resolution := taskcommon.NormalizeVideoResolution(payload.Resolution)
+	if resolution == "" {
+		return channel.TaskBillingSpec{}
+	}
+	return channel.TaskBillingSpec{
+		Dimensions:      map[string]string{"resolution": resolution},
+		LegacyRatioKeys: []string{"resolution"},
+	}
+}
+
 // configuredResolutionPriceRatio 兼容将分辨率编码进模型价格键的开源实现：
 // base-model + resolution=1080p 可读取 base-model-1080p 的每秒绝对价格。
 // 若客户端本身请求的模型名已经带该后缀，则基础 ModelPrice 已是档位价，不再重复乘。

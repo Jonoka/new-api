@@ -43,6 +43,7 @@ import { ModelRatioVisualEditor } from './model-ratio-visual-editor'
 type ModelFormValues = {
   ModelPrice: string
   ModelPriceUnit: string
+  ModelPriceVariants: string
   ModelRatio: string
   CacheRatio: string
   CreateCacheRatio: string
@@ -130,6 +131,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
             <ModelRatioVisualEditor
               modelPrice={form.watch('ModelPrice')}
               modelPriceUnit={form.watch('ModelPriceUnit')}
+              modelPriceVariants={form.watch('ModelPriceVariants')}
               modelRatio={form.watch('ModelRatio')}
               cacheRatio={form.watch('CacheRatio')}
               createCacheRatio={form.watch('CreateCacheRatio')}
@@ -206,6 +208,25 @@ export const ModelRatioForm = memo(function ModelRatioForm({
                   <FormDescription>
                     {t(
                       'JSON map of model → "request" or "second". Missing entries default to "request".'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='ModelPriceVariants'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Model specification prices')}</FormLabel>
+                  <FormControl>
+                    <Textarea rows={10} {...field} />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'JSON map of model → specification switches and final fixed-price rules.'
                     )}
                   </FormDescription>
                   <FormMessage />

@@ -32,7 +32,7 @@ import {
 import { parseTags } from '../lib/filters'
 import { getGroupDisplayName } from '../lib/group-names'
 import { getModelPriceUnit, isTokenBasedModel } from '../lib/model-helpers'
-import { formatPrice, formatRequestPrice } from '../lib/price'
+import { formatPrice, formatRequestPriceDisplay } from '../lib/price'
 import type { GroupNameMap, PricingModel, TokenUnit } from '../types'
 import { ModelPerfBadge, type ModelPerfBadgeData } from './model-perf-badge'
 
@@ -86,6 +86,12 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
         groupRatioMultiplier: getDynamicDisplayGroupRatio(props.model),
       })
     : null
+  const fixedPriceDisplay = formatRequestPriceDisplay(
+    props.model,
+    showRechargePrice,
+    priceRate,
+    usdExchangeRate
+  )
 
   const primaryGroup = groups[0]
   const bottomTags = [...endpoints.slice(0, 2), ...tags.slice(0, 2)]
@@ -200,12 +206,8 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
               ) : (
                 <span className='text-muted-foreground whitespace-nowrap'>
                   <span className='text-foreground font-mono font-semibold'>
-                    {formatRequestPrice(
-                      props.model,
-                      showRechargePrice,
-                      priceRate,
-                      usdExchangeRate
-                    )}
+                    {fixedPriceDisplay.hasVariants && `${t('from')} `}
+                    {fixedPriceDisplay.formatted}
                   </span>{' '}
                   / {fixedPriceUnitLabel}
                 </span>

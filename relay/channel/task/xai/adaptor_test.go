@@ -101,6 +101,33 @@ func TestBuildRequestBodyMapsWidthAndHeight(t *testing.T) {
 	}
 }
 
+func TestExplicitResolutionWinsOverConflictingSizeForBilling(t *testing.T) {
+	c, _ := newJSONContext(t, `{
+		"model":"grok-imagine-video",
+		"prompt":"竖屏视频",
+		"resolution":"480p",
+		"size":"720x1280",
+		"duration":10
+	}`)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "grok-imagine-video"}}
+	adaptor := &TaskAdaptor{}
+	if taskErr := adaptor.ValidateRequestAndSetAction(c, info); taskErr != nil {
+		t.Fatalf("ValidateRequestAndSetAction() error = %v", taskErr)
+	}
+
+	dimensions := adaptor.EstimateTaskBillingSpec(c, info).Dimensions
+	if got := dimensions["resolution"]; got != "480p" {
+		t.Fatalf("billing resolution = %q, want 480p", got)
+	}
+	if got := adaptor.EstimateBilling(c, info)["resolution"]; got != 1 {
+		t.Fatalf("legacy resolution ratio = %v, want 1", got)
+	}
+	body := mustBuildRequestBody(t, adaptor, c, info)
+	if body.Resolution != "480p" || body.AspectRatio != "9:16" {
+		t.Fatalf("upstream format = %q/%q, want 9:16/480p", body.AspectRatio, body.Resolution)
+	}
+}
+
 func TestBuildRequestBodyMapsMultipleImagesToReferences(t *testing.T) {
 	c, _ := newJSONContext(t, `{
 		"model":"grok-imagine-video",

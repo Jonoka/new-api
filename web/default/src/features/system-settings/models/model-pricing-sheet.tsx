@@ -27,6 +27,13 @@ import {
   normalizeModelPriceUnit,
   type ModelPriceUnit,
 } from '@/lib/model-price-unit'
+import {
+  getModelPriceVariantCombinationKey,
+  isGrokImagineVideoModel,
+  normalizeModelPriceVariantQuality,
+  normalizeModelPriceVariantResolution,
+  type ModelPriceVariantConfig,
+} from '@/lib/model-price-variants'
 import { cn } from '@/lib/utils'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -38,9 +45,13 @@ import {
 } from '@/components/ui/collapsible'
 import {
   Field,
+  FieldContent,
   FieldDescription,
+  FieldError,
   FieldGroup,
   FieldLabel,
+  FieldLegend,
+  FieldSet,
 } from '@/components/ui/field'
 import {
   Form,
@@ -73,6 +84,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   sideDrawerContentClassName,
@@ -116,6 +128,8 @@ export type ModelRatioData = {
   name: string
   price?: string
   priceUnit?: ModelPriceUnit
+  /** null 表示删除显式覆盖并恢复后端内置继承配置。 */
+  priceVariant?: ModelPriceVariantConfig | null
   ratio?: string
   cacheRatio?: string
   createCacheRatio?: string
@@ -151,7 +165,39 @@ type PreviewRow = {
   multiline?: boolean
 }
 
+type PriceVariantRuleDraft = {
+  id: string
+  resolution: string
+  quality: string
+  price: string
+}
+
+type PriceVariantDraft = {
+  configured: boolean
+  resolutionEnabled: boolean
+  qualityEnabled: boolean
+  rules: PriceVariantRuleDraft[]
+  inherited: boolean
+  restoreInherited: boolean
+}
+
+type PriceVariantRuleErrors = Partial<
+  Record<'resolution' | 'quality' | 'price' | 'duplicate', string>
+>
+
+type PriceVariantValidation = {
+  sectionError?: string
+  ruleErrors: Record<string, PriceVariantRuleErrors>
+  valid: boolean
+}
+
 const numericDraftRegex = /^(\d+(\.\d*)?|\.\d*)?$/
+let priceVariantRuleSequence = 0
+
+function createPriceVariantRuleId(): string {
+  priceVariantRuleSequence += 1
+  return `model-price-variant-rule-${priceVariantRuleSequence}`
+}
 
 const EMPTY_LANE_PRICES: Record<LaneKey, string> = {
   completion: '',
@@ -223,6 +269,189 @@ const laneConfigs: Array<{
     placeholder: '15.11',
   },
 ]
+
+function createInitialPriceVariantDraft(
+  data?: ModelRatioData | null
+): PriceVariantDraft {
+  const config = data?.priceVariant
+  if (config === null) {
+    return {
+      configured: false,
+      resolutionEnabled: false,
+      qualityEnabled: false,
+      rules: [],
+      inherited: false,
+      restoreInherited: true,
+    }
+  }
+
+  return {
+    configured: config !== undefined,
+    resolutionEnabled: config?.resolution_enabled ?? false,
+    qualityEnabled: config?.quality_enabled ?? false,
+    rules: (config?.rules ?? []).map((rule) => ({
+      id: createPriceVariantRuleId(),
+      resolution: rule.resolution ?? '',
+      quality: rule.quality ?? '',
+      price: String(rule.price),
+    })),
+    inherited: config?.inherited === true,
+    restoreInherited: false,
+  }
+}
+
+function validatePriceVariantDraft(
+  draft: PriceVariantDraft,
+  modelName: string,
+  t: (key: string) => string
+): PriceVariantValidation {
+  const resolutionEnabled = draft.resolutionEnabled
+  const qualityEnabled =
+    !isGrokImagineVideoModel(modelName) && draft.qualityEnabled
+  const ruleErrors: Record<string, PriceVariantRuleErrors> = {}
+
+  if (draft.restoreInherited || (!resolutionEnabled && !qualityEnabled)) {
+    return { ruleErrors, valid: true }
+  }
+  if (draft.rules.length === 0) {
+    return {
+      sectionError: t('Add at least one specification price rule.'),
+      ruleErrors,
+      valid: false,
+    }
+  }
+
+  const combinations = new Map<string, string>()
+  const setRuleError = (
+    ruleId: string,
+    field: keyof PriceVariantRuleErrors,
+    message: string
+  ) => {
+    ruleErrors[ruleId] = { ...ruleErrors[ruleId], [field]: message }
+  }
+
+  draft.rules.forEach((rule) => {
+    const resolution = rule.resolution.trim()
+    const quality = rule.quality.trim()
+    if (resolutionEnabled && !resolution) {
+      setRuleError(rule.id, 'resolution', t('Resolution is required.'))
+    }
+    if (qualityEnabled && !quality) {
+      setRuleError(rule.id, 'quality', t('Quality tier is required.'))
+    }
+    if (!rule.price.trim()) {
+      setRuleError(rule.id, 'price', t('Price is required.'))
+    } else {
+      const price = Number(rule.price)
+      if (!Number.isFinite(price) || price < 0) {
+        setRuleError(rule.id, 'price', t('Enter a valid non-negative price.'))
+      }
+    }
+
+    if ((!resolutionEnabled || resolution) && (!qualityEnabled || quality)) {
+      const combination = getModelPriceVariantCombinationKey(
+        resolutionEnabled ? resolution : '',
+        qualityEnabled ? quality : ''
+      )
+      const existingRuleId = combinations.get(combination)
+      if (existingRuleId) {
+        const message = t('This specification combination is duplicated.')
+        setRuleError(existingRuleId, 'duplicate', message)
+        setRuleError(rule.id, 'duplicate', message)
+      } else {
+        combinations.set(combination, rule.id)
+      }
+    }
+  })
+
+  return {
+    ruleErrors,
+    valid: Object.keys(ruleErrors).length === 0,
+  }
+}
+
+function buildPriceVariantConfig(
+  draft: PriceVariantDraft,
+  modelName: string
+): ModelPriceVariantConfig | null | undefined {
+  if (draft.restoreInherited) return null
+
+  const qualityEnabled =
+    !isGrokImagineVideoModel(modelName) && draft.qualityEnabled
+  if (
+    !draft.configured &&
+    !draft.resolutionEnabled &&
+    !qualityEnabled &&
+    draft.rules.length === 0
+  ) {
+    return undefined
+  }
+
+  const config: ModelPriceVariantConfig = {
+    resolution_enabled: draft.resolutionEnabled,
+    quality_enabled: qualityEnabled,
+    inherited: draft.inherited,
+  }
+  if (draft.resolutionEnabled || qualityEnabled) {
+    config.rules = draft.rules.map((rule) => ({
+      ...(draft.resolutionEnabled
+        ? {
+            resolution: draft.inherited
+              ? rule.resolution
+              : normalizeModelPriceVariantResolution(rule.resolution),
+          }
+        : {}),
+      ...(qualityEnabled
+        ? {
+            quality: draft.inherited
+              ? rule.quality
+              : normalizeModelPriceVariantQuality(rule.quality),
+          }
+        : {}),
+      price: Number(rule.price),
+    }))
+  }
+  return config
+}
+
+function buildPriceVariantPreview(
+  draft: PriceVariantDraft,
+  modelName: string,
+  t: (key: string) => string
+): string | null {
+  if (draft.restoreInherited) return t('Restore inherited defaults')
+
+  const qualityEnabled =
+    !isGrokImagineVideoModel(modelName) && draft.qualityEnabled
+  if (
+    !draft.configured &&
+    !draft.resolutionEnabled &&
+    !qualityEnabled &&
+    draft.rules.length === 0
+  ) {
+    return null
+  }
+
+  const preview: Record<string, unknown> = {
+    resolution_enabled: draft.resolutionEnabled,
+    quality_enabled: qualityEnabled,
+    inherited: draft.inherited,
+  }
+  if (draft.resolutionEnabled || qualityEnabled) {
+    preview.rules = draft.rules.map((rule) => {
+      const price = Number(rule.price)
+      return {
+        ...(draft.resolutionEnabled
+          ? { resolution: rule.resolution || t('Empty') }
+          : {}),
+        ...(qualityEnabled ? { quality: rule.quality || t('Empty') } : {}),
+        price: rule.price.trim() && Number.isFinite(price) ? price : t('Empty'),
+      }
+    })
+  }
+
+  return JSON.stringify(preview, null, 2)
+}
 
 function hasValue(value: unknown): boolean {
   return (
@@ -310,6 +539,7 @@ function buildPreviewRows(
   lanePrices: Record<LaneKey, string>,
   laneEnabled: Record<LaneKey, boolean>,
   priceUnit: ModelPriceUnit,
+  priceVariantPreview: string | null,
   t: (key: string) => string
 ): PreviewRow[] {
   if (mode === 'tiered_expr') {
@@ -326,7 +556,7 @@ function buildPreviewRows(
   }
 
   if (mode === 'per-request') {
-    return [
+    const rows: PreviewRow[] = [
       {
         key: 'price',
         label: 'ModelPrice',
@@ -338,6 +568,15 @@ function buildPreviewRows(
         value: priceUnit,
       },
     ]
+    if (priceVariantPreview) {
+      rows.push({
+        key: 'priceVariants',
+        label: 'ModelPriceVariants',
+        value: priceVariantPreview,
+        multiline: true,
+      })
+    }
+    return rows
   }
 
   return [
@@ -455,6 +694,10 @@ export function ModelPricingEditorPanel({
   const [priceUnit, setPriceUnit] = useState<ModelPriceUnit>(
     MODEL_PRICE_UNITS.REQUEST
   )
+  const [priceVariantDraft, setPriceVariantDraft] = useState<PriceVariantDraft>(
+    () => createInitialPriceVariantDraft()
+  )
+  const [showPriceVariantErrors, setShowPriceVariantErrors] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(true)
   const isEditMode = !!editData
 
@@ -519,6 +762,8 @@ export function ModelPricingEditorPanel({
     setPromptPrice(nextLaneState.promptPrice)
     setLanePrices(nextLaneState.prices)
     setLaneEnabled(nextLaneState.enabled)
+    setPriceVariantDraft(createInitialPriceVariantDraft(editData))
+    setShowPriceVariantErrors(false)
     setPreviewOpen(true)
   }, [editData, form])
 
@@ -634,6 +879,72 @@ export function ModelPricingEditorPanel({
     }
   }
 
+  const updatePriceVariantDraft = (
+    updater: (current: PriceVariantDraft) => PriceVariantDraft
+  ) => {
+    setPriceVariantDraft((current) => ({
+      ...updater(current),
+      configured: true,
+      inherited: false,
+      restoreInherited: false,
+    }))
+  }
+
+  const handlePriceVariantSwitchChange = (
+    field: 'resolutionEnabled' | 'qualityEnabled',
+    checked: boolean
+  ) => {
+    updatePriceVariantDraft((current) => ({ ...current, [field]: checked }))
+  }
+
+  const handleAddPriceVariantRule = () => {
+    updatePriceVariantDraft((current) => ({
+      ...current,
+      rules: [
+        ...current.rules,
+        {
+          id: createPriceVariantRuleId(),
+          resolution: '',
+          quality: '',
+          price: '',
+        },
+      ],
+    }))
+  }
+
+  const handleRemovePriceVariantRule = (ruleId: string) => {
+    updatePriceVariantDraft((current) => ({
+      ...current,
+      rules: current.rules.filter((rule) => rule.id !== ruleId),
+    }))
+  }
+
+  const handlePriceVariantRuleChange = (
+    ruleId: string,
+    field: 'resolution' | 'quality' | 'price',
+    value: string
+  ) => {
+    if (field === 'price' && !numericDraftRegex.test(value)) return
+    updatePriceVariantDraft((current) => ({
+      ...current,
+      rules: current.rules.map((rule) =>
+        rule.id === ruleId ? { ...rule, [field]: value } : rule
+      ),
+    }))
+  }
+
+  const handleRestoreInheritedPriceVariants = () => {
+    setPriceVariantDraft({
+      configured: false,
+      resolutionEnabled: false,
+      qualityEnabled: false,
+      rules: [],
+      inherited: false,
+      restoreInherited: true,
+    })
+    setShowPriceVariantErrors(false)
+  }
+
   const handleModeChange = (value: string) => {
     const nextMode = value as PricingMode
     setPricingMode(nextMode)
@@ -646,6 +957,15 @@ export function ModelPricingEditorPanel({
   }
 
   const watchedValues = form.watch()
+  const activeModelName = watchedValues.name || editData?.name || ''
+  const priceVariantValidation = useMemo(
+    () => validatePriceVariantDraft(priceVariantDraft, activeModelName, t),
+    [activeModelName, priceVariantDraft, t]
+  )
+  const priceVariantPreview = useMemo(
+    () => buildPriceVariantPreview(priceVariantDraft, activeModelName, t),
+    [activeModelName, priceVariantDraft, t]
+  )
   const previewRows = useMemo(
     () =>
       buildPreviewRows(
@@ -657,6 +977,7 @@ export function ModelPricingEditorPanel({
         lanePrices,
         laneEnabled,
         priceUnit,
+        priceVariantPreview,
         t
       ),
     [
@@ -665,6 +986,7 @@ export function ModelPricingEditorPanel({
       lanePrices,
       pricingMode,
       priceUnit,
+      priceVariantPreview,
       promptPrice,
       requestRuleExpr,
       t,
@@ -718,6 +1040,26 @@ export function ModelPricingEditorPanel({
   }, [editData, laneEnabled, lanePrices, pricingMode, promptPrice, t])
 
   const handleSubmit = (values: ModelPricingFormValues) => {
+    if (pricingMode === 'per-request') {
+      const price = values.price?.trim() ?? ''
+      const parsedPrice = Number(price)
+      if (!price) {
+        form.setError('price', { message: t('Price is required.') })
+        return
+      }
+      if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
+        form.setError('price', {
+          message: t('Enter a valid non-negative price.'),
+        })
+        return
+      }
+      form.clearErrors('price')
+      if (!priceVariantValidation.valid) {
+        setShowPriceVariantErrors(true)
+        return
+      }
+    }
+
     if (
       pricingMode === 'per-token' &&
       toNumberOrNull(promptPrice) === null &&
@@ -745,7 +1087,7 @@ export function ModelPricingEditorPanel({
     const data: ModelRatioData = {
       name: values.name.trim(),
       billingMode: pricingMode,
-      price: values.price || '',
+      price: values.price?.trim() || '',
       priceUnit:
         pricingMode === 'per-request' ||
         (pricingMode === 'tiered_expr' && hasValue(values.price))
@@ -758,6 +1100,10 @@ export function ModelPricingEditorPanel({
       imageRatio: values.imageRatio || '',
       audioRatio: values.audioRatio || '',
       audioCompletionRatio: values.audioCompletionRatio || '',
+      priceVariant:
+        pricingMode === 'per-request'
+          ? buildPriceVariantConfig(priceVariantDraft, values.name)
+          : undefined,
     }
 
     if (pricingMode === 'tiered_expr') {
@@ -770,7 +1116,7 @@ export function ModelPricingEditorPanel({
     onCancel?.()
   }
 
-  const activeName = watchedValues.name || editData?.name || t('New model')
+  const activeName = activeModelName || t('New model')
 
   return (
     <div
@@ -895,7 +1241,9 @@ export function ModelPricingEditorPanel({
                   className='flex flex-col gap-5'
                 >
                   <FormItem>
-                    <FormLabel>{t('Price unit')}</FormLabel>
+                    <FormLabel htmlFor='model-fixed-price-unit'>
+                      {t('Price unit')}
+                    </FormLabel>
                     <Select
                       items={[
                         {
@@ -914,7 +1262,10 @@ export function ModelPricingEditorPanel({
                         }
                       }}
                     >
-                      <SelectTrigger className='w-full'>
+                      <SelectTrigger
+                        id='model-fixed-price-unit'
+                        className='w-full'
+                      >
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent alignItemWithTrigger={false}>
@@ -933,15 +1284,16 @@ export function ModelPricingEditorPanel({
                   <FormField
                     control={form.control}
                     name='price'
-                    render={({ field }) => (
+                    render={({ field, fieldState }) => (
                       <FormItem>
-                        <FormLabel>{t('Fixed price')}</FormLabel>
+                        <FormLabel>{t('Fallback price')}</FormLabel>
                         <FormControl>
                           <InputGroup>
                             <InputGroupAddon>$</InputGroupAddon>
                             <InputGroupInput
                               inputMode='decimal'
                               placeholder='0.01'
+                              aria-invalid={fieldState.invalid}
                               {...field}
                               onChange={(event) => {
                                 const value = event.target.value
@@ -959,12 +1311,25 @@ export function ModelPricingEditorPanel({
                         </FormControl>
                         <FormDescription>
                           {t(
-                            'Cost in USD per billing unit, regardless of tokens used.'
+                            'Used only when no specification rule matches; it is not added to a rule price.'
                           )}
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
+                  />
+
+                  <SpecificationPricingEditor
+                    modelName={activeModelName}
+                    draft={priceVariantDraft}
+                    priceUnit={priceUnit}
+                    validation={priceVariantValidation}
+                    showErrors={showPriceVariantErrors}
+                    onSwitchChange={handlePriceVariantSwitchChange}
+                    onAddRule={handleAddPriceVariantRule}
+                    onRemoveRule={handleRemovePriceVariantRule}
+                    onRuleChange={handlePriceVariantRuleChange}
+                    onRestoreInherited={handleRestoreInheritedPriceVariants}
                   />
                 </TabsContent>
 
@@ -1052,6 +1417,251 @@ export function ModelPricingEditorPanel({
         </form>
       </Form>
     </div>
+  )
+}
+
+function SpecificationPricingEditor(props: {
+  modelName: string
+  draft: PriceVariantDraft
+  priceUnit: ModelPriceUnit
+  validation: PriceVariantValidation
+  showErrors: boolean
+  onSwitchChange: (
+    field: 'resolutionEnabled' | 'qualityEnabled',
+    checked: boolean
+  ) => void
+  onAddRule: () => void
+  onRemoveRule: (ruleId: string) => void
+  onRuleChange: (
+    ruleId: string,
+    field: 'resolution' | 'quality' | 'price',
+    value: string
+  ) => void
+  onRestoreInherited: () => void
+}) {
+  const { t } = useTranslation()
+  const hideQuality = isGrokImagineVideoModel(props.modelName)
+  const qualityEnabled = !hideQuality && props.draft.qualityEnabled
+  const hasActiveDimension = props.draft.resolutionEnabled || qualityEnabled
+  const canRestore =
+    hideQuality &&
+    !props.draft.inherited &&
+    (props.draft.configured ||
+      props.draft.restoreInherited ||
+      props.draft.rules.length > 0)
+  const unitLabel =
+    props.priceUnit === MODEL_PRICE_UNITS.SECOND
+      ? t('Per second')
+      : t('Per request')
+
+  return (
+    <FieldSet>
+      <FieldLegend>{t('Specification pricing')}</FieldLegend>
+      <FieldDescription>
+        {t(
+          'Each matching rule sets the final price for that specification and uses the selected fixed-price unit.'
+        )}
+      </FieldDescription>
+
+      {(props.draft.inherited || canRestore) && (
+        <div className='flex flex-wrap items-center gap-2'>
+          {props.draft.inherited && (
+            <Badge variant='outline'>{t('Inherited defaults')}</Badge>
+          )}
+          {canRestore && (
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              onClick={props.onRestoreInherited}
+            >
+              {t('Restore inherited defaults')}
+            </Button>
+          )}
+        </div>
+      )}
+
+      {props.draft.restoreInherited && (
+        <Alert>
+          <AlertDescription>
+            {t('Inherited defaults will be restored when this draft is saved.')}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <FieldGroup className='gap-3'>
+        <Field orientation='horizontal'>
+          <FieldContent>
+            <FieldLabel htmlFor='variant-resolution-enabled'>
+              {t('Price by resolution')}
+            </FieldLabel>
+            <FieldDescription>
+              {t('Match rules using the request resolution.')}
+            </FieldDescription>
+          </FieldContent>
+          <Switch
+            id='variant-resolution-enabled'
+            checked={props.draft.resolutionEnabled}
+            onCheckedChange={(checked) =>
+              props.onSwitchChange('resolutionEnabled', checked)
+            }
+            aria-label={t('Price by resolution')}
+          />
+        </Field>
+
+        {!hideQuality && (
+          <Field orientation='horizontal'>
+            <FieldContent>
+              <FieldLabel htmlFor='variant-quality-enabled'>
+                {t('Price by quality')}
+              </FieldLabel>
+              <FieldDescription>
+                {t('Match rules using the request quality tier.')}
+              </FieldDescription>
+            </FieldContent>
+            <Switch
+              id='variant-quality-enabled'
+              checked={props.draft.qualityEnabled}
+              onCheckedChange={(checked) =>
+                props.onSwitchChange('qualityEnabled', checked)
+              }
+              aria-label={t('Price by quality')}
+            />
+          </Field>
+        )}
+      </FieldGroup>
+
+      {hasActiveDimension ? (
+        <FieldGroup className='gap-3'>
+          {props.showErrors && props.validation.sectionError && (
+            <FieldError>{props.validation.sectionError}</FieldError>
+          )}
+
+          {props.draft.rules.map((rule, index) => {
+            const errors = props.showErrors
+              ? props.validation.ruleErrors[rule.id]
+              : undefined
+            const resolutionId = `${rule.id}-resolution`
+            const qualityId = `${rule.id}-quality`
+            const priceId = `${rule.id}-price`
+            return (
+              <FieldSet
+                key={rule.id}
+                className='rounded-lg border p-3'
+                data-invalid={errors ? true : undefined}
+              >
+                <FieldLegend className='sr-only'>
+                  {t('Specification rule {{index}}', { index: index + 1 })}
+                </FieldLegend>
+                <div
+                  className={cn(
+                    'grid gap-3',
+                    props.draft.resolutionEnabled && qualityEnabled
+                      ? 'sm:grid-cols-3'
+                      : 'sm:grid-cols-2'
+                  )}
+                >
+                  {props.draft.resolutionEnabled && (
+                    <Field data-invalid={Boolean(errors?.resolution)}>
+                      <FieldLabel htmlFor={resolutionId}>
+                        {t('Resolution')}
+                      </FieldLabel>
+                      <Input
+                        id={resolutionId}
+                        value={rule.resolution}
+                        placeholder='720p'
+                        aria-invalid={Boolean(errors?.resolution)}
+                        onChange={(event) =>
+                          props.onRuleChange(
+                            rule.id,
+                            'resolution',
+                            event.target.value
+                          )
+                        }
+                      />
+                      <FieldError>{errors?.resolution}</FieldError>
+                    </Field>
+                  )}
+
+                  {qualityEnabled && (
+                    <Field data-invalid={Boolean(errors?.quality)}>
+                      <FieldLabel htmlFor={qualityId}>
+                        {t('Quality tier')}
+                      </FieldLabel>
+                      <Input
+                        id={qualityId}
+                        value={rule.quality}
+                        placeholder={t('high')}
+                        aria-invalid={Boolean(errors?.quality)}
+                        onChange={(event) =>
+                          props.onRuleChange(
+                            rule.id,
+                            'quality',
+                            event.target.value
+                          )
+                        }
+                      />
+                      <FieldError>{errors?.quality}</FieldError>
+                    </Field>
+                  )}
+
+                  <Field data-invalid={Boolean(errors?.price)}>
+                    <FieldLabel htmlFor={priceId}>
+                      {t('Final price')}
+                    </FieldLabel>
+                    <InputGroup>
+                      <InputGroupAddon>$</InputGroupAddon>
+                      <InputGroupInput
+                        id={priceId}
+                        inputMode='decimal'
+                        value={rule.price}
+                        placeholder='0.01'
+                        aria-invalid={Boolean(errors?.price)}
+                        onChange={(event) =>
+                          props.onRuleChange(
+                            rule.id,
+                            'price',
+                            event.target.value
+                          )
+                        }
+                      />
+                      <InputGroupAddon align='inline-end'>
+                        {unitLabel}
+                      </InputGroupAddon>
+                    </InputGroup>
+                    <FieldError>{errors?.price}</FieldError>
+                  </Field>
+                </div>
+
+                <div className='flex items-center justify-between gap-3'>
+                  <FieldError>{errors?.duplicate}</FieldError>
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    className='ml-auto'
+                    onClick={() => props.onRemoveRule(rule.id)}
+                    aria-label={t('Delete specification rule {{index}}', {
+                      index: index + 1,
+                    })}
+                  >
+                    {t('Delete rule')}
+                  </Button>
+                </div>
+              </FieldSet>
+            )
+          })}
+
+          <Button type='button' variant='outline' onClick={props.onAddRule}>
+            {t('Add specification rule')}
+          </Button>
+        </FieldGroup>
+      ) : (
+        <FieldDescription>
+          {t('Enable a dimension to add specification price rules.')}
+        </FieldDescription>
+      )}
+    </FieldSet>
   )
 }
 

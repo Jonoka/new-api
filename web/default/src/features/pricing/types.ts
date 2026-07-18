@@ -20,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 // Pricing Types
 // ----------------------------------------------------------------------------
 import type { ModelPriceUnit } from '@/lib/model-price-unit'
+import type { ModelPriceVariantConfig } from '@/lib/model-price-variants'
 
 export type PricingVendor = {
   id: number
@@ -43,6 +44,7 @@ export type PricingModel = {
   completion_ratio: number
   model_price?: number
   model_price_unit?: ModelPriceUnit | ''
+  model_price_variants?: ModelPriceVariantConfig
   cache_ratio?: number | null
   create_cache_ratio?: number | null
   image_ratio?: number | null

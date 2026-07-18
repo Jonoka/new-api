@@ -18,6 +18,7 @@ import (
 	taskcommon "github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/pkg/errors"
 )
@@ -133,6 +134,37 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 		return nil, err
 	}
 	return bytes.NewReader(data), nil
+}
+
+func (a *TaskAdaptor) EstimateTaskBillingSpec(c *gin.Context, info *relaycommon.RelayInfo) channel.TaskBillingSpec {
+	req, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return channel.TaskBillingSpec{}
+	}
+	payload, err := a.convertToRequestPayload(&req, info)
+	if err != nil {
+		return channel.TaskBillingSpec{}
+	}
+	resolution := strings.ToLower(strings.TrimSpace(payload.Resolution))
+	if resolution == "" {
+		return channel.TaskBillingSpec{}
+	}
+	return channel.TaskBillingSpec{Dimensions: map[string]string{"resolution": resolution}}
+}
+
+func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
+	if info == nil || !info.PriceData.UsePrice || info.PriceData.ModelPriceUnit != types.ModelPriceUnitSecond {
+		return nil
+	}
+	req, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return nil
+	}
+	payload, err := a.convertToRequestPayload(&req, info)
+	if err != nil || payload.Duration <= 0 {
+		return nil
+	}
+	return map[string]float64{"seconds": float64(payload.Duration)}
 }
 
 func (a *TaskAdaptor) BuildRequestURL(info *relaycommon.RelayInfo) (string, error) {

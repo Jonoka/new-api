@@ -24,6 +24,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { isModelPriceUnitMap } from '@/lib/model-price-unit'
+import { isModelPriceVariantsMap } from '@/lib/model-price-variants'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { resetModelRatios } from '../api'
@@ -52,6 +53,18 @@ const modelSchema = z.object({
   ModelPriceUnit: z.string().superRefine((value, ctx) => {
     const result = validateJsonString(value, {
       predicate: isModelPriceUnitMap,
+      predicateMessage: 'Invalid JSON',
+    })
+    if (!result.valid) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: result.message || 'Invalid JSON',
+      })
+    }
+  }),
+  ModelPriceVariants: z.string().superRefine((value, ctx) => {
+    const result = validateJsonString(value, {
+      predicate: isModelPriceVariantsMap,
       predicateMessage: 'Invalid JSON',
     })
     if (!result.valid) {
@@ -251,6 +264,7 @@ export function RatioSettingsCard({
   const modelNormalizedDefaults = useRef({
     ModelPrice: normalizeJsonString(modelDefaults.ModelPrice),
     ModelPriceUnit: normalizeJsonString(modelDefaults.ModelPriceUnit),
+    ModelPriceVariants: normalizeJsonString(modelDefaults.ModelPriceVariants),
     ModelRatio: normalizeJsonString(modelDefaults.ModelRatio),
     CacheRatio: normalizeJsonString(modelDefaults.CacheRatio),
     CreateCacheRatio: normalizeJsonString(modelDefaults.CreateCacheRatio),
@@ -284,6 +298,9 @@ export function RatioSettingsCard({
       ...modelDefaults,
       ModelPrice: formatJsonForTextarea(modelDefaults.ModelPrice),
       ModelPriceUnit: formatJsonForTextarea(modelDefaults.ModelPriceUnit),
+      ModelPriceVariants: formatJsonForTextarea(
+        modelDefaults.ModelPriceVariants
+      ),
       ModelRatio: formatJsonForTextarea(modelDefaults.ModelRatio),
       CacheRatio: formatJsonForTextarea(modelDefaults.CacheRatio),
       CreateCacheRatio: formatJsonForTextarea(modelDefaults.CreateCacheRatio),
@@ -318,6 +335,7 @@ export function RatioSettingsCard({
     modelNormalizedDefaults.current = {
       ModelPrice: normalizeJsonString(modelDefaults.ModelPrice),
       ModelPriceUnit: normalizeJsonString(modelDefaults.ModelPriceUnit),
+      ModelPriceVariants: normalizeJsonString(modelDefaults.ModelPriceVariants),
       ModelRatio: normalizeJsonString(modelDefaults.ModelRatio),
       CacheRatio: normalizeJsonString(modelDefaults.CacheRatio),
       CreateCacheRatio: normalizeJsonString(modelDefaults.CreateCacheRatio),
@@ -336,6 +354,9 @@ export function RatioSettingsCard({
       ...modelDefaults,
       ModelPrice: formatJsonForTextarea(modelDefaults.ModelPrice),
       ModelPriceUnit: formatJsonForTextarea(modelDefaults.ModelPriceUnit),
+      ModelPriceVariants: formatJsonForTextarea(
+        modelDefaults.ModelPriceVariants
+      ),
       ModelRatio: formatJsonForTextarea(modelDefaults.ModelRatio),
       CacheRatio: formatJsonForTextarea(modelDefaults.CacheRatio),
       CreateCacheRatio: formatJsonForTextarea(modelDefaults.CreateCacheRatio),
@@ -381,6 +402,7 @@ export function RatioSettingsCard({
       const normalized = {
         ModelPrice: normalizeJsonString(values.ModelPrice),
         ModelPriceUnit: normalizeJsonString(values.ModelPriceUnit),
+        ModelPriceVariants: normalizeJsonString(values.ModelPriceVariants),
         ModelRatio: normalizeJsonString(values.ModelRatio),
         CacheRatio: normalizeJsonString(values.CacheRatio),
         CreateCacheRatio: normalizeJsonString(values.CreateCacheRatio),

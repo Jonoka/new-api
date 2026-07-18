@@ -50,6 +50,7 @@ import {
 } from '../hooks/useModelPricingEditorState';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
 import TieredPricingEditor from './TieredPricingEditor';
+import ModelPriceVariantsEditor from './ModelPriceVariantsEditor';
 
 const { Text } = Typography;
 const EMPTY_CANDIDATE_MODEL_NAMES = [];
@@ -124,6 +125,11 @@ export default function ModelPricingEditor({
     handleOptionalFieldToggle,
     handleNumericFieldChange,
     handlePriceUnitChange,
+    handleVariantDimensionChange,
+    handleVariantRuleChange,
+    addVariantRule,
+    deleteVariantRule,
+    restoreInheritedPriceVariants,
     handleBillingModeChange,
     handleBillingExprChange,
     handleRequestRuleExprChange,
@@ -490,6 +496,16 @@ export default function ModelPricingEditor({
                           ? '适合视频生成等按生成时长收费的模型。'
                           : '适合 MJ / 任务类等按次收费模型。',
                       )}
+                    />
+                    <ModelPriceVariantsEditor
+                      model={selectedModel}
+                      isMobile={isMobile}
+                      onDimensionChange={handleVariantDimensionChange}
+                      onRuleChange={handleVariantRuleChange}
+                      onAddRule={addVariantRule}
+                      onDeleteRule={deleteVariantRule}
+                      onRestoreInherited={restoreInheritedPriceVariants}
+                      t={t}
                     />
                   </>
                 ) : selectedModel.billingMode === 'tiered_expr' ? (

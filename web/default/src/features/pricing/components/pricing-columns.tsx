@@ -39,7 +39,7 @@ import { getGroupDisplayName } from '../lib/group-names'
 import { getModelPriceUnit, isTokenBasedModel } from '../lib/model-helpers'
 import {
   formatPrice,
-  formatRequestPrice,
+  formatRequestPriceDisplay,
   stripTrailingZeros,
 } from '../lib/price'
 import type { GroupNameMap, PricingModel, TokenUnit } from '../types'
@@ -263,14 +263,13 @@ export function usePricingColumns(
           )
         }
 
-        const price = stripTrailingZeros(
-          formatRequestPrice(
-            model,
-            showRechargePrice,
-            priceRate,
-            usdExchangeRate
-          )
+        const priceDisplay = formatRequestPriceDisplay(
+          model,
+          showRechargePrice,
+          priceRate,
+          usdExchangeRate
         )
+        const price = stripTrailingZeros(priceDisplay.formatted)
         const fixedPriceUnitLabel =
           getModelPriceUnit(model) === MODEL_PRICE_UNITS.SECOND
             ? t('second')
@@ -278,7 +277,10 @@ export function usePricingColumns(
 
         return (
           <div className='min-w-[100px]'>
-            <span className='font-mono text-sm tabular-nums'>{price}</span>
+            <span className='font-mono text-sm tabular-nums'>
+              {priceDisplay.hasVariants && `${t('from')} `}
+              {price}
+            </span>
             <div className='text-muted-foreground/50 text-[10px]'>
               / {fixedPriceUnitLabel}
             </div>

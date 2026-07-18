@@ -19,7 +19,15 @@ For commercial licensing, please contact support@quantumnous.com
 import { useEffect, useMemo, useState } from 'react';
 import {
   API,
+  buildModelPriceVariantsPreview,
+  cloneModelPriceVariantsState,
+  createEmptyModelPriceVariantRule,
+  createEmptyModelPriceVariantsState,
+  createModelPriceVariantsState,
+  isBuiltInGrokImagineVideoModel,
+  isGrokImagineVideoModel,
   normalizeModelPriceUnit,
+  serializeModelPriceVariants,
   showError,
   showSuccess,
 } from '../../../../helpers';
@@ -37,6 +45,8 @@ const EMPTY_MODEL = {
   billingMode: 'per-token',
   priceUnit: 'request',
   fixedPrice: '',
+  priceVariants: createEmptyModelPriceVariantsState(),
+  initialInheritedPriceVariants: null,
   inputPrice: '',
   completionPrice: '',
   cachePrice: '',
@@ -125,6 +135,13 @@ const normalizeCompletionRatioMeta = (rawMeta) => {
 
 const buildModelState = (name, sourceMaps) => {
   const billingMode = sourceMaps.ModelBillingMode?.[name];
+  const priceVariants = createModelPriceVariantsState(
+    sourceMaps.ModelPriceVariants?.[name],
+    name,
+  );
+  const initialInheritedPriceVariants = priceVariants.inherited
+    ? cloneModelPriceVariantsState(priceVariants, name)
+    : null;
   if (billingMode === 'tiered_expr') {
     const fullBillingExpr = sourceMaps.ModelBillingExpr?.[name] || '';
     const { billingExpr, requestRuleExpr } =
@@ -135,6 +152,8 @@ const buildModelState = (name, sourceMaps) => {
       billingMode: 'tiered_expr',
       billingExpr,
       requestRuleExpr,
+      priceVariants,
+      initialInheritedPriceVariants,
       rawRatios: { ...EMPTY_MODEL.rawRatios },
       hasConflict: false,
     };
@@ -164,9 +183,14 @@ const buildModelState = (name, sourceMaps) => {
   return {
     ...EMPTY_MODEL,
     name,
-    billingMode: hasValue(fixedPrice) ? 'per-request' : 'per-token',
+    billingMode:
+      hasValue(fixedPrice) || priceVariants.configured
+        ? 'per-request'
+        : 'per-token',
     priceUnit,
     fixedPrice,
+    priceVariants,
+    initialInheritedPriceVariants,
     inputPrice,
     completionPrice:
       inputPriceNumber !== null && hasValue(completionRatio)
@@ -331,6 +355,7 @@ const serializeModel = (model, t) => {
   const result = {
     ModelPrice: null,
     ModelPriceUnit: null,
+    ModelPriceVariants: null,
     ModelRatio: null,
     CompletionRatio: null,
     CacheRatio: null,
@@ -345,6 +370,7 @@ const serializeModel = (model, t) => {
       result.ModelPrice = toNormalizedNumber(model.fixedPrice);
       result.ModelPriceUnit = normalizeModelPriceUnit(model.priceUnit);
     }
+    result.ModelPriceVariants = serializeModelPriceVariants(model, t);
     return result;
   }
 
@@ -480,6 +506,7 @@ export const buildPreviewRows = (model, t) => {
   }
 
   if (model.billingMode === 'per-request') {
+    const priceVariantsPreview = buildModelPriceVariantsPreview(model);
     const rows = [
       {
         key: 'ModelPrice',
@@ -490,6 +517,15 @@ export const buildPreviewRows = (model, t) => {
         key: 'ModelPriceUnit',
         label: 'ModelPriceUnit',
         value: normalizeModelPriceUnit(model.priceUnit),
+      },
+      {
+        key: 'ModelPriceVariants',
+        label: 'ModelPriceVariants',
+        value: model.priceVariants?.restoreInherited
+          ? t('恢复内置配置')
+          : priceVariantsPreview
+            ? JSON.stringify(priceVariantsPreview)
+            : t('空'),
       },
     ];
     return rows;
@@ -635,6 +671,7 @@ export function useModelPricingEditorState({
     const sourceMaps = {
       ModelPrice: parseOptionJSON(options.ModelPrice),
       ModelPriceUnit: parseOptionJSON(options.ModelPriceUnit),
+      ModelPriceVariants: parseOptionJSON(options.ModelPriceVariants),
       ModelRatio: parseOptionJSON(options.ModelRatio),
       CompletionRatio: parseOptionJSON(options.CompletionRatio),
       CompletionRatioMeta: parseOptionJSON(options.CompletionRatioMeta),
@@ -655,6 +692,7 @@ export function useModelPricingEditorState({
       ...candidateModelNames,
       ...Object.keys(sourceMaps.ModelPrice),
       ...Object.keys(sourceMaps.ModelPriceUnit),
+      ...Object.keys(sourceMaps.ModelPriceVariants),
       ...Object.keys(sourceMaps.ModelRatio),
       ...Object.keys(sourceMaps.CompletionRatio),
       ...Object.keys(sourceMaps.CompletionRatioMeta),
@@ -880,6 +918,98 @@ export function useModelPricingEditorState({
     }));
   };
 
+  const handleVariantDimensionChange = (field, checked) => {
+    if (!selectedModel) return;
+    if (
+      field === 'qualityEnabled' &&
+      isGrokImagineVideoModel(selectedModel.name)
+    ) {
+      return;
+    }
+
+    upsertModel(selectedModel.name, (model) => {
+      const priceVariants = cloneModelPriceVariantsState(
+        model.priceVariants,
+        model.name,
+        { markExplicit: true },
+      );
+      priceVariants.configured = true;
+      priceVariants[field] = Boolean(checked);
+      return { ...model, priceVariants };
+    });
+  };
+
+  const handleVariantRuleChange = (index, field, value) => {
+    if (!selectedModel) return;
+    if (field === 'price' && !NUMERIC_INPUT_REGEX.test(value)) return;
+
+    upsertModel(selectedModel.name, (model) => {
+      const priceVariants = cloneModelPriceVariantsState(
+        model.priceVariants,
+        model.name,
+        { markExplicit: true },
+      );
+      priceVariants.configured = true;
+      priceVariants.rules = priceVariants.rules.map((rule, ruleIndex) =>
+        ruleIndex === index ? { ...rule, [field]: value } : rule,
+      );
+      return { ...model, priceVariants };
+    });
+  };
+
+  const addVariantRule = () => {
+    if (!selectedModel) return;
+    upsertModel(selectedModel.name, (model) => {
+      const priceVariants = cloneModelPriceVariantsState(
+        model.priceVariants,
+        model.name,
+        { markExplicit: true },
+      );
+      priceVariants.configured = true;
+      priceVariants.rules.push(createEmptyModelPriceVariantRule());
+      return { ...model, priceVariants };
+    });
+  };
+
+  const deleteVariantRule = (index) => {
+    if (!selectedModel) return;
+    upsertModel(selectedModel.name, (model) => {
+      const priceVariants = cloneModelPriceVariantsState(
+        model.priceVariants,
+        model.name,
+        { markExplicit: true },
+      );
+      priceVariants.configured = true;
+      priceVariants.rules = priceVariants.rules.filter(
+        (_, ruleIndex) => ruleIndex !== index,
+      );
+      return { ...model, priceVariants };
+    });
+  };
+
+  const restoreInheritedPriceVariants = () => {
+    if (!selectedModel) return;
+    upsertModel(selectedModel.name, (model) => {
+      if (model.initialInheritedPriceVariants) {
+        return {
+          ...model,
+          priceVariants: cloneModelPriceVariantsState(
+            model.initialInheritedPriceVariants,
+            model.name,
+          ),
+        };
+      }
+      if (!isBuiltInGrokImagineVideoModel(model.name)) return model;
+      return {
+        ...model,
+        priceVariants: {
+          ...createEmptyModelPriceVariantsState(),
+          restoreInherited: true,
+        },
+      };
+    });
+  };
+
   const handleBillingModeChange = (value) => {
     if (!selectedModel) return;
     upsertModel(selectedModel.name, (model) => {
@@ -928,6 +1058,8 @@ export function useModelPricingEditorState({
     const nextModel = {
       ...EMPTY_MODEL,
       name: trimmedName,
+      priceVariants: createEmptyModelPriceVariantsState(),
+      initialInheritedPriceVariants: null,
       rawRatios: { ...EMPTY_MODEL.rawRatios },
     };
 
@@ -980,6 +1112,15 @@ export function useModelPricingEditorState({
           billingMode: selectedModel.billingMode,
           priceUnit: normalizeModelPriceUnit(selectedModel.priceUnit),
           fixedPrice: selectedModel.fixedPrice,
+          priceVariants: {
+            ...cloneModelPriceVariantsState(
+              selectedModel.priceVariants,
+              model.name,
+              { markExplicit: true },
+            ),
+            // 批量复制是显式操作；“无规格规则”也要能覆盖并关闭目标模型的内置规则。
+            configured: true,
+          },
           inputPrice: selectedModel.inputPrice,
           completionPrice: selectedModel.completionPrice,
           cachePrice: selectedModel.cachePrice,
@@ -998,7 +1139,6 @@ export function useModelPricingEditorState({
     setOptionalFieldToggles((previous) => {
       const next = { ...previous };
       selectedModelNames.forEach((modelName) => {
-        const targetModel = models.find((item) => item.name === modelName);
         next[modelName] = {
           completionPrice: Boolean(sourceToggles.completionPrice),
           cachePrice: Boolean(sourceToggles.cachePrice),
@@ -1028,6 +1168,7 @@ export function useModelPricingEditorState({
       const output = {
         ModelPrice: {},
         ModelPriceUnit: {},
+        ModelPriceVariants: {},
         ModelRatio: {},
         CompletionRatio: {},
         CacheRatio: {},
@@ -1128,6 +1269,11 @@ export function useModelPricingEditorState({
     handleOptionalFieldToggle,
     handleNumericFieldChange,
     handlePriceUnitChange,
+    handleVariantDimensionChange,
+    handleVariantRuleChange,
+    addVariantRule,
+    deleteVariantRule,
+    restoreInheritedPriceVariants,
     handleBillingModeChange,
     handleBillingExprChange,
     handleRequestRuleExprChange,

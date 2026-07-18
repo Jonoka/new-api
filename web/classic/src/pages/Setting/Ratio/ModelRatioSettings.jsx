@@ -30,6 +30,7 @@ import {
 import {
   compareObjects,
   API,
+  getModelPriceVariantsJSONError,
   showError,
   showSuccess,
   showWarning,
@@ -42,6 +43,7 @@ export default function ModelRatioSettings(props) {
   const [inputs, setInputs] = useState({
     ModelPrice: '',
     ModelPriceUnit: '',
+    ModelPriceVariants: '',
     ModelRatio: '',
     CacheRatio: '',
     CreateCacheRatio: '',
@@ -161,6 +163,33 @@ export default function ModelRatioSettings(props) {
                 },
               ]}
               onChange={(value) => setInputs({ ...inputs, ModelPrice: value })}
+            />
+          </Col>
+        </Row>
+        <Row gutter={16}>
+          <Col xs={24} sm={16}>
+            <Form.TextArea
+              label={t('规格差异计费')}
+              extraText={t(
+                '键为模型名称，规则价格是对应规格的最终单价；未匹配时使用 ModelPrice，二者不会叠加。',
+              )}
+              placeholder='{"grok-imagine-video":{"resolution_enabled":true,"quality_enabled":false,"rules":[{"resolution":"480p","price":0.05}]}}'
+              field={'ModelPriceVariants'}
+              autosize={{ minRows: 6, maxRows: 12 }}
+              trigger='blur'
+              stopValidateWithError
+              rules={[
+                {
+                  validator: (rule, value) =>
+                    !getModelPriceVariantsJSONError(value, t),
+                  message: t(
+                    '规格差异计费配置无效，请检查模型名称、档位、价格和重复组合。',
+                  ),
+                },
+              ]}
+              onChange={(value) =>
+                setInputs({ ...inputs, ModelPriceVariants: value })
+              }
             />
           </Col>
         </Row>

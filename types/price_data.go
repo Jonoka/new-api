@@ -32,6 +32,7 @@ type PriceData struct {
 	AudioRatio           float64
 	AudioCompletionRatio float64
 	OtherRatios          map[string]float64
+	BillingMeta          map[string]string
 	UsePrice             bool
 	Quota                int // 固定单价任务的最终额度（MJ / Task，可按请求或按秒）
 	QuotaToPreConsume    int // 按量计费的预消耗额度
@@ -51,6 +52,16 @@ func (p *PriceData) AddOtherRatio(key string, ratio float64) {
 func (p *PriceData) HasOtherRatio(key string) bool {
 	ratio, ok := p.OtherRatios[key]
 	return ok && ratio > 0 && !math.IsInf(ratio, 1)
+}
+
+func (p *PriceData) AddBillingMeta(key string, value string) {
+	if key == "" || value == "" {
+		return
+	}
+	if p.BillingMeta == nil {
+		p.BillingMeta = make(map[string]string)
+	}
+	p.BillingMeta[key] = value
 }
 
 func (p *PriceData) ApplyOtherRatiosToFloat(value float64) float64 {

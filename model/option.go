@@ -171,6 +171,7 @@ func InitOptionMap() {
 	common.OptionMap["ModelRatio"] = ratio_setting.ModelRatio2JSONString()
 	common.OptionMap["ModelPrice"] = ratio_setting.ModelPrice2JSONString()
 	common.OptionMap["ModelPriceUnit"] = ratio_setting.ModelPriceUnit2JSONString()
+	common.OptionMap["ModelPriceVariants"] = ratio_setting.ModelPriceVariants2JSONString()
 	common.OptionMap["CacheRatio"] = ratio_setting.CacheRatio2JSONString()
 	common.OptionMap["CreateCacheRatio"] = ratio_setting.CreateCacheRatio2JSONString()
 	common.OptionMap["GroupRatio"] = ratio_setting.GroupRatio2JSONString()
@@ -640,12 +641,19 @@ func updateOptionMap(key string, value string) (err error) {
 		if err == nil {
 			// 返回包含内置默认值的有效配置，确保价格与价格单位在管理端成对出现。
 			common.OptionMap[key] = ratio_setting.ModelPrice2JSONString()
+			// 内置规格档位按当前基础价动态换算，基础价变化后必须同步刷新。
+			common.OptionMap["ModelPriceVariants"] = ratio_setting.ModelPriceVariants2JSONString()
 		}
 	case "ModelPriceUnit":
 		err = ratio_setting.UpdateModelPriceUnitByJSONString(value)
 		if err == nil {
 			// 对管理端返回包含内置默认值的有效配置，避免稀疏覆盖后界面误显示为按次。
 			common.OptionMap[key] = ratio_setting.ModelPriceUnit2JSONString()
+		}
+	case "ModelPriceVariants":
+		err = ratio_setting.UpdateModelPriceVariantsByJSONString(value)
+		if err == nil {
+			common.OptionMap[key] = ratio_setting.ModelPriceVariants2JSONString()
 		}
 	case "CacheRatio":
 		err = ratio_setting.UpdateCacheRatioByJSONString(value)
@@ -690,7 +698,7 @@ func updateOptionMap(key string, value string) (err error) {
 	}
 	if err == nil {
 		switch key {
-		case "ModelPrice", "ModelPriceUnit", "ModelRatio", "CompletionRatio", "CacheRatio", "CreateCacheRatio", "ImageRatio", "AudioRatio", "AudioCompletionRatio":
+		case "ModelPrice", "ModelPriceUnit", "ModelPriceVariants", "ModelRatio", "CompletionRatio", "CacheRatio", "CreateCacheRatio", "ImageRatio", "AudioRatio", "AudioCompletionRatio":
 			InvalidatePricingCache()
 		}
 	}
@@ -701,6 +709,8 @@ func validateOptionValue(key string, value string) error {
 	switch key {
 	case "ModelPriceUnit":
 		return ratio_setting.CheckModelPriceUnitJSONString(value)
+	case "ModelPriceVariants":
+		return ratio_setting.CheckModelPriceVariantsJSONString(value)
 	case "InvoiceTypes":
 		_, err := ParseInvoiceTypes(value)
 		return err

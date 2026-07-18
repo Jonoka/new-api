@@ -29,6 +29,7 @@ import { AffiliateSettingsSection } from './affiliate-settings-section'
 const getModelDefaults = (settings: BillingSettings) => ({
   ModelPrice: settings.ModelPrice,
   ModelPriceUnit: settings.ModelPriceUnit,
+  ModelPriceVariants: settings.ModelPriceVariants,
   ModelRatio: settings.ModelRatio,
   CacheRatio: settings.CacheRatio,
   CreateCacheRatio: settings.CreateCacheRatio,

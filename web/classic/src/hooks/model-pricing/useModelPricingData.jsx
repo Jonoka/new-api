@@ -24,6 +24,7 @@ import {
   copy,
   getGroupDisplayName,
   matchesModelPricingQuotaFilter,
+  normalizeModelPriceVariantsConfig,
   showError,
   showInfo,
   showSuccess,
@@ -209,6 +210,9 @@ export const useModelPricingData = () => {
       const m = models[i];
       m.key = m.model_name;
       m.group_ratio = groupRatio[m.model_name];
+      m.model_price_variants = normalizeModelPriceVariantsConfig(
+        m.model_price_variants,
+      );
 
       if (m.vendor_id && vendorMap[m.vendor_id]) {
         const vendor = vendorMap[m.vendor_id];

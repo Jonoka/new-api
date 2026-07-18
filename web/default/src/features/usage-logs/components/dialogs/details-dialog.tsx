@@ -192,6 +192,37 @@ function BillingBreakdown(props: {
         value: `${fmtPrice(other.model_price)}${isPerSecond ? `/${t('second')}` : ''}`,
       })
     }
+    const variantStatus = other.billing_variant_price_status
+    if (other.billing_resolution) {
+      rows.push({
+        label:
+          variantStatus === 'disabled'
+            ? t('Requested resolution')
+            : t('Billing resolution'),
+        value: other.billing_resolution,
+      })
+    }
+    if (other.billing_quality) {
+      rows.push({
+        label:
+          variantStatus === 'disabled'
+            ? t('Requested quality')
+            : t('Billing quality'),
+        value: other.billing_quality,
+      })
+    }
+    if (variantStatus) {
+      const statusLabels: Record<typeof variantStatus, string> = {
+        matched: 'Matched specification price',
+        fallback: 'Fallback price',
+        legacy: 'Legacy specification multiplier',
+        disabled: 'Specification pricing disabled',
+      }
+      rows.push({
+        label: t('Specification price status'),
+        value: t(statusLabels[variantStatus]),
+      })
+    }
     if (isPerSecond && other.seconds != null) {
       rows.push({
         label: t('Seconds'),

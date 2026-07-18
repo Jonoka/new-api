@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -51,7 +52,8 @@ func DefaultInt(val, fallback int) int {
 // NormalizeVideoResolution 将常见分辨率参数归一化为计费档位名称。
 // 返回空字符串表示无法识别，调用方应保留原请求或不应用分辨率价格。
 func NormalizeVideoResolution(resolution string) string {
-	switch strings.ToLower(strings.TrimSpace(resolution)) {
+	resolution = strings.ToLower(strings.TrimSpace(resolution))
+	switch resolution {
 	case "480", "480p", "sd", "854x480":
 		return "480p"
 	case "720", "720p", "hd", "1280x720":
@@ -62,6 +64,26 @@ func NormalizeVideoResolution(resolution string) string {
 		return "2k"
 	case "4k", "3840x2160", "4096x2160":
 		return "4k"
+	}
+	parts := strings.SplitN(resolution, "x", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+	width, widthErr := strconv.Atoi(strings.TrimSpace(parts[0]))
+	height, heightErr := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if widthErr != nil || heightErr != nil || width <= 0 || height <= 0 {
+		return ""
+	}
+	shortSide := min(width, height)
+	switch {
+	case shortSide >= 2160:
+		return "4k"
+	case shortSide >= 1080:
+		return "1080p"
+	case shortSide >= 720:
+		return "720p"
+	case shortSide >= 480:
+		return "480p"
 	default:
 		return ""
 	}

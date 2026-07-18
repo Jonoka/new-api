@@ -93,6 +93,12 @@ export interface ChannelAffinityInfo {
   using_group?: string
 }
 
+export type BillingVariantPriceStatus =
+  | 'matched'
+  | 'fallback'
+  | 'legacy'
+  | 'disabled'
+
 export interface LogOtherData {
   admin_info?: {
     is_multi_key?: boolean
@@ -135,6 +141,9 @@ export interface LogOtherData {
   completion_ratio?: number
   model_price?: number
   model_price_unit?: ModelPriceUnit | ''
+  billing_resolution?: string
+  billing_quality?: string
+  billing_variant_price_status?: BillingVariantPriceStatus
   seconds?: number
   group_ratio?: number
   user_group_ratio?: number

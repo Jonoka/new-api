@@ -430,6 +430,22 @@ export const useLogsData = () => {
           value: other.cache_creation_tokens,
         });
       }
+      [
+        { field: 'billing_resolution', label: t('计费分辨率') },
+        { field: 'billing_quality', label: t('计费质量') },
+        {
+          field: 'billing_variant_price_status',
+          label: t('规格价格状态'),
+        },
+      ].forEach(({ field, label }) => {
+        const value = other?.[field];
+        if (value !== undefined && value !== null && value !== '') {
+          expandDataLocal.push({
+            key: label,
+            value,
+          });
+        }
+      });
       if (logs[i].type === 2) {
         if (other?.billing_mode !== 'tiered_expr') {
           expandDataLocal.push({
@@ -485,7 +501,17 @@ export const useLogsData = () => {
             displayMode: billingDisplayMode,
           };
           const isTaskLog = other?.is_task === true || other?.task_id != null;
-          if (isTaskLog && other?.model_price === -1) {
+          const hasVariantBillingDetails = [
+            other?.billing_resolution,
+            other?.billing_quality,
+            other?.billing_variant_price_status,
+          ].some(
+            (value) => value !== undefined && value !== null && value !== '',
+          );
+          if (hasVariantBillingDetails && logs[i].content) {
+            // 规格计费日志已由后端生成完整公式，直接展示可避免误读旧 resolution 倍率字段。
+            content = logs[i].content;
+          } else if (isTaskLog && other?.model_price === -1) {
             content = renderTaskBillingProcess(other, logs[i].content);
           } else if (other?.ws || other?.audio) {
             content = renderAudioModelPrice(logOpts);

@@ -139,6 +139,25 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	}
 }
 
+func (a *TaskAdaptor) EstimateTaskBillingSpec(c *gin.Context, _ *relaycommon.RelayInfo) channel.TaskBillingSpec {
+	v, ok := c.Get("task_request")
+	if !ok {
+		return channel.TaskBillingSpec{}
+	}
+	req, ok := v.(relaycommon.TaskSubmitReq)
+	if !ok {
+		return channel.TaskBillingSpec{}
+	}
+	resolution := geminitask.ResolveVeoResolution(req.Metadata, req.Size)
+	if resolution == "" {
+		return channel.TaskBillingSpec{}
+	}
+	return channel.TaskBillingSpec{
+		Dimensions:      map[string]string{"resolution": resolution},
+		LegacyRatioKeys: []string{"resolution"},
+	}
+}
+
 // BuildRequestBody converts request into Vertex specific format.
 func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, error) {
 	v, ok := c.Get("task_request")

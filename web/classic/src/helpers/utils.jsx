@@ -35,6 +35,10 @@ import {
   isModelPriceUnitSecond,
   normalizeModelPriceUnit,
 } from './modelPriceUnit';
+import {
+  getModelPriceVariantRange,
+  getModelPriceVariantRuleLabel,
+} from './modelPriceVariants';
 
 const HTMLToastContent = ({ htmlContent }) => {
   return <div dangerouslySetInnerHTML={{ __html: htmlContent }} />;
@@ -841,6 +845,17 @@ export const calculateModelPrice = ({
     // 固定价格计费，缺省按次；仅 second 按秒展示。
     const priceUSD = parseFloat(record.model_price) * usedGroupRatio;
     const displayVal = displayPrice(priceUSD);
+    const variantRange = getModelPriceVariantRange(
+      record.model_price,
+      record.model_price_variants,
+    );
+    const variantPrices = variantRange
+      ? variantRange.rules.map((rule) => ({
+          ...rule,
+          displayPrice: displayPrice(rule.price * usedGroupRatio),
+          originalPrice: formatUsdOriginalPrice(rule.price),
+        }))
+      : [];
 
     return {
       price: displayVal,
@@ -848,6 +863,21 @@ export const calculateModelPrice = ({
         parseFloat(record.model_price) || 0,
       ),
       modelPriceUnit: normalizeModelPriceUnit(record.model_price_unit),
+      hasPriceVariants: variantPrices.length > 0,
+      modelPriceVariants: variantRange?.config || null,
+      variantPrices,
+      variantMinPrice: variantRange
+        ? displayPrice(variantRange.minPrice * usedGroupRatio)
+        : null,
+      variantMaxPrice: variantRange
+        ? displayPrice(variantRange.maxPrice * usedGroupRatio)
+        : null,
+      originalVariantMinPrice: variantRange
+        ? formatUsdOriginalPrice(variantRange.minPrice)
+        : null,
+      originalVariantMaxPrice: variantRange
+        ? formatUsdOriginalPrice(variantRange.maxPrice)
+        : null,
       isPerToken: false,
       isTokensDisplay: false,
       usedGroup,
@@ -865,7 +895,12 @@ export const calculateModelPrice = ({
   };
 };
 
-export const getModelPriceItems = (priceData, t, quotaDisplayType = 'USD') => {
+export const getModelPriceItems = (
+  priceData,
+  t,
+  quotaDisplayType = 'USD',
+  { includeVariantRules = false } = {},
+) => {
   if (priceData.isDynamicPricing) {
     return [
       {
@@ -986,14 +1021,61 @@ export const getModelPriceItems = (priceData, t, quotaDisplayType = 'USD') => {
     );
   }
 
+  const unitSuffix = ` / ${t(
+    isModelPriceUnitSecond(priceData.modelPriceUnit) ? '秒' : '次',
+  )}`;
+
+  if (priceData.hasPriceVariants) {
+    if (includeVariantRules) {
+      return [
+        ...priceData.variantPrices.map((rule, index) => ({
+          key: `variant-${index}-${rule.resolution || ''}-${rule.quality || ''}`,
+          label: getModelPriceVariantRuleLabel(
+            rule,
+            priceData.modelPriceVariants,
+            t,
+          ),
+          value: rule.displayPrice,
+          suffix: unitSuffix,
+          originalValue: rule.originalPrice,
+          isVariantRule: true,
+        })),
+        {
+          key: 'fixed-fallback',
+          label: t('未匹配规格（固定价格兜底）'),
+          value: priceData.price,
+          suffix: unitSuffix,
+          originalValue: priceData.originalPrice,
+        },
+      ];
+    }
+
+    const hasRange = priceData.variantMinPrice !== priceData.variantMaxPrice;
+    return [
+      {
+        key: 'fixed-variant-range',
+        label: t('规格价格'),
+        value: hasRange
+          ? `${priceData.variantMinPrice} ~ ${priceData.variantMaxPrice}`
+          : priceData.variantMinPrice,
+        minimumValue: priceData.variantMinPrice,
+        maximumValue: priceData.variantMaxPrice,
+        suffix: unitSuffix,
+        originalValue: hasRange
+          ? `${priceData.originalVariantMinPrice} ~ ${priceData.originalVariantMaxPrice}`
+          : priceData.originalVariantMinPrice,
+        originalMinimumValue: priceData.originalVariantMinPrice,
+        isVariantRange: true,
+      },
+    ];
+  }
+
   return [
     {
       key: 'fixed',
       label: t('模型价格'),
       value: priceData.price,
-      suffix: ` / ${t(
-        isModelPriceUnitSecond(priceData.modelPriceUnit) ? '秒' : '次',
-      )}`,
+      suffix: unitSuffix,
       originalValue: priceData.originalPrice,
     },
   ].filter(
@@ -1115,8 +1197,17 @@ export const formatPriceInfo = (priceData, t, quotaDisplayType = 'USD') => {
           }}
         >
           <span>
-            {item.label} {item.value}
-            {item.suffix}
+            {item.isVariantRange ? (
+              <>
+                {t('{{price}} 起', { price: item.minimumValue })}
+                {item.suffix}
+              </>
+            ) : (
+              <>
+                {item.label} {item.value}
+                {item.suffix}
+              </>
+            )}
           </span>
           {item.originalValue && quotaDisplayType !== 'TOKENS' && (
             <span
@@ -1126,7 +1217,10 @@ export const formatPriceInfo = (priceData, t, quotaDisplayType = 'USD') => {
                 textDecoration: 'line-through',
               }}
             >
-              {t('原价')}：{item.originalValue}
+              {t('原价')}：
+              {item.isVariantRange
+                ? t('{{price}} 起', { price: item.originalMinimumValue })
+                : item.originalValue}
               {item.suffix}
             </span>
           )}

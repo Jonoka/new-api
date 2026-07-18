@@ -369,6 +369,25 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	return otherRatios
 }
 
+func (a *TaskAdaptor) EstimateTaskBillingSpec(c *gin.Context, info *relaycommon.RelayInfo) channel.TaskBillingSpec {
+	taskReq, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return channel.TaskBillingSpec{}
+	}
+	aliReq, err := a.convertToAliRequest(info, taskReq)
+	if err != nil || aliReq.Parameters == nil {
+		return channel.TaskBillingSpec{}
+	}
+	resolution := taskcommon.NormalizeVideoResolution(aliReq.Parameters.Resolution)
+	if resolution == "" {
+		return channel.TaskBillingSpec{}
+	}
+	return channel.TaskBillingSpec{
+		Dimensions:      map[string]string{"resolution": resolution},
+		LegacyRatioKeys: []string{"resolution"},
+	}
+}
+
 // DoRequest delegates to common helper
 func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (*http.Response, error) {
 	return channel.DoTaskApiRequest(a, c, info, requestBody)

@@ -129,6 +129,24 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	return ratios
 }
 
+func (a *TaskAdaptor) EstimateTaskBillingSpec(c *gin.Context, info *relaycommon.RelayInfo) channel.TaskBillingSpec {
+	if info != nil && info.Action == constant.TaskActionRemix {
+		return channel.TaskBillingSpec{}
+	}
+	req, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return channel.TaskBillingSpec{}
+	}
+	size := strings.ToLower(strings.TrimSpace(req.Size))
+	if size == "" {
+		size = "720x1280"
+	}
+	return channel.TaskBillingSpec{
+		Dimensions:      map[string]string{"resolution": size},
+		LegacyRatioKeys: []string{"size"},
+	}
+}
+
 func (a *TaskAdaptor) BuildRequestURL(info *relaycommon.RelayInfo) (string, error) {
 	if info.Action == constant.TaskActionRemix {
 		return fmt.Sprintf("%s/v1/videos/%s/remix", a.baseURL, info.OriginTaskID), nil

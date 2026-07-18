@@ -50,6 +50,15 @@ func TestValidateOptionValueModelPriceUnit(t *testing.T) {
 	require.Error(t, validateOptionValue("ModelPriceUnit", `{"video":"minute"}`))
 }
 
+func TestValidateOptionValueModelPriceVariants(t *testing.T) {
+	require.NoError(t, validateOptionValue("ModelPriceVariants", `{
+		"video":{"resolution_enabled":true,"rules":[{"resolution":"720p","price":0.07}]}
+	}`))
+	require.Error(t, validateOptionValue("ModelPriceVariants", `{
+		"video":{"resolution_enabled":true,"rules":[{"resolution":"","price":0.07}]}
+	}`))
+}
+
 func TestUpdateModelPriceUnitInvalidatesPricingCache(t *testing.T) {
 	originalOptionMap := common.OptionMap
 	originalUnits := ratio_setting.ModelPriceUnit2JSONString()

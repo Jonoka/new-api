@@ -22,6 +22,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
@@ -239,6 +240,21 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	return map[string]float64{
 		"seconds":    float64(duration),
 		"resolution": xaiResolutionPriceRatio(modelName, resolution),
+	}
+}
+
+func (a *TaskAdaptor) EstimateTaskBillingSpec(c *gin.Context, _ *relaycommon.RelayInfo) channel.TaskBillingSpec {
+	request, err := getVideoGenerationRequest(c)
+	if err != nil {
+		return channel.TaskBillingSpec{}
+	}
+	resolution := request.Resolution
+	if resolution == "" {
+		resolution = defaultVideoResolution
+	}
+	return channel.TaskBillingSpec{
+		Dimensions:      map[string]string{ratio_setting.ModelPriceVariantResolution: resolution},
+		LegacyRatioKeys: []string{ratio_setting.ModelPriceVariantResolution},
 	}
 }
 

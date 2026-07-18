@@ -43,6 +43,13 @@ import {
   normalizeModelPriceUnit,
   type ModelPriceUnit,
 } from '@/lib/model-price-unit'
+import {
+  cloneModelPriceVariantConfig,
+  hasActiveModelPriceVariants,
+  isModelPriceVariantsMap,
+  type ModelPriceVariantConfig,
+  type ModelPriceVariantsMap,
+} from '@/lib/model-price-variants'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -64,7 +71,10 @@ import {
   combineBillingExpr,
   splitBillingExprAndRequestRules,
 } from '@/features/pricing/lib/billing-expr'
-import { safeJsonParse } from '../utils/json-parser'
+import {
+  safeJsonParse,
+  safeJsonParseWithValidation,
+} from '../utils/json-parser'
 import {
   ModelPricingEditorPanel,
   ModelPricingSheet,
@@ -75,6 +85,7 @@ import { formatPricingNumber } from './pricing-format'
 type ModelRatioVisualEditorProps = {
   modelPrice: string
   modelPriceUnit: string
+  modelPriceVariants: string
   modelRatio: string
   cacheRatio: string
   createCacheRatio: string
@@ -91,6 +102,7 @@ type ModelRow = {
   name: string
   price?: string
   priceUnit?: ModelPriceUnit
+  priceVariant?: ModelPriceVariantConfig
   ratio?: string
   cacheRatio?: string
   createCacheRatio?: string
@@ -156,6 +168,9 @@ const getPriceSummary = (row: ModelRow, t: (key: string) => string) => {
     return getExpressionSummary(row, t)
   }
   if (row.billingMode === 'per-request') {
+    if (hasActiveModelPriceVariants(row.priceVariant)) {
+      return `${t('Specification pricing')} · ${row.priceVariant?.rules?.length ?? 0} ${t('rules')}`
+    }
     const unit =
       row.priceUnit === MODEL_PRICE_UNITS.SECOND ? t('second') : t('request')
     return row.price ? `$${row.price} / ${unit}` : t('Unset price')
@@ -209,6 +224,7 @@ export const ModelRatioVisualEditor = memo(
   function ModelRatioVisualEditor({
     modelPrice,
     modelPriceUnit,
+    modelPriceVariants,
     modelRatio,
     cacheRatio,
     createCacheRatio,
@@ -284,6 +300,12 @@ export const ModelRatioVisualEditor = memo(
           context: 'model price units',
         }
       )
+      const priceVariantsMap =
+        safeJsonParseWithValidation<ModelPriceVariantsMap>(modelPriceVariants, {
+          fallback: {},
+          validator: isModelPriceVariantsMap,
+          context: 'model specification prices',
+        })
       const ratioMap = safeJsonParse<Record<string, number>>(modelRatio, {
         fallback: {},
         context: 'model ratios',
@@ -330,6 +352,7 @@ export const ModelRatioVisualEditor = memo(
       const modelNames = new Set([
         ...Object.keys(priceMap),
         ...Object.keys(priceUnitMap),
+        ...Object.keys(priceVariantsMap),
         ...Object.keys(ratioMap),
         ...Object.keys(cacheMap),
         ...Object.keys(createCacheMap),
@@ -344,6 +367,7 @@ export const ModelRatioVisualEditor = memo(
       const modelData: ModelRow[] = Array.from(modelNames).map((name) => {
         const price = priceMap[name]?.toString() || ''
         const priceUnit = normalizeModelPriceUnit(priceUnitMap[name])
+        const priceVariant = priceVariantsMap[name]
         const ratio = ratioMap[name]?.toString() || ''
         const cache = cacheMap[name]?.toString() || ''
         const createCache = createCacheMap[name]?.toString() || ''
@@ -367,6 +391,7 @@ export const ModelRatioVisualEditor = memo(
             requestRuleExpr,
             price,
             priceUnit,
+            priceVariant,
             ratio,
             cacheRatio: cache,
             createCacheRatio: createCache,
@@ -382,6 +407,7 @@ export const ModelRatioVisualEditor = memo(
           name,
           price,
           priceUnit,
+          priceVariant,
           ratio,
           cacheRatio: cache,
           createCacheRatio: createCache,
@@ -406,6 +432,7 @@ export const ModelRatioVisualEditor = memo(
     }, [
       modelPrice,
       modelPriceUnit,
+      modelPriceVariants,
       modelRatio,
       cacheRatio,
       createCacheRatio,
@@ -444,6 +471,9 @@ export const ModelRatioVisualEditor = memo(
           name: model.name,
           price: model.price,
           priceUnit: model.priceUnit,
+          priceVariant: model.priceVariant
+            ? cloneModelPriceVariantConfig(model.priceVariant)
+            : undefined,
           ratio: model.ratio,
           cacheRatio: model.cacheRatio,
           createCacheRatio: model.createCacheRatio,
@@ -504,6 +534,15 @@ export const ModelRatioVisualEditor = memo(
           modelPriceUnit,
           { fallback: {}, silent: true }
         )
+        const priceVariantsMap =
+          safeJsonParseWithValidation<ModelPriceVariantsMap>(
+            modelPriceVariants,
+            {
+              fallback: {},
+              validator: isModelPriceVariantsMap,
+              silent: true,
+            }
+          )
         const ratioMap = safeJsonParse<Record<string, number>>(modelRatio, {
           fallback: {},
           silent: true,
@@ -543,6 +582,7 @@ export const ModelRatioVisualEditor = memo(
 
         delete priceMap[name]
         delete priceUnitMap[name]
+        delete priceVariantsMap[name]
         delete ratioMap[name]
         delete cacheMap[name]
         delete createCacheMap[name]
@@ -555,6 +595,10 @@ export const ModelRatioVisualEditor = memo(
 
         onChange('ModelPrice', JSON.stringify(priceMap, null, 2))
         onChange('ModelPriceUnit', JSON.stringify(priceUnitMap, null, 2))
+        onChange(
+          'ModelPriceVariants',
+          JSON.stringify(priceVariantsMap, null, 2)
+        )
         onChange('ModelRatio', JSON.stringify(ratioMap, null, 2))
         onChange('CacheRatio', JSON.stringify(cacheMap, null, 2))
         onChange('CreateCacheRatio', JSON.stringify(createCacheMap, null, 2))
@@ -577,6 +621,7 @@ export const ModelRatioVisualEditor = memo(
       [
         modelPrice,
         modelPriceUnit,
+        modelPriceVariants,
         modelRatio,
         cacheRatio,
         createCacheRatio,
@@ -739,7 +784,11 @@ export const ModelRatioVisualEditor = memo(
     })
 
     const persistPricingData = useCallback(
-      (data: ModelRatioData, targetNames: string[] = [data.name]) => {
+      (
+        data: ModelRatioData,
+        targetNames: string[] = [data.name],
+        makeVariantExplicit = false
+      ) => {
         const priceMap = safeJsonParse<Record<string, number>>(modelPrice, {
           fallback: {},
           silent: true,
@@ -748,6 +797,15 @@ export const ModelRatioVisualEditor = memo(
           modelPriceUnit,
           { fallback: {}, silent: true }
         )
+        const priceVariantsMap =
+          safeJsonParseWithValidation<ModelPriceVariantsMap>(
+            modelPriceVariants,
+            {
+              fallback: {},
+              validator: isModelPriceVariantsMap,
+              silent: true,
+            }
+          )
         const ratioMap = safeJsonParse<Record<string, number>>(modelRatio, {
           fallback: {},
           silent: true,
@@ -798,6 +856,7 @@ export const ModelRatioVisualEditor = memo(
         targetNames.forEach((name) => {
           delete priceMap[name]
           delete priceUnitMap[name]
+          delete priceVariantsMap[name]
           delete ratioMap[name]
           delete cacheMap[name]
           delete createCacheMap[name]
@@ -837,6 +896,19 @@ export const ModelRatioVisualEditor = memo(
             if (data.price && data.price !== '') {
               priceUnitMap[name] = normalizeModelPriceUnit(data.priceUnit)
             }
+            if (data.priceVariant) {
+              priceVariantsMap[name] = cloneModelPriceVariantConfig(
+                data.priceVariant,
+                makeVariantExplicit ? false : data.priceVariant.inherited
+              )
+            } else if (makeVariantExplicit && data.priceVariant === undefined) {
+              // 批量复制“无规格差异”时写入显式关闭，避免 Grok 等模型恢复内置规则。
+              priceVariantsMap[name] = {
+                resolution_enabled: false,
+                quality_enabled: false,
+                inherited: false,
+              }
+            }
           } else {
             setIfPresent(ratioMap, name, data.ratio)
             setIfPresent(cacheMap, name, data.cacheRatio)
@@ -850,6 +922,10 @@ export const ModelRatioVisualEditor = memo(
 
         onChange('ModelPrice', JSON.stringify(priceMap, null, 2))
         onChange('ModelPriceUnit', JSON.stringify(priceUnitMap, null, 2))
+        onChange(
+          'ModelPriceVariants',
+          JSON.stringify(priceVariantsMap, null, 2)
+        )
         onChange('ModelRatio', JSON.stringify(ratioMap, null, 2))
         onChange('CacheRatio', JSON.stringify(cacheMap, null, 2))
         onChange('CreateCacheRatio', JSON.stringify(createCacheMap, null, 2))
@@ -872,6 +948,7 @@ export const ModelRatioVisualEditor = memo(
       [
         modelPrice,
         modelPriceUnit,
+        modelPriceVariants,
         modelRatio,
         cacheRatio,
         createCacheRatio,
@@ -914,7 +991,7 @@ export const ModelRatioVisualEditor = memo(
         return
       }
 
-      persistPricingData(editData, targetNames)
+      persistPricingData(editData, targetNames, true)
       table.resetRowSelection()
       toast.success(
         t('Applied {{name}} pricing to {{count}} models', {
@@ -1083,6 +1160,7 @@ export const ModelRatioVisualEditor = memo(
     return (
       prevProps.modelPrice === nextProps.modelPrice &&
       prevProps.modelPriceUnit === nextProps.modelPriceUnit &&
+      prevProps.modelPriceVariants === nextProps.modelPriceVariants &&
       prevProps.modelRatio === nextProps.modelRatio &&
       prevProps.cacheRatio === nextProps.cacheRatio &&
       prevProps.createCacheRatio === nextProps.createCacheRatio &&

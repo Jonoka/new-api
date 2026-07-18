@@ -19,6 +19,7 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -112,6 +113,9 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 			for s, f := range originTask.PrivateData.BillingContext.OtherRatios {
 				info.PriceData.AddOtherRatio(s, f)
 			}
+			for key, value := range originTask.PrivateData.BillingContext.BillingMeta {
+				info.PriceData.AddBillingMeta(key, value)
+			}
 		} else {
 			// 旧的 remix 逻辑：直接从 task data 解析 seconds 和 size（如果存在）
 			var taskData map[string]interface{}
@@ -178,11 +182,19 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 
 	// 4. 价格计算：基础模型价格
 	info.OriginModelName = modelName
+	presetRatios := info.PriceData.OtherRatios
+	presetBillingMeta := info.PriceData.BillingMeta
 	priceData, err := helper.ModelPriceHelperPerCall(c, info)
 	if err != nil {
 		return nil, service.TaskErrorWrapper(err, "model_price_error", http.StatusBadRequest)
 	}
 	info.PriceData = priceData
+	for key, value := range presetRatios {
+		info.PriceData.AddOtherRatio(key, value)
+	}
+	for key, value := range presetBillingMeta {
+		info.PriceData.AddBillingMeta(key, value)
+	}
 
 	// 5. 计费估算：让适配器根据用户请求提供 OtherRatios（时长、分辨率等）
 	//    必须在 ModelPriceHelperPerCall 之后调用（它会重建 PriceData）。
@@ -191,6 +203,25 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		for k, v := range estimatedRatios {
 			info.PriceData.AddOtherRatio(k, v)
 		}
+	}
+	billingSpec := channel.TaskBillingSpec{Dimensions: make(map[string]string, 2)}
+	for _, key := range []string{ratio_setting.ModelPriceVariantResolution, ratio_setting.ModelPriceVariantQuality} {
+		if value := info.PriceData.BillingMeta[key]; value != "" {
+			billingSpec.Dimensions[key] = value
+		}
+	}
+	if provider, ok := adaptor.(channel.TaskBillingSpecProvider); ok {
+		estimatedSpec := provider.EstimateTaskBillingSpec(c, info)
+		for key, value := range estimatedSpec.Dimensions {
+			billingSpec.Dimensions[key] = value
+		}
+		billingSpec.LegacyRatioKeys = append(billingSpec.LegacyRatioKeys, estimatedSpec.LegacyRatioKeys...)
+	}
+	if len(billingSpec.LegacyRatioKeys) == 0 {
+		billingSpec.LegacyRatioKeys = splitBillingMetaList(info.PriceData.BillingMeta["variant_legacy_ratio_keys"])
+	}
+	if err := applyTaskVariantPrice(info, billingSpec); err != nil {
+		return nil, service.TaskErrorWrapper(err, "model_price_error", http.StatusBadRequest)
 	}
 
 	// 6. 将 OtherRatios 应用到基础额度
@@ -242,6 +273,10 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	// 11. 提交后计费调整：让适配器根据上游实际返回调整 OtherRatios
 	finalQuota := info.PriceData.Quota
 	if adjustedRatios := adaptor.AdjustBillingOnSubmit(info, taskData); len(adjustedRatios) > 0 {
+		status := info.PriceData.BillingMeta["variant_price_status"]
+		if status == "matched" || status == "disabled" {
+			removeLegacyVariantRatios(adjustedRatios, splitBillingMetaList(info.PriceData.BillingMeta["variant_legacy_ratio_keys"]))
+		}
 		// 基于调整后的 ratios 重新计算 quota
 		finalQuota = recalcQuotaFromRatios(info, adjustedRatios)
 		info.PriceData.OtherRatios = adjustedRatios
@@ -254,6 +289,75 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		Platform:       platform,
 		Quota:          finalQuota,
 	}, nil
+}
+
+func applyTaskVariantPrice(info *relaycommon.RelayInfo, spec channel.TaskBillingSpec) error {
+	if info == nil {
+		return nil
+	}
+	for key, value := range spec.Dimensions {
+		info.PriceData.AddBillingMeta(strings.ToLower(strings.TrimSpace(key)), strings.ToLower(strings.TrimSpace(value)))
+	}
+	if len(spec.LegacyRatioKeys) > 0 {
+		info.PriceData.AddBillingMeta("variant_legacy_ratio_keys", strings.Join(spec.LegacyRatioKeys, ","))
+	}
+	if !info.PriceData.UsePrice {
+		return nil
+	}
+
+	config, configured := ratio_setting.GetModelPriceVariantConfig(info.OriginModelName)
+	if !configured {
+		return nil
+	}
+	match := ratio_setting.MatchModelPriceVariant(info.OriginModelName, spec.Dimensions)
+	if !match.Matched {
+		if config.ResolutionEnabled || config.QualityEnabled {
+			// 缺档时保留旧倍率，避免未知高规格静默回落到低价。
+			info.PriceData.AddBillingMeta("variant_price_status", "legacy")
+		} else {
+			removeLegacyVariantRatios(info.PriceData.OtherRatios, spec.LegacyRatioKeys)
+			info.PriceData.AddBillingMeta("variant_price_status", "disabled")
+		}
+		return nil
+	}
+
+	removeLegacyVariantRatios(info.PriceData.OtherRatios, spec.LegacyRatioKeys)
+	info.PriceData.ModelPrice = match.Price
+	info.PriceData.AddBillingMeta("variant_price_status", "matched")
+	quotaValue := match.Price * common.QuotaPerUnit * info.PriceData.GroupRatioInfo.GroupRatio
+	quota, err := common.QuotaFromFloatStrict(quotaValue)
+	if err != nil {
+		return err
+	}
+	info.PriceData.Quota = quota
+	info.PriceData.FreeModel = match.Price == 0 || info.PriceData.GroupRatioInfo.GroupRatio == 0
+	return nil
+}
+
+func removeLegacyVariantRatios(ratios map[string]float64, keys []string) {
+	if len(ratios) == 0 || len(keys) == 0 {
+		return
+	}
+	for key := range ratios {
+		normalizedKey := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(key), "_", "-"))
+		for _, legacyKey := range keys {
+			normalizedLegacyKey := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(legacyKey), "_", "-"))
+			if normalizedLegacyKey != "" && (normalizedKey == normalizedLegacyKey || strings.HasPrefix(normalizedKey, normalizedLegacyKey+"-")) {
+				delete(ratios, key)
+				break
+			}
+		}
+	}
+}
+
+func splitBillingMetaList(value string) []string {
+	var values []string
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			values = append(values, item)
+		}
+	}
+	return values
 }
 
 // recalcQuotaFromRatios 根据 adjustedRatios 重新计算 quota。

@@ -100,7 +100,9 @@ const ModelPricingTable = ({
                       : '按次计费',
                   )
                 : '-',
-        priceItems: getModelPriceItems(priceData, t, siteDisplayType),
+        priceItems: getModelPriceItems(priceData, t, siteDisplayType, {
+          includeVariantRules: true,
+        }),
       };
     });
 
