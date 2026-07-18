@@ -30,13 +30,15 @@ import {
   getDynamicPricingSummary,
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
+import { getGroupDisplayName } from '../lib/group-names'
 import { getModelPriceUnit, isTokenBasedModel } from '../lib/model-helpers'
 import { formatPrice, formatRequestPrice } from '../lib/price'
-import type { PricingModel, TokenUnit } from '../types'
+import type { GroupNameMap, PricingModel, TokenUnit } from '../types'
 import { ModelPerfBadge, type ModelPerfBadgeData } from './model-perf-badge'
 
 export interface ModelCardProps {
   model: PricingModel
+  groupNames: GroupNameMap
   onClick: () => void
   priceRate?: number
   usdExchangeRate?: number
@@ -242,7 +244,8 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
         <div className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1'>
           {primaryGroup && (
             <span className='text-muted-foreground text-xs font-medium'>
-              {primaryGroup} {t('Groups')}
+              {getGroupDisplayName(primaryGroup, props.groupNames)}{' '}
+              {t('Groups')}
             </span>
           )}
           <span className='text-muted-foreground text-xs font-medium'>

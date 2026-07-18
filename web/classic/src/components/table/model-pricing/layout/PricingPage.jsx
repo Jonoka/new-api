@@ -137,6 +137,7 @@ const PricingPage = () => {
         onClose={pricingData.closeModelDetail}
         modelData={pricingData.selectedModel}
         groupRatio={pricingData.groupRatio}
+        groupNames={pricingData.groupNames}
         usableGroup={pricingData.usableGroup}
         currency={pricingData.currency}
         siteDisplayType={pricingData.siteDisplayType}
@@ -157,6 +158,7 @@ const PricingPage = () => {
         isMobile={isMobile}
         models={pricingData.models}
         groupRatio={pricingData.groupRatio}
+        groupNames={pricingData.groupNames}
         selectedGroup={pricingData.selectedGroup}
         currency={pricingData.currency}
         siteDisplayType={pricingData.siteDisplayType}

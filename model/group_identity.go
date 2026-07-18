@@ -159,6 +159,34 @@ func GetAllGroups(includeDisabled bool) ([]*Group, error) {
 	return groups, nil
 }
 
+// GetActiveGroupNameMap 返回内部兼容标识到当前显示名称的映射。
+//
+// 业务逻辑仍使用 Code 做筛选和计费；面向用户的页面只使用 Name 展示，
+// 因此管理员修改分组名称后无需重绑渠道、令牌或模型可用分组。
+func GetActiveGroupNameMap() (map[string]string, error) {
+	var groups []Group
+	if err := DB.Model(&Group{}).
+		Select("code", "name").
+		Where("status = ?", GroupStatusActive).
+		Find(&groups).Error; err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]string, len(groups))
+	for _, group := range groups {
+		code := strings.TrimSpace(group.Code)
+		if code == "" {
+			continue
+		}
+		name := strings.TrimSpace(group.Name)
+		if name == "" {
+			name = code
+		}
+		result[code] = name
+	}
+	return result, nil
+}
+
 func GetGroupById(id int) (*Group, error) {
 	var group Group
 	if err := DB.First(&group, "id = ?", id).Error; err != nil {

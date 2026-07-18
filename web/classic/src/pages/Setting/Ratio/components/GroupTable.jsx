@@ -29,6 +29,7 @@ import {
 import { IconPlus, IconDelete } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 import CardTable from '../../../../components/common/ui/CardTable';
+import { createUniqueGroupCode } from '../../../../helpers';
 
 const { Text } = Typography;
 
@@ -46,6 +47,13 @@ const serializeRows = (rows) => rows.map(({ _rowId, ...group }) => group);
 export default function GroupTable({ groups, onChange, disabled = false }) {
   const { t } = useTranslation();
   const [rows, setRows] = useState(() => buildRows(groups));
+  const reservedCodesRef = useRef(
+    new Set(
+      (Array.isArray(groups) ? groups : [])
+        .map((group) => String(group.code || '').trim())
+        .filter(Boolean),
+    ),
+  );
 
   // 通过 ref 读取最新回调，避免输入时重建列定义导致光标跳动。
   const onChangeRef = useRef(onChange);
@@ -65,9 +73,6 @@ export default function GroupTable({ groups, onChange, disabled = false }) {
       emitAndSet((previousRows) =>
         previousRows.map((row) => {
           if (row._rowId !== rowId) return row;
-          if (field === 'code' && !row.id && row.name === row.code) {
-            return { ...row, code: value, name: value };
-          }
           return { ...row, [field]: value };
         }),
       );
@@ -77,13 +82,8 @@ export default function GroupTable({ groups, onChange, disabled = false }) {
 
   const addRow = useCallback(() => {
     emitAndSet((previousRows) => {
-      const existingCodes = new Set(previousRows.map((row) => row.code));
-      let counter = 1;
-      let code = `group_${counter}`;
-      while (existingCodes.has(code)) {
-        counter += 1;
-        code = `group_${counter}`;
-      }
+      const code = createUniqueGroupCode(reservedCodesRef.current);
+      reservedCodesRef.current.add(code);
 
       return [
         ...previousRows,
@@ -91,7 +91,7 @@ export default function GroupTable({ groups, onChange, disabled = false }) {
           _rowId: createRowId(),
           id: null,
           code,
-          name: code,
+          name: '',
           description: '',
           ratio: 1,
           user_selectable: true,
@@ -112,23 +112,6 @@ export default function GroupTable({ groups, onChange, disabled = false }) {
     [emitAndSet],
   );
 
-  const duplicateCodes = useMemo(() => {
-    const counts = new Map();
-    rows.forEach((row) => {
-      const code = String(row.code || '').trim();
-      if (code) counts.set(code, (counts.get(code) || 0) + 1);
-    });
-    return new Set(
-      Array.from(counts.entries())
-        .filter(([, count]) => count > 1)
-        .map(([code]) => code),
-    );
-  }, [rows]);
-
-  // 列渲染始终读取最新重复项，同时保持列引用稳定。
-  const duplicateCodesRef = useRef(duplicateCodes);
-  duplicateCodesRef.current = duplicateCodes;
-
   const columns = useMemo(
     () => [
       {
@@ -143,26 +126,7 @@ export default function GroupTable({ groups, onChange, disabled = false }) {
         ),
       },
       {
-        title: t('稳定标识'),
-        dataIndex: 'code',
-        key: 'code',
-        width: 170,
-        render: (_, record) => (
-          <Input
-            size='small'
-            value={record.code}
-            disabled={disabled || !!record.id}
-            status={
-              duplicateCodesRef.current.has(String(record.code || '').trim())
-                ? 'warning'
-                : undefined
-            }
-            onChange={(value) => updateRow(record._rowId, 'code', value)}
-          />
-        ),
-      },
-      {
-        title: t('显示名称（可修改）'),
+        title: t('分组名称'),
         dataIndex: 'name',
         key: 'name',
         width: 180,
@@ -171,6 +135,7 @@ export default function GroupTable({ groups, onChange, disabled = false }) {
             size='small'
             value={record.name}
             disabled={disabled}
+            placeholder={t('请输入分组名称')}
             onChange={(value) => updateRow(record._rowId, 'name', value)}
           />
         ),
@@ -274,12 +239,6 @@ export default function GroupTable({ groups, onChange, disabled = false }) {
           {t('添加分组')}
         </Button>
       </div>
-      {duplicateCodes.size > 0 && (
-        <Text type='warning' size='small' className='mt-2 block'>
-          {t('存在重复的分组名称：')}
-          {Array.from(duplicateCodes).join(', ')}
-        </Text>
-      )}
     </div>
   );
 }

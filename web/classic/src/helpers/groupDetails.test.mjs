@@ -5,12 +5,34 @@ import {
   buildGroupDetailsPayload,
   buildGroupSelectionPayload,
   createGroupOptions,
+  createUniqueGroupCode,
   createUserGroupOptions,
   extractGroupDetailsResponse,
   formatGroupLabel,
+  getGroupDisplayName,
   getDeletedGroupIds,
   resolveGroupCodes,
 } from './groupDetails.js';
+
+test('新增分组生成未占用的内部 code 并随保存 payload 发送', () => {
+  const code = createUniqueGroupCode(new Set(['group_1', 'group_3']));
+  const payload = buildGroupDetailsPayload(
+    [{ code, name: '新分组', ratio: 1, status: 1 }],
+    [],
+  );
+
+  assert.equal(code, 'group_2');
+  assert.equal(payload.groups[0].code, 'group_2');
+  assert.equal(payload.groups[0].name, '新分组');
+});
+
+test('显示名称映射不会改变内部 code', () => {
+  const groupNames = { group_1: '高级分组' };
+
+  assert.equal(getGroupDisplayName('group_1', groupNames), '高级分组');
+  assert.equal(getGroupDisplayName('legacy', groupNames), 'legacy');
+  assert.equal(getGroupDisplayName('group_1', null), 'group_1');
+});
 
 test('修改显示名称不会改变稳定 ID 和分组标识', () => {
   const original = {

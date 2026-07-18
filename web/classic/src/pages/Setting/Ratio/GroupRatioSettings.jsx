@@ -44,6 +44,7 @@ import {
   applyAutoGroupCodes,
   buildGroupDetailsPayload,
   compareObjects,
+  createGroupOptions,
   API,
   extractGroupDetailsResponse,
   getDeletedGroupIds,
@@ -103,9 +104,11 @@ export default function GroupRatioSettings(props) {
   const [groupsLoaded, setGroupsLoaded] = useState(false);
   const [autoListVersion, setAutoListVersion] = useState(0);
 
-  const groupNames = useMemo(
+  const groupOptions = useMemo(
     () =>
-      groups.map((group) => String(group.code || '').trim()).filter(Boolean),
+      createGroupOptions(
+        groups.filter((group) => String(group.name || '').trim()),
+      ),
     [groups],
   );
 
@@ -201,11 +204,18 @@ export default function GroupRatioSettings(props) {
       JSON.stringify(groupPayload.groups) !==
         JSON.stringify(originalPayload.groups) || deletedIds.length > 0;
 
-    const hasMissingIdentity = groupPayload.groups.some(
-      (group) => !group.code || !group.name,
+    const hasMissingName = groupsRef.current.some(
+      (group) => !String(group.name || '').trim(),
     );
-    if (groupsChanged && hasMissingIdentity) {
-      return showError(t('请输入稳定标识和显示名称'));
+    if (groupsChanged && hasMissingName) {
+      return showError(t('请输入分组名称'));
+    }
+
+    const hasMissingCode = groupsRef.current.some(
+      (group) => !String(group.code || '').trim(),
+    );
+    if (groupsChanged && hasMissingCode) {
+      return showError(t('保存失败，请重试'));
     }
 
     const codeCounts = new Map();
@@ -216,9 +226,7 @@ export default function GroupRatioSettings(props) {
       .filter(([, count]) => count > 1)
       .map(([code]) => code);
     if (groupsChanged && duplicateCodes.length > 0) {
-      return showError(
-        `${t('存在重复的分组稳定标识：')}${duplicateCodes.join(', ')}`,
-      );
+      return showError(t('保存失败，请重试'));
     }
 
     const nameCounts = new Map();
@@ -230,7 +238,7 @@ export default function GroupRatioSettings(props) {
       .map(([name]) => name);
     if (groupsChanged && duplicateNames.length > 0) {
       return showError(
-        `${t('存在重复的分组显示名称：')}${duplicateNames.join(', ')}`,
+        `${t('存在重复的分组名称：')}${duplicateNames.join(', ')}`,
       );
     }
 
@@ -357,7 +365,7 @@ export default function GroupRatioSettings(props) {
           style={{ display: 'block', marginBottom: 12 }}
         >
           {t(
-            'ID 和稳定标识用于绑定渠道、令牌及用户分组；显示名称可以随时修改，修改后不会丢失已有绑定。倍率用于计费乘数，勾选「用户可选」后用户可在创建令牌时选择该分组',
+            '倍率用于计费乘数，勾选「用户可选」后用户可在创建令牌时选择该分组',
           )}
         </Text>
         <GroupTable
@@ -404,7 +412,7 @@ export default function GroupRatioSettings(props) {
         <AutoGroupList
           key={`ag_${groupDv}_${autoListVersion}`}
           value={inputs.AutoGroups}
-          groupNames={groupNames}
+          groupOptions={groupOptions}
           onChange={handleAutoGroupsChange}
         />
       </Form.Section>
@@ -422,7 +430,7 @@ export default function GroupRatioSettings(props) {
         <GroupGroupRatioRules
           key={`ggr_${dv}`}
           value={inputs.GroupGroupRatio}
-          groupNames={groupNames}
+          groupOptions={groupOptions}
           onChange={handleGroupGroupRatioChange}
         />
       </Form.Section>
@@ -440,7 +448,7 @@ export default function GroupRatioSettings(props) {
         <GroupSpecialUsableRules
           key={`gsu_${dv}`}
           value={inputs['group_ratio_setting.group_special_usable_group']}
-          groupNames={groupNames}
+          groupOptions={groupOptions}
           onChange={handleSpecialUsableChange}
         />
       </Form.Section>

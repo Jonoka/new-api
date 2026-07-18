@@ -39,6 +39,30 @@ const normalizeStatus = (value) => {
   return 1;
 };
 
+export const createUniqueGroupCode = (groupsOrCodes = []) => {
+  const existingCodes = new Set();
+  for (const item of groupsOrCodes || []) {
+    const value = typeof item === 'object' && item !== null ? item.code : item;
+    const code = String(value ?? '').trim();
+    if (code) existingCodes.add(code);
+  }
+
+  let index = 1;
+  while (existingCodes.has(`group_${index}`)) index += 1;
+  return `group_${index}`;
+};
+
+export const getGroupDisplayName = (code, groupNames = {}) => {
+  const normalizedCode = String(code ?? '').trim();
+  if (!normalizedCode) return '';
+
+  const mappedName =
+    groupNames && typeof groupNames === 'object'
+      ? groupNames[normalizedCode]
+      : '';
+  return String(mappedName ?? '').trim() || normalizedCode;
+};
+
 export const normalizeGroupDetail = (group = {}) => {
   const code = String(group.code ?? '').trim();
   const name = String(group.name ?? '').trim();

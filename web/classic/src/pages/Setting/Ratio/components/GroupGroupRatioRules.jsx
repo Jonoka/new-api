@@ -1,8 +1,26 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
 import React, { useState, useCallback, useMemo } from 'react';
 import {
   Button,
   Collapsible,
-  Input,
   InputNumber,
   Select,
   Tag,
@@ -64,7 +82,16 @@ export function serializeGroupGroupRatio(rules) {
     : JSON.stringify(nested, null, 2);
 }
 
-function GroupSection({ groupName, items, groupOptions, onUpdate, onRemove, onAdd, t }) {
+function GroupSection({
+  groupCode,
+  groupLabel,
+  items,
+  groupOptions,
+  onUpdate,
+  onRemove,
+  onAdd,
+  t,
+}) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -84,16 +111,25 @@ function GroupSection({ groupName, items, groupOptions, onUpdate, onRemove, onAd
         onClick={() => setOpen(!open)}
       >
         <div className='flex items-center gap-2'>
-          {open ? <IconChevronUp size='small' /> : <IconChevronDown size='small' />}
-          <Text strong>{groupName}</Text>
-          <Tag size='small' color='blue'>{items.length} {t('条规则')}</Tag>
+          {open ? (
+            <IconChevronUp size='small' />
+          ) : (
+            <IconChevronDown size='small' />
+          )}
+          <Text strong>{groupLabel}</Text>
+          <Tag size='small' color='blue'>
+            {items.length} {t('条规则')}
+          </Tag>
         </div>
-        <div className='flex items-center gap-1' onClick={(e) => e.stopPropagation()}>
+        <div
+          className='flex items-center gap-1'
+          onClick={(e) => e.stopPropagation()}
+        >
           <Button
             icon={<IconPlus />}
             size='small'
             theme='borderless'
-            onClick={() => onAdd(groupName)}
+            onClick={() => onAdd(groupCode)}
           />
           <Popconfirm
             title={t('确认删除该分组的所有规则？')}
@@ -125,7 +161,6 @@ function GroupSection({ groupName, items, groupOptions, onUpdate, onRemove, onAd
                 optionList={groupOptions}
                 onChange={(v) => onUpdate(rule._id, 'usingGroup', v)}
                 style={{ flex: 1 }}
-                allowCreate
                 position='bottomLeft'
               />
               <InputNumber
@@ -158,12 +193,12 @@ function GroupSection({ groupName, items, groupOptions, onUpdate, onRemove, onAd
 
 export default function GroupGroupRatioRules({
   value,
-  groupNames = [],
+  groupOptions = [],
   onChange,
 }) {
   const { t } = useTranslation();
   const [rules, setRules] = useState(() => flattenRules(parseJSON(value)));
-  const [newGroupName, setNewGroupName] = useState('');
+  const [newGroupCode, setNewGroupCode] = useState('');
 
   const emitChange = useCallback(
     (newRules) => {
@@ -198,18 +233,18 @@ export default function GroupGroupRatioRules({
   );
 
   const addNewGroup = useCallback(() => {
-    const name = newGroupName.trim();
-    if (!name) return;
+    const code = newGroupCode.trim();
+    if (!code) return;
     emitChange([
       ...rules,
-      { _id: uid(), userGroup: name, usingGroup: '', ratio: 1 },
+      { _id: uid(), userGroup: code, usingGroup: '', ratio: 1 },
     ]);
-    setNewGroupName('');
-  }, [rules, emitChange, newGroupName]);
+    setNewGroupCode('');
+  }, [rules, emitChange, newGroupCode]);
 
-  const groupOptions = useMemo(
-    () => groupNames.map((n) => ({ value: n, label: n })),
-    [groupNames],
+  const groupLabels = useMemo(
+    () => new Map(groupOptions.map((option) => [option.value, option.label])),
+    [groupOptions],
   );
 
   const grouped = useMemo(() => {
@@ -223,8 +258,12 @@ export default function GroupGroupRatioRules({
       }
       map[r.userGroup].push(r);
     });
-    return order.map((name) => ({ name, items: map[name] }));
-  }, [rules]);
+    return order.map((code) => ({
+      code,
+      label: groupLabels.get(code) || code,
+      items: map[code],
+    }));
+  }, [groupLabels, rules]);
 
   if (grouped.length === 0 && rules.length === 0) {
     return (
@@ -236,11 +275,10 @@ export default function GroupGroupRatioRules({
           <Select
             size='small'
             filter
-            allowCreate
             placeholder={t('选择用户分组')}
             optionList={groupOptions}
-            value={newGroupName || undefined}
-            onChange={setNewGroupName}
+            value={newGroupCode || undefined}
+            onChange={setNewGroupCode}
             style={{ width: 200 }}
             position='bottomLeft'
           />
@@ -256,8 +294,9 @@ export default function GroupGroupRatioRules({
     <div className='space-y-2'>
       {grouped.map((group) => (
         <GroupSection
-          key={group.name}
-          groupName={group.name}
+          key={group.code}
+          groupCode={group.code}
+          groupLabel={group.label}
           items={group.items}
           groupOptions={groupOptions}
           onUpdate={updateRule}
@@ -270,11 +309,10 @@ export default function GroupGroupRatioRules({
         <Select
           size='small'
           filter
-          allowCreate
           placeholder={t('选择用户分组')}
           optionList={groupOptions}
-          value={newGroupName || undefined}
-          onChange={setNewGroupName}
+          value={newGroupCode || undefined}
+          onChange={setNewGroupCode}
           style={{ width: 200 }}
           position='bottomLeft'
         />

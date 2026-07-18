@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next';
 import {
   API,
   copy,
+  getGroupDisplayName,
   matchesModelPricingQuotaFilter,
   showError,
   showInfo,
@@ -55,6 +56,7 @@ export const useModelPricingData = () => {
   const [vendorsMap, setVendorsMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [groupRatio, setGroupRatio] = useState({});
+  const [groupNames, setGroupNames] = useState({});
   const [usableGroup, setUsableGroup] = useState({});
   const [endpointMap, setEndpointMap] = useState({});
   const [autoGroups, setAutoGroups] = useState([]);
@@ -245,12 +247,20 @@ export const useModelPricingData = () => {
       data,
       vendors,
       group_ratio,
+      group_names,
       usable_group,
       supported_endpoint,
       auto_groups,
     } = res.data;
     if (success) {
       setGroupRatio(group_ratio);
+      setGroupNames(
+        group_names &&
+          typeof group_names === 'object' &&
+          !Array.isArray(group_names)
+          ? group_names
+          : {},
+      );
       setUsableGroup(usable_group);
       setSelectedGroup('all');
       // 构建供应商 Map 方便查找
@@ -332,7 +342,7 @@ export const useModelPricingData = () => {
     } else {
       showInfo(
         t('当前查看的分组为：{{group}}，倍率为：{{ratio}}', {
-          group: group,
+          group: getGroupDisplayName(group, groupNames),
           ratio: groupRatio[group] ?? 1,
         }),
       );
@@ -408,6 +418,7 @@ export const useModelPricingData = () => {
     models,
     loading,
     groupRatio,
+    groupNames,
     usableGroup,
     endpointMap,
     autoGroups,

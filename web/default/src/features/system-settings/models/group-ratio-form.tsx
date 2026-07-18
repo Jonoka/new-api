@@ -60,6 +60,7 @@ import {
 } from '../components/settings-form-layout'
 import { SettingsPageActionsPortal } from '../components/settings-page-context'
 import type { GroupDetail, GroupDetailInput } from '../types'
+import { reserveGroupCodes } from './group-identity'
 import {
   GroupRatioVisualEditor,
   type EditableGroupDetail,
@@ -95,7 +96,7 @@ function createEditableGroup(group: GroupDetail): EditableGroupDetail {
   return {
     id: Number(group.id),
     code,
-    name: String(group.name ?? '').trim() || code,
+    name: String(group.name ?? '').trim(),
     description: String(group.description ?? ''),
     ratio: Number.isFinite(ratio) && ratio >= 0 ? ratio : 1,
     user_selectable: group.user_selectable === true,
@@ -149,6 +150,9 @@ export const GroupRatioForm = memo(function GroupRatioForm({
   const [editMode, setEditMode] = useState<'visual' | 'json'>('visual')
   const [guideOpen, setGuideOpen] = useState(false)
   const [groups, setGroups] = useState<EditableGroupDetail[]>([])
+  const [reservedGroupCodes, setReservedGroupCodes] = useState<Set<string>>(
+    () => new Set()
+  )
   const [deletedGroupIds, setDeletedGroupIds] = useState<number[]>([])
 
   const groupDetailsQuery = useQuery({
@@ -165,6 +169,12 @@ export const GroupRatioForm = memo(function GroupRatioForm({
   useEffect(() => {
     if (!groupDetailsQuery.data) return
     setGroups(groupDetailsQuery.data.map(createEditableGroup))
+    setReservedGroupCodes((current) =>
+      reserveGroupCodes(
+        current,
+        groupDetailsQuery.data.map((group) => group.code)
+      )
+    )
     setDeletedGroupIds([])
   }, [groupDetailsQuery.data])
 
@@ -194,6 +204,12 @@ export const GroupRatioForm = memo(function GroupRatioForm({
           (id) => !nextIds.has(id)
         )
       )
+      setReservedGroupCodes((current) =>
+        reserveGroupCodes(
+          current,
+          nextGroups.map((group) => group.code)
+        )
+      )
       setGroups(nextGroups)
     },
     [groups]
@@ -206,18 +222,21 @@ export const GroupRatioForm = memo(function GroupRatioForm({
         return
       }
 
-      const codes = groups.map((group) => group.code.trim())
-      if (groups.some((group) => !group.code.trim() || !group.name.trim())) {
-        toast.error(t('Group code and group name are required.'))
-        return
-      }
-      if (new Set(codes).size !== codes.length) {
-        toast.error(t('Group codes must be unique.'))
-        return
-      }
       const names = groups.map((group) => group.name.trim())
+      if (names.some((name) => !name)) {
+        toast.error(`${t('Group name')}: ${t('Required')}`)
+        return
+      }
       if (new Set(names).size !== names.length) {
         toast.error(t('Group names must be unique.'))
+        return
+      }
+
+      // 稳定标识由系统生成并保持不可编辑；异常时仅返回通用保存错误，
+      // 不把内部标识暴露给管理员。
+      const codes = groups.map((group) => group.code.trim())
+      if (codes.some((code) => !code) || new Set(codes).size !== codes.length) {
+        toast.error(t('Failed to save'))
         return
       }
       if (
@@ -243,6 +262,9 @@ export const GroupRatioForm = memo(function GroupRatioForm({
         setGroups(savedGroups.map(createEditableGroup))
         setDeletedGroupIds([])
 
+        // 分组名称会显示在模型广场；立即使五分钟缓存失效。
+        await queryClient.invalidateQueries({ queryKey: ['pricing'] })
+
         // 组间特殊倍率等高级配置仍通过旧 Option 接口保存。
         await onSave(values)
         await Promise.all([
@@ -250,7 +272,6 @@ export const GroupRatioForm = memo(function GroupRatioForm({
           queryClient.invalidateQueries({ queryKey: ['channels'] }),
           queryClient.invalidateQueries({ queryKey: ['user-groups'] }),
           queryClient.invalidateQueries({ queryKey: ['user-self-groups'] }),
-          queryClient.invalidateQueries({ queryKey: ['pricing'] }),
         ])
         toast.success(t('Group settings saved successfully'))
       } catch {
@@ -321,6 +342,7 @@ export const GroupRatioForm = memo(function GroupRatioForm({
           <div className='space-y-6'>
             <GroupRatioVisualEditor
               groups={groups}
+              reservedGroupCodes={reservedGroupCodes}
               isLoadingGroups={groupDetailsQuery.isPending}
               groupLoadError={groupLoadError}
               topupGroupRatio={form.watch('TopupGroupRatio')}

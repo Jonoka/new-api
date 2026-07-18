@@ -44,6 +44,7 @@ export function Pricing() {
     models,
     vendors,
     groupRatio,
+    groupNames,
     usableGroup,
     endpointMap,
     autoGroups,
@@ -128,6 +129,7 @@ export function Pricing() {
           usdExchangeRate={usdExchangeRate}
           tokenUnit={tokenUnit}
           showRechargePrice={showRechargePrice}
+          groupNames={groupNames}
         />
       )
     }
@@ -139,6 +141,7 @@ export function Pricing() {
         usdExchangeRate={usdExchangeRate}
         tokenUnit={tokenUnit}
         showRechargePrice={showRechargePrice}
+        groupNames={groupNames}
         onModelClick={handleModelClick}
       />
     )
@@ -216,6 +219,7 @@ export function Pricing() {
               vendors={vendors || []}
               groups={availableGroups}
               groupRatios={groupRatio}
+              groupNames={groupNames}
               tags={availableTags}
               models={models || []}
               hasActiveFilters={hasActiveFilters}
@@ -248,6 +252,7 @@ export function Pricing() {
                 vendors={vendors || []}
                 groups={availableGroups}
                 groupRatios={groupRatio}
+                groupNames={groupNames}
                 tags={availableTags}
                 models={models || []}
                 hasActiveFilters={hasActiveFilters}
@@ -267,6 +272,7 @@ export function Pricing() {
               }}
               model={selectedModel}
               groupRatio={groupRatio || {}}
+              groupNames={groupNames}
               usableGroup={usableGroup || {}}
               endpointMap={
                 (endpointMap as Record<

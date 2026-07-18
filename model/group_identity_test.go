@@ -100,8 +100,47 @@ func TestSaveGroupConfigChangesDisplayNameOnly(t *testing.T) {
 	if updated.Id != group.Id || updated.Code != "vip" || updated.Name != "尊贵用户" {
 		t.Fatalf("显示名称更新错误: %#v", updated)
 	}
+	names, err := GetActiveGroupNameMap()
+	if err != nil {
+		t.Fatalf("读取模型广场分组名称失败: %v", err)
+	}
+	if names["vip"] != "尊贵用户" {
+		t.Fatalf("模型广场未读取到修改后的分组名称: %#v", names)
+	}
 	if err := SaveGroupConfig([]GroupConfig{{Id: group.Id, Code: "renamed-code", Name: "其他", Ratio: 0.5, Status: GroupStatusActive}}, nil); err == nil {
 		t.Fatal("修改 code 应该被拒绝")
+	}
+}
+
+func TestGetActiveGroupNameMapUsesLatestDisplayName(t *testing.T) {
+	db := openGroupIdentityTestDB(t)
+	if err := db.AutoMigrate(&Group{}, &AutoGroupMember{}); err != nil {
+		t.Fatalf("迁移测试表失败: %v", err)
+	}
+	groups := []Group{
+		{Code: "vip", Name: "尊贵用户", Ratio: 0.5, Status: GroupStatusActive},
+		{Code: "hidden", Name: "已停用", Ratio: 1, Status: GroupStatusDisabled},
+		{Code: "fallback", Name: "", Ratio: 1, Status: GroupStatusActive},
+	}
+	if err := db.Create(&groups).Error; err != nil {
+		t.Fatalf("创建分组失败: %v", err)
+	}
+	if err := db.Model(&Group{}).Where("code = ?", "hidden").Update("status", GroupStatusDisabled).Error; err != nil {
+		t.Fatalf("停用测试分组失败: %v", err)
+	}
+
+	names, err := GetActiveGroupNameMap()
+	if err != nil {
+		t.Fatalf("读取分组显示名称失败: %v", err)
+	}
+	if names["vip"] != "尊贵用户" {
+		t.Fatalf("未返回最新显示名称: %#v", names)
+	}
+	if names["fallback"] != "fallback" {
+		t.Fatalf("空显示名称未回退到内部标识: %#v", names)
+	}
+	if _, ok := names["hidden"]; ok {
+		t.Fatalf("停用分组不应出现在显示名称映射中: %#v", names)
 	}
 }
 

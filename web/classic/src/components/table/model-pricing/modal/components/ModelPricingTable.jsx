@@ -22,6 +22,7 @@ import { Avatar, Typography, Table, Tag } from '@douyinfe/semi-ui';
 import { IconCoinMoneyStroked } from '@douyinfe/semi-icons';
 import {
   calculateModelPrice,
+  getGroupDisplayName,
   getModelPriceItems,
   isModelPriceUnitSecond,
 } from '../../../../../helpers';
@@ -36,6 +37,7 @@ const { Text } = Typography;
 const ModelPricingTable = ({
   modelData,
   groupRatio,
+  groupNames = {},
   currency,
   siteDisplayType,
   tokenUnit,
@@ -83,7 +85,7 @@ const ModelPricingTable = ({
 
       return {
         key: group,
-        group: group,
+        group: getGroupDisplayName(group, groupNames),
         ratio: groupRatioValue,
         discountFactor,
         billingType:
@@ -227,7 +229,7 @@ const ModelPricingTable = ({
           {autoChain.map((g, idx) => (
             <React.Fragment key={g}>
               <Tag color='white' size='small' shape='circle'>
-                {g}
+                {getGroupDisplayName(g, groupNames)}
                 {t('分组')}
               </Tag>
               {idx < autoChain.length - 1 && <span className='text-sm'>→</span>}

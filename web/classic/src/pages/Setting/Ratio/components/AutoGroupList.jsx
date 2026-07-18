@@ -1,11 +1,24 @@
-import React, { useState, useCallback, useMemo } from 'react';
-import {
-  Button,
-  Select,
-  Typography,
-  Popconfirm,
-  Tag,
-} from '@douyinfe/semi-ui';
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
+import React, { useState, useCallback } from 'react';
+import { Button, Select, Typography, Popconfirm, Tag } from '@douyinfe/semi-ui';
 import {
   IconPlus,
   IconDelete,
@@ -26,18 +39,18 @@ function parseAutoGroups(str) {
     if (!Array.isArray(parsed)) return [];
     return parsed
       .filter((item) => typeof item === 'string')
-      .map((name) => ({ _id: uid(), name }));
+      .map((code) => ({ _id: uid(), code }));
   } catch {
     return [];
   }
 }
 
 function serializeAutoGroups(items) {
-  const names = items.map((i) => i.name).filter(Boolean);
-  return names.length === 0 ? '' : JSON.stringify(names);
+  const codes = items.map((item) => item.code).filter(Boolean);
+  return codes.length === 0 ? '' : JSON.stringify(codes);
 }
 
-export default function AutoGroupList({ value, groupNames = [], onChange }) {
+export default function AutoGroupList({ value, groupOptions = [], onChange }) {
   const { t } = useTranslation();
 
   const [items, setItems] = useState(() => parseAutoGroups(value));
@@ -50,13 +63,8 @@ export default function AutoGroupList({ value, groupNames = [], onChange }) {
     [onChange],
   );
 
-  const groupOptions = useMemo(
-    () => groupNames.map((n) => ({ value: n, label: n })),
-    [groupNames],
-  );
-
   const addItem = useCallback(() => {
-    emitChange([...items, { _id: uid(), name: '' }]);
+    emitChange([...items, { _id: uid(), code: '' }]);
   }, [items, emitChange]);
 
   const removeItem = useCallback(
@@ -67,8 +75,8 @@ export default function AutoGroupList({ value, groupNames = [], onChange }) {
   );
 
   const updateItem = useCallback(
-    (id, name) => {
-      emitChange(items.map((i) => (i._id === id ? { ...i, name } : i)));
+    (id, code) => {
+      emitChange(items.map((i) => (i._id === id ? { ...i, code } : i)));
     },
     [items, emitChange],
   );
@@ -112,22 +120,18 @@ export default function AutoGroupList({ value, groupNames = [], onChange }) {
     <div>
       <div className='space-y-2'>
         {items.map((item, index) => (
-          <div
-            key={item._id}
-            className='flex items-center gap-2'
-          >
+          <div key={item._id} className='flex items-center gap-2'>
             <Tag size='small' color='blue' className='shrink-0'>
               {index + 1}
             </Tag>
             <Select
               size='small'
               filter
-              value={item.name || undefined}
+              value={item.code || undefined}
               placeholder={t('选择分组')}
               optionList={groupOptions}
               onChange={(v) => updateItem(item._id, v)}
               style={{ flex: 1 }}
-              allowCreate
               position='bottomLeft'
             />
             <Button

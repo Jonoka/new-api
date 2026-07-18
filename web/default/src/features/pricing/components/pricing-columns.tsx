@@ -35,13 +35,14 @@ import {
   getDynamicPricingSummary,
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
+import { getGroupDisplayName } from '../lib/group-names'
 import { getModelPriceUnit, isTokenBasedModel } from '../lib/model-helpers'
 import {
   formatPrice,
   formatRequestPrice,
   stripTrailingZeros,
 } from '../lib/price'
-import type { PricingModel, TokenUnit } from '../types'
+import type { GroupNameMap, PricingModel, TokenUnit } from '../types'
 
 // ----------------------------------------------------------------------------
 // Pricing Table Columns
@@ -52,6 +53,7 @@ export interface PricingColumnsOptions {
   priceRate?: number
   usdExchangeRate?: number
   showRechargePrice?: boolean
+  groupNames?: GroupNameMap
 }
 
 function renderLimitedTags(
@@ -72,6 +74,7 @@ function renderLimitedTags(
 
 function renderLimitedGroupBadges(
   groups: string[],
+  groupNames: GroupNameMap,
   maxDisplay: number = 2
 ): React.ReactNode {
   return (
@@ -79,7 +82,13 @@ function renderLimitedGroupBadges(
       items={groups}
       max={maxDisplay}
       getKey={(group) => group}
-      renderItem={(group) => <GroupBadge group={group} size='sm' />}
+      renderItem={(group) => (
+        <GroupBadge
+          group={group}
+          label={getGroupDisplayName(group, groupNames)}
+          size='sm'
+        />
+      )}
     />
   )
 }
@@ -93,6 +102,7 @@ export function usePricingColumns(
     priceRate = 1,
     usdExchangeRate = 1,
     showRechargePrice = false,
+    groupNames = {},
   } = options
 
   const tokenUnitLabel = tokenUnit === 'K' ? '1K' : '1M'
@@ -458,13 +468,18 @@ export function usePricingColumns(
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger render={<div />}>
-                {renderLimitedGroupBadges(groups, 2)}
+                {renderLimitedGroupBadges(groups, groupNames, 2)}
               </TooltipTrigger>
               {groups.length > 2 && (
                 <TooltipContent side='top' className='max-w-[280px] p-2'>
                   <div className='flex flex-wrap gap-1'>
                     {groups.map((group) => (
-                      <GroupBadge key={group} group={group} size='sm' />
+                      <GroupBadge
+                        key={group}
+                        group={group}
+                        label={getGroupDisplayName(group, groupNames)}
+                        size='sm'
+                      />
                     ))}
                   </div>
                 </TooltipContent>

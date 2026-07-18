@@ -37,8 +37,9 @@ import {
   formatUptimePct,
 } from '@/features/performance-metrics/lib/format'
 import type { PerformanceGroup } from '@/features/performance-metrics/types'
+import { getGroupDisplayName } from '../lib/group-names'
 import { type UptimeDayPoint } from '../lib/mock-stats'
-import type { PricingModel } from '../types'
+import type { GroupNameMap, PricingModel } from '../types'
 import { LatencyTrendChart, UptimeTrendChart } from './model-details-charts'
 import { UptimeSparkline } from './model-details-uptime-sparkline'
 
@@ -154,7 +155,10 @@ function average(
   )
 }
 
-export function ModelDetailsPerformance(props: { model: PricingModel }) {
+export function ModelDetailsPerformance(props: {
+  model: PricingModel
+  groupNames: GroupNameMap
+}) {
   const { t } = useTranslation()
   const metricsQuery = useQuery({
     queryKey: ['perf-metrics', props.model.model_name],
@@ -281,7 +285,11 @@ export function ModelDetailsPerformance(props: { model: PricingModel }) {
               {performances.map((perf) => (
                 <TableRow key={perf.group}>
                   <TableCell className='py-2.5'>
-                    <GroupBadge group={perf.group} size='sm' />
+                    <GroupBadge
+                      group={perf.group}
+                      label={getGroupDisplayName(perf.group, props.groupNames)}
+                      size='sm'
+                    />
                   </TableCell>
                   <TableCell className='py-2.5 text-right font-mono'>
                     {formatThroughput(perf.avg_tps)}

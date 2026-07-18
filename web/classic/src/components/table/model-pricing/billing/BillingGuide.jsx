@@ -38,7 +38,7 @@ import {
   IconHelpCircle,
   IconRefresh,
 } from '@douyinfe/semi-icons';
-import { calculateModelPrice } from '../../../../helpers';
+import { calculateModelPrice, getGroupDisplayName } from '../../../../helpers';
 import { BILLING_GUIDE_MASK_STYLE } from './BillingGuideWelcome';
 import {
   DEFAULT_TOKEN_COUNTS,
@@ -194,6 +194,7 @@ const BillingGuide = ({
   isMobile,
   models = [],
   groupRatio = {},
+  groupNames = {},
   selectedGroup = 'all',
   currency = 'USD',
   siteDisplayType = 'USD',
@@ -306,9 +307,9 @@ const BillingGuide = ({
     () =>
       groups.map((group) => ({
         value: group.value,
-        label: `${group.value} · ×${formatFixedNumber(group.ratio, 3)}`,
+        label: `${getGroupDisplayName(group.value, groupNames)} · ×${formatFixedNumber(group.ratio, 3)}`,
       })),
-    [groups],
+    [groupNames, groups],
   );
 
   useEffect(() => {
