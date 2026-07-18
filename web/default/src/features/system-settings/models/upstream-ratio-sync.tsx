@@ -62,6 +62,7 @@ import { UpstreamRatioSyncTable } from './upstream-ratio-sync-table'
 type UpstreamRatioSyncProps = {
   modelRatios: {
     ModelPrice: string
+    ModelPriceUnit: string
     ModelRatio: string
     CompletionRatio: string
     CacheRatio: string
@@ -89,7 +90,8 @@ function getDefaultEndpointForChannel(channel: UpstreamChannel): string {
 }
 
 function getBillingCategory(ratioType: string): 'price' | 'ratio' | 'tiered' {
-  if (ratioType === 'model_price') return 'price'
+  if (ratioType === 'model_price' || ratioType === 'model_price_unit')
+    return 'price'
   if (ratioType === 'billing_mode' || ratioType === 'billing_expr')
     return 'tiered'
   return 'ratio'
@@ -344,6 +346,7 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
         modelRatios.AudioCompletionRatio
       ),
       ModelPrice: parseJsonRecord<number>(modelRatios.ModelPrice),
+      ModelPriceUnit: parseJsonRecord<string>(modelRatios.ModelPriceUnit),
       'billing_setting.billing_mode': parseJsonRecord<string>(
         modelRatios['billing_setting.billing_mode']
       ),
@@ -384,6 +387,7 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
         AudioRatio: { ...currentRatios.AudioRatio },
         AudioCompletionRatio: { ...currentRatios.AudioCompletionRatio },
         ModelPrice: { ...currentRatios.ModelPrice },
+        ModelPriceUnit: { ...currentRatios.ModelPriceUnit },
         'billing_setting.billing_mode': {
           ...currentRatios['billing_setting.billing_mode'],
         },
@@ -410,6 +414,7 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
         }
         if (hasRatio) {
           delete finalRatios.ModelPrice[model]
+          delete finalRatios.ModelPriceUnit[model]
         }
 
         Object.entries(ratios).forEach(([ratioType, value]) => {

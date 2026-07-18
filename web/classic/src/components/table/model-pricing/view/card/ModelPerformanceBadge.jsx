@@ -25,7 +25,7 @@ import {
   normalizePerformanceSeries,
 } from '../../performance/utils';
 
-const ModelPerformanceBadge = ({ performance, t }) => {
+const ModelPerformanceBadge = ({ performance, t, isMobile = false }) => {
   if (!performance) return null;
 
   const { avg_latency_ms, avg_tps, success_rate } = performance;
@@ -33,8 +33,20 @@ const ModelPerformanceBadge = ({ performance, t }) => {
   const latestPoint = series[series.length - 1];
 
   return (
-    <div className='hidden min-w-0 items-center gap-3 text-xs tabular-nums sm:flex'>
-      <div className='flex shrink-0 items-center gap-3 whitespace-nowrap'>
+    <div
+      className={
+        isMobile
+          ? 'flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] tabular-nums'
+          : 'flex min-w-0 items-center gap-3 text-xs tabular-nums'
+      }
+    >
+      <div
+        className={
+          isMobile
+            ? 'flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1'
+            : 'flex shrink-0 items-center gap-3 whitespace-nowrap'
+        }
+      >
         <span
           title={t('吞吐量')}
           className='inline-flex items-baseline gap-1 text-semi-color-text-2'
@@ -54,12 +66,16 @@ const ModelPerformanceBadge = ({ performance, t }) => {
           </span>
         </span>
       </div>
-      <div className='relative' title={t('成功率')}>
+      <div
+        className={isMobile ? 'relative ml-auto shrink-0' : 'relative'}
+        title={t('成功率')}
+      >
         <SuccessRateSparkline
           series={series}
           overall={success_rate}
-          maxPoints={24}
-          latestTimestamp={latestPoint?.ts}
+          maxPoints={isMobile ? 12 : 24}
+          compact={isMobile}
+          latestTimestamp={isMobile ? undefined : latestPoint?.ts}
         />
       </div>
     </div>

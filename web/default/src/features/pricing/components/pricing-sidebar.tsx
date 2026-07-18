@@ -20,6 +20,7 @@ import type { ReactNode } from 'react'
 import { ChevronDown, RotateCcw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getLobeIcon } from '@/lib/lobe-icon'
+import { MODEL_PRICE_UNITS } from '@/lib/model-price-unit'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -36,6 +37,7 @@ import {
   getQuotaTypeLabels,
 } from '../constants'
 import { parseTags } from '../lib/filters'
+import { getModelPriceUnit } from '../lib/model-helpers'
 import type { PricingModel, PricingVendor } from '../types'
 
 type FilterOption = {
@@ -204,7 +206,22 @@ export function PricingSidebar(props: PricingSidebarProps) {
     {
       value: QUOTA_TYPES.REQUEST,
       label: quotaTypeLabels[QUOTA_TYPES.REQUEST],
-      count: countBy(props.models, (model) => model.quota_type === 1),
+      count: countBy(
+        props.models,
+        (model) =>
+          model.quota_type === 1 &&
+          getModelPriceUnit(model) === MODEL_PRICE_UNITS.REQUEST
+      ),
+    },
+    {
+      value: QUOTA_TYPES.SECOND,
+      label: quotaTypeLabels[QUOTA_TYPES.SECOND],
+      count: countBy(
+        props.models,
+        (model) =>
+          model.quota_type === 1 &&
+          getModelPriceUnit(model) === MODEL_PRICE_UNITS.SECOND
+      ),
     },
   ]
 

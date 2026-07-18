@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 /**
  * Type definitions for usage logs
  */
+import type { ModelPriceUnit } from '@/lib/model-price-unit'
 import type { UsageLog } from './data/schema'
 
 // ============================================================================
@@ -133,6 +134,8 @@ export interface LogOtherData {
   model_ratio?: number
   completion_ratio?: number
   model_price?: number
+  model_price_unit?: ModelPriceUnit | ''
+  seconds?: number
   group_ratio?: number
   user_group_ratio?: number
   cache_ratio?: number

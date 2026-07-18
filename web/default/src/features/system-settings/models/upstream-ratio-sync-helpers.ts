@@ -47,6 +47,7 @@ export const RATIO_SYNC_FIELDS: RatioType[] = [
 export const SYNC_FIELD_ORDER: RatioType[] = [
   ...RATIO_SYNC_FIELDS,
   'model_price',
+  'model_price_unit',
   'billing_mode',
   'billing_expr',
 ]

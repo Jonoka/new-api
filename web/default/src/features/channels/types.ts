@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
+import type { GroupIdentity } from '@/lib/group-options'
 
 // ============================================================================
 // Channel Schema & Types
@@ -33,6 +34,12 @@ export const channelInfoSchema = z.object({
 })
 
 export type ChannelInfo = z.infer<typeof channelInfoSchema>
+
+const groupReferenceSchema = z.object({
+  id: z.number(),
+  code: z.string(),
+  name: z.string(),
+})
 
 export const channelSchema = z.object({
   id: z.number(),
@@ -54,6 +61,8 @@ export const channelSchema = z.object({
   balance_updated_time: z.number(),
   models: z.string().default(''),
   group: z.string().default('default'),
+  group_ids: z.array(z.number()).optional().default([]),
+  group_details: z.array(groupReferenceSchema).optional().default([]),
   used_quota: z.number().default(0),
   model_mapping: z.string().nullish(),
   status_code_mapping: z.string().nullish(),
@@ -179,6 +188,21 @@ export interface FetchModelsResponse {
   success: boolean
   message?: string
   data?: string[]
+}
+
+export interface GroupDetail extends GroupIdentity {
+  description: string
+  ratio: number
+  user_selectable: boolean
+  status: number
+  auto_enabled: boolean
+  auto_order: number
+}
+
+export interface GetGroupDetailsResponse {
+  success: boolean
+  message?: string
+  data?: GroupDetail[]
 }
 
 export interface CopyChannelResponse {
@@ -312,6 +336,7 @@ export interface TagOperationParams {
   model_mapping?: string
   models?: string
   groups?: string
+  group_ids?: number[]
 }
 
 // ============================================================================
@@ -326,6 +351,7 @@ export interface ChannelFormData {
   openai_organization?: string
   models: string
   group: string
+  group_ids: number[]
   model_mapping?: string
   priority?: number
   weight?: number

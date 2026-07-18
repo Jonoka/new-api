@@ -48,6 +48,10 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import {
+  createGroupOptions,
+  includeSelectedGroupOptions,
+} from '@/lib/group-options'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { useHiddenClickUnlock } from '@/hooks/use-hidden-click-unlock'
@@ -112,7 +116,7 @@ import {
   getAllModels,
   getChannel,
   getChannelKey,
-  getGroups,
+  getGroupDetails,
   getPrefillGroups,
   refreshCodexCredential,
 } from '../../api'
@@ -302,6 +306,7 @@ export function ChannelMutateDrawer({
   const initialModelsRef = useRef<string[]>([])
   const initialModelMappingRef = useRef<string>('')
   const initialStatusCodeMappingRef = useRef<string>('')
+  const initializedFormKeyRef = useRef<string | null>(null)
   const [statusCodeRiskOpen, setStatusCodeRiskOpen] = useState(false)
   const [statusCodeRiskDetailItems, setStatusCodeRiskDetailItems] = useState<
     string[]
@@ -329,8 +334,8 @@ export function ChannelMutateDrawer({
 
   // Fetch available groups
   const { data: groupsData, isLoading: isLoadingGroups } = useQuery({
-    queryKey: ['groups'],
-    queryFn: getGroups,
+    queryKey: ['channels', 'group-details'],
+    queryFn: getGroupDetails,
   })
 
   // Fetch all available models
@@ -445,14 +450,19 @@ export function ChannelMutateDrawer({
   )
 
   // Transform groups to multi-select options
-  const groupOptions = useMemo(() => {
-    if (!groupsData?.data) return []
-    const allGroups = new Set([...groupsData.data, ...(currentGroups || [])])
-    return Array.from(allGroups).map((group) => ({
-      value: group,
-      label: group,
-    }))
-  }, [groupsData, currentGroups])
+  const availableGroupOptions = useMemo(
+    () => createGroupOptions(groupsData?.data),
+    [groupsData?.data]
+  )
+  const groupOptions = useMemo(
+    () =>
+      includeSelectedGroupOptions(
+        availableGroupOptions,
+        currentGroups || [],
+        channelData?.data?.group_details ?? currentRow?.group_details ?? []
+      ),
+    [availableGroupOptions, channelData?.data, currentGroups, currentRow]
+  )
 
   // Parse current models as array
   const currentModelsArray = useMemo(
@@ -609,8 +619,19 @@ export function ChannelMutateDrawer({
 
   // Load channel data into form when editing
   useEffect(() => {
+    if (!open) {
+      initializedFormKeyRef.current = null
+      return
+    }
+
     if (isEditing && channelData?.data) {
-      const defaults = transformChannelToFormDefaults(channelData.data)
+      const formKey = `edit:${channelData.data.id}`
+      if (initializedFormKeyRef.current === formKey) return
+      initializedFormKeyRef.current = formKey
+      const defaults = transformChannelToFormDefaults(
+        channelData.data,
+        availableGroupOptions
+      )
       form.reset(defaults)
       setAdvancedSettingsOpen(
         readAdvancedSettingsPreference() || hasAdvancedSettingsValues(defaults)
@@ -623,13 +644,15 @@ export function ChannelMutateDrawer({
       initialStatusCodeMappingRef.current =
         channelData.data.status_code_mapping || ''
     } else if (!isEditing) {
+      if (initializedFormKeyRef.current === 'create') return
+      initializedFormKeyRef.current = 'create'
       form.reset(CHANNEL_FORM_DEFAULT_VALUES)
       setAdvancedSettingsOpen(false)
       initialModelsRef.current = []
       initialModelMappingRef.current = ''
       initialStatusCodeMappingRef.current = ''
     }
-  }, [isEditing, channelData, form])
+  }, [open, isEditing, channelData?.data?.id, form, availableGroupOptions])
 
   // Handle type change - set default values for specific types
   useEffect(() => {
@@ -940,6 +963,7 @@ export function ChannelMutateDrawer({
     currentRow,
     isEditing,
     isMultiKeyChannel,
+    groupOptions,
     onSuccess: handleSuccess,
   })
 

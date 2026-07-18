@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	commonRelay "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
 )
 
 type TaskStatus string
@@ -109,12 +110,13 @@ type TaskPrivateData struct {
 
 // TaskBillingContext 记录任务提交时的计费参数，以便轮询阶段可以重新计算额度。
 type TaskBillingContext struct {
-	ModelPrice      float64            `json:"model_price,omitempty"`       // 模型单价
-	GroupRatio      float64            `json:"group_ratio,omitempty"`       // 分组倍率
-	ModelRatio      float64            `json:"model_ratio,omitempty"`       // 模型倍率
-	OtherRatios     map[string]float64 `json:"other_ratios,omitempty"`      // 附加倍率（时长、分辨率等）
-	OriginModelName string             `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
-	PerCallBilling  bool               `json:"per_call_billing,omitempty"`  // 按次计费：跳过轮询阶段的差额结算
+	ModelPrice      float64              `json:"model_price,omitempty"`       // 模型单价
+	ModelPriceUnit  types.ModelPriceUnit `json:"model_price_unit,omitempty"`  // 固定价格单位：request 或 second
+	GroupRatio      float64              `json:"group_ratio,omitempty"`       // 分组倍率
+	ModelRatio      float64              `json:"model_ratio,omitempty"`       // 模型倍率
+	OtherRatios     map[string]float64   `json:"other_ratios,omitempty"`      // 附加倍率（时长、分辨率等）
+	OriginModelName string               `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
+	PerCallBilling  bool                 `json:"per_call_billing,omitempty"`  // 固定价格计费：禁止回退到 token 重算
 }
 
 // GetUpstreamTaskID 获取上游真实 task ID（用于与 provider 通信）
@@ -174,7 +176,8 @@ func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) 
 	privateData := TaskPrivateData{}
 	if relayInfo != nil && relayInfo.ChannelMeta != nil {
 		if relayInfo.ChannelMeta.ChannelType == constant.ChannelTypeGemini ||
-			relayInfo.ChannelMeta.ChannelType == constant.ChannelTypeVertexAi {
+			relayInfo.ChannelMeta.ChannelType == constant.ChannelTypeVertexAi ||
+			relayInfo.ChannelMeta.ChannelType == constant.ChannelTypeXai {
 			privateData.Key = relayInfo.ChannelMeta.ApiKey
 		}
 		if relayInfo.UpstreamModelName != "" {
@@ -405,6 +408,19 @@ func (Task *Task) Update() error {
 	var err error
 	err = DB.Save(Task).Error
 	return err
+}
+
+// UpdateBillingSettlement 持久化异步差额结算后的额度与计费快照。
+func (t *Task) UpdateBillingSettlement() error {
+	if t == nil || t.ID <= 0 {
+		return nil
+	}
+	return DB.Model(&Task{}).
+		Where("id = ?", t.ID).
+		Updates(map[string]any{
+			"quota":        t.Quota,
+			"private_data": t.PrivateData,
+		}).Error
 }
 
 // UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).

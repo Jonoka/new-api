@@ -26,6 +26,9 @@ import {
   showWarning,
   verifyJSON,
   selectFilter,
+  buildGroupSelectionPayload,
+  createGroupOptions,
+  extractGroupDetailsResponse,
 } from '../../../../helpers';
 import {
   SideSheet,
@@ -180,16 +183,12 @@ const EditTagModal = (props) => {
 
   const fetchGroups = async () => {
     try {
-      let res = await API.get(`/api/group/`);
+      const res = await API.get('/api/group/details');
       if (res === undefined) {
         return;
       }
-      setGroupOptions(
-        res.data.data.map((group) => ({
-          label: group,
-          value: group,
-        })),
-      );
+      const groupDetails = extractGroupDetailsResponse(res.data);
+      setGroupOptions(createGroupOptions(groupDetails || []));
     } catch (error) {
       showError(error.message);
     }
@@ -208,7 +207,12 @@ const EditTagModal = (props) => {
       data.model_mapping = formVals.model_mapping;
     }
     if (formVals.groups && formVals.groups.length > 0) {
-      data.groups = formVals.groups.join(',');
+      const groupSelection = buildGroupSelectionPayload(
+        formVals.groups,
+        groupOptions,
+      );
+      data.groups = groupSelection.group;
+      data.group_ids = groupSelection.group_ids;
     }
     if (formVals.models && formVals.models.length > 0) {
       data.models = formVals.models.join(',');

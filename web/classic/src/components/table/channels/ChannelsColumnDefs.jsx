@@ -471,7 +471,16 @@ export const getChannelsColumns = ({
                 if (b === 'default') return 1;
                 return a.localeCompare(b);
               })
-              .map((item, index) => renderGroup(item))}
+              .map((item, index) => {
+                const groupDetails = Array.isArray(record.group_details)
+                  ? record.group_details
+                  : [];
+                const detail = groupDetails.find((group) => group.code === item);
+                const labels = detail?.name && detail.name !== item
+                  ? { [item]: detail.name }
+                  : {};
+                return renderGroup(item, labels);
+              })}
           </Space>
         </div>
       ),

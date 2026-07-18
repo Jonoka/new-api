@@ -70,6 +70,7 @@ var pricingSyncFields = []string{
 	"audio_ratio",
 	"audio_completion_ratio",
 	"model_price",
+	"model_price_unit",
 	billing_setting.BillingModeField,
 	billing_setting.BillingExprField,
 }
@@ -383,6 +384,7 @@ func FetchUpstreamRatios(c *gin.Context) {
 				QuotaType            int      `json:"quota_type"`
 				ModelRatio           float64  `json:"model_ratio"`
 				ModelPrice           float64  `json:"model_price"`
+				ModelPriceUnit       string   `json:"model_price_unit"`
 				CompletionRatio      float64  `json:"completion_ratio"`
 				CacheRatio           *float64 `json:"cache_ratio"`
 				CreateCacheRatio     *float64 `json:"create_cache_ratio"`
@@ -406,6 +408,7 @@ func FetchUpstreamRatios(c *gin.Context) {
 			audioRatioMap := make(map[string]float64)
 			audioCompletionRatioMap := make(map[string]float64)
 			modelPriceMap := make(map[string]float64)
+			modelPriceUnitMap := make(map[string]string)
 			billingModeMap := make(map[string]string)
 			billingExprMap := make(map[string]string)
 
@@ -419,6 +422,9 @@ func FetchUpstreamRatios(c *gin.Context) {
 				}
 				if item.QuotaType == 1 {
 					modelPriceMap[item.ModelName] = item.ModelPrice
+					if item.ModelPriceUnit != "" {
+						modelPriceUnitMap[item.ModelName] = item.ModelPriceUnit
+					}
 				} else {
 					modelRatioMap[item.ModelName] = item.ModelRatio
 					// completionRatio 可能为 0，此时也直接赋值，保持与上游一致
@@ -480,6 +486,9 @@ func FetchUpstreamRatios(c *gin.Context) {
 					priceAny[k] = v
 				}
 				converted["model_price"] = priceAny
+			}
+			if len(modelPriceUnitMap) > 0 {
+				converted["model_price_unit"] = valueMap(modelPriceUnitMap)
 			}
 			if len(billingModeMap) > 0 {
 				converted[billing_setting.BillingModeField] = valueMap(billingModeMap)

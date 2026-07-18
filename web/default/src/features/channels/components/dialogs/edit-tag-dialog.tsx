@@ -21,6 +21,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import {
+  buildGroupSelectionPayload,
+  createGroupOptions,
+} from '@/lib/group-options'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -49,7 +53,7 @@ import {
   editTagChannels,
   getTagModels,
   getAllModels,
-  getGroups,
+  getGroupDetails,
 } from '../../api'
 import { channelsQueryKeys } from '../../lib'
 import type { TagOperationParams } from '../../types'
@@ -89,14 +93,14 @@ export function EditTagDialog({ open, onOpenChange }: EditTagDialogProps) {
 
   // Fetch groups
   const { data: groupsData } = useQuery({
-    queryKey: ['groups'],
-    queryFn: getGroups,
+    queryKey: ['channels', 'group-details'],
+    queryFn: getGroupDetails,
     enabled: open,
   })
 
   const availableModels =
     allModelsData?.data?.map((m) => m.id).filter(Boolean) || []
-  const availableGroups = groupsData?.data || []
+  const availableGroups = createGroupOptions(groupsData?.data)
 
   // Initialize form when tag changes
   useEffect(() => {
@@ -177,10 +181,10 @@ export function EditTagDialog({ open, onOpenChange }: EditTagDialogProps) {
 
     setIsSubmitting(true)
     try {
-      const params: Record<string, string | null> = { tag: currentTag }
+      const params: TagOperationParams = { tag: currentTag }
 
       if (newTag && newTag !== currentTag) {
-        params.new_tag = newTag || null
+        params.new_tag = newTag
       }
 
       if (modelMapping.trim()) {
@@ -192,12 +196,15 @@ export function EditTagDialog({ open, onOpenChange }: EditTagDialogProps) {
       }
 
       if (selectedGroups.length > 0) {
-        params.groups = selectedGroups.join(',')
+        const groupSelection = buildGroupSelectionPayload(
+          selectedGroups,
+          availableGroups
+        )
+        params.groups = groupSelection.group
+        params.group_ids = groupSelection.group_ids
       }
 
-      const response = await editTagChannels(
-        params as unknown as TagOperationParams
-      )
+      const response = await editTagChannels(params)
 
       if (response.success) {
         toast.success(t('Tag updated successfully'))
@@ -418,12 +425,16 @@ export function EditTagDialog({ open, onOpenChange }: EditTagDialogProps) {
               <div className='flex min-h-[60px] flex-wrap gap-2 rounded-md border p-3'>
                 {availableGroups.map((group) => (
                   <GroupBadge
-                    key={group}
-                    group={group}
+                    key={group.id ?? group.code}
+                    group={group.code}
+                    label={group.name}
+                    title={group.name !== group.code ? group.code : undefined}
                     className={`cursor-pointer rounded-sm transition-opacity hover:opacity-70 ${
-                      selectedGroups.includes(group) ? 'bg-muted/70 px-1' : ''
+                      selectedGroups.includes(group.code)
+                        ? 'bg-muted/70 px-1'
+                        : ''
                     }`}
-                    onClick={() => handleToggleGroup(group)}
+                    onClick={() => handleToggleGroup(group.code)}
                   />
                 ))}
               </div>

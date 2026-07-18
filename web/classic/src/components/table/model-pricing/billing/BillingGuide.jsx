@@ -47,6 +47,7 @@ import {
   formatBillingNumber,
   getBillingDiscountColor,
   getBillingDiscountText,
+  getBillingDynamicUnitPrices,
   getBillingFactors,
   getBillingGuideGroups,
   getBillingGuideModels,
@@ -254,23 +255,34 @@ const BillingGuide = ({
       siteDisplayType,
     ],
   );
-  const prices = useMemo(
-    () =>
-      getBillingUnitPricesFromPriceData({
+  const prices = useMemo(() => {
+    if (priceData?.isDynamicPricing) {
+      return getBillingDynamicUnitPrices({
         priceData,
+        tokenCounts,
+        displayPrice,
         currency: effectiveCurrency,
         usdExchangeRate,
         customExchangeRate,
         customCurrencySymbol,
-      }),
-    [
+      });
+    }
+    return getBillingUnitPricesFromPriceData({
       priceData,
-      effectiveCurrency,
+      currency: effectiveCurrency,
       usdExchangeRate,
       customExchangeRate,
       customCurrencySymbol,
-    ],
-  );
+    });
+  }, [
+    priceData,
+    tokenCounts,
+    displayPrice,
+    effectiveCurrency,
+    usdExchangeRate,
+    customExchangeRate,
+    customCurrencySymbol,
+  ]);
 
   const factors = useMemo(
     () =>
@@ -518,13 +530,13 @@ const BillingGuide = ({
                   <PriceLine
                     label={t('输入')}
                     price={prices.input}
-                    officialPrice={prices.input.officialPrice}
+                    officialPrice={prices.input?.officialPrice}
                     symbol={prices.symbol}
                   />
                   <PriceLine
                     label={t('输出')}
                     price={prices.output}
-                    officialPrice={prices.output.officialPrice}
+                    officialPrice={prices.output?.officialPrice}
                     symbol={prices.symbol}
                   />
                   <PriceLine
@@ -540,9 +552,20 @@ const BillingGuide = ({
                     symbol={prices.symbol}
                   />
                 </div>
+                {prices.dynamicTierLabel && (
+                  <div
+                    className='mt-3 text-xs'
+                    style={{ color: 'var(--semi-color-text-2)' }}
+                  >
+                    {t('命中档位')}：{prices.dynamicTierLabel}
+                  </div>
+                )}
                 <div className='mt-4'>
-                  <Tag color='purple' shape='circle'>
-                    {t('按量计费')}
+                  <Tag
+                    color={priceData.isDynamicPricing ? 'orange' : 'purple'}
+                    shape='circle'
+                  >
+                    {priceData.isDynamicPricing ? t('动态计费') : t('按量计费')}
                   </Tag>
                 </div>
               </>
@@ -643,6 +666,12 @@ const BillingGuide = ({
               </strong>
             </span>
           ))}
+          {prices.dynamicTierLabel && (
+            <span>
+              {t('命中档位')}：
+              <strong className='font-mono'>{prices.dynamicTierLabel}</strong>
+            </span>
+          )}
         </div>
       )}
 

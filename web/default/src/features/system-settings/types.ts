@@ -39,6 +39,41 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type GroupDetail = {
+  id: number
+  code: string
+  name: string
+  description: string
+  ratio: number
+  user_selectable: boolean
+  status: number
+  auto_enabled: boolean
+  auto_order: number
+}
+
+export type GroupDetailInput = Omit<GroupDetail, 'id'> & {
+  id?: number
+}
+
+export type GroupDetailsResponse =
+  | GroupDetail[]
+  | {
+      success: boolean
+      message?: string
+      data: GroupDetail[]
+    }
+
+export type UpdateGroupDetailsRequest = {
+  groups: GroupDetailInput[]
+  deleted_ids: number[]
+}
+
+export type UpdateGroupDetailsResponse = {
+  success: boolean
+  message?: string
+  data?: GroupDetail[]
+}
+
 export type OkpayRatePreviewResponse = {
   success: boolean
   message: string
@@ -170,6 +205,7 @@ export type ModelSettings = {
   'grok.violation_deduction_enabled': boolean
   'grok.violation_deduction_amount': number
   ModelPrice: string
+  ModelPriceUnit: string
   ModelRatio: string
   CacheRatio: string
   CreateCacheRatio: string
@@ -214,6 +250,7 @@ export type BillingSettings = {
   DisplayInCurrencyEnabled: boolean
   DisplayTokenStatEnabled: boolean
   ModelPrice: string
+  ModelPriceUnit: string
   ModelRatio: string
   CacheRatio: string
   CreateCacheRatio: string
@@ -413,6 +450,7 @@ export type RatioType =
   | 'audio_ratio'
   | 'audio_completion_ratio'
   | 'model_price'
+  | 'model_price_unit'
   | 'billing_mode'
   | 'billing_expr'
 

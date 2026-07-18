@@ -11,9 +11,17 @@ type GroupRatioInfo struct {
 	HasSpecialRatio   bool
 }
 
+type ModelPriceUnit string
+
+const (
+	ModelPriceUnitRequest ModelPriceUnit = "request"
+	ModelPriceUnitSecond  ModelPriceUnit = "second"
+)
+
 type PriceData struct {
 	FreeModel            bool
 	ModelPrice           float64
+	ModelPriceUnit       ModelPriceUnit
 	ModelRatio           float64
 	CompletionRatio      float64
 	CacheRatio           float64
@@ -25,7 +33,7 @@ type PriceData struct {
 	AudioCompletionRatio float64
 	OtherRatios          map[string]float64
 	UsePrice             bool
-	Quota                int // 按次计费的最终额度（MJ / Task）
+	Quota                int // 固定单价任务的最终额度（MJ / Task，可按请求或按秒）
 	QuotaToPreConsume    int // 按量计费的预消耗额度
 	GroupRatioInfo       GroupRatioInfo
 }
@@ -54,6 +62,27 @@ func (p *PriceData) ApplyOtherRatiosToFloat(value float64) float64 {
 	return value
 }
 
+// ShouldApplyTaskRatio 判断任务附加倍率是否参与固定价格计算。
+// 按次固定价不会乘视频秒数；按秒固定价与倍率计费保持原有行为。
+func (p *PriceData) ShouldApplyTaskRatio(key string) bool {
+	if key != "seconds" || !p.UsePrice {
+		return true
+	}
+	return p.ModelPriceUnit == ModelPriceUnitSecond
+}
+
+func (p *PriceData) ApplyTaskRatiosToFloat(value float64) float64 {
+	for key, ratio := range p.OtherRatios {
+		if !p.ShouldApplyTaskRatio(key) {
+			continue
+		}
+		if ratio > 0 && !math.IsInf(ratio, 1) && ratio != 1 {
+			value *= ratio
+		}
+	}
+	return value
+}
+
 func (p *PriceData) ToSetting() string {
-	return fmt.Sprintf("ModelPrice: %f, ModelRatio: %f, CompletionRatio: %f, CacheRatio: %f, GroupRatio: %f, UsePrice: %t, CacheCreationRatio: %f, CacheCreation5mRatio: %f, CacheCreation1hRatio: %f, QuotaToPreConsume: %d, ImageRatio: %f, AudioRatio: %f, AudioCompletionRatio: %f", p.ModelPrice, p.ModelRatio, p.CompletionRatio, p.CacheRatio, p.GroupRatioInfo.GroupRatio, p.UsePrice, p.CacheCreationRatio, p.CacheCreation5mRatio, p.CacheCreation1hRatio, p.QuotaToPreConsume, p.ImageRatio, p.AudioRatio, p.AudioCompletionRatio)
+	return fmt.Sprintf("ModelPrice: %f, ModelPriceUnit: %s, ModelRatio: %f, CompletionRatio: %f, CacheRatio: %f, GroupRatio: %f, UsePrice: %t, CacheCreationRatio: %f, CacheCreation5mRatio: %f, CacheCreation1hRatio: %f, QuotaToPreConsume: %d, ImageRatio: %f, AudioRatio: %f, AudioCompletionRatio: %f", p.ModelPrice, p.ModelPriceUnit, p.ModelRatio, p.CompletionRatio, p.CacheRatio, p.GroupRatioInfo.GroupRatio, p.UsePrice, p.CacheCreationRatio, p.CacheCreation5mRatio, p.CacheCreation1hRatio, p.QuotaToPreConsume, p.ImageRatio, p.AudioRatio, p.AudioCompletionRatio)
 }

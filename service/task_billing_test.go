@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -397,6 +398,30 @@ func TestRecalculate_ActualQuotaZero(t *testing.T) {
 	assert.Equal(t, int64(0), countLogs(t))
 }
 
+func TestRecalculatePersistsQuotaAndBillingContext(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, channelID = 15, 15
+	const preConsumed, actualQuota = 5000, 3000
+	seedUser(t, userID, 10000)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumed, 0, BillingSourceWallet, 0)
+	task.PrivateData.BillingContext.OtherRatios = map[string]float64{"seconds": 8}
+	require.NoError(t, model.DB.Create(task).Error)
+
+	// 模拟适配器在终态响应中拿到实际时长后更新计费快照。
+	task.PrivateData.BillingContext.OtherRatios["seconds"] = 10
+	RecalculateTaskQuota(ctx, task, actualQuota, "actual duration")
+
+	var reloaded model.Task
+	require.NoError(t, model.DB.First(&reloaded, task.ID).Error)
+	assert.Equal(t, actualQuota, reloaded.Quota)
+	require.NotNil(t, reloaded.PrivateData.BillingContext)
+	assert.Equal(t, float64(10), reloaded.PrivateData.BillingContext.OtherRatios["seconds"])
+}
+
 func TestRecalculate_Subscription_NegativeDelta(t *testing.T) {
 	truncate(t)
 	ctx := context.Background()
@@ -570,6 +595,7 @@ func TestCASGuardedSettle_Win(t *testing.T) {
 	var reloaded model.Task
 	require.NoError(t, model.DB.First(&reloaded, task.ID).Error)
 	assert.EqualValues(t, model.TaskStatusSuccess, reloaded.Status)
+	assert.Equal(t, actualQuota, reloaded.Quota)
 
 	// Settlement should refund the over-charge (5000 - 3000 = 2000 back to user)
 	assert.Equal(t, initQuota+(preConsumed-actualQuota), getUserQuota(t, userID))
@@ -682,6 +708,80 @@ func TestSettle_PerCallBilling_SkipsTotalTokens(t *testing.T) {
 	assert.Equal(t, tokenRemain, getTokenRemainQuota(t, tokenID))
 	assert.Equal(t, preConsumed, task.Quota)
 	assert.Equal(t, int64(0), countLogs(t))
+}
+
+func TestSettle_PerSecondFixedPriceAllowsAdaptorAdjustment(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 33, 33, 33
+	const initQuota, preConsumed = 10000, 5000
+	const actualQuota = 3000
+	const tokenRemain = 8000
+
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-persecond-adaptor", tokenRemain)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.PrivateData.BillingContext.PerCallBilling = true
+	task.PrivateData.BillingContext.ModelPriceUnit = types.ModelPriceUnitSecond
+
+	adaptor := &mockAdaptor{adjustReturn: actualQuota}
+	taskResult := &relaycommon.TaskInfo{Status: model.TaskStatusSuccess, TotalTokens: 9999}
+
+	settleTaskBillingOnComplete(ctx, adaptor, task, taskResult)
+
+	assert.Equal(t, initQuota+(preConsumed-actualQuota), getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain+(preConsumed-actualQuota), getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, actualQuota, task.Quota)
+}
+
+func TestSettle_PerSecondFixedPriceDoesNotFallBackToTokens(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, channelID = 34, 34
+	const initQuota, preConsumed = 10000, 4000
+
+	seedUser(t, userID, initQuota)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumed, 0, BillingSourceWallet, 0)
+	task.PrivateData.BillingContext.PerCallBilling = true
+	task.PrivateData.BillingContext.ModelPriceUnit = types.ModelPriceUnitSecond
+
+	settleTaskBillingOnComplete(
+		ctx,
+		&mockAdaptor{adjustReturn: 0},
+		task,
+		&relaycommon.TaskInfo{Status: model.TaskStatusSuccess, TotalTokens: 9999},
+	)
+
+	assert.Equal(t, initQuota, getUserQuota(t, userID))
+	assert.Equal(t, preConsumed, task.Quota)
+	assert.Equal(t, int64(0), countLogs(t))
+}
+
+func TestTaskBillingOtherIncludesPriceUnitAndVideoRatios(t *testing.T) {
+	task := &model.Task{
+		PrivateData: model.TaskPrivateData{
+			BillingContext: &model.TaskBillingContext{
+				ModelPrice:     0.05,
+				ModelPriceUnit: types.ModelPriceUnitSecond,
+				GroupRatio:     1,
+				OtherRatios: map[string]float64{
+					"seconds":    8,
+					"resolution": 1.4,
+				},
+			},
+		},
+	}
+
+	other := taskBillingOther(task)
+	assert.Equal(t, types.ModelPriceUnitSecond, other["model_price_unit"])
+	assert.Equal(t, float64(8), other["seconds"])
+	assert.Equal(t, 1.4, other["resolution"])
 }
 
 func TestSettle_NonPerCall_AdaptorAdjustWorks(t *testing.T) {

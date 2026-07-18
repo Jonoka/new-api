@@ -2,9 +2,11 @@ package model
 
 import (
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/stretchr/testify/require"
 )
 
@@ -41,4 +43,31 @@ func TestInitOptionMapMigratesLegacyAutomaticRetryStatusCodes(t *testing.T) {
 	common.OptionMapRWMutex.RUnlock()
 	require.True(t, operation_setting.ShouldRetryByStatusCode(504))
 	require.True(t, operation_setting.ShouldRetryByStatusCode(524))
+}
+
+func TestValidateOptionValueModelPriceUnit(t *testing.T) {
+	require.NoError(t, validateOptionValue("ModelPriceUnit", `{"video":"second","image":"request"}`))
+	require.Error(t, validateOptionValue("ModelPriceUnit", `{"video":"minute"}`))
+}
+
+func TestUpdateModelPriceUnitInvalidatesPricingCache(t *testing.T) {
+	originalOptionMap := common.OptionMap
+	originalUnits := ratio_setting.ModelPriceUnit2JSONString()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptionMap
+		common.OptionMapRWMutex.Unlock()
+		require.NoError(t, ratio_setting.UpdateModelPriceUnitByJSONString(originalUnits))
+		InvalidatePricingCache()
+	})
+
+	common.OptionMapRWMutex.Lock()
+	common.OptionMap = make(map[string]string)
+	common.OptionMapRWMutex.Unlock()
+	pricingMap = []Pricing{{ModelName: "cached-model"}}
+	lastGetPricingTime = time.Now()
+
+	require.NoError(t, updateOptionMap("ModelPriceUnit", `{"video":"second"}`))
+	require.Empty(t, pricingMap)
+	require.True(t, lastGetPricingTime.IsZero())
 }

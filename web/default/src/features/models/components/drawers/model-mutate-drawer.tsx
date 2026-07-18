@@ -174,6 +174,7 @@ export function ModelMutateDrawer({
       'claude.thinking_adapter_enabled': true,
       'claude.thinking_adapter_budget_tokens_percentage': 0.8,
       ModelPrice: '',
+      ModelPriceUnit: '{}',
       ModelRatio: '',
       CacheRatio: '',
       CompletionRatio: '',

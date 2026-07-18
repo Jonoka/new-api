@@ -20,6 +20,7 @@ import { memo } from 'react'
 import { ChevronRight, Copy } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getLobeIcon } from '@/lib/lobe-icon'
+import { MODEL_PRICE_UNITS } from '@/lib/model-price-unit'
 import { cn } from '@/lib/utils'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { StatusBadge } from '@/components/status-badge'
@@ -29,7 +30,7 @@ import {
   getDynamicPricingSummary,
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
-import { isTokenBasedModel } from '../lib/model-helpers'
+import { getModelPriceUnit, isTokenBasedModel } from '../lib/model-helpers'
 import { formatPrice, formatRequestPrice } from '../lib/price'
 import type { PricingModel, TokenUnit } from '../types'
 import { ModelPerfBadge, type ModelPerfBadgeData } from './model-perf-badge'
@@ -52,6 +53,16 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
   const usdExchangeRate = props.usdExchangeRate ?? 1
   const showRechargePrice = props.showRechargePrice ?? false
   const isTokenBased = isTokenBasedModel(props.model)
+  const fixedPriceUnit = getModelPriceUnit(props.model)
+  const fixedPriceUnitLabel =
+    fixedPriceUnit === MODEL_PRICE_UNITS.SECOND ? t('second') : t('request')
+  let pricingTypeLabel = t('Token-based')
+  if (!isTokenBased) {
+    pricingTypeLabel =
+      fixedPriceUnit === MODEL_PRICE_UNITS.SECOND
+        ? t('Per-second')
+        : t('Per-request')
+  }
   const tokenUnitLabel = tokenUnit === 'K' ? '1K' : '1M'
   const tags = parseTags(props.model.tags)
   const groups = props.model.enable_groups || []
@@ -194,7 +205,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
                       usdExchangeRate
                     )}
                   </span>{' '}
-                  / {t('request')}
+                  / {fixedPriceUnitLabel}
                 </span>
               )}
             </div>
@@ -226,8 +237,8 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
         {props.model.description || t('No description available.')}
       </p>
 
-      {/* Footer: left metadata and right performance summary share row alignment */}
-      <div className='mt-2 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 sm:mt-4'>
+      {/* 底部信息：移动端性能摘要独占末行，460px 起恢复右侧摘要 */}
+      <div className='mt-2 grid grid-cols-1 items-start gap-x-2 gap-y-1 min-[460px]:grid-cols-[minmax(0,1fr)_auto] sm:mt-4'>
         <div className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1'>
           {primaryGroup && (
             <span className='text-muted-foreground text-xs font-medium'>
@@ -235,7 +246,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
             </span>
           )}
           <span className='text-muted-foreground text-xs font-medium'>
-            {isTokenBased ? t('Token-based') : t('Per Request')}
+            {pricingTypeLabel}
           </span>
           {isDynamicPricing && (
             <StatusBadge
@@ -246,7 +257,6 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
             />
           )}
         </div>
-        <ModelPerfBadge perf={props.perf} className='row-span-2 self-start' />
 
         <div className='flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5 sm:gap-x-3 sm:gap-y-1'>
           {bottomTags.map((item) => (
@@ -255,7 +265,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
             </span>
           ))}
           <span className='text-muted-foreground/50 text-xs'>
-            {tokenUnitLabel}
+            {isTokenBased ? tokenUnitLabel : fixedPriceUnitLabel}
           </span>
           {hiddenCount > 0 && (
             <span className='text-muted-foreground/40 text-xs'>
@@ -263,6 +273,10 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
             </span>
           )}
         </div>
+        <ModelPerfBadge
+          perf={props.perf}
+          className='mt-1 min-[460px]:col-start-2 min-[460px]:row-span-2 min-[460px]:row-start-1 min-[460px]:mt-0 min-[460px]:self-start'
+        />
       </div>
     </div>
   )

@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useMemo, useState } from 'react'
 import { Check, ChevronsUpDown } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import type { GroupOption } from '@/lib/group-options'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -36,11 +37,8 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 
-export type ApiKeyGroupOption = {
-  value: string
-  label: string
+export type ApiKeyGroupOption = GroupOption & {
   desc?: string
-  ratio?: number | string
 }
 
 type ApiKeyGroupComboboxProps = {
@@ -76,7 +74,11 @@ export function getRatioBadgeClassName(ratio: ApiKeyGroupOption['ratio']) {
   return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300'
 }
 
-export function GroupRatioBadge({ ratio }: { ratio: ApiKeyGroupOption['ratio'] }) {
+export function GroupRatioBadge({
+  ratio,
+}: {
+  ratio: ApiKeyGroupOption['ratio']
+}) {
   const { t } = useTranslation()
   const label = formatGroupRatio(ratio, t('Ratio'))
 
@@ -114,6 +116,8 @@ export function ApiKeyGroupCombobox({
     return options.filter((option) => {
       const ratioText = String(option.ratio ?? '').toLowerCase()
       return (
+        option.code.toLowerCase().includes(search) ||
+        option.name.toLowerCase().includes(search) ||
         option.value.toLowerCase().includes(search) ||
         option.label.toLowerCase().includes(search) ||
         option.desc?.toLowerCase().includes(search) ||

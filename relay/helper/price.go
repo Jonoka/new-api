@@ -148,6 +148,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	priceData := types.PriceData{
 		FreeModel:            freeModel,
 		ModelPrice:           modelPrice,
+		ModelPriceUnit:       ratio_setting.GetModelPriceUnit(info.OriginModelName),
 		ModelRatio:           modelRatio,
 		CompletionRatio:      completionRatio,
 		GroupRatioInfo:       groupRatioInfo,
@@ -180,7 +181,8 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	return priceData, nil
 }
 
-// ModelPriceHelperPerCall 按次/按量计费的 PriceHelper (MJ、Task)
+// ModelPriceHelperPerCall 固定单价/倍率任务的 PriceHelper（MJ、Task）。
+// 固定单价的具体单位由 PriceData.ModelPriceUnit 决定。
 func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types.PriceData, error) {
 	groupRatioInfo := HandleGroupRatio(c, info)
 
@@ -241,6 +243,7 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types
 	priceData := types.PriceData{
 		FreeModel:      freeModel,
 		ModelPrice:     modelPrice,
+		ModelPriceUnit: ratio_setting.GetModelPriceUnit(info.OriginModelName),
 		ModelRatio:     modelRatio,
 		UsePrice:       usePrice,
 		Quota:          quota,

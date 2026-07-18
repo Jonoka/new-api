@@ -274,6 +274,11 @@ func migrateDB() error {
 	}
 
 	err := DB.AutoMigrate(
+		&Group{},
+		&GroupAlias{},
+		&AutoGroupMember{},
+		&ChannelGroupBinding{},
+		&TokenGroupBinding{},
 		&Channel{},
 		&Token{},
 		&User{},
@@ -331,6 +336,12 @@ func migrateDB() error {
 		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 			return err
 		}
+	}
+	if err := migrateGroupIdentity(); err != nil {
+		return fmt.Errorf("failed to migrate group identity: %w", err)
+	}
+	if err := BackfillGroupBindings(); err != nil {
+		return fmt.Errorf("failed to backfill group bindings: %w", err)
 	}
 	return nil
 }
@@ -420,6 +431,23 @@ func migrateDBFast() error {
 		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 			return err
 		}
+	}
+	// 稳定分组表依赖业务表的新列。快速迁移先等待业务表迁移完成，
+	// 再串行建关系表，避免 SQLite 锁冲突和并发迁移下的回填竞态。
+	if err := DB.AutoMigrate(
+		&Group{},
+		&GroupAlias{},
+		&AutoGroupMember{},
+		&ChannelGroupBinding{},
+		&TokenGroupBinding{},
+	); err != nil {
+		return fmt.Errorf("failed to migrate group relationship tables: %w", err)
+	}
+	if err := migrateGroupIdentity(); err != nil {
+		return fmt.Errorf("failed to migrate group identity: %w", err)
+	}
+	if err := BackfillGroupBindings(); err != nil {
+		return fmt.Errorf("failed to backfill group bindings: %w", err)
 	}
 	common.SysLog("database migrated")
 	return nil

@@ -1,3 +1,22 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
 import React, { useState, useCallback, useMemo, useRef } from 'react';
 import {
   Button,
@@ -13,132 +32,137 @@ import CardTable from '../../../../components/common/ui/CardTable';
 
 const { Text } = Typography;
 
-let _idCounter = 0;
-const uid = () => `gr_${++_idCounter}`;
+let rowIdCounter = 0;
+const createRowId = () => `gr_${++rowIdCounter}`;
 
-function parseJSON(str, fallback) {
-  if (!str || !str.trim()) return fallback;
-  try {
-    return JSON.parse(str);
-  } catch {
-    return fallback;
-  }
-}
-
-function buildRows(groupRatioStr, userUsableGroupsStr) {
-  const ratioMap = parseJSON(groupRatioStr, {});
-  const usableMap = parseJSON(userUsableGroupsStr, {});
-
-  const allNames = new Set([
-    ...Object.keys(ratioMap),
-    ...Object.keys(usableMap),
-  ]);
-
-  return Array.from(allNames).map((name) => ({
-    _id: uid(),
-    name,
-    ratio: ratioMap[name] ?? 1,
-    selectable: name in usableMap,
-    description: usableMap[name] ?? '',
+const buildRows = (groups) =>
+  (Array.isArray(groups) ? groups : []).map((group) => ({
+    ...group,
+    _rowId: group.id ? `group_${group.id}` : createRowId(),
   }));
-}
 
-export function serializeGroupTable(rows) {
-  const groupRatio = {};
-  const userUsableGroups = {};
+const serializeRows = (rows) => rows.map(({ _rowId, ...group }) => group);
 
-  rows.forEach((row) => {
-    if (!row.name) return;
-    groupRatio[row.name] = row.ratio;
-    if (row.selectable) {
-      userUsableGroups[row.name] = row.description;
-    }
-  });
-
-  return {
-    GroupRatio: JSON.stringify(groupRatio, null, 2),
-    UserUsableGroups: JSON.stringify(userUsableGroups, null, 2),
-  };
-}
-
-export default function GroupTable({ groupRatio, userUsableGroups, onChange }) {
+export default function GroupTable({ groups, onChange, disabled = false }) {
   const { t } = useTranslation();
+  const [rows, setRows] = useState(() => buildRows(groups));
 
-  const [rows, setRows] = useState(() =>
-    buildRows(groupRatio, userUsableGroups),
-  );
-
-  // Use functional setRows to keep updateRow/addRow/removeRow referentially
-  // stable, preventing columns useMemo from rebuilding on every keystroke
-  // which causes the Input cursor to jump to end (cursor reset bug).
+  // 通过 ref 读取最新回调，避免输入时重建列定义导致光标跳动。
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
   const emitAndSet = useCallback((updater) => {
-    setRows((prev) => {
-      const next = typeof updater === 'function' ? updater(prev) : updater;
-      onChangeRef.current?.(serializeGroupTable(next));
-      return next;
+    setRows((previousRows) => {
+      const nextRows =
+        typeof updater === 'function' ? updater(previousRows) : updater;
+      onChangeRef.current?.(serializeRows(nextRows));
+      return nextRows;
     });
   }, []);
 
   const updateRow = useCallback(
-    (id, field, value) => {
-      emitAndSet((prev) =>
-        prev.map((r) => (r._id === id ? { ...r, [field]: value } : r)),
+    (rowId, field, value) => {
+      emitAndSet((previousRows) =>
+        previousRows.map((row) => {
+          if (row._rowId !== rowId) return row;
+          if (field === 'code' && !row.id && row.name === row.code) {
+            return { ...row, code: value, name: value };
+          }
+          return { ...row, [field]: value };
+        }),
       );
     },
     [emitAndSet],
   );
 
   const addRow = useCallback(() => {
-    emitAndSet((prev) => {
-      const existingNames = new Set(prev.map((r) => r.name));
+    emitAndSet((previousRows) => {
+      const existingCodes = new Set(previousRows.map((row) => row.code));
       let counter = 1;
-      let newName = `group_${counter}`;
-      while (existingNames.has(newName)) {
-        counter++;
-        newName = `group_${counter}`;
+      let code = `group_${counter}`;
+      while (existingCodes.has(code)) {
+        counter += 1;
+        code = `group_${counter}`;
       }
+
       return [
-        ...prev,
+        ...previousRows,
         {
-          _id: uid(),
-          name: newName,
-          ratio: 1,
-          selectable: true,
+          _rowId: createRowId(),
+          id: null,
+          code,
+          name: code,
           description: '',
+          ratio: 1,
+          user_selectable: true,
+          status: 1,
+          auto_enabled: false,
+          auto_order: 0,
         },
       ];
     });
   }, [emitAndSet]);
 
   const removeRow = useCallback(
-    (id) => {
-      emitAndSet((prev) => prev.filter((r) => r._id !== id));
+    (rowId) => {
+      emitAndSet((previousRows) =>
+        previousRows.filter((row) => row._rowId !== rowId),
+      );
     },
     [emitAndSet],
   );
 
-  const groupNames = useMemo(() => rows.map((r) => r.name), [rows]);
-
-  const duplicateNames = useMemo(() => {
-    const counts = {};
-    groupNames.forEach((n) => {
-      counts[n] = (counts[n] || 0) + 1;
+  const duplicateCodes = useMemo(() => {
+    const counts = new Map();
+    rows.forEach((row) => {
+      const code = String(row.code || '').trim();
+      if (code) counts.set(code, (counts.get(code) || 0) + 1);
     });
-    return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
-  }, [groupNames]);
+    return new Set(
+      Array.from(counts.entries())
+        .filter(([, count]) => count > 1)
+        .map(([code]) => code),
+    );
+  }, [rows]);
 
-  // Use ref so column render functions always read the latest duplicate set
-  // without adding duplicateNames to columns deps (which would break cursor).
-  const duplicateNamesRef = useRef(duplicateNames);
-  duplicateNamesRef.current = duplicateNames;
+  // 列渲染始终读取最新重复项，同时保持列引用稳定。
+  const duplicateCodesRef = useRef(duplicateCodes);
+  duplicateCodesRef.current = duplicateCodes;
 
   const columns = useMemo(
     () => [
       {
-        title: t('分组名称'),
+        title: t('ID'),
+        dataIndex: 'id',
+        key: 'id',
+        width: 72,
+        render: (_, record) => (
+          <Text type={record.id ? 'primary' : 'tertiary'}>
+            {record.id || '-'}
+          </Text>
+        ),
+      },
+      {
+        title: t('稳定标识'),
+        dataIndex: 'code',
+        key: 'code',
+        width: 170,
+        render: (_, record) => (
+          <Input
+            size='small'
+            value={record.code}
+            disabled={disabled || !!record.id}
+            status={
+              duplicateCodesRef.current.has(String(record.code || '').trim())
+                ? 'warning'
+                : undefined
+            }
+            onChange={(value) => updateRow(record._rowId, 'code', value)}
+          />
+        ),
+      },
+      {
+        title: t('显示名称（可修改）'),
         dataIndex: 'name',
         key: 'name',
         width: 180,
@@ -146,10 +170,8 @@ export default function GroupTable({ groupRatio, userUsableGroups, onChange }) {
           <Input
             size='small'
             value={record.name}
-            status={
-              duplicateNamesRef.current.has(record.name) ? 'warning' : undefined
-            }
-            onChange={(v) => updateRow(record._id, 'name', v)}
+            disabled={disabled}
+            onChange={(value) => updateRow(record._rowId, 'name', value)}
           />
         ),
       },
@@ -164,22 +186,24 @@ export default function GroupTable({ groupRatio, userUsableGroups, onChange }) {
             min={0}
             step={0.1}
             value={record.ratio}
+            disabled={disabled}
             style={{ width: '100%' }}
-            onChange={(v) => updateRow(record._id, 'ratio', v ?? 0)}
+            onChange={(value) => updateRow(record._rowId, 'ratio', value ?? 0)}
           />
         ),
       },
       {
         title: t('用户可选'),
-        dataIndex: 'selectable',
-        key: 'selectable',
+        dataIndex: 'user_selectable',
+        key: 'user_selectable',
         width: 90,
         align: 'center',
         render: (_, record) => (
           <Checkbox
-            checked={record.selectable}
-            onChange={(e) =>
-              updateRow(record._id, 'selectable', e.target.checked)
+            checked={record.user_selectable}
+            disabled={disabled}
+            onChange={(event) =>
+              updateRow(record._rowId, 'user_selectable', event.target.checked)
             }
           />
         ),
@@ -189,12 +213,15 @@ export default function GroupTable({ groupRatio, userUsableGroups, onChange }) {
         dataIndex: 'description',
         key: 'description',
         render: (_, record) =>
-          record.selectable ? (
+          record.user_selectable ? (
             <Input
               size='small'
               value={record.description}
+              disabled={disabled}
               placeholder={t('分组描述')}
-              onChange={(v) => updateRow(record._id, 'description', v)}
+              onChange={(value) =>
+                updateRow(record._rowId, 'description', value)
+              }
             />
           ) : (
             <Text type='tertiary' size='small'>
@@ -209,20 +236,22 @@ export default function GroupTable({ groupRatio, userUsableGroups, onChange }) {
         render: (_, record) => (
           <Popconfirm
             title={t('确认删除该分组？')}
-            onConfirm={() => removeRow(record._id)}
+            onConfirm={() => removeRow(record._rowId)}
             position='left'
+            disabled={disabled}
           >
             <Button
               icon={<IconDelete />}
               type='danger'
               theme='borderless'
               size='small'
+              disabled={disabled}
             />
           </Popconfirm>
         ),
       },
     ],
-    [t, updateRow, removeRow],
+    [disabled, removeRow, t, updateRow],
   );
 
   return (
@@ -230,20 +259,25 @@ export default function GroupTable({ groupRatio, userUsableGroups, onChange }) {
       <CardTable
         columns={columns}
         dataSource={rows}
-        rowKey='_id'
+        rowKey='_rowId'
         hidePagination
         size='small'
         empty={<Text type='tertiary'>{t('暂无分组，点击下方按钮添加')}</Text>}
       />
       <div className='mt-3 flex justify-center'>
-        <Button icon={<IconPlus />} theme='outline' onClick={addRow}>
+        <Button
+          icon={<IconPlus />}
+          theme='outline'
+          disabled={disabled}
+          onClick={addRow}
+        >
           {t('添加分组')}
         </Button>
       </div>
-      {duplicateNames.size > 0 && (
+      {duplicateCodes.size > 0 && (
         <Text type='warning' size='small' className='mt-2 block'>
           {t('存在重复的分组名称：')}
-          {Array.from(duplicateNames).join(', ')}
+          {Array.from(duplicateCodes).join(', ')}
         </Text>
       )}
     </div>

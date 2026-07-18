@@ -166,6 +166,10 @@ func GetAllChannels(c *gin.Context) {
 		}
 	}
 
+	if err := model.HydrateChannelGroupBindings(model.DB, channelData); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	for _, datum := range channelData {
 		clearChannelInfo(datum)
 	}
@@ -415,6 +419,10 @@ func SearchChannels(c *gin.Context) {
 
 	pagedData := channelData[startIdx:endIdx]
 
+	if err := model.HydrateChannelGroupBindings(model.DB, pagedData); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	for _, datum := range pagedData {
 		clearChannelInfo(datum)
 	}
@@ -780,6 +788,7 @@ type ChannelTag struct {
 	ModelMapping     *string `json:"model_mapping"`
 	Models           *string `json:"models"`
 	Groups           *string `json:"groups"`
+	GroupIds         *[]int  `json:"group_ids"`
 	ParamOverride    *string `json:"param_override"`
 	HeaderOverride   *string `json:"header_override"`
 }
@@ -876,7 +885,7 @@ func EditTagChannels(c *gin.Context) {
 		})
 		return
 	}
-	err = model.EditChannelByTag(channelTag.Tag, channelTag.NewTag, channelTag.ModelMapping, channelTag.Models, channelTag.Groups, channelTag.Priority, channelTag.Weight, channelTag.ConcurrencyLimit, channelTag.ParamOverride, channelTag.HeaderOverride)
+	err = model.EditChannelByTag(channelTag.Tag, channelTag.NewTag, channelTag.ModelMapping, channelTag.Models, channelTag.Groups, channelTag.GroupIds, channelTag.Priority, channelTag.Weight, channelTag.ConcurrencyLimit, channelTag.ParamOverride, channelTag.HeaderOverride)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -926,10 +935,34 @@ type PatchChannel struct {
 
 func UpdateChannel(c *gin.Context) {
 	channel := PatchChannel{}
-	err := c.ShouldBindJSON(&channel)
+	rawFields := make(map[string]any)
+	if err := common.UnmarshalBodyReusable(c, &rawFields); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	err := common.UnmarshalBodyReusable(c, &channel)
 	if err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	_, groupProvided := rawFields["group"]
+	_, groupIDsProvided := rawFields["group_ids"]
+	if rawFields["group"] == nil {
+		groupProvided = false
+	}
+	if rawFields["group_ids"] == nil {
+		groupIDsProvided = false
+	}
+	if groupIDsProvided && len(channel.GroupIds) == 0 {
+		common.ApiError(c, fmt.Errorf("渠道分组不能为空"))
+		return
+	}
+	if groupProvided && !groupIDsProvided && strings.TrimSpace(channel.Group) == "" {
+		common.ApiError(c, fmt.Errorf("渠道分组不能为空"))
+		return
+	}
+	if !groupIDsProvided {
+		channel.GroupIds = nil
 	}
 
 	// 使用统一的校验函数

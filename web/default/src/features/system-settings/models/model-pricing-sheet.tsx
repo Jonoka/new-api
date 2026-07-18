@@ -22,6 +22,11 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { AlertTriangle, ChevronDown } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import {
+  MODEL_PRICE_UNITS,
+  normalizeModelPriceUnit,
+  type ModelPriceUnit,
+} from '@/lib/model-price-unit'
 import { cn } from '@/lib/utils'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -52,6 +57,14 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from '@/components/ui/input-group'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   Sheet,
   SheetContent,
@@ -102,6 +115,7 @@ type LaneKey =
 export type ModelRatioData = {
   name: string
   price?: string
+  priceUnit?: ModelPriceUnit
   ratio?: string
   cacheRatio?: string
   createCacheRatio?: string
@@ -295,6 +309,7 @@ function buildPreviewRows(
   promptPrice: string,
   lanePrices: Record<LaneKey, string>,
   laneEnabled: Record<LaneKey, boolean>,
+  priceUnit: ModelPriceUnit,
   t: (key: string) => string
 ): PreviewRow[] {
   if (mode === 'tiered_expr') {
@@ -316,6 +331,11 @@ function buildPreviewRows(
         key: 'price',
         label: 'ModelPrice',
         value: values.price || t('Empty'),
+      },
+      {
+        key: 'priceUnit',
+        label: 'ModelPriceUnit',
+        value: priceUnit,
       },
     ]
   }
@@ -432,6 +452,9 @@ export function ModelPricingEditorPanel({
   })
   const [billingExpr, setBillingExpr] = useState('')
   const [requestRuleExpr, setRequestRuleExpr] = useState('')
+  const [priceUnit, setPriceUnit] = useState<ModelPriceUnit>(
+    MODEL_PRICE_UNITS.REQUEST
+  )
   const [previewOpen, setPreviewOpen] = useState(true)
   const isEditMode = !!editData
 
@@ -468,12 +491,13 @@ export function ModelPricingEditorPanel({
       setPricingMode(
         editData.billingMode === 'tiered_expr'
           ? 'tiered_expr'
-          : editData.price
+          : editData.billingMode === 'per-request'
             ? 'per-request'
             : 'per-token'
       )
       setBillingExpr(editData.billingExpr || '')
       setRequestRuleExpr(editData.requestRuleExpr || '')
+      setPriceUnit(normalizeModelPriceUnit(editData.priceUnit))
     } else {
       form.reset({
         name: '',
@@ -489,6 +513,7 @@ export function ModelPricingEditorPanel({
       setPricingMode('per-token')
       setBillingExpr('')
       setRequestRuleExpr('')
+      setPriceUnit(MODEL_PRICE_UNITS.REQUEST)
     }
 
     setPromptPrice(nextLaneState.promptPrice)
@@ -612,6 +637,9 @@ export function ModelPricingEditorPanel({
   const handleModeChange = (value: string) => {
     const nextMode = value as PricingMode
     setPricingMode(nextMode)
+    if (nextMode === 'per-token') {
+      setPriceUnit(MODEL_PRICE_UNITS.REQUEST)
+    }
     if (nextMode === 'tiered_expr' && !billingExpr) {
       setBillingExpr('tier("base", p * 0 + c * 0)')
     }
@@ -628,6 +656,7 @@ export function ModelPricingEditorPanel({
         promptPrice,
         lanePrices,
         laneEnabled,
+        priceUnit,
         t
       ),
     [
@@ -635,6 +664,7 @@ export function ModelPricingEditorPanel({
       laneEnabled,
       lanePrices,
       pricingMode,
+      priceUnit,
       promptPrice,
       requestRuleExpr,
       t,
@@ -716,6 +746,11 @@ export function ModelPricingEditorPanel({
       name: values.name.trim(),
       billingMode: pricingMode,
       price: values.price || '',
+      priceUnit:
+        pricingMode === 'per-request' ||
+        (pricingMode === 'tiered_expr' && hasValue(values.price))
+          ? priceUnit
+          : undefined,
       ratio: values.ratio || '',
       cacheRatio: values.cacheRatio || '',
       createCacheRatio: values.createCacheRatio || '',
@@ -859,6 +894,42 @@ export function ModelPricingEditorPanel({
                   value='per-request'
                   className='flex flex-col gap-5'
                 >
+                  <FormItem>
+                    <FormLabel>{t('Price unit')}</FormLabel>
+                    <Select
+                      items={[
+                        {
+                          value: MODEL_PRICE_UNITS.REQUEST,
+                          label: t('Per request'),
+                        },
+                        {
+                          value: MODEL_PRICE_UNITS.SECOND,
+                          label: t('Per second'),
+                        },
+                      ]}
+                      value={priceUnit}
+                      onValueChange={(value) => {
+                        if (value !== null) {
+                          setPriceUnit(normalizeModelPriceUnit(value))
+                        }
+                      }}
+                    >
+                      <SelectTrigger className='w-full'>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent alignItemWithTrigger={false}>
+                        <SelectGroup>
+                          <SelectItem value={MODEL_PRICE_UNITS.REQUEST}>
+                            {t('Per request')}
+                          </SelectItem>
+                          <SelectItem value={MODEL_PRICE_UNITS.SECOND}>
+                            {t('Per second')}
+                          </SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </FormItem>
+
                   <FormField
                     control={form.control}
                     name='price'
@@ -880,13 +951,15 @@ export function ModelPricingEditorPanel({
                               }}
                             />
                             <InputGroupAddon align='inline-end'>
-                              {t('per request')}
+                              {priceUnit === MODEL_PRICE_UNITS.SECOND
+                                ? t('Per second')
+                                : t('Per request')}
                             </InputGroupAddon>
                           </InputGroup>
                         </FormControl>
                         <FormDescription>
                           {t(
-                            'Cost in USD per request, regardless of tokens used.'
+                            'Cost in USD per billing unit, regardless of tokens used.'
                           )}
                         </FormDescription>
                         <FormMessage />

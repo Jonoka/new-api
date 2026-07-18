@@ -42,6 +42,7 @@ import { ModelRatioVisualEditor } from './model-ratio-visual-editor'
 
 type ModelFormValues = {
   ModelPrice: string
+  ModelPriceUnit: string
   ModelRatio: string
   CacheRatio: string
   CreateCacheRatio: string
@@ -128,6 +129,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
           <div className='space-y-6'>
             <ModelRatioVisualEditor
               modelPrice={form.watch('ModelPrice')}
+              modelPriceUnit={form.watch('ModelPriceUnit')}
               modelRatio={form.watch('ModelRatio')}
               cacheRatio={form.watch('CacheRatio')}
               createCacheRatio={form.watch('CreateCacheRatio')}
@@ -184,7 +186,26 @@ export const ModelRatioForm = memo(function ModelRatioForm({
                   </FormControl>
                   <FormDescription>
                     {t(
-                      'JSON map of model → USD cost per request. Takes precedence over ratio based billing.'
+                      'JSON map of model → fixed USD price. Billing units are configured separately.'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='ModelPriceUnit'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Model price units')}</FormLabel>
+                  <FormControl>
+                    <Textarea rows={8} {...field} />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'JSON map of model → "request" or "second". Missing entries default to "request".'
                     )}
                   </FormDescription>
                   <FormMessage />

@@ -41,6 +41,7 @@ export default function ModelRatioSettings(props) {
   const [loading, setLoading] = useState(false);
   const [inputs, setInputs] = useState({
     ModelPrice: '',
+    ModelPriceUnit: '',
     ModelRatio: '',
     CacheRatio: '',
     CreateCacheRatio: '',
@@ -145,10 +146,10 @@ export default function ModelRatioSettings(props) {
           <Col xs={24} sm={16}>
             <Form.TextArea
               label={t('模型固定价格')}
-              extraText={t('一次调用消耗多少刀，优先级大于模型倍率')}
-              placeholder={t(
-                '为一个 JSON 文本，键为模型名称，值为一次调用消耗多少刀，比如 "gpt-4-gizmo-*": 0.1，一次消耗0.1刀',
+              extraText={t(
+                '固定价格优先级大于模型倍率；价格单位支持按次或按秒。',
               )}
+              placeholder='{"gpt-4-gizmo-*":0.1}'
               field={'ModelPrice'}
               autosize={{ minRows: 6, maxRows: 12 }}
               trigger='blur'
@@ -160,6 +161,30 @@ export default function ModelRatioSettings(props) {
                 },
               ]}
               onChange={(value) => setInputs({ ...inputs, ModelPrice: value })}
+            />
+          </Col>
+        </Row>
+        <Row gutter={16}>
+          <Col xs={24} sm={16}>
+            <Form.TextArea
+              label={`${t('模型固定价格')} / ${t('价格单位')}`}
+              extraText={t(
+                '键为模型名称，值为 request（按次）或 second（按秒），缺省为 request。',
+              )}
+              placeholder='{"sora-2":"second"}'
+              field={'ModelPriceUnit'}
+              autosize={{ minRows: 4, maxRows: 10 }}
+              trigger='blur'
+              stopValidateWithError
+              rules={[
+                {
+                  validator: (rule, value) => verifyJSON(value),
+                  message: '不是合法的 JSON 字符串',
+                },
+              ]}
+              onChange={(value) =>
+                setInputs({ ...inputs, ModelPriceUnit: value })
+              }
             />
           </Col>
         </Row>

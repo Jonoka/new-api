@@ -41,6 +41,7 @@ type User struct {
 	UsedQuota        int            `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
 	RequestCount     int            `json:"request_count" gorm:"type:int;default:0;"`               // request number
 	Group            string         `json:"group" gorm:"type:varchar(64);default:'default'"`
+	GroupId          int            `json:"group_id" gorm:"index;default:0"`
 	AffCode          string         `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
 	AffCount         int            `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
 	AffQuota         int            `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`           // 邀请剩余额度
@@ -59,6 +60,7 @@ func (user *User) ToBaseUser() *UserBase {
 	cache := &UserBase{
 		Id:       user.Id,
 		Group:    user.Group,
+		GroupId:  user.GroupId,
 		Quota:    user.Quota,
 		Status:   user.Status,
 		Role:     user.Role,
@@ -435,6 +437,9 @@ func (user *User) Insert(inviterId int) error {
 	//user.SetAccessToken(common.GetUUID())
 	user.AffCode = common.GetRandomString(4)
 	user.InviterId = inviterId
+	if groupID, groupErr := ResolveGroupIDByCode(user.Group); groupErr == nil {
+		user.GroupId = groupID
+	}
 
 	// 初始化用户设置，包括默认的边栏配置
 	if user.Setting == "" {
@@ -490,6 +495,9 @@ func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
 	user.Quota = common.QuotaForNewUser
 	user.AffCode = common.GetRandomString(4)
 	user.InviterId = inviterId
+	if groupID, groupErr := ResolveGroupIDByCodeWithDB(tx, user.Group); groupErr == nil {
+		user.GroupId = groupID
+	}
 
 	// 初始化用户设置
 	if user.Setting == "" {
@@ -542,6 +550,9 @@ func (user *User) Update(updatePassword bool) error {
 		}
 	}
 	newUser := *user
+	if groupID, groupErr := ResolveGroupIDByCode(user.Group); groupErr == nil {
+		newUser.GroupId = groupID
+	}
 	DB.First(&user, user.Id)
 	if err = DB.Model(user).Updates(newUser).Error; err != nil {
 		return err
@@ -569,6 +580,7 @@ func (user *User) Edit(updatePassword bool) error {
 		"display_name": newUser.DisplayName,
 		"role":         newUser.Role,
 		"group":        newUser.Group,
+		"group_id":     newUser.GroupId,
 		"remark":       newUser.Remark,
 	}
 	if updatePassword {

@@ -146,3 +146,28 @@ func TestModelPriceHelperAppliesRequestBillingRatiosOnce(t *testing.T) {
 	require.Equal(t, 180000, priceData.QuotaToPreConsume)
 	require.Equal(t, float64(3), priceData.OtherRatios["n"])
 }
+
+func TestModelPriceHelperPerCallCarriesConfiguredPriceUnit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	savedPrices := ratio_setting.ModelPrice2JSONString()
+	savedUnits := ratio_setting.ModelPriceUnit2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(savedPrices))
+		require.NoError(t, ratio_setting.UpdateModelPriceUnitByJSONString(savedUnits))
+	})
+
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"video-unit-test":0.05}`))
+	require.NoError(t, ratio_setting.UpdateModelPriceUnitByJSONString(`{"video-unit-test":"second"}`))
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Set("group", "default")
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "video-unit-test",
+		UserGroup:       "default",
+		UsingGroup:      "default",
+	}
+	priceData, err := ModelPriceHelperPerCall(ctx, info)
+
+	require.NoError(t, err)
+	require.Equal(t, types.ModelPriceUnitSecond, priceData.ModelPriceUnit)
+}

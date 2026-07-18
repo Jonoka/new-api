@@ -48,3 +48,73 @@ func TestGetCompletionRatioFallsBackToGPT5Default(t *testing.T) {
 		t.Fatalf("GetCompletionRatioInfo().Ratio = %v, want default ratio 8", info.Ratio)
 	}
 }
+
+func TestDefaultXAIModelPricesArePerSecondBasePrices(t *testing.T) {
+	prices := GetDefaultModelPriceMap()
+	if got := prices["grok-imagine-video"]; got != 0.05 {
+		t.Fatalf("grok-imagine-video price = %v, want 0.05", got)
+	}
+	if got := prices["grok-imagine-video-1.5"]; got != 0.08 {
+		t.Fatalf("grok-imagine-video-1.5 price = %v, want 0.08", got)
+	}
+	if got := GetDefaultModelPriceUnitMap()["grok-imagine-video"]; got != "second" {
+		t.Fatalf("grok-imagine-video price unit = %q, want second", got)
+	}
+	if got := GetDefaultModelPriceUnitMap()["grok-imagine-video-1.5"]; got != "second" {
+		t.Fatalf("grok-imagine-video-1.5 price unit = %q, want second", got)
+	}
+}
+
+func TestUpdateModelPriceUnitRejectsInvalidUnitWithoutChangingCurrentConfig(t *testing.T) {
+	original := modelPriceUnitMap.ReadAll()
+	defer func() {
+		modelPriceUnitMap.Clear()
+		modelPriceUnitMap.AddAll(original)
+	}()
+
+	if err := UpdateModelPriceUnitByJSONString(`{"video-model":"second"}`); err != nil {
+		t.Fatalf("UpdateModelPriceUnitByJSONString() error = %v", err)
+	}
+	if got := GetModelPriceUnit("video-model"); got != "second" {
+		t.Fatalf("GetModelPriceUnit() = %q, want second", got)
+	}
+	if got := GetModelPriceUnit("grok-imagine-video"); got != "second" {
+		t.Fatalf("sparse update dropped built-in grok unit: %q", got)
+	}
+	if got := GetModelPriceUnitCopy()["grok-imagine-video"]; got != "second" {
+		t.Fatalf("effective unit map dropped built-in grok unit: %q", got)
+	}
+
+	if err := UpdateModelPriceUnitByJSONString(`{"video-model":"minute"}`); err == nil {
+		t.Fatal("UpdateModelPriceUnitByJSONString() error = nil, want invalid unit error")
+	}
+	if err := UpdateModelPriceUnitByJSONString(`null`); err == nil {
+		t.Fatal("UpdateModelPriceUnitByJSONString(null) error = nil, want object error")
+	}
+	if got := GetModelPriceUnit("video-model"); got != "second" {
+		t.Fatalf("invalid update changed unit to %q", got)
+	}
+}
+
+func TestGetModelPriceUnitFallsBackToBuiltInVideoUnit(t *testing.T) {
+	original := modelPriceUnitMap.ReadAll()
+	defer func() {
+		modelPriceUnitMap.Clear()
+		modelPriceUnitMap.AddAll(original)
+	}()
+
+	modelPriceUnitMap.Clear()
+	modelPriceUnitMap.AddAll(map[string]string{
+		"custom-video": "second",
+	})
+
+	if got := GetModelPriceUnit("grok-imagine-video"); got != "second" {
+		t.Fatalf("GetModelPriceUnit(default video) = %q, want second", got)
+	}
+	if got := GetModelPriceUnit("custom-video"); got != "second" {
+		t.Fatalf("GetModelPriceUnit(custom video) = %q, want second", got)
+	}
+	if got := GetModelPriceUnit("ordinary-fixed-price-model"); got != "request" {
+		t.Fatalf("GetModelPriceUnit(ordinary model) = %q, want request", got)
+	}
+}

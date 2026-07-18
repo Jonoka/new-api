@@ -14,6 +14,8 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -208,6 +210,33 @@ func TestListModelsIncludesTieredBillingModel(t *testing.T) {
 	require.True(t, ok)
 	require.Empty(t, missingExprPricing.BillingMode)
 	require.Empty(t, missingExprPricing.BillingExpr)
+}
+
+func TestPricingIncludesFixedPriceUnit(t *testing.T) {
+	savedPrices := ratio_setting.ModelPrice2JSONString()
+	savedUnits := ratio_setting.ModelPriceUnit2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(savedPrices))
+		require.NoError(t, ratio_setting.UpdateModelPriceUnitByJSONString(savedUnits))
+		model.InvalidatePricingCache()
+	})
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"zz-video-second-model":0.05}`))
+	require.NoError(t, ratio_setting.UpdateModelPriceUnitByJSONString(`{"zz-video-second-model":"second"}`))
+
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.Create(&model.Ability{
+		Group:     "default",
+		Model:     "zz-video-second-model",
+		ChannelId: 1,
+		Enabled:   true,
+	}).Error)
+	model.InvalidatePricingCache()
+
+	pricing, ok := pricingByModelName(model.GetPricing())["zz-video-second-model"]
+	require.True(t, ok)
+	require.Equal(t, 1, pricing.QuotaType)
+	require.Equal(t, 0.05, pricing.ModelPrice)
+	require.Equal(t, types.ModelPriceUnitSecond, pricing.ModelPriceUnit)
 }
 
 func TestListModelsTokenLimitIncludesTieredBillingModel(t *testing.T) {

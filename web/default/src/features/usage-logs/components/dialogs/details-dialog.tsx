@@ -33,6 +33,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { formatLogQuota, formatTokens } from '@/lib/format'
+import { MODEL_PRICE_UNITS } from '@/lib/model-price-unit'
 import { cn } from '@/lib/utils'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { Button } from '@/components/ui/button'
@@ -145,6 +146,8 @@ function BillingBreakdown(props: {
   const { t } = useTranslation()
   const { log, other, isAdmin } = props
   const isPerCall = isPerCallBilling(other.model_price)
+  const isPerSecond =
+    isPerCall && other.model_price_unit === MODEL_PRICE_UNITS.SECOND
   const isClaude = other.claude === true
   const isTieredExpr = other.billing_mode === 'tiered_expr'
   const tieredSummary = getTieredBillingSummary(other)
@@ -179,11 +182,20 @@ function BillingBreakdown(props: {
       })
     }
   } else if (isPerCall) {
-    rows.push({ label: t('Billing Mode'), value: t('Per-call') })
+    rows.push({
+      label: t('Billing Mode'),
+      value: isPerSecond ? t('Per-second') : t('Per-call'),
+    })
     if (other.model_price != null) {
       rows.push({
         label: t('Model Price'),
-        value: fmtPrice(other.model_price),
+        value: `${fmtPrice(other.model_price)}${isPerSecond ? `/${t('second')}` : ''}`,
+      })
+    }
+    if (isPerSecond && other.seconds != null) {
+      rows.push({
+        label: t('Seconds'),
+        value: String(other.seconds),
       })
     }
   } else {

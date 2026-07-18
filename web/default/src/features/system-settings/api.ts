@@ -21,8 +21,12 @@ import type {
   ConfirmPaymentComplianceResponse,
   DeleteLogsResponse,
   FetchUpstreamRatiosRequest,
+  GroupDetail,
+  GroupDetailsResponse,
   OkpayRatePreviewResponse,
   SystemOptionsResponse,
+  UpdateGroupDetailsRequest,
+  UpdateGroupDetailsResponse,
   UpdateOptionRequest,
   UpdateOptionResponse,
   UpstreamChannelsResponse,
@@ -36,6 +40,27 @@ export async function getSystemOptions() {
 
 export async function updateSystemOption(request: UpdateOptionRequest) {
   const res = await api.put<UpdateOptionResponse>('/api/option/', request)
+  return res.data
+}
+
+export async function getGroupDetails(): Promise<GroupDetail[]> {
+  const res = await api.get<GroupDetailsResponse>('/api/group/details')
+  if (Array.isArray(res.data)) {
+    return res.data
+  }
+  if (!res.data.success) {
+    throw new Error(res.data.message || 'Failed to load groups')
+  }
+  return res.data.data
+}
+
+export async function updateGroupDetails(
+  request: UpdateGroupDetailsRequest
+): Promise<UpdateGroupDetailsResponse> {
+  const res = await api.put<UpdateGroupDetailsResponse>(
+    '/api/group/details',
+    request
+  )
   return res.data
 }
 

@@ -22,6 +22,7 @@ import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { ArrowLeft, Code2, HeartPulse, Info, Timer } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getLobeIcon } from '@/lib/lobe-icon'
+import { MODEL_PRICE_UNITS } from '@/lib/model-price-unit'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -60,7 +61,11 @@ import {
   isDynamicPricingModel,
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
-import { getAvailableGroups, isTokenBasedModel } from '../lib/model-helpers'
+import {
+  getAvailableGroups,
+  getModelPriceUnit,
+  isTokenBasedModel,
+} from '../lib/model-helpers'
 import { inferModelMetadata } from '../lib/model-metadata'
 import { formatFixedPrice, formatGroupPrice } from '../lib/price'
 import type {
@@ -273,6 +278,14 @@ function ModelHeader(props: { model: PricingModel }) {
     : null
   const description = model.description || model.vendor_description || null
   const tags = parseTags(model.tags)
+  const fixedPriceUnit = getModelPriceUnit(model)
+  let pricingTypeLabel = t('Token-based')
+  if (model.quota_type !== QUOTA_TYPE_VALUES.TOKEN) {
+    pricingTypeLabel =
+      fixedPriceUnit === MODEL_PRICE_UNITS.SECOND
+        ? t('Per-second')
+        : t('Per-request')
+  }
   const isSpecialExpression =
     model.billing_mode === 'tiered_expr' &&
     Boolean(model.billing_expr) &&
@@ -299,11 +312,7 @@ function ModelHeader(props: { model: PricingModel }) {
           <span className='text-muted-foreground'>{model.vendor_name}</span>
         )}
         <span className='text-muted-foreground/30'>·</span>
-        <span className='text-muted-foreground/70'>
-          {model.quota_type === QUOTA_TYPE_VALUES.TOKEN
-            ? t('Token-based')
-            : t('Per Request')}
-        </span>
+        <span className='text-muted-foreground/70'>{pricingTypeLabel}</span>
         {model.billing_mode === 'tiered_expr' && model.billing_expr && (
           <>
             <span className='text-muted-foreground/30'>·</span>
@@ -349,6 +358,9 @@ function PriceSection(props: {
 }) {
   const { t } = useTranslation()
   const isTokenBased = isTokenBasedModel(props.model)
+  const fixedPriceUnit = getModelPriceUnit(props.model)
+  const fixedPriceUnitLabel =
+    fixedPriceUnit === MODEL_PRICE_UNITS.SECOND ? t('second') : t('request')
   const tokenUnitLabel = props.tokenUnit === 'K' ? '1K' : '1M'
   const baseGroupKey = '_base'
   const baseGroupRatioMap = { [baseGroupKey]: 1 }
@@ -482,7 +494,9 @@ function PriceSection(props: {
         <SectionTitle>{t('Base Price')}</SectionTitle>
         <div className='flex items-baseline justify-between'>
           <span className='text-muted-foreground text-sm'>
-            {t('Per request')}
+            {fixedPriceUnit === MODEL_PRICE_UNITS.SECOND
+              ? t('Per second')
+              : t('Per request')}
           </span>
           <span className='text-foreground font-mono text-sm font-semibold tabular-nums'>
             {formatFixedPrice(
@@ -493,6 +507,9 @@ function PriceSection(props: {
               props.usdExchangeRate,
               baseGroupRatioMap
             )}
+            <span className='text-muted-foreground/40 ml-1 text-xs font-normal'>
+              / {fixedPriceUnitLabel}
+            </span>
           </span>
         </div>
       </section>
@@ -609,6 +626,10 @@ function GroupPricingSection(props: {
 
   const isTokenBased = isTokenBasedModel(props.model)
   const tokenUnitLabel = props.tokenUnit === 'K' ? '1K' : '1M'
+  const fixedPriceUnitLabel =
+    getModelPriceUnit(props.model) === MODEL_PRICE_UNITS.SECOND
+      ? t('second')
+      : t('request')
 
   const extraPriceTypes = useMemo(() => {
     const types: { label: string; type: PriceType }[] = []
@@ -866,6 +887,9 @@ function GroupPricingSection(props: {
                         props.usdExchangeRate,
                         props.groupRatio
                       )}
+                      <span className='text-muted-foreground/40 ml-1 text-xs font-normal'>
+                        / {fixedPriceUnitLabel}
+                      </span>
                     </TableCell>
                   )}
                 </TableRow>

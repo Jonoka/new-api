@@ -15,6 +15,7 @@ import (
 
 type Ability struct {
 	Group     string  `json:"group" gorm:"type:varchar(64);primaryKey;autoIncrement:false"`
+	GroupId   int     `json:"group_id" gorm:"index"`
 	Model     string  `json:"model" gorm:"type:varchar(255);primaryKey;autoIncrement:false"`
 	ChannelId int     `json:"channel_id" gorm:"primaryKey;autoIncrement:false;index"`
 	Enabled   bool    `json:"enabled"`
@@ -193,6 +194,10 @@ func selectChannelByAbilities(abilities []Ability) (*Channel, error) {
 }
 
 func (channel *Channel) AddAbilities(tx *gorm.DB) error {
+	useDB := DB
+	if tx != nil {
+		useDB = tx
+	}
 	models_ := strings.Split(channel.Models, ",")
 	groups_ := strings.Split(channel.Group, ",")
 	abilitySet := make(map[string]struct{})
@@ -204,8 +209,10 @@ func (channel *Channel) AddAbilities(tx *gorm.DB) error {
 				continue
 			}
 			abilitySet[key] = struct{}{}
+			groupID, _ := ResolveGroupIDByCodeWithDB(useDB, group)
 			ability := Ability{
 				Group:     group,
+				GroupId:   groupID,
 				Model:     model,
 				ChannelId: channel.Id,
 				Enabled:   channel.Status == common.ChannelStatusEnabled,
@@ -218,11 +225,6 @@ func (channel *Channel) AddAbilities(tx *gorm.DB) error {
 	}
 	if len(abilities) == 0 {
 		return nil
-	}
-	// choose DB or provided tx
-	useDB := DB
-	if tx != nil {
-		useDB = tx
 	}
 	for _, chunk := range lo.Chunk(abilities, 50) {
 		err := useDB.Clauses(clause.OnConflict{DoNothing: true}).Create(&chunk).Error
@@ -265,6 +267,10 @@ func (channel *Channel) UpdateAbilities(tx *gorm.DB) error {
 	}
 
 	// Then add new abilities
+	useDB := tx
+	if useDB == nil {
+		useDB = DB
+	}
 	models_ := strings.Split(channel.Models, ",")
 	groups_ := strings.Split(channel.Group, ",")
 	abilitySet := make(map[string]struct{})
@@ -276,8 +282,10 @@ func (channel *Channel) UpdateAbilities(tx *gorm.DB) error {
 				continue
 			}
 			abilitySet[key] = struct{}{}
+			groupID, _ := ResolveGroupIDByCodeWithDB(useDB, group)
 			ability := Ability{
 				Group:     group,
+				GroupId:   groupID,
 				Model:     model,
 				ChannelId: channel.Id,
 				Enabled:   channel.Status == common.ChannelStatusEnabled,

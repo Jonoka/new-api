@@ -19,13 +19,23 @@ import (
 func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	tokenName := c.GetString("token_name")
 	logContent := fmt.Sprintf("操作 %s", info.Action)
-	// 支持任务仅按次计费
+	// 固定价格任务按配置的价格单位展示。
 	if common.StringsContains(constant.TaskPricePatches, info.OriginModelName) {
 		logContent = fmt.Sprintf("%s，按次计费", logContent)
 	} else {
+		if info.PriceData.UsePrice {
+			if info.PriceData.ModelPriceUnit == "second" {
+				logContent = fmt.Sprintf("%s，按秒计费", logContent)
+			} else {
+				logContent = fmt.Sprintf("%s，按次计费", logContent)
+			}
+		}
 		if len(info.PriceData.OtherRatios) > 0 {
 			var contents []string
 			for key, ra := range info.PriceData.OtherRatios {
+				if !info.PriceData.ShouldApplyTaskRatio(key) {
+					continue
+				}
 				if 1.0 != ra {
 					contents = append(contents, fmt.Sprintf("%s: %.2f", key, ra))
 				}
@@ -39,10 +49,16 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	other["is_task"] = true
 	other["request_path"] = c.Request.URL.Path
 	other["model_price"] = info.PriceData.ModelPrice
+	if info.PriceData.UsePrice {
+		other["model_price_unit"] = info.PriceData.ModelPriceUnit
+	}
 	if info.PriceData.ModelRatio > 0 {
 		other["model_ratio"] = info.PriceData.ModelRatio
 	}
 	other["group_ratio"] = info.PriceData.GroupRatioInfo.GroupRatio
+	for key, ratio := range info.PriceData.OtherRatios {
+		other[key] = ratio
+	}
 	if info.PriceData.GroupRatioInfo.HasSpecialRatio {
 		other["user_group_ratio"] = info.PriceData.GroupRatioInfo.GroupSpecialRatio
 	}
@@ -122,6 +138,9 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 	other := make(map[string]interface{})
 	if bc := task.PrivateData.BillingContext; bc != nil {
 		other["model_price"] = bc.ModelPrice
+		if bc.ModelPriceUnit != "" {
+			other["model_price_unit"] = bc.ModelPriceUnit
+		}
 		if bc.ModelRatio > 0 {
 			other["model_ratio"] = bc.ModelRatio
 		}
@@ -240,6 +259,9 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	taskAdjustTokenQuota(ctx, task, quotaDelta)
 
 	task.Quota = actualQuota
+	if err := task.UpdateBillingSettlement(); err != nil {
+		logger.LogError(ctx, fmt.Sprintf("持久化任务差额结算失败 task %s: %s", task.TaskID, err.Error()))
+	}
 
 	var logType int
 	var logQuota int

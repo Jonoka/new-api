@@ -961,9 +961,18 @@ export function useChannelsColumns(): ColumnDef<Channel>[] {
       cell: ({ row }) => {
         const group = row.getValue('group') as string
         const groupArray = parseGroupsList(group)
+        const groupDetails = row.original.group_details ?? []
+        const groupLabels = new Map(
+          groupDetails.map((detail) => [detail.code, detail.name])
+        )
 
         const groupBadges = groupArray.map((g) => (
-          <GroupBadge key={g} group={g} size='sm' />
+          <GroupBadge
+            key={g}
+            group={g}
+            label={groupLabels.get(g) || undefined}
+            size='sm'
+          />
         ))
 
         return (

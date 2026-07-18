@@ -48,6 +48,9 @@ export const ModelPerfBadge = memo(function ModelPerfBadge(
   }
 
   const { avg_latency_ms, avg_tps, success_rate } = props.perf
+  const formattedSuccessRate = Number.isFinite(success_rate)
+    ? `${success_rate.toFixed(1)}%`
+    : '—'
 
   let statusColor = 'bg-emerald-500'
   if (success_rate < 99) {
@@ -59,7 +62,7 @@ export const ModelPerfBadge = memo(function ModelPerfBadge(
   return (
     <div
       className={cn(
-        'hidden w-[132px] grid-cols-[38px_48px_30px] gap-x-2 text-right tabular-nums min-[460px]:grid',
+        'bg-muted/30 grid w-full grid-cols-3 gap-x-1 rounded-md px-2 py-1 text-left tabular-nums min-[460px]:w-[132px] min-[460px]:grid-cols-[38px_48px_30px] min-[460px]:gap-x-2 min-[460px]:rounded-none min-[460px]:bg-transparent min-[460px]:p-0 min-[460px]:text-right',
         props.className
       )}
     >
@@ -80,16 +83,21 @@ export const ModelPerfBadge = memo(function ModelPerfBadge(
         </div>
       </div>
       <div
-        title={`${t('Success rate')}: ${success_rate.toFixed(1)}%`}
+        title={`${t('Success rate')}: ${formattedSuccessRate}`}
         className='min-w-0'
       >
         <div className='text-muted-foreground/55 truncate text-[10px] leading-4'>
           {t('Status short')}
         </div>
-        <div className='flex h-4 items-center justify-end gap-0.5'>
-          <span className='bg-muted-foreground/10 h-2 w-1 rounded-full' />
-          <span className='bg-muted-foreground/15 h-2.5 w-1 rounded-full' />
-          <span className={cn('h-3 w-1 rounded-full', statusColor)} />
+        <div className='flex h-4 items-center justify-start gap-1 min-[460px]:justify-end min-[460px]:gap-0.5'>
+          <span className='text-muted-foreground/80 font-mono text-xs leading-4 whitespace-nowrap min-[460px]:hidden'>
+            {formattedSuccessRate}
+          </span>
+          <span aria-hidden='true' className='flex items-center gap-0.5'>
+            <span className='bg-muted-foreground/10 h-2 w-1 rounded-full' />
+            <span className='bg-muted-foreground/15 h-2.5 w-1 rounded-full' />
+            <span className={cn('h-3 w-1 rounded-full', statusColor)} />
+          </span>
         </div>
       </div>
     </div>

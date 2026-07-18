@@ -17,10 +17,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
+import type { GroupMode } from '@/lib/group-options'
 
 // ============================================================================
 // API Key Schema & Types
 // ============================================================================
+
+const groupReferenceSchema = z.object({
+  id: z.number(),
+  code: z.string(),
+  name: z.string(),
+})
 
 export const apiKeySchema = z.object({
   id: z.number(),
@@ -34,6 +41,9 @@ export const apiKeySchema = z.object({
   created_time: z.number(),
   accessed_time: z.number(),
   group: z.string().nullish().default(''),
+  group_mode: z.enum(['inherit', 'explicit', 'auto']).nullish(),
+  group_ids: z.array(z.number()).optional().default([]),
+  group_details: z.array(groupReferenceSchema).optional().default([]),
   cross_group_retry: z
     .preprocess((v) => {
       if (v === 1) return true
@@ -91,6 +101,8 @@ export interface ApiKeyFormData {
   model_limits: string
   allow_ips: string
   group: string
+  group_ids?: number[]
+  group_mode: GroupMode
   cross_group_retry: boolean
 }
 

@@ -39,6 +39,7 @@ import {
   formatPriceInfo,
   formatDynamicPriceSummary,
   getLobeHubIcon,
+  isModelPriceUnitSecond,
 } from '../../../../../helpers';
 import PricingCardSkeleton from './PricingCardSkeleton';
 import ModelPerformanceBadge from './ModelPerformanceBadge';
@@ -164,7 +165,11 @@ const PricingCardView = ({
     if (record.quota_type === 1) {
       billingTag = (
         <Tag key='billing' shape='circle' color='teal' size='small'>
-          {t('按次计费')}
+          {t(
+            isModelPriceUnitSecond(record.model_price_unit)
+              ? '按秒计费'
+              : '按次计费',
+          )}
         </Tag>
       );
     } else if (record.quota_type === 0) {
@@ -184,6 +189,7 @@ const PricingCardView = ({
       <PricingCardSkeleton
         rowSelection={!!rowSelection}
         showRatio={showRatio}
+        isMobile={isMobile}
       />
     );
   }
@@ -294,11 +300,18 @@ const PricingCardView = ({
                 {/* 底部区域 */}
                 <div className='mt-auto'>
                   {/* 计费类型与性能状态 */}
-                  <div className='flex min-h-[20px] min-w-0 flex-wrap items-center gap-2'>
+                  <div
+                    className={`flex min-h-[20px] min-w-0 gap-2 ${
+                      isMobile
+                        ? 'flex-col items-start'
+                        : 'flex-wrap items-center'
+                    }`}
+                  >
                     <div className='shrink-0'>{renderBillingTag(model)}</div>
                     <ModelPerformanceBadge
                       performance={performanceMap[model.model_name]}
                       t={t}
+                      isMobile={isMobile}
                     />
                   </div>
 

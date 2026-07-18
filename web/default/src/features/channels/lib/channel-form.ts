@@ -18,6 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
 import {
+  buildGroupSelectionPayload,
+  resolveGroupSelectionCodes,
+  type GroupOption,
+} from '@/lib/group-options'
+import {
   CHANNEL_STATUS,
   ERROR_MESSAGES,
   MODEL_FETCHABLE_TYPES,
@@ -387,8 +392,11 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
  * Transform Channel from API to Form default values
  */
 export function transformChannelToFormDefaults(
-  channel: Channel
+  channel: Channel,
+  groupOptions: readonly GroupOption[] = []
 ): ChannelFormValues {
+  const resolvedGroupCodes = resolveGroupSelectionCodes(channel, groupOptions)
+
   // Parse channel extra settings from setting field
   let extraSettings = {
     force_format: false,
@@ -528,7 +536,10 @@ export function transformChannelToFormDefaults(
     key: '', // Never populate key from backend for security
     openai_organization: channel.openai_organization || '',
     models: channel.models || '',
-    group: parseGroups(channel.group || 'default'),
+    group:
+      resolvedGroupCodes.length > 0
+        ? resolvedGroupCodes
+        : parseGroups('default'),
     model_mapping: channel.model_mapping || '',
     priority: channel.priority || 0,
     weight: channel.weight || 0,
@@ -830,13 +841,20 @@ function normalizeBaseUrl(value: string | undefined): string {
 /**
  * Transform form data to API payload for creating channel
  */
-export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
+export function transformFormDataToCreatePayload(
+  formData: ChannelFormValues,
+  groupOptions: readonly GroupOption[] = []
+): {
   mode: 'single' | 'batch' | 'multi_to_single'
   multi_key_mode?: 'random' | 'polling'
   batch_add_set_key_prefix_2_name?: boolean
   channel: Partial<Channel>
 } {
   const mode = formData.multi_key_mode || 'single'
+  const groupSelection = buildGroupSelectionPayload(
+    formData.group,
+    groupOptions
+  )
 
   const channel: Partial<Channel> = {
     name: formData.name,
@@ -846,7 +864,8 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
     key: formData.key,
     openai_organization: formData.openai_organization || null,
     models: formData.models,
-    group: formatGroups(formData.group),
+    group: groupSelection.group,
+    group_ids: groupSelection.group_ids,
     model_mapping: formData.model_mapping || null,
     priority: formData.priority || null,
     weight: formData.weight || null,
@@ -886,8 +905,13 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
  */
 export function transformFormDataToUpdatePayload(
   formData: ChannelFormValues,
-  channelId: number
+  channelId: number,
+  groupOptions: readonly GroupOption[] = []
 ): Partial<Channel> {
+  const groupSelection = buildGroupSelectionPayload(
+    formData.group,
+    groupOptions
+  )
   const payload: Partial<Channel> = {
     id: channelId,
     name: formData.name,
@@ -896,7 +920,8 @@ export function transformFormDataToUpdatePayload(
     base_url: normalizeBaseUrl(formData.base_url) || null,
     openai_organization: formData.openai_organization || null,
     models: formData.models,
-    group: formatGroups(formData.group),
+    group: groupSelection.group,
+    group_ids: groupSelection.group_ids,
     model_mapping: formData.model_mapping || null,
     priority: formData.priority ?? 0,
     weight: formData.weight ?? 0,

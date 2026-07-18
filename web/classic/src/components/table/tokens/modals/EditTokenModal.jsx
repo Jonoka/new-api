@@ -23,10 +23,12 @@ import {
   showError,
   showSuccess,
   timestamp2string,
-  renderGroupOption,
   getCurrencyConfig,
   getModelCategories,
   selectFilter,
+  buildGroupSelectionPayload,
+  createUserGroupOptions,
+  resolveGroupCodes,
 } from '../../../../helpers';
 import {
   quotaToDisplayAmount,
@@ -194,6 +196,7 @@ const GroupMultiPicker = ({
         >
           {selectedGroups.map((value, index) => {
             const info = groupMap[value];
+            const displayName = info?.label || value;
             return (
               <div
                 key={value}
@@ -254,18 +257,18 @@ const GroupMultiPicker = ({
                       ellipsis={{ showTooltip: true }}
                       style={{ maxWidth: 200 }}
                     >
-                      {value}
+                      {displayName}
                     </Text>
                     {info && renderRatioBadge(info.ratio)}
                   </div>
-                  {info && info.label && (
+                  {info?.description && (
                     <Text
                       type='tertiary'
                       size='small'
                       ellipsis={{ showTooltip: true }}
                       style={{ maxWidth: 300 }}
                     >
-                      {info.label}
+                      {info.description}
                     </Text>
                   )}
                 </div>
@@ -358,12 +361,12 @@ const GroupMultiPicker = ({
                 >
                   <div>
                     <Text strong size='small'>
-                      {g.value}
+                      {g.label || g.value}
                     </Text>
-                    {g.label && (
+                    {g.description && (
                       <div>
                         <Text type='tertiary' size='small'>
-                          {g.label}
+                          {g.description}
                         </Text>
                       </div>
                     )}
@@ -398,7 +401,7 @@ const GroupMultiPicker = ({
 
 const EditTokenModal = (props) => {
   const { t } = useTranslation();
-  const [statusState, statusDispatch] = useContext(StatusContext);
+  const [statusState] = useContext(StatusContext);
   const [loading, setLoading] = useState(false);
   const isMobile = useIsMobile();
   const formApiRef = useRef(null);
@@ -535,61 +538,72 @@ const EditTokenModal = (props) => {
   };
 
   const loadGroups = async () => {
-    let res = await API.get(`/api/user/self/groups`);
-    const { success, message, data } = res.data;
-    if (success) {
-      let localGroupOptions = Object.entries(data).map(([group, info]) => ({
-        label: info.desc,
-        value: group,
-        ratio: info.ratio,
-      }));
-      if (defaultUseAutoGroup) {
-        if (localGroupOptions.some((group) => group.value === 'auto')) {
-          localGroupOptions.sort((a, b) => (a.value === 'auto' ? -1 : 1));
+    try {
+      const res = await API.get(`/api/user/self/groups`);
+      if (!res?.data) return groups;
+      const { success, message, data } = res.data;
+      if (success) {
+        const localGroupOptions = createUserGroupOptions(data);
+        if (defaultUseAutoGroup) {
+          if (localGroupOptions.some((group) => group.value === 'auto')) {
+            localGroupOptions.sort((a, b) =>
+              a.value === 'auto' ? -1 : b.value === 'auto' ? 1 : 0,
+            );
+          }
         }
+        setGroups(localGroupOptions);
+        return localGroupOptions;
+      } else {
+        showError(t(message));
+        return groups;
       }
-      setGroups(localGroupOptions);
-    } else {
-      showError(t(message));
+    } catch (error) {
+      showError(error?.message || t('加载分组失败'));
+      return groups;
     }
   };
 
   const loadToken = async () => {
     setLoading(true);
-    let res = await API.get(`/api/token/${props.editingToken.id}`);
-    const { success, message, data } = res.data;
-    if (success) {
-      if (data.expired_time !== -1) {
-        data.expired_time = timestamp2string(data.expired_time);
-      }
-      if (data.model_limits !== '') {
-        data.model_limits = data.model_limits.split(',');
+    try {
+      const [availableGroups, res] = await Promise.all([
+        loadGroups(),
+        API.get(`/api/token/${props.editingToken.id}`),
+      ]);
+      if (!res?.data) return;
+      const { success, message, data } = res.data;
+      if (success) {
+        if (data.expired_time !== -1) {
+          data.expired_time = timestamp2string(data.expired_time);
+        }
+        if (data.model_limits !== '') {
+          data.model_limits = data.model_limits.split(',');
+        } else {
+          data.model_limits = [];
+        }
+        data.remain_amount = Number(
+          quotaToDisplayAmount(data.remain_quota || 0).toFixed(6),
+        );
+        setSelectedGroups(resolveGroupCodes(data, availableGroups));
+        setGroupRatioLimits(parseGroupRatioLimits(data.group_ratio_limits));
+        // 分组由独立选择器维护，避免表单回传服务端旧值。
+        const formData = { ...data };
+        delete formData.group;
+        delete formData.group_ids;
+        delete formData.group_mode;
+        delete formData.group_details;
+        delete formData.group_ratio_limits;
+        if (formApiRef.current) {
+          formApiRef.current.setValues({ ...getInitValues(), ...formData });
+        }
       } else {
-        data.model_limits = [];
+        showError(message);
       }
-      data.remain_amount = Number(
-        quotaToDisplayAmount(data.remain_quota || 0).toFixed(6),
-      );
-      // Parse group string into selectedGroups array
-      const groupStr = data.group || '';
-      setSelectedGroups(
-        groupStr
-          ? groupStr
-              .split(',')
-              .map((g) => g.trim())
-              .filter(Boolean)
-          : [],
-      );
-      setGroupRatioLimits(parseGroupRatioLimits(data.group_ratio_limits));
-      // Remove group from form data since we manage it separately
-      const { group: _g, group_ratio_limits: _grl, ...formData } = data;
-      if (formApiRef.current) {
-        formApiRef.current.setValues({ ...getInitValues(), ...formData });
-      }
-    } else {
-      showError(message);
+    } catch (error) {
+      showError(error?.message || t('加载令牌失败'));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => {
@@ -601,7 +615,6 @@ const EditTokenModal = (props) => {
       }
     }
     loadModels();
-    loadGroups();
   }, [props.editingToken.id]);
 
   useEffect(() => {
@@ -609,6 +622,7 @@ const EditTokenModal = (props) => {
       if (isEdit) {
         loadToken();
       } else {
+        loadGroups();
         formApiRef.current?.setValues(getInitValues());
         onSelectedGroupsChange(defaultUseAutoGroup ? ['auto'] : []);
         setGroupRatioLimits({});
@@ -634,8 +648,7 @@ const EditTokenModal = (props) => {
 
   const submit = async (values) => {
     setLoading(true);
-    // Inject group from selectedGroups state
-    const groupStr = selectedGroups.join(',');
+    const groupSelection = buildGroupSelectionPayload(selectedGroups, groups);
     const isMultiGroup = selectedGroups.length > 1;
     const isAuto = selectedGroups.length === 1 && selectedGroups[0] === 'auto';
     const cleanedGroupRatioLimits = cleanGroupRatioLimits(groupRatioLimits);
@@ -646,7 +659,7 @@ const EditTokenModal = (props) => {
 
     if (isEdit) {
       let { tokenCount: _tc, ...localInputs } = values;
-      localInputs.group = groupStr;
+      Object.assign(localInputs, groupSelection);
       localInputs.group_ratio_limits = groupRatioLimitsJSON;
       localInputs.cross_group_retry = isMultiGroup
         ? true
@@ -689,7 +702,7 @@ const EditTokenModal = (props) => {
       let successCount = 0;
       for (let i = 0; i < count; i++) {
         let { tokenCount: _tc, ...localInputs } = values;
-        localInputs.group = groupStr;
+        Object.assign(localInputs, groupSelection);
         localInputs.group_ratio_limits = groupRatioLimitsJSON;
         localInputs.cross_group_retry = isMultiGroup
           ? true

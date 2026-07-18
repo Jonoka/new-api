@@ -17,6 +17,7 @@ import (
 type UserBase struct {
 	Id       int    `json:"id"`
 	Group    string `json:"group"`
+	GroupId  int    `json:"group_id"`
 	Email    string `json:"email"`
 	Quota    int    `json:"quota"`
 	Status   int    `json:"status"`
@@ -116,6 +117,7 @@ func GetUserCache(userId int) (userCache *UserBase, err error) {
 	userCache = &UserBase{
 		Id:       user.Id,
 		Group:    user.Group,
+		GroupId:  user.GroupId,
 		Quota:    user.Quota,
 		Status:   user.Status,
 		Role:     user.Role,

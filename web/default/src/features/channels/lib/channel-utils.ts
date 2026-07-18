@@ -545,6 +545,8 @@ export function aggregateChannelsByTag(
         created_time: 0,
         balance_updated_time: 0,
         models: '',
+        group_ids: [],
+        group_details: [],
         children: [],
       } as TagRow
       tagMap.set(tag, tagRow)
@@ -598,6 +600,22 @@ export function aggregateChannelsByTag(
         }
       })
     }
+
+    // 聚合行也保留所有子渠道的结构化分组信息，确保改名后标签行显示名称。
+    const detailsByKey = new Map(
+      (tagRow.group_details ?? []).map((detail) => [
+        detail.id > 0 ? `id:${detail.id}` : `code:${detail.code}`,
+        detail,
+      ])
+    )
+    for (const detail of channel.group_details ?? []) {
+      const key = detail.id > 0 ? `id:${detail.id}` : `code:${detail.code}`
+      if (!detailsByKey.has(key)) detailsByKey.set(key, detail)
+    }
+    tagRow.group_details = Array.from(detailsByKey.values())
+    tagRow.group_ids = tagRow.group_details
+      .map((detail) => detail.id)
+      .filter((id) => id > 0)
 
     // Aggregate status (enabled if any child is enabled)
     if (channel.status === 1) {

@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { type ColumnDef } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
 import { getLobeIcon } from '@/lib/lobe-icon'
+import { MODEL_PRICE_UNITS } from '@/lib/model-price-unit'
 import {
   Tooltip,
   TooltipContent,
@@ -34,7 +35,7 @@ import {
   getDynamicPricingSummary,
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
-import { isTokenBasedModel } from '../lib/model-helpers'
+import { getModelPriceUnit, isTokenBasedModel } from '../lib/model-helpers'
 import {
   formatPrice,
   formatRequestPrice,
@@ -129,13 +130,20 @@ export function usePricingColumns(
       header: t('Type'),
       cell: ({ row }) => {
         const isTokenBased = row.original.quota_type === QUOTA_TYPE_VALUES.TOKEN
-        return (
-          <StatusBadge
-            label={isTokenBased ? t('Token') : t('Request')}
-            variant={isTokenBased ? 'info' : 'neutral'}
-            copyable={false}
-          />
-        )
+        let label = t('Token')
+        let variant: 'info' | 'neutral' | 'warning' = 'info'
+
+        if (!isTokenBased) {
+          if (getModelPriceUnit(row.original) === MODEL_PRICE_UNITS.SECOND) {
+            label = t('Per-second')
+            variant = 'warning'
+          } else {
+            label = t('Per-request')
+            variant = 'neutral'
+          }
+        }
+
+        return <StatusBadge label={label} variant={variant} copyable={false} />
       },
       size: 80,
       enableSorting: false,
@@ -253,12 +261,16 @@ export function usePricingColumns(
             usdExchangeRate
           )
         )
+        const fixedPriceUnitLabel =
+          getModelPriceUnit(model) === MODEL_PRICE_UNITS.SECOND
+            ? t('second')
+            : t('request')
 
         return (
           <div className='min-w-[100px]'>
             <span className='font-mono text-sm tabular-nums'>{price}</span>
             <div className='text-muted-foreground/50 text-[10px]'>
-              / {t('request')}
+              / {fixedPriceUnitLabel}
             </div>
           </div>
         )

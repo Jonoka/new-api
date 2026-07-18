@@ -24,6 +24,7 @@ type Pricing struct {
 	QuotaType              int                     `json:"quota_type"`
 	ModelRatio             float64                 `json:"model_ratio"`
 	ModelPrice             float64                 `json:"model_price"`
+	ModelPriceUnit         types.ModelPriceUnit    `json:"model_price_unit,omitempty"`
 	OwnerBy                string                  `json:"owner_by"`
 	CompletionRatio        float64                 `json:"completion_ratio"`
 	CacheRatio             *float64                `json:"cache_ratio,omitempty"`
@@ -305,8 +306,12 @@ func updatePricing() {
 			pricing.VendorID = meta.VendorID
 		}
 		modelPrice, findPrice := ratio_setting.GetModelPrice(model, false)
+		if !findPrice {
+			modelPrice, findPrice = ratio_setting.GetDefaultModelPriceMap()[model]
+		}
 		if findPrice {
 			pricing.ModelPrice = modelPrice
+			pricing.ModelPriceUnit = ratio_setting.GetModelPriceUnit(model)
 			pricing.QuotaType = 1
 		} else {
 			modelRatio, _, _ := ratio_setting.GetModelRatio(model)
@@ -342,7 +347,7 @@ func updatePricing() {
 
 	// 防止大更新后数据不通用
 	if len(pricingMap) > 0 {
-		pricingMap[0].PricingVersion = "5a90f2b86c08bd983a9a2e6d66c255f4eaef9c4bc934386d2b6ae84ef0ff1f1f"
+		pricingMap[0].PricingVersion = "b1d8365b190b67e06a62b2e9678fd49bef1ec3a5685bb4e289c1a38275e183a7"
 	}
 
 	// 刷新缓存映射，供高并发快速查询

@@ -170,6 +170,7 @@ func InitOptionMap() {
 	common.OptionMap["ModelRequestRateLimitUserGroup"] = setting.ModelRequestRateLimitUserGroup2JSONString()
 	common.OptionMap["ModelRatio"] = ratio_setting.ModelRatio2JSONString()
 	common.OptionMap["ModelPrice"] = ratio_setting.ModelPrice2JSONString()
+	common.OptionMap["ModelPriceUnit"] = ratio_setting.ModelPriceUnit2JSONString()
 	common.OptionMap["CacheRatio"] = ratio_setting.CacheRatio2JSONString()
 	common.OptionMap["CreateCacheRatio"] = ratio_setting.CreateCacheRatio2JSONString()
 	common.OptionMap["GroupRatio"] = ratio_setting.GroupRatio2JSONString()
@@ -636,6 +637,12 @@ func updateOptionMap(key string, value string) (err error) {
 		err = ratio_setting.UpdateCompletionRatioByJSONString(value)
 	case "ModelPrice":
 		err = ratio_setting.UpdateModelPriceByJSONString(value)
+	case "ModelPriceUnit":
+		err = ratio_setting.UpdateModelPriceUnitByJSONString(value)
+		if err == nil {
+			// 对管理端返回包含内置默认值的有效配置，避免稀疏覆盖后界面误显示为按次。
+			common.OptionMap[key] = ratio_setting.ModelPriceUnit2JSONString()
+		}
 	case "CacheRatio":
 		err = ratio_setting.UpdateCacheRatioByJSONString(value)
 	case "CreateCacheRatio":
@@ -677,11 +684,19 @@ func updateOptionMap(key string, value string) (err error) {
 		// The value is already stored in OptionMap at the top of this function (line: common.OptionMap[key] = value).
 		// No additional in-memory variable to update.
 	}
+	if err == nil {
+		switch key {
+		case "ModelPrice", "ModelPriceUnit", "ModelRatio", "CompletionRatio", "CacheRatio", "CreateCacheRatio", "ImageRatio", "AudioRatio", "AudioCompletionRatio":
+			InvalidatePricingCache()
+		}
+	}
 	return err
 }
 
 func validateOptionValue(key string, value string) error {
 	switch key {
+	case "ModelPriceUnit":
+		return ratio_setting.CheckModelPriceUnitJSONString(value)
 	case "InvoiceTypes":
 		_, err := ParseInvoiceTypes(value)
 		return err

@@ -19,6 +19,11 @@ For commercial licensing, please contact support@quantumnous.com
 import { z } from 'zod'
 import type { TFunction } from 'i18next'
 import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
+import {
+  buildGroupSelectionPayload,
+  resolveGroupSelectionCodes,
+  type GroupOption,
+} from '@/lib/group-options'
 import { type ApiKeyFormData, type ApiKey } from '../types'
 
 // ============================================================================
@@ -92,10 +97,11 @@ export function getApiKeyFormDefaultValues(
  * Transform form data to API payload
  */
 export function transformFormDataToPayload(
-  data: ApiKeyFormValues
+  data: ApiKeyFormValues,
+  groupOptions: readonly GroupOption[] = []
 ): ApiKeyFormData {
-  const groupStr = data.groups.join(',')
-  const isAuto = data.groups.length === 1 && data.groups[0] === 'auto'
+  const groupSelection = buildGroupSelectionPayload(data.groups, groupOptions)
+  const isAuto = groupSelection.group_mode === 'auto'
   const isMultiGroup = data.groups.length > 1
   return {
     name: data.name,
@@ -109,9 +115,15 @@ export function transformFormDataToPayload(
     model_limits_enabled: data.model_limits.length > 0,
     model_limits: data.model_limits.join(','),
     allow_ips: data.allow_ips || '',
-    group: groupStr,
+    group: groupSelection.group,
+    group_ids: groupSelection.group_ids,
+    group_mode: groupSelection.group_mode,
     // Multi-group always enables cross-group retry; auto respects user toggle
-    cross_group_retry: isMultiGroup ? true : isAuto ? !!data.cross_group_retry : false,
+    cross_group_retry: isMultiGroup
+      ? true
+      : isAuto
+        ? !!data.cross_group_retry
+        : false,
   }
 }
 
@@ -119,7 +131,8 @@ export function transformFormDataToPayload(
  * Transform API key data to form defaults
  */
 export function transformApiKeyToFormDefaults(
-  apiKey: ApiKey
+  apiKey: ApiKey,
+  groupOptions: readonly GroupOption[] = []
 ): ApiKeyFormValues {
   return {
     name: apiKey.name,
@@ -135,7 +148,7 @@ export function transformApiKeyToFormDefaults(
       ? apiKey.model_limits.split(',').filter(Boolean)
       : [],
     allow_ips: apiKey.allow_ips || '',
-    groups: apiKey.group ? apiKey.group.split(',').map((g) => g.trim()).filter(Boolean) : [],
+    groups: resolveGroupSelectionCodes(apiKey, groupOptions),
     cross_group_retry: !!apiKey.cross_group_retry,
     tokenCount: 1,
   }

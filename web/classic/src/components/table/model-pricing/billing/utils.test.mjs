@@ -22,6 +22,9 @@ import {
   calculateTokenCost,
   getBillingDiscountColor,
   getBillingDiscountText,
+  getBillingDynamicUnitPrices,
+  getBillingExpressionInfo,
+  getBillingExpressionTier,
   getBillingFactors,
   getBillingGuideGroups,
   getBillingGuideModels,
@@ -41,10 +44,26 @@ const models = [
     model_price: 0.1,
   },
   {
-    model_name: 'dynamic',
+    model_name: 'gpt-5.6-sol',
     quota_type: 0,
     billing_mode: 'tiered_expr',
     model_ratio: 1,
+    billing_expr:
+      'len <= 272000 ? tier("standard", p * 0.5 + c * 3 + cr * 0.05) : tier("long_context", p * 1 + c * 6 + cr * 0.1)',
+  },
+  {
+    model_name: 'invalid-dynamic',
+    quota_type: 0,
+    billing_mode: 'tiered_expr',
+    model_ratio: 1,
+    billing_expr: 'tier("invalid", p * max(1, 2))',
+  },
+  {
+    model_name: 'empty-dynamic',
+    quota_type: 0,
+    billing_mode: 'tiered_expr',
+    model_ratio: 1,
+    billing_expr: '',
   },
   {
     model_name: 'unpriced',
@@ -62,10 +81,44 @@ const models = [
   },
 ];
 
-assert.deepEqual(getBillingGuideModels(models), [models[3]]);
+assert.deepEqual(getBillingGuideModels(models), [models[1], models[5]]);
 assert.equal(pickBillingGuideModel(models)?.model_name, 'gpt-5.5');
 
-const groups = getBillingGuideGroups(models[3], {
+const dynamicInfo = getBillingExpressionInfo(models[1].billing_expr);
+assert.equal(dynamicInfo.supported, true);
+assert.equal(dynamicInfo.tiers.length, 2);
+assert.equal(
+  getBillingExpressionTier(dynamicInfo, {
+    input: 1024,
+    output: 500,
+    cacheRead: 155,
+  }).label,
+  'standard',
+);
+assert.equal(
+  getBillingExpressionTier(dynamicInfo, {
+    input: 300000,
+    output: 500,
+    cacheRead: 155,
+  }).label,
+  'long_context',
+);
+
+const dynamicPrices = getBillingDynamicUnitPrices({
+  priceData: {
+    isDynamicPricing: true,
+    billingExpr: models[1].billing_expr,
+    usedGroupRatio: 0.5,
+  },
+  tokenCounts: { input: 1024, output: 500, cacheRead: 155 },
+  displayPrice: (value) => `$${value.toFixed(4)}`,
+});
+assert.equal(dynamicPrices.dynamicTierLabel, 'standard');
+assert.equal(dynamicPrices.input.unitPrice, 0.25);
+assert.equal(dynamicPrices.output.unitPrice, 1.5);
+assert.equal(dynamicPrices.cacheRead.unitPrice, 0.025);
+
+const groups = getBillingGuideGroups(models[5], {
   standard: 1,
   discount: 0.5,
 });
@@ -74,7 +127,7 @@ assert.deepEqual(groups, [
   { value: 'discount', ratio: 0.5 },
 ]);
 assert.deepEqual(
-  pickBillingGuideGroup(models[3], { standard: 1, discount: 0.5 }),
+  pickBillingGuideGroup(models[5], { standard: 1, discount: 0.5 }),
   { value: 'discount', ratio: 0.5 },
 );
 

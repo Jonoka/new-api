@@ -31,17 +31,18 @@ import {
 } from '@tanstack/react-table'
 import { useDebounce, useMediaQuery } from '@/hooks'
 import { useTranslation } from 'react-i18next'
+import { createGroupOptions } from '@/lib/group-options'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 import { Input } from '@/components/ui/input'
-import { getVendors } from '@/features/models/api'
-import { vendorsQueryKeys } from '@/features/models/lib'
 import {
   DISABLED_ROW_DESKTOP,
   DISABLED_ROW_MOBILE,
   DataTablePage,
 } from '@/components/data-table'
-import { getChannels, searchChannels, getGroups } from '../api'
+import { getVendors } from '@/features/models/api'
+import { vendorsQueryKeys } from '@/features/models/lib'
+import { getChannels, searchChannels, getGroupDetails } from '../api'
 import {
   DEFAULT_PAGE_SIZE,
   CHANNEL_STATUS,
@@ -181,8 +182,8 @@ export function ChannelsTable() {
 
   // Fetch groups for filter
   const { data: groupsData } = useQuery({
-    queryKey: ['groups'],
-    queryFn: getGroups,
+    queryKey: ['channels', 'group-details'],
+    queryFn: getGroupDetails,
   })
 
   const { data: vendorsData } = useQuery({
@@ -196,12 +197,8 @@ export function ChannelsTable() {
   )
 
   const groupOptions = useMemo(
-    () =>
-      (groupsData?.data || []).map((g) => ({
-        label: g,
-        value: g,
-      })),
-    [groupsData]
+    () => createGroupOptions(groupsData?.data),
+    [groupsData?.data]
   )
 
   // Fetch channels data
