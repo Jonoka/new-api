@@ -22,8 +22,16 @@ const (
 	InvoiceSourceSubscription = "subscription"
 
 	InvoiceStatusPending = "pending"
-	InvoiceStatusIssued  = "issued"
-	InvoiceStatusClosed  = "closed"
+	// InvoiceStatusPaymentPending 表示服务费尚未确认支付，不能进入开票流程。
+	InvoiceStatusPaymentPending = "payment_pending"
+	InvoiceStatusIssued         = "issued"
+	InvoiceStatusClosed         = "closed"
+
+	InvoicePaymentStatusPending  = "pending"
+	InvoicePaymentStatusSuccess  = "success"
+	InvoicePaymentStatusFailed   = "failed"
+	InvoicePaymentStatusExpired  = "expired"
+	InvoicePaymentStatusCanceled = "canceled"
 
 	InvoiceFeeRuleFixed   = "fixed"
 	InvoiceFeeRulePercent = "percent"
@@ -67,28 +75,38 @@ type InvoiceRequest struct {
 }
 
 type InvoiceRecord struct {
-	Id            int                `json:"id"`
-	UserId        int                `json:"user_id" gorm:"index"`
-	SourceType    string             `json:"source_type" gorm:"type:varchar(32);index;uniqueIndex:idx_invoice_source,priority:1"`
-	SourceId      string             `json:"source_id" gorm:"type:varchar(255);index;uniqueIndex:idx_invoice_source,priority:2"`
-	PaymentMethod string             `json:"payment_method" gorm:"type:varchar(50)"`
-	InvoiceType   string             `json:"invoice_type" gorm:"type:varchar(32)"`
-	InvoiceKind   string             `json:"invoice_kind" gorm:"type:varchar(32)"`
-	Title         string             `json:"title" gorm:"type:varchar(255)"`
-	TaxNo         string             `json:"tax_no" gorm:"type:varchar(128)"`
-	Email         string             `json:"email" gorm:"type:varchar(255)"`
-	Phone         string             `json:"phone" gorm:"type:varchar(64)"`
-	Remark        string             `json:"remark" gorm:"type:text"`
-	BaseAmount    float64            `json:"base_amount"`
-	FeeAmount     float64            `json:"fee_amount"`
-	TotalAmount   float64            `json:"total_amount"`
-	Status        string             `json:"status" gorm:"type:varchar(32);index"`
-	DownloadUrl   string             `json:"download_url" gorm:"type:text"`
-	AdminRemark   string             `json:"admin_remark" gorm:"type:text"`
-	CreateTime    int64              `json:"create_time" gorm:"index"`
-	UpdateTime    int64              `json:"update_time"`
-	IssuedTime    int64              `json:"issued_time"`
-	Orders        []InvoiceOrderLink `json:"orders,omitempty" gorm:"-"`
+	Id                 int                `json:"id"`
+	UserId             int                `json:"user_id" gorm:"index"`
+	SourceType         string             `json:"source_type" gorm:"type:varchar(32);index;uniqueIndex:idx_invoice_source,priority:1"`
+	SourceId           string             `json:"source_id" gorm:"type:varchar(255);index;uniqueIndex:idx_invoice_source,priority:2"`
+	PaymentMethod      string             `json:"payment_method" gorm:"type:varchar(50)"`
+	PaymentProvider    string             `json:"payment_provider" gorm:"type:varchar(50);default:'';index"`
+	PaymentStatus      string             `json:"payment_status" gorm:"type:varchar(32);default:'';index"`
+	ProviderOrderId    string             `json:"provider_order_id" gorm:"type:varchar(128);default:'';index"`
+	ProviderMerchantId string             `json:"-" gorm:"type:varchar(128);default:''"`
+	ProviderAmount     string             `json:"provider_amount" gorm:"type:varchar(64);default:''"`
+	ProviderCurrency   string             `json:"provider_currency" gorm:"type:varchar(32);default:''"`
+	PaymentAmountMinor int64              `json:"payment_amount_minor" gorm:"default:0"`
+	RequestIP          string             `json:"request_ip" gorm:"type:varchar(64);default:''"`
+	PaidTime           int64              `json:"paid_time" gorm:"index"`
+	ProviderPayload    string             `json:"-" gorm:"type:text"`
+	InvoiceType        string             `json:"invoice_type" gorm:"type:varchar(32)"`
+	InvoiceKind        string             `json:"invoice_kind" gorm:"type:varchar(32)"`
+	Title              string             `json:"title" gorm:"type:varchar(255)"`
+	TaxNo              string             `json:"tax_no" gorm:"type:varchar(128)"`
+	Email              string             `json:"email" gorm:"type:varchar(255)"`
+	Phone              string             `json:"phone" gorm:"type:varchar(64)"`
+	Remark             string             `json:"remark" gorm:"type:text"`
+	BaseAmount         float64            `json:"base_amount"`
+	FeeAmount          float64            `json:"fee_amount"`
+	TotalAmount        float64            `json:"total_amount"`
+	Status             string             `json:"status" gorm:"type:varchar(32);index"`
+	DownloadUrl        string             `json:"download_url" gorm:"type:text"`
+	AdminRemark        string             `json:"admin_remark" gorm:"type:text"`
+	CreateTime         int64              `json:"create_time" gorm:"index"`
+	UpdateTime         int64              `json:"update_time"`
+	IssuedTime         int64              `json:"issued_time"`
+	Orders             []InvoiceOrderLink `json:"orders,omitempty" gorm:"-"`
 }
 
 func InvoiceTypesJSON() string {
@@ -507,23 +525,31 @@ func CreateInvoiceRecordFromTopUpTx(tx *gorm.DB, topUp *TopUp) error {
 		return nil
 	}
 	record := &InvoiceRecord{
-		UserId:        topUp.UserId,
-		SourceType:    InvoiceSourceTopUp,
-		SourceId:      topUp.TradeNo,
-		PaymentMethod: topUp.PaymentMethod,
-		InvoiceType:   topUp.InvoiceType,
-		InvoiceKind:   topUp.InvoiceKind,
-		Title:         topUp.InvoiceTitle,
-		TaxNo:         topUp.InvoiceTaxNo,
-		Email:         topUp.InvoiceEmail,
-		Phone:         topUp.InvoicePhone,
-		Remark:        topUp.InvoiceRemark,
-		BaseAmount:    topUp.InvoiceBaseAmount,
-		FeeAmount:     topUp.InvoiceFeeAmount,
-		TotalAmount:   decimal.NewFromFloat(topUp.InvoiceBaseAmount).Add(decimal.NewFromFloat(topUp.InvoiceFeeAmount)).Round(2).InexactFloat64(),
-		Status:        InvoiceStatusPending,
-		CreateTime:    common.GetTimestamp(),
-		UpdateTime:    common.GetTimestamp(),
+		UserId:             topUp.UserId,
+		SourceType:         InvoiceSourceTopUp,
+		SourceId:           topUp.TradeNo,
+		PaymentMethod:      topUp.PaymentMethod,
+		PaymentProvider:    invoiceOrderPaymentProvider(topUp.PaymentProvider, topUp.PaymentMethod),
+		PaymentStatus:      InvoicePaymentStatusSuccess,
+		ProviderOrderId:    topUp.ProviderOrderId,
+		ProviderAmount:     topUp.ProviderAmount,
+		ProviderCurrency:   topUp.ProviderCurrency,
+		PaymentAmountMinor: invoiceCNYToMinor(topUp.InvoiceFeeAmount),
+		RequestIP:          topUp.RequestIP,
+		PaidTime:           invoiceOrderCompleteTime(topUp.CompleteTime, topUp.CreateTime),
+		InvoiceType:        topUp.InvoiceType,
+		InvoiceKind:        topUp.InvoiceKind,
+		Title:              topUp.InvoiceTitle,
+		TaxNo:              topUp.InvoiceTaxNo,
+		Email:              topUp.InvoiceEmail,
+		Phone:              topUp.InvoicePhone,
+		Remark:             topUp.InvoiceRemark,
+		BaseAmount:         topUp.InvoiceBaseAmount,
+		FeeAmount:          topUp.InvoiceFeeAmount,
+		TotalAmount:        decimal.NewFromFloat(topUp.InvoiceBaseAmount).Add(decimal.NewFromFloat(topUp.InvoiceFeeAmount)).Round(2).InexactFloat64(),
+		Status:             InvoiceStatusPending,
+		CreateTime:         common.GetTimestamp(),
+		UpdateTime:         common.GetTimestamp(),
 	}
 	if err := tx.Where("source_type = ? AND source_id = ?", record.SourceType, record.SourceId).First(&InvoiceRecord{}).Error; err == nil {
 		return nil
@@ -542,23 +568,32 @@ func CreateInvoiceRecordFromSubscriptionOrderTx(tx *gorm.DB, order *Subscription
 		return nil
 	}
 	record := &InvoiceRecord{
-		UserId:        order.UserId,
-		SourceType:    InvoiceSourceSubscription,
-		SourceId:      order.TradeNo,
-		PaymentMethod: order.PaymentMethod,
-		InvoiceType:   order.InvoiceType,
-		InvoiceKind:   order.InvoiceKind,
-		Title:         order.InvoiceTitle,
-		TaxNo:         order.InvoiceTaxNo,
-		Email:         order.InvoiceEmail,
-		Phone:         order.InvoicePhone,
-		Remark:        order.InvoiceRemark,
-		BaseAmount:    order.InvoiceBaseAmount,
-		FeeAmount:     order.InvoiceFeeAmount,
-		TotalAmount:   decimal.NewFromFloat(order.InvoiceBaseAmount).Add(decimal.NewFromFloat(order.InvoiceFeeAmount)).Round(2).InexactFloat64(),
-		Status:        InvoiceStatusPending,
-		CreateTime:    common.GetTimestamp(),
-		UpdateTime:    common.GetTimestamp(),
+		UserId:             order.UserId,
+		SourceType:         InvoiceSourceSubscription,
+		SourceId:           order.TradeNo,
+		PaymentMethod:      order.PaymentMethod,
+		PaymentProvider:    invoiceOrderPaymentProvider(order.PaymentProvider, order.PaymentMethod),
+		PaymentStatus:      InvoicePaymentStatusSuccess,
+		ProviderOrderId:    order.ProviderOrderId,
+		ProviderAmount:     order.ProviderAmount,
+		ProviderCurrency:   order.ProviderCurrency,
+		PaymentAmountMinor: invoiceCNYToMinor(order.InvoiceFeeAmount),
+		RequestIP:          order.RequestIP,
+		PaidTime:           invoiceOrderCompleteTime(order.CompleteTime, order.CreateTime),
+		ProviderPayload:    order.ProviderPayload,
+		InvoiceType:        order.InvoiceType,
+		InvoiceKind:        order.InvoiceKind,
+		Title:              order.InvoiceTitle,
+		TaxNo:              order.InvoiceTaxNo,
+		Email:              order.InvoiceEmail,
+		Phone:              order.InvoicePhone,
+		Remark:             order.InvoiceRemark,
+		BaseAmount:         order.InvoiceBaseAmount,
+		FeeAmount:          order.InvoiceFeeAmount,
+		TotalAmount:        decimal.NewFromFloat(order.InvoiceBaseAmount).Add(decimal.NewFromFloat(order.InvoiceFeeAmount)).Round(2).InexactFloat64(),
+		Status:             InvoiceStatusPending,
+		CreateTime:         common.GetTimestamp(),
+		UpdateTime:         common.GetTimestamp(),
 	}
 	if err := tx.Where("source_type = ? AND source_id = ?", record.SourceType, record.SourceId).First(&InvoiceRecord{}).Error; err == nil {
 		return nil
@@ -653,6 +688,13 @@ func UpdateInvoiceRecord(id int, downloadUrl string, status string, adminRemark 
 		var record InvoiceRecord
 		if err := lockForUpdate(tx).Where("id = ?", id).First(&record).Error; err != nil {
 			return err
+		}
+		if record.PaymentStatus != "" && record.PaymentStatus != InvoicePaymentStatusSuccess {
+			if status != InvoiceStatusClosed {
+				return errors.New("发票服务费尚未支付，只能关闭该申请")
+			}
+			record.AdminRemark = strings.TrimSpace(adminRemark)
+			return cancelInvoiceExternalPaymentTx(tx, &record)
 		}
 		record.DownloadUrl = strings.TrimSpace(downloadUrl)
 		record.Status = status

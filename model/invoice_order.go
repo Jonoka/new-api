@@ -334,7 +334,7 @@ func resolveInvoiceOrdersTx(tx *gorm.DB, userId int, references []InvoiceOrderRe
 		switch reference.SourceType {
 		case InvoiceSourceTopUp:
 			var topUp TopUp
-			if err := tx.Set("gorm:query_option", "FOR UPDATE").
+			if err := lockForUpdate(tx).
 				Where("user_id = ? AND trade_no = ? AND status = ?", userId, reference.SourceId, common.TopUpStatusSuccess).
 				First(&topUp).Error; err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -357,7 +357,7 @@ func resolveInvoiceOrdersTx(tx *gorm.DB, userId int, references []InvoiceOrderRe
 			invoiceRequired = topUp.InvoiceRequired
 		case InvoiceSourceSubscription:
 			var order SubscriptionOrder
-			if err := tx.Set("gorm:query_option", "FOR UPDATE").
+			if err := lockForUpdate(tx).
 				Where("user_id = ? AND trade_no = ? AND status = ?", userId, reference.SourceId, common.TopUpStatusSuccess).
 				First(&order).Error; err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -464,6 +464,10 @@ func PreviewInvoiceOrders(userId int, references []InvoiceOrderReference) (Invoi
 }
 
 func applyInvoiceSnapshotToOrderTx(tx *gorm.DB, userId int, order resolvedInvoiceOrder, req InvoiceRequest) error {
+	return applyInvoiceSnapshotToOrderWithStatusTx(tx, userId, order, req, InvoiceStatusPending)
+}
+
+func applyInvoiceSnapshotToOrderWithStatusTx(tx *gorm.DB, userId int, order resolvedInvoiceOrder, req InvoiceRequest, status string) error {
 	updates := map[string]interface{}{
 		"invoice_required":    true,
 		"invoice_type":        req.Type,
@@ -475,7 +479,7 @@ func applyInvoiceSnapshotToOrderTx(tx *gorm.DB, userId int, order resolvedInvoic
 		"invoice_remark":      req.Remark,
 		"invoice_base_amount": order.BaseAmount,
 		"invoice_fee_amount":  0,
-		"invoice_status":      InvoiceStatusPending,
+		"invoice_status":      status,
 	}
 	var result *gorm.DB
 	switch order.Reference.SourceType {
@@ -506,7 +510,7 @@ func applyInvoiceSnapshotToOrderTx(tx *gorm.DB, userId int, order resolvedInvoic
 }
 
 // CreateCombinedInvoiceWithBalance 使用账户余额支付发票服务费，并创建一张合并发票申请。
-func CreateCombinedInvoiceWithBalance(userId int, references []InvoiceOrderReference, req InvoiceRequest) (*InvoiceRecord, error) {
+func CreateCombinedInvoiceWithBalance(userId int, references []InvoiceOrderReference, req InvoiceRequest, requestIPs ...string) (*InvoiceRecord, error) {
 	if userId <= 0 {
 		return nil, errors.New("无效的用户")
 	}
@@ -552,23 +556,32 @@ func CreateCombinedInvoiceWithBalance(userId int, references []InvoiceOrderRefer
 
 		now := common.GetTimestamp()
 		created = InvoiceRecord{
-			UserId:        userId,
-			SourceType:    InvoiceSourceCombined,
-			SourceId:      fmt.Sprintf("INVUSR%d%s%d", userId, common.GetRandomString(8), time.Now().UnixNano()),
-			PaymentMethod: PaymentMethodBalance,
-			InvoiceType:   normalizedReq.Type,
-			InvoiceKind:   normalizedReq.Kind,
-			Title:         normalizedReq.Title,
-			TaxNo:         normalizedReq.TaxNo,
-			Email:         normalizedReq.Email,
-			Phone:         normalizedReq.Phone,
-			Remark:        normalizedReq.Remark,
-			BaseAmount:    preview.BaseAmount,
-			FeeAmount:     preview.FeeAmount,
-			TotalAmount:   preview.TotalAmount,
-			Status:        InvoiceStatusPending,
-			CreateTime:    now,
-			UpdateTime:    now,
+			UserId:             userId,
+			SourceType:         InvoiceSourceCombined,
+			SourceId:           fmt.Sprintf("INVUSR%d%s%d", userId, common.GetRandomString(8), time.Now().UnixNano()),
+			PaymentMethod:      PaymentMethodBalance,
+			PaymentProvider:    PaymentProviderBalance,
+			PaymentStatus:      InvoicePaymentStatusSuccess,
+			ProviderAmount:     decimal.NewFromFloat(preview.FeeAmount).StringFixed(2),
+			ProviderCurrency:   "CNY",
+			PaymentAmountMinor: invoiceCNYToMinor(preview.FeeAmount),
+			PaidTime:           now,
+			InvoiceType:        normalizedReq.Type,
+			InvoiceKind:        normalizedReq.Kind,
+			Title:              normalizedReq.Title,
+			TaxNo:              normalizedReq.TaxNo,
+			Email:              normalizedReq.Email,
+			Phone:              normalizedReq.Phone,
+			Remark:             normalizedReq.Remark,
+			BaseAmount:         preview.BaseAmount,
+			FeeAmount:          preview.FeeAmount,
+			TotalAmount:        preview.TotalAmount,
+			Status:             InvoiceStatusPending,
+			CreateTime:         now,
+			UpdateTime:         now,
+		}
+		if len(requestIPs) > 0 {
+			created.RequestIP = strings.TrimSpace(requestIPs[0])
 		}
 		if err := tx.Create(&created).Error; err != nil {
 			return err

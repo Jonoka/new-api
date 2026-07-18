@@ -69,6 +69,7 @@ import {
   type InvoiceOrderPreview,
   type InvoiceRequest,
 } from '../types'
+import { InvoicePaymentSelector } from './invoice-payment-selector'
 import { InvoiceRequestForm } from './invoice-request-form'
 
 interface OrderInvoiceRequestProps {
@@ -79,7 +80,9 @@ interface OrderInvoiceRequestProps {
   onRefresh: () => void
   onSubmit: (
     orders: InvoiceEligibleOrder[],
-    invoice: InvoiceRequest
+    invoice: InvoiceRequest,
+    paymentMethod: string,
+    tradeType?: string
   ) => Promise<boolean>
 }
 
@@ -124,6 +127,10 @@ export function OrderInvoiceRequest({
   const [preview, setPreview] = useState<InvoiceOrderPreview | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState('balance')
+  const [bepusdtTradeType, setBepusdtTradeType] = useState(
+    normalizedConfig.bepusdt_chains[0]?.trade_type || ''
+  )
   const [invoice, setInvoice] = useState<InvoiceRequest>(() => ({
     ...createEmptyInvoiceRequest(
       normalizedConfig.types[0],
@@ -165,6 +172,29 @@ export function OrderInvoiceRequest({
     normalizedConfig.types,
   ])
 
+  useEffect(() => {
+    if (
+      paymentMethod === 'balance' ||
+      normalizedConfig.pay_methods.some(
+        (method) => method.type === paymentMethod
+      )
+    ) {
+      return
+    }
+    setPaymentMethod('balance')
+  }, [normalizedConfig.pay_methods, paymentMethod])
+
+  useEffect(() => {
+    if (
+      normalizedConfig.bepusdt_chains.some(
+        (chain) => chain.trade_type === bepusdtTradeType
+      )
+    ) {
+      return
+    }
+    setBepusdtTradeType(normalizedConfig.bepusdt_chains[0]?.trade_type || '')
+  }, [bepusdtTradeType, normalizedConfig.bepusdt_chains])
+
   const selectedOrders = useMemo(
     () =>
       orders.filter(
@@ -191,6 +221,24 @@ export function OrderInvoiceRequest({
   const allSelected =
     bulkSelectableOrders.length > 0 &&
     bulkSelectableOrders.every((order) => selectedKeys.has(orderKey(order)))
+  const selectedPaymentMethod = normalizedConfig.pay_methods.find(
+    (method) => method.type === paymentMethod
+  )
+  const invoiceFee = Number(preview?.invoice_fee || 0)
+  const isBepusdtPayment =
+    selectedPaymentMethod?.provider === 'bepusdt' ||
+    selectedPaymentMethod?.type === 'bepusdt'
+  let submitLabel = t('Submit invoice request')
+  if (invoiceFee > 0 && paymentMethod === 'balance') {
+    submitLabel = t('Pay {{amount}} with balance and submit', {
+      amount: formatCny(invoiceFee),
+    })
+  } else if (invoiceFee > 0 && selectedPaymentMethod) {
+    submitLabel = t('Use {{method}} to pay {{amount}}', {
+      method: selectedPaymentMethod.name,
+      amount: formatCny(invoiceFee),
+    })
+  }
 
   useEffect(() => {
     if (selectedOrderRefs.length === 0) {
@@ -269,11 +317,24 @@ export function OrderInvoiceRequest({
       toast.error(t('Please wait for invoice fee calculation'))
       return
     }
-    const success = await onSubmit(selectedOrders, invoice)
+    if (invoiceFee > 0 && isBepusdtPayment && !bepusdtTradeType) {
+      toast.error(t('Please select a USDT network'))
+      return
+    }
+    const selectedMethod = invoiceFee > 0 ? paymentMethod : 'balance'
+    const tradeType =
+      invoiceFee > 0 && isBepusdtPayment ? bepusdtTradeType : undefined
+    const success = await onSubmit(
+      selectedOrders,
+      invoice,
+      selectedMethod,
+      tradeType
+    )
     if (!success) return
     setDialogOpen(false)
     setSelectedKeys(new Set())
     setPreview(null)
+    setPaymentMethod('balance')
     setInvoice({
       ...createEmptyInvoiceRequest(
         normalizedConfig.types[0],
@@ -455,7 +516,7 @@ export function OrderInvoiceRequest({
             <DialogTitle>{t('Confirm invoice request')}</DialogTitle>
             <DialogDescription>
               {t(
-                'The invoice amount is based on the actual total paid for the selected orders.'
+                'The historical order amount has already been paid. You are only paying the invoice service fee this time.'
               )}
             </DialogDescription>
           </DialogHeader>
@@ -489,11 +550,22 @@ export function OrderInvoiceRequest({
             <Alert>
               <AlertDescription>
                 {t(
-                  'Only the invoice service fee will be deducted from your balance ({{quota}} quota).',
-                  { quota: Number(preview.fee_quota || 0) }
+                  'The historical order amount has already been paid. You are only paying the invoice service fee this time.'
                 )}
               </AlertDescription>
             </Alert>
+          )}
+
+          {invoiceFee > 0 && (
+            <InvoicePaymentSelector
+              methods={normalizedConfig.pay_methods}
+              value={paymentMethod}
+              onValueChange={setPaymentMethod}
+              bepusdtChains={normalizedConfig.bepusdt_chains}
+              tradeType={bepusdtTradeType}
+              onTradeTypeChange={setBepusdtTradeType}
+              disabled={submitting}
+            />
           )}
 
           <InvoiceRequestForm
@@ -515,11 +587,7 @@ export function OrderInvoiceRequest({
             </Button>
             <Button onClick={submit} disabled={submitting}>
               {submitting && <Spinner data-icon='inline-start' />}
-              {(preview?.invoice_fee || 0) > 0
-                ? t('Pay {{amount}} and submit', {
-                    amount: formatCny(preview?.invoice_fee || 0),
-                  })
-                : t('Submit invoice request')}
+              {submitLabel}
             </Button>
           </DialogFooter>
         </DialogContent>

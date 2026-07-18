@@ -25,6 +25,7 @@ import {
   ExternalLink,
   FileText,
   RefreshCw,
+  XCircle,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -52,6 +53,8 @@ import { SectionPageLayout } from '@/components/layout'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import {
   createOrderInvoice,
+  createOrderInvoicePayment,
+  cancelOrderInvoicePayment,
   getAdminInvoices,
   getInvoiceConfig,
   getInvoiceEligibleOrders,
@@ -59,6 +62,7 @@ import {
   updateInvoiceRecord,
 } from './api'
 import { OrderInvoiceRequest } from './components/order-invoice-request'
+import { openInvoicePaymentCheckout } from './payment'
 import type {
   InvoiceConfig,
   InvoiceEligibleOrder,
@@ -87,6 +91,8 @@ function getStatusConfig(
   t: (key: string) => string
 ): { label: string; variant: StatusBadgeProps['variant'] } {
   switch (status) {
+    case 'payment_pending':
+      return { label: t('Pending payment'), variant: 'warning' }
     case 'issued':
       return { label: t('Issued'), variant: 'success' }
     case 'closed':
@@ -129,6 +135,7 @@ export function Invoices({ admin = false }: InvoicesProps) {
   const [ordersLoading, setOrdersLoading] = useState(false)
   const [orderInvoiceSubmitting, setOrderInvoiceSubmitting] = useState(false)
   const [savingId, setSavingId] = useState<number | null>(null)
+  const [cancelingId, setCancelingId] = useState<number | null>(null)
   const [editing, setEditing] = useState<
     Record<
       number,
@@ -158,7 +165,10 @@ export function Invoices({ admin = false }: InvoicesProps) {
             if (!next[record.id]) {
               next[record.id] = {
                 download_url: record.download_url || '',
-                status: record.status || 'pending',
+                status:
+                  record.status === 'payment_pending'
+                    ? 'closed'
+                    : record.status || 'pending',
                 admin_remark: record.admin_remark || '',
               }
             }
@@ -240,24 +250,84 @@ export function Invoices({ admin = false }: InvoicesProps) {
     }
   }
 
+  const cancelInvoicePayment = async (record: InvoiceRecord) => {
+    if (
+      record.status !== 'payment_pending' ||
+      !window.confirm(
+        t(
+          'Cancel this unpaid invoice request only if you have not completed payment.'
+        )
+      )
+    ) {
+      return
+    }
+    setCancelingId(record.id)
+    try {
+      const response = await cancelOrderInvoicePayment(record.source_id)
+      if (response.success) {
+        toast.success(t('Pending payment request canceled'))
+        await Promise.all([loadInvoices(), loadInvoiceOrders()])
+      } else {
+        toast.error(response.message || t('Failed to cancel invoice request'))
+      }
+    } catch {
+      toast.error(t('Failed to cancel invoice request'))
+    } finally {
+      setCancelingId(null)
+    }
+  }
+
   const submitOrderInvoice = async (
     orders: InvoiceEligibleOrder[],
-    invoice: InvoiceRequest
+    invoice: InvoiceRequest,
+    paymentMethod: string,
+    tradeType?: string
   ) => {
     setOrderInvoiceSubmitting(true)
     try {
-      const response = await createOrderInvoice({
+      const request = {
         orders: orders.map((order) => ({
           source_type: order.source_type,
           source_id: order.source_id,
         })),
         invoice: { ...invoice, required: true },
+      }
+      if (paymentMethod === 'balance') {
+        const response = await createOrderInvoice(request)
+        if (!response.success || !response.data) {
+          toast.error(response.message || t('Failed to submit invoice request'))
+          return false
+        }
+        toast.success(t('Invoice request submitted'))
+        await Promise.all([loadInvoices(), loadInvoiceOrders()])
+        return true
+      }
+
+      const response = await createOrderInvoicePayment({
+        ...request,
+        payment_method: paymentMethod,
+        ...(tradeType ? { trade_type: tradeType } : {}),
       })
-      if (!response.success) {
+      if (!response.success || !response.data) {
         toast.error(response.message || t('Failed to submit invoice request'))
         return false
       }
-      toast.success(t('Invoice request submitted'))
+      if (response.data.completed) {
+        toast.success(t('Invoice request submitted'))
+      } else if (
+        !response.data.checkout ||
+        !openInvoicePaymentCheckout(response.data.checkout)
+      ) {
+        toast.error(t('Failed to open payment checkout'))
+        await Promise.all([loadInvoices(), loadInvoiceOrders()])
+        return true
+      } else {
+        toast.success(
+          t(
+            'Pending payment request created. It will automatically move to pending issue after successful payment.'
+          )
+        )
+      }
       await Promise.all([loadInvoices(), loadInvoiceOrders()])
       return true
     } catch {
@@ -287,6 +357,10 @@ export function Invoices({ admin = false }: InvoicesProps) {
               {admin && (
                 <Select
                   items={[
+                    {
+                      value: 'payment_pending',
+                      label: t('Pending payment'),
+                    },
                     { value: 'pending', label: t('Pending issue') },
                     { value: 'issued', label: t('Issued') },
                     { value: 'closed', label: t('Closed') },
@@ -304,6 +378,9 @@ export function Invoices({ admin = false }: InvoicesProps) {
                   </SelectTrigger>
                   <SelectContent alignItemWithTrigger={false}>
                     <SelectGroup>
+                      <SelectItem value='payment_pending'>
+                        {t('Pending payment')}
+                      </SelectItem>
                       <SelectItem value='pending'>
                         {t('Pending issue')}
                       </SelectItem>
@@ -365,7 +442,10 @@ export function Invoices({ admin = false }: InvoicesProps) {
                 const statusConfig = getStatusConfig(record.status, t)
                 const draft = editing[record.id] || {
                   download_url: record.download_url || '',
-                  status: record.status || 'pending',
+                  status:
+                    record.status === 'payment_pending'
+                      ? 'closed'
+                      : record.status || 'pending',
                   admin_remark: record.admin_remark || '',
                 }
 
@@ -597,6 +677,17 @@ export function Invoices({ admin = false }: InvoicesProps) {
                               {t('Save')}
                             </Button>
                           </div>
+                        </div>
+                      ) : record.status === 'payment_pending' ? (
+                        <div className='flex justify-end border-t pt-4'>
+                          <Button
+                            variant='outline'
+                            onClick={() => cancelInvoicePayment(record)}
+                            disabled={cancelingId === record.id}
+                          >
+                            <XCircle className='mr-2 h-4 w-4' />
+                            {t('Cancel pending payment')}
+                          </Button>
                         </div>
                       ) : record.download_url ? (
                         <div className='flex justify-end border-t pt-4'>

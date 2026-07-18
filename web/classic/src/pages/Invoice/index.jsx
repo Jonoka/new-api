@@ -39,10 +39,14 @@ import InvoiceBatchRequestModal from '../../components/invoice/InvoiceBatchReque
 const { Text } = Typography;
 
 const STATUS_OPTIONS = [
+  { label: '待支付', value: 'payment_pending', color: 'orange' },
   { label: '待开票', value: 'pending', color: 'orange' },
   { label: '已开票', value: 'issued', color: 'green' },
   { label: '已关闭', value: 'closed', color: 'grey' },
 ];
+const EDIT_STATUS_OPTIONS = STATUS_OPTIONS.filter(
+  (item) => item.value !== 'payment_pending',
+);
 
 const SOURCE_LABEL = {
   topup: '余额充值',
@@ -112,10 +116,31 @@ const InvoiceCenter = ({ adminOnly = false }) => {
   const openEdit = (record) => {
     setEditing(record);
     setFormValues({
-      status: record.status || 'issued',
+      status:
+        record.status === 'payment_pending'
+          ? 'closed'
+          : record.status || 'issued',
       download_url: record.download_url || '',
       admin_remark: record.admin_remark || '',
     });
+  };
+
+  const cancelInvoicePayment = async (record) => {
+    if (!window.confirm(t('取消待支付开票申请前，请确认你尚未完成支付。'))) {
+      return;
+    }
+    try {
+      const response = await API.post(
+        `/api/user/invoice/payment/${encodeURIComponent(record.source_id)}/cancel`,
+      );
+      if (!response.data?.success) {
+        throw new Error(response.data?.message || t('取消开票申请失败'));
+      }
+      Toast.success({ content: t('待支付申请已取消') });
+      await loadInvoices();
+    } catch (error) {
+      Toast.error({ content: error.message || t('取消开票申请失败') });
+    }
   };
 
   const saveInvoice = async () => {
@@ -147,16 +172,35 @@ const InvoiceCenter = ({ adminOnly = false }) => {
   };
 
   const columns = [
-    ...(adminView
+    ...(!adminView
       ? [
           {
-            title: t('用户ID'),
-            dataIndex: 'user_id',
-            key: 'user_id',
-            width: 90,
+            title: t('操作'),
+            key: 'action',
+            render: (_, record) =>
+              record.status === 'payment_pending' ? (
+                <Button
+                  size='small'
+                  theme='outline'
+                  onClick={() => cancelInvoicePayment(record)}
+                >
+                  {t('取消待支付')}
+                </Button>
+              ) : (
+                '-'
+              ),
           },
         ]
-      : []),
+      : adminView
+        ? [
+            {
+              title: t('用户ID'),
+              dataIndex: 'user_id',
+              key: 'user_id',
+              width: 90,
+            },
+          ]
+        : []),
     {
       title: t('来源'),
       dataIndex: 'source_type',
@@ -339,7 +383,10 @@ const InvoiceCenter = ({ adminOnly = false }) => {
             label={t('状态')}
             style={{ width: '100%' }}
           >
-            {STATUS_OPTIONS.map((item) => (
+            {(editing?.status === 'payment_pending'
+              ? EDIT_STATUS_OPTIONS.filter((item) => item.value === 'closed')
+              : EDIT_STATUS_OPTIONS
+            ).map((item) => (
               <Form.Select.Option key={item.value} value={item.value}>
                 {t(item.label)}
               </Form.Select.Option>

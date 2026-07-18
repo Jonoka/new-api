@@ -10,7 +10,11 @@ import (
 )
 
 func GetInvoiceConfig(c *gin.Context) {
-	common.ApiSuccess(c, model.InvoiceConfigSnapshot())
+	config := model.InvoiceConfigSnapshot()
+	payMethods, bepusdtChains := availableInvoicePayMethods()
+	config["pay_methods"] = payMethods
+	config["bepusdt_chains"] = bepusdtChains
+	common.ApiSuccess(c, config)
 }
 
 func GetUserInvoices(c *gin.Context) {

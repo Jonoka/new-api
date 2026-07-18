@@ -673,6 +673,14 @@ func SubscriptionRequestBepusdtPay(c *gin.Context) {
 
 // createBepusdtTransaction 调用 bepusdt API 创建交易订单
 func createBepusdtTransaction(c *gin.Context, orderId string, amountCNY float64, tradeType string, notifyUrl string, redirectUrl string, names ...string) (string, error) {
+	result, err := createBepusdtTransactionDetails(c, orderId, amountCNY, tradeType, notifyUrl, redirectUrl, names...)
+	if err != nil {
+		return "", err
+	}
+	return result.Data.PaymentUrl, nil
+}
+
+func createBepusdtTransactionDetails(c *gin.Context, orderId string, amountCNY float64, tradeType string, notifyUrl string, redirectUrl string, names ...string) (*bepusdtCreateTransactionResp, error) {
 	apiUrl := strings.TrimRight(setting.BepusdtApiUrl, "/") + "/api/v1/order/create-transaction"
 	name := fmt.Sprintf("TopUp-%s", orderId)
 	if len(names) > 0 && strings.TrimSpace(names[0]) != "" {
@@ -709,48 +717,48 @@ func createBepusdtTransaction(c *gin.Context, orderId string, amountCNY float64,
 
 	jsonData, err := common.Marshal(jsonBody)
 	if err != nil {
-		return "", fmt.Errorf("序列化请求失败: %v", err)
+		return nil, fmt.Errorf("序列化请求失败: %v", err)
 	}
 
 	req, err := http.NewRequest("POST", apiUrl, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return "", fmt.Errorf("创建请求失败: %v", err)
+		return nil, fmt.Errorf("创建请求失败: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("请求 bepusdt 失败: %v", err)
+		return nil, fmt.Errorf("请求 bepusdt 失败: %v", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("读取响应失败: %v", err)
+		return nil, fmt.Errorf("读取响应失败: %v", err)
 	}
 
 	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Bepusdt API 响应 order_id=%s status_code=%d body=%q", orderId, resp.StatusCode, string(body)))
 
 	if resp.StatusCode/100 != 2 {
-		return "", fmt.Errorf("bepusdt API HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("bepusdt API HTTP %d", resp.StatusCode)
 	}
 
 	var result bepusdtCreateTransactionResp
 	err = common.Unmarshal(body, &result)
 	if err != nil {
-		return "", fmt.Errorf("解析响应失败: %v", err)
+		return nil, fmt.Errorf("解析响应失败: %v", err)
 	}
 
 	if result.StatusCode != 200 {
-		return "", fmt.Errorf("bepusdt API 错误: %s", result.Message)
+		return nil, fmt.Errorf("bepusdt API 错误: %s", result.Message)
 	}
 
 	if result.Data.PaymentUrl == "" {
-		return "", fmt.Errorf("bepusdt 未返回 payment_url")
+		return nil, fmt.Errorf("bepusdt 未返回 payment_url")
 	}
 
-	return result.Data.PaymentUrl, nil
+	return &result, nil
 }
 
 // BepusdtNotify 处理 bepusdt 回调通知

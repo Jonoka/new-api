@@ -52,7 +52,7 @@ func ApplyInvoiceOrders(c *gin.Context) {
 	}
 	// 该接口本身就是发票申请动作，不要求客户端重复传 required=true。
 	req.Invoice.Required = true
-	record, err := model.CreateCombinedInvoiceWithBalance(c.GetInt("id"), req.Orders, req.Invoice)
+	record, err := model.CreateCombinedInvoiceWithBalance(c.GetInt("id"), req.Orders, req.Invoice, c.ClientIP())
 	if err != nil {
 		common.ApiError(c, err)
 		return

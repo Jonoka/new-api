@@ -19,9 +19,21 @@ For commercial licensing, please contact support@quantumnous.com
 
 export type InvoiceType = 'personal' | 'company'
 export type InvoiceKind = 'normal' | 'special'
-export type InvoiceStatus = 'pending' | 'issued' | 'closed'
+export type InvoiceStatus = 'payment_pending' | 'pending' | 'issued' | 'closed'
 export type InvoiceSourceType = 'topup' | 'subscription' | 'batch'
 export type InvoiceFeeRuleType = 'fixed' | 'percent'
+
+export interface InvoicePaymentMethod {
+  name: string
+  type: string
+  provider: string
+  color: string
+}
+
+export interface InvoiceBepusdtChain {
+  name: string
+  trade_type: string
+}
 
 export interface InvoiceFeeRule {
   min: number
@@ -37,6 +49,8 @@ export interface InvoiceConfig {
   kinds: InvoiceKind[]
   fee_rules?: InvoiceFeeRule[]
   currency: 'CNY' | string
+  pay_methods: InvoicePaymentMethod[]
+  bepusdt_chains: InvoiceBepusdtChain[]
 }
 
 export interface InvoiceRequest {
@@ -66,6 +80,20 @@ export interface InvoiceRecord {
   base_amount: number
   fee_amount: number
   total_amount: number
+  payment_provider?: string
+  payment_status?:
+    | 'pending'
+    | 'success'
+    | 'failed'
+    | 'expired'
+    | 'canceled'
+    | ''
+  provider_order_id?: string
+  provider_amount?: string
+  provider_currency?: string
+  payment_amount_minor?: number
+  request_ip?: string
+  paid_time?: number
   status: InvoiceStatus
   download_url: string
   admin_remark: string
@@ -102,6 +130,25 @@ export interface InvoiceOrderReference {
 export interface CreateOrderInvoiceRequest {
   orders: InvoiceOrderReference[]
   invoice: InvoiceRequest
+}
+
+export interface CreateOrderInvoicePaymentRequest extends CreateOrderInvoiceRequest {
+  payment_method: string
+  trade_type?: string
+}
+
+export interface InvoicePaymentCheckout {
+  type: 'form' | 'redirect'
+  url: string
+  params?: Record<string, unknown>
+}
+
+export interface InvoiceSubmissionResult {
+  completed: boolean
+  trade_no: string
+  invoice: InvoiceRecord
+  checkout?: InvoicePaymentCheckout
+  amount_text?: string
 }
 
 export interface InvoiceOrderSelectionRequest {
@@ -141,6 +188,54 @@ export const DEFAULT_INVOICE_CONFIG: InvoiceConfig = {
   kinds: ['normal'],
   fee_rules: [],
   currency: 'CNY',
+  pay_methods: [],
+  bepusdt_chains: [],
+}
+
+function normalizeInvoicePaymentMethods(
+  value: unknown
+): InvoicePaymentMethod[] {
+  if (!Array.isArray(value)) return []
+
+  const seenTypes = new Set<string>()
+  const methods: InvoicePaymentMethod[] = []
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const method = item as Record<string, unknown>
+    const name = typeof method.name === 'string' ? method.name.trim() : ''
+    const type = typeof method.type === 'string' ? method.type.trim() : ''
+    const provider =
+      typeof method.provider === 'string' ? method.provider.trim() : ''
+    if (!name || !type || !provider || seenTypes.has(type)) continue
+
+    seenTypes.add(type)
+    methods.push({
+      name,
+      type,
+      provider,
+      color: typeof method.color === 'string' ? method.color.trim() : '',
+    })
+  }
+  return methods
+}
+
+function normalizeInvoiceBepusdtChains(value: unknown): InvoiceBepusdtChain[] {
+  if (!Array.isArray(value)) return []
+
+  const seenTradeTypes = new Set<string>()
+  const chains: InvoiceBepusdtChain[] = []
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const chain = item as Record<string, unknown>
+    const name = typeof chain.name === 'string' ? chain.name.trim() : ''
+    const tradeType =
+      typeof chain.trade_type === 'string' ? chain.trade_type.trim() : ''
+    if (!name || !tradeType || seenTradeTypes.has(tradeType)) continue
+
+    seenTradeTypes.add(tradeType)
+    chains.push({ name, trade_type: tradeType })
+  }
+  return chains
 }
 
 export function normalizeInvoiceConfig(
@@ -164,6 +259,8 @@ export function normalizeInvoiceConfig(
     kinds: kinds.length > 0 ? kinds : DEFAULT_INVOICE_CONFIG.kinds,
     fee_rules: Array.isArray(config.fee_rules) ? config.fee_rules : [],
     currency: config.currency || 'CNY',
+    pay_methods: normalizeInvoicePaymentMethods(config.pay_methods),
+    bepusdt_chains: normalizeInvoiceBepusdtChains(config.bepusdt_chains),
   }
 }
 

@@ -20,6 +20,7 @@ import { api } from '@/lib/api'
 import type {
   AdminUpdateInvoiceRequest,
   CreateOrderInvoiceRequest,
+  CreateOrderInvoicePaymentRequest,
   InvoiceApiResponse,
   InvoiceConfig,
   InvoiceEligibleOrderList,
@@ -27,6 +28,7 @@ import type {
   InvoiceOrderSelectionRequest,
   InvoicePageData,
   InvoiceRecord,
+  InvoiceSubmissionResult,
 } from './types'
 
 export async function getInvoiceConfig(): Promise<
@@ -66,6 +68,22 @@ export async function createOrderInvoice(
   request: CreateOrderInvoiceRequest
 ): Promise<InvoiceApiResponse<InvoiceRecord>> {
   const res = await api.post('/api/user/invoice/request', request)
+  return res.data
+}
+
+export async function createOrderInvoicePayment(
+  request: CreateOrderInvoicePaymentRequest
+): Promise<InvoiceApiResponse<InvoiceSubmissionResult>> {
+  const res = await api.post('/api/user/invoice/payment', request)
+  return res.data
+}
+
+export async function cancelOrderInvoicePayment(
+  tradeNo: string
+): Promise<InvoiceApiResponse<InvoiceRecord>> {
+  const res = await api.post(
+    `/api/user/invoice/payment/${encodeURIComponent(tradeNo)}/cancel`
+  )
   return res.data
 }
 
