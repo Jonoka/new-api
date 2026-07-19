@@ -169,6 +169,32 @@ export const applyAutoGroupCodes = (groups, codes) => {
   }));
 };
 
+export const reorderAutoGroupItems = (
+  items,
+  sourceId,
+  targetId,
+  position = 'before',
+) => {
+  const currentItems = Array.isArray(items) ? items : [];
+  if (!sourceId || !targetId || sourceId === targetId) return currentItems;
+
+  const sourceIndex = currentItems.findIndex((item) => item?._id === sourceId);
+  const targetIndex = currentItems.findIndex((item) => item?._id === targetId);
+  if (sourceIndex < 0 || targetIndex < 0) return currentItems;
+
+  const reorderedItems = [...currentItems];
+  const [movedItem] = reorderedItems.splice(sourceIndex, 1);
+  const remainingTargetIndex = reorderedItems.findIndex(
+    (item) => item?._id === targetId,
+  );
+  const insertIndex = remainingTargetIndex + (position === 'after' ? 1 : 0);
+  reorderedItems.splice(insertIndex, 0, movedItem);
+
+  return reorderedItems.every((item, index) => item === currentItems[index])
+    ? currentItems
+    : reorderedItems;
+};
+
 export const parseAutoGroupCodes = (value) => {
   if (!value || !String(value).trim()) return [];
   try {

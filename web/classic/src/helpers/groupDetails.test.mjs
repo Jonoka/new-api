@@ -11,6 +11,7 @@ import {
   formatGroupLabel,
   getGroupDisplayName,
   getDeletedGroupIds,
+  reorderAutoGroupItems,
   resolveGroupCodes,
 } from './groupDetails.js';
 
@@ -186,4 +187,32 @@ test('禁用状态以数字原样提交，兼容后端整数字段', () => {
   );
 
   assert.equal(payload.groups[0].status, 0);
+});
+
+test('自动分组拖拽按落点前后精确重排', () => {
+  const items = [
+    { _id: 'a', code: 'group-a' },
+    { _id: 'b', code: 'group-b' },
+    { _id: 'c', code: 'group-c' },
+  ];
+
+  assert.deepEqual(
+    reorderAutoGroupItems(items, 'a', 'c', 'after').map((item) => item._id),
+    ['b', 'c', 'a'],
+  );
+  assert.deepEqual(
+    reorderAutoGroupItems(items, 'c', 'a', 'before').map((item) => item._id),
+    ['c', 'a', 'b'],
+  );
+});
+
+test('自动分组无效或原位拖拽保持原引用和顺序', () => {
+  const items = [
+    { _id: 'a', code: 'group-a' },
+    { _id: 'b', code: 'group-b' },
+  ];
+
+  assert.equal(reorderAutoGroupItems(items, 'a', 'a'), items);
+  assert.equal(reorderAutoGroupItems(items, 'missing', 'b'), items);
+  assert.equal(reorderAutoGroupItems(items, 'a', 'b', 'before'), items);
 });

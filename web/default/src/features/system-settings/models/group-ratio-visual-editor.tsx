@@ -23,8 +23,10 @@ import {
   Plus,
   Trash2,
   GripVertical,
+  ChevronUp,
   ChevronDown,
 } from 'lucide-react'
+import { Reorder, useDragControls } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import {
@@ -69,6 +71,7 @@ import {
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import type { GroupDetailInput } from '../types'
 import { safeJsonParse } from '../utils/json-parser'
+import { applyAutoGroupOrder } from './auto-group-order'
 import {
   createUniqueGroupCode,
   getGroupIdDisplayValue,
@@ -118,20 +121,79 @@ function normalizeRatio(value: unknown): number {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1
 }
 
-function applyAutoGroupOrder(
-  groups: EditableGroupDetail[],
-  orderedKeys: string[]
-): EditableGroupDetail[] {
-  const orderByKey = new Map(orderedKeys.map((key, index) => [key, index]))
+function AutoGroupReorderItem({
+  group,
+  index,
+  itemCount,
+  onMove,
+  onDelete,
+}: {
+  group: EditableGroupDetail
+  index: number
+  itemCount: number
+  onMove: (index: number, direction: 'up' | 'down') => void
+  onDelete: (index: number) => void
+}) {
+  const { t } = useTranslation()
+  const dragControls = useDragControls()
 
-  return groups.map((group) => {
-    const order = orderByKey.get(group._key)
-    return {
-      ...group,
-      auto_enabled: order !== undefined,
-      auto_order: order ?? 0,
-    }
-  })
+  return (
+    <Reorder.Item
+      as='div'
+      value={group._key}
+      dragListener={false}
+      dragControls={dragControls}
+      className='bg-background relative flex items-center gap-2 rounded-md border p-3'
+      whileDrag={{
+        boxShadow: '0 4px 16px rgba(0, 0, 0, 0.12)',
+        zIndex: 50,
+      }}
+    >
+      <span
+        aria-hidden='true'
+        className='text-muted-foreground hover:text-foreground shrink-0 cursor-grab touch-none active:cursor-grabbing'
+        title={t('Sort')}
+        onPointerDown={(event) => dragControls.start(event)}
+      >
+        <GripVertical className='h-4 w-4' />
+      </span>
+      <span className='min-w-0 flex-1 truncate font-medium'>{group.name}</span>
+      <div className='flex shrink-0 gap-1'>
+        <Button
+          type='button'
+          variant='ghost'
+          size='icon-sm'
+          disabled={index === 0}
+          aria-label={`${t('Sort')} ↑`}
+          title={`${t('Sort')} ↑`}
+          onClick={() => onMove(index, 'up')}
+        >
+          <ChevronUp className='h-4 w-4' />
+        </Button>
+        <Button
+          type='button'
+          variant='ghost'
+          size='icon-sm'
+          disabled={index === itemCount - 1}
+          aria-label={`${t('Sort')} ↓`}
+          title={`${t('Sort')} ↓`}
+          onClick={() => onMove(index, 'down')}
+        >
+          <ChevronDown className='h-4 w-4' />
+        </Button>
+        <Button
+          type='button'
+          variant='ghost'
+          size='icon-sm'
+          aria-label={t('Delete')}
+          title={t('Delete')}
+          onClick={() => onDelete(index)}
+        >
+          <Trash2 className='h-4 w-4' />
+        </Button>
+      </div>
+    </Reorder.Item>
+  )
 }
 
 export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
@@ -291,6 +353,10 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
       orderedKeys[newIndex],
       orderedKeys[index],
     ]
+    onGroupsChange(applyAutoGroupOrder(groups, orderedKeys))
+  }
+
+  const handleAutoGroupReorder = (orderedKeys: string[]) => {
     onGroupsChange(applyAutoGroupOrder(groups, orderedKeys))
   }
 
@@ -609,42 +675,25 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
               {t('Add group')}
             </Button>
             {autoGroupsList.length > 0 && (
-              <div className='space-y-2'>
+              <Reorder.Group
+                as='div'
+                axis='y'
+                values={autoGroupsList.map((group) => group._key)}
+                onReorder={handleAutoGroupReorder}
+                className='flex flex-col gap-2'
+                layoutScroll
+              >
                 {autoGroupsList.map((group, index) => (
-                  <div
+                  <AutoGroupReorderItem
                     key={group._key}
-                    className='flex items-center gap-2 rounded-md border p-3'
-                  >
-                    <GripVertical className='text-muted-foreground h-4 w-4' />
-                    <span className='flex-1 font-medium'>{group.name}</span>
-                    <div className='flex gap-1'>
-                      <Button
-                        variant='ghost'
-                        size='sm'
-                        disabled={index === 0}
-                        onClick={() => handleAutoGroupMove(index, 'up')}
-                      >
-                        ↑
-                      </Button>
-                      <Button
-                        variant='ghost'
-                        size='sm'
-                        disabled={index === autoGroupsList.length - 1}
-                        onClick={() => handleAutoGroupMove(index, 'down')}
-                      >
-                        ↓
-                      </Button>
-                      <Button
-                        variant='ghost'
-                        size='sm'
-                        onClick={() => handleAutoGroupDelete(index)}
-                      >
-                        <Trash2 className='h-4 w-4' />
-                      </Button>
-                    </div>
-                  </div>
+                    group={group}
+                    index={index}
+                    itemCount={autoGroupsList.length}
+                    onMove={handleAutoGroupMove}
+                    onDelete={handleAutoGroupDelete}
+                  />
                 ))}
-              </div>
+              </Reorder.Group>
             )}
           </div>
         </CardContent>
