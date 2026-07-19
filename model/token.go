@@ -284,7 +284,9 @@ func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
 		token, err := cacheGetTokenByKey(key)
 		if err == nil {
 			if len(token.GroupIds) == 0 {
-				_ = HydrateTokenGroupBindings(DB, []*Token{token})
+				if err = HydrateTokenGroupBindings(DB, []*Token{token}); err != nil {
+					return nil, err
+				}
 			}
 			return token, nil
 		}

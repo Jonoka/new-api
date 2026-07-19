@@ -394,19 +394,21 @@ func UpdateToken(c *gin.Context) {
 	if rawFields["group_mode"] == nil {
 		groupModeProvided = false
 	}
-	if len(token.Name) > 50 {
-		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
-		return
-	}
-	if !token.UnlimitedQuota {
-		if token.RemainQuota < 0 {
-			common.ApiErrorI18n(c, i18n.MsgTokenQuotaNegative)
+	if statusOnly == "" {
+		if len(token.Name) > 50 {
+			common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
 			return
 		}
-		maxQuotaValue := int((1000000000 * common.QuotaPerUnit))
-		if token.RemainQuota > maxQuotaValue {
-			common.ApiErrorI18n(c, i18n.MsgTokenQuotaExceedMax, map[string]any{"Max": maxQuotaValue})
-			return
+		if !token.UnlimitedQuota {
+			if token.RemainQuota < 0 {
+				common.ApiErrorI18n(c, i18n.MsgTokenQuotaNegative)
+				return
+			}
+			maxQuotaValue := int((1000000000 * common.QuotaPerUnit))
+			if token.RemainQuota > maxQuotaValue {
+				common.ApiErrorI18n(c, i18n.MsgTokenQuotaExceedMax, map[string]any{"Max": maxQuotaValue})
+				return
+			}
 		}
 	}
 	cleanToken, err := model.GetTokenByIds(token.Id, userId)
@@ -426,6 +428,7 @@ func UpdateToken(c *gin.Context) {
 	}
 	if statusOnly != "" {
 		cleanToken.Status = token.Status
+		err = cleanToken.SelectUpdate()
 	} else {
 		groupSelectionProvided := groupProvided || groupIdsProvided || groupModeProvided
 		selection := model.Token{
@@ -481,8 +484,8 @@ func UpdateToken(c *gin.Context) {
 			cleanToken.GroupRatioLimits = ""
 		}
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
+		err = cleanToken.Update()
 	}
-	err = cleanToken.Update()
 	if err != nil {
 		common.ApiError(c, err)
 		return

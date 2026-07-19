@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type GroupReference struct {
@@ -64,13 +66,48 @@ func splitLegacyGroupCodes(value string) []string {
 	return result
 }
 
+type invalidLegacyGroupCodeError struct {
+	code  string
+	cause error
+}
+
+func (err *invalidLegacyGroupCodeError) Error() string {
+	return fmt.Sprintf("历史分组标识 %q 无效: %v", legacyGroupCodePreview(err.code), err.cause)
+}
+
+func (err *invalidLegacyGroupCodeError) Unwrap() error {
+	return err.cause
+}
+
+func legacyGroupCodePreview(code string) string {
+	const maxRunes = 64
+	runes := []rune(strings.TrimSpace(code))
+	if len(runes) <= maxRunes {
+		return string(runes)
+	}
+	return string(runes[:maxRunes]) + "..."
+}
+
+func isInvalidLegacyGroupCodeError(err error) bool {
+	var target *invalidLegacyGroupCodeError
+	return errors.As(err, &target)
+}
+
 func groupBindingTablesReady(tx *gorm.DB, table interface{}) bool {
 	return tx != nil && tx.Migrator().HasTable(&Group{}) && tx.Migrator().HasTable(table)
+}
+
+func groupBindingGroupColumn() string {
+	if common.UsingPostgreSQL {
+		return `"group"`
+	}
+	return "`group`"
 }
 
 type groupBindingResolvePolicy struct {
 	allowedDisabledIDs map[int]struct{}
 	allowAllDisabled   bool
+	tablesVerified     bool
 }
 
 func (policy groupBindingResolvePolicy) allows(group *Group) bool {
@@ -99,8 +136,29 @@ func getGroupsByIDsWithDB(tx *gorm.DB, ids []int) (map[int]*Group, error) {
 	return result, nil
 }
 
+func getGroupByCodeOrAliasStrict(tx *gorm.DB, code string) (*Group, error) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+	var group Group
+	if err := tx.Where("code = ?", code).First(&group).Error; err == nil {
+		return &group, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	var alias GroupAlias
+	if err := tx.Where("alias = ?", code).First(&alias).Error; err != nil {
+		return nil, err
+	}
+	if err := tx.First(&group, "id = ?", alias.GroupId).Error; err != nil {
+		return nil, err
+	}
+	return &group, nil
+}
+
 func resolveBindingGroupsWithPolicy(tx *gorm.DB, ids []int, legacy string, policy groupBindingResolvePolicy) ([]int, []string, []GroupReference, error) {
-	if tx == nil || !tx.Migrator().HasTable(&Group{}) {
+	if tx == nil || (!policy.tablesVerified && !tx.Migrator().HasTable(&Group{})) {
 		return nil, splitLegacyGroupCodes(legacy), nil, nil
 	}
 	orderedIDs := make([]int, 0)
@@ -132,10 +190,29 @@ func resolveBindingGroupsWithPolicy(tx *gorm.DB, ids []int, legacy string, polic
 		return orderedIDs, orderedCodes, references, nil
 	}
 
-	for _, code := range splitLegacyGroupCodes(legacy) {
-		group, err := GetGroupByCodeOrAliasWithDB(tx, code)
+	legacyCodes := splitLegacyGroupCodes(legacy)
+	if len(legacyCodes) == 0 && strings.TrimSpace(legacy) != "" {
+		return nil, nil, nil, &invalidLegacyGroupCodeError{code: legacy, cause: errors.New("分组标识不能为空")}
+	}
+	for _, code := range legacyCodes {
+		if _, err := NormalizeGroupCode(code); err != nil {
+			return nil, nil, nil, &invalidLegacyGroupCodeError{code: code, cause: err}
+		}
+		var group *Group
+		var err error
+		if policy.tablesVerified {
+			group, err = getGroupByCodeOrAliasStrict(tx, code)
+		} else {
+			group, err = GetGroupByCodeOrAliasWithDB(tx, code)
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, nil, &invalidLegacyGroupCodeError{
+				code:  code,
+				cause: fmt.Errorf("对应分组不存在: %w", err),
+			}
+		}
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("分组 %q 不存在", code)
+			return nil, nil, nil, fmt.Errorf("查询分组 %q 失败: %w", legacyGroupCodePreview(code), err)
 		}
 		if !policy.allows(group) {
 			return nil, nil, nil, fmt.Errorf("分组 %q 已禁用", code)
@@ -204,7 +281,7 @@ func existingChannelGroupIDs(tx *gorm.DB, channelID int) (map[int]struct{}, erro
 		return result, nil
 	}
 	var channel Channel
-	if err := tx.Select("id", commonGroupCol).First(&channel, "id = ?", channelID).Error; err != nil {
+	if err := tx.Select("id", groupBindingGroupColumn()).First(&channel, "id = ?", channelID).Error; err != nil {
 		return nil, err
 	}
 	addLegacyGroupIDs(tx, result, channel.Group)
@@ -224,7 +301,7 @@ func existingTokenGroupIDs(tx *gorm.DB, tokenID int) (map[int]struct{}, error) {
 		return result, nil
 	}
 	var token Token
-	if err := tx.Select("id", commonGroupCol).First(&token, "id = ?", tokenID).Error; err != nil {
+	if err := tx.Select("id", groupBindingGroupColumn()).First(&token, "id = ?", tokenID).Error; err != nil {
 		return nil, err
 	}
 	addLegacyGroupIDs(tx, result, token.Group)
@@ -265,21 +342,50 @@ func PrepareChannelGroupBindingsForUpdate(tx *gorm.DB, channel *Channel) error {
 	return prepareChannelGroupBindings(tx, channel, groupBindingResolvePolicy{allowedDisabledIDs: allowedDisabledIDs})
 }
 
-func writeChannelGroupBindings(tx *gorm.DB, channel *Channel) error {
-	if channel == nil || channel.Id <= 0 || !groupBindingTablesReady(tx, &ChannelGroupBinding{}) {
+func buildChannelGroupBindings(channel *Channel) []ChannelGroupBinding {
+	bindings := make([]ChannelGroupBinding, 0, len(channel.GroupIds))
+	for position, groupID := range channel.GroupIds {
+		bindings = append(bindings, ChannelGroupBinding{ChannelId: channel.Id, GroupId: groupID, Position: position})
+	}
+	return bindings
+}
+
+func replaceChannelGroupBindings(tx *gorm.DB, channel *Channel) error {
+	if tx == nil {
+		return errors.New("database is nil")
+	}
+	if channel == nil || channel.Id <= 0 {
 		return nil
 	}
 	if err := tx.Where("channel_id = ?", channel.Id).Delete(&ChannelGroupBinding{}).Error; err != nil {
 		return err
 	}
-	bindings := make([]ChannelGroupBinding, 0, len(channel.GroupIds))
-	for position, groupID := range channel.GroupIds {
-		bindings = append(bindings, ChannelGroupBinding{ChannelId: channel.Id, GroupId: groupID, Position: position})
-	}
+	bindings := buildChannelGroupBindings(channel)
 	if len(bindings) == 0 {
 		return nil
 	}
 	return tx.Create(&bindings).Error
+}
+
+func insertChannelGroupBindingsForBackfill(tx *gorm.DB, channel *Channel) error {
+	if tx == nil {
+		return errors.New("database is nil")
+	}
+	if channel == nil || channel.Id <= 0 {
+		return nil
+	}
+	bindings := buildChannelGroupBindings(channel)
+	if len(bindings) == 0 {
+		return nil
+	}
+	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&bindings).Error
+}
+
+func writeChannelGroupBindings(tx *gorm.DB, channel *Channel) error {
+	if channel == nil || channel.Id <= 0 || !groupBindingTablesReady(tx, &ChannelGroupBinding{}) {
+		return nil
+	}
+	return replaceChannelGroupBindings(tx, channel)
 }
 
 func ReplaceChannelGroupBindings(tx *gorm.DB, channel *Channel) error {
@@ -360,12 +466,16 @@ func HydrateChannelGroupBindings(tx *gorm.DB, channels []*Channel) error {
 			tx,
 			nil,
 			channel.Group,
-			groupBindingResolvePolicy{allowAllDisabled: true},
+			groupBindingResolvePolicy{allowAllDisabled: true, tablesVerified: true},
 		)
-		if resolveErr == nil {
-			channel.GroupIds = ids
-			channel.GroupDetails = details
+		if resolveErr != nil {
+			if isInvalidLegacyGroupCodeError(resolveErr) {
+				continue
+			}
+			return fmt.Errorf("加载渠道 %d 分组关联失败: %w", channel.Id, resolveErr)
 		}
+		channel.GroupIds = ids
+		channel.GroupDetails = details
 	}
 	return nil
 }
@@ -434,8 +544,8 @@ func prepareTokenGroupBindings(tx *gorm.DB, token *Token, policy groupBindingRes
 		if err != nil {
 			return err
 		}
-		if len(ids) == 0 && tx != nil && tx.Migrator().HasTable(&Group{}) {
-			return errors.New("显式令牌分组不能为空")
+		if len(ids) == 0 && tx != nil && (policy.tablesVerified || tx.Migrator().HasTable(&Group{})) {
+			return &invalidLegacyGroupCodeError{code: token.Group, cause: errors.New("显式令牌分组不能为空")}
 		}
 		token.GroupIds = ids
 		token.GroupDetails = details
@@ -461,16 +571,7 @@ func PrepareTokenGroupBindingsForUpdate(tx *gorm.DB, token *Token) error {
 	return prepareTokenGroupBindings(tx, token, groupBindingResolvePolicy{allowedDisabledIDs: allowedDisabledIDs})
 }
 
-func writeTokenGroupBindings(tx *gorm.DB, token *Token) error {
-	if token == nil || token.Id <= 0 || !groupBindingTablesReady(tx, &TokenGroupBinding{}) {
-		return nil
-	}
-	if err := tx.Where("token_id = ?", token.Id).Delete(&TokenGroupBinding{}).Error; err != nil {
-		return err
-	}
-	if token.GroupMode != TokenGroupModeExplicit {
-		return nil
-	}
+func buildTokenGroupBindings(token *Token) []TokenGroupBinding {
 	limits := token.GetGroupRatioLimitsMap()
 	bindings := make([]TokenGroupBinding, 0, len(token.GroupIds))
 	for position, groupID := range token.GroupIds {
@@ -483,10 +584,48 @@ func writeTokenGroupBindings(tx *gorm.DB, token *Token) error {
 		}
 		bindings = append(bindings, binding)
 	}
+	return bindings
+}
+
+func replaceTokenGroupBindings(tx *gorm.DB, token *Token) error {
+	if tx == nil {
+		return errors.New("database is nil")
+	}
+	if token == nil || token.Id <= 0 {
+		return nil
+	}
+	if err := tx.Where("token_id = ?", token.Id).Delete(&TokenGroupBinding{}).Error; err != nil {
+		return err
+	}
+	if token.GroupMode != TokenGroupModeExplicit {
+		return nil
+	}
+	bindings := buildTokenGroupBindings(token)
 	if len(bindings) == 0 {
 		return nil
 	}
 	return tx.Create(&bindings).Error
+}
+
+func insertTokenGroupBindingsForBackfill(tx *gorm.DB, token *Token) error {
+	if tx == nil {
+		return errors.New("database is nil")
+	}
+	if token == nil || token.Id <= 0 || token.GroupMode != TokenGroupModeExplicit {
+		return nil
+	}
+	bindings := buildTokenGroupBindings(token)
+	if len(bindings) == 0 {
+		return nil
+	}
+	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&bindings).Error
+}
+
+func writeTokenGroupBindings(tx *gorm.DB, token *Token) error {
+	if token == nil || token.Id <= 0 || !groupBindingTablesReady(tx, &TokenGroupBinding{}) {
+		return nil
+	}
+	return replaceTokenGroupBindings(tx, token)
 }
 
 func ReplaceTokenGroupBindings(tx *gorm.DB, token *Token) error {
@@ -557,10 +696,13 @@ func HydrateTokenGroupBindings(tx *gorm.DB, tokens []*Token) error {
 				tx,
 				nil,
 				token.Group,
-				groupBindingResolvePolicy{allowAllDisabled: true},
+				groupBindingResolvePolicy{allowAllDisabled: true, tablesVerified: true},
 			)
 			if resolveErr != nil {
-				continue
+				if isInvalidLegacyGroupCodeError(resolveErr) {
+					continue
+				}
+				return fmt.Errorf("加载令牌 %d 分组关联失败: %w", token.Id, resolveErr)
 			}
 			token.GroupIds = ids
 			token.GroupDetails = details
@@ -575,41 +717,77 @@ func HydrateTokenGroupBindings(tx *gorm.DB, tokens []*Token) error {
 
 // BackfillGroupBindings 在只增不删的迁移阶段建立关联表和令牌模式。
 func BackfillGroupBindings() error {
-	if DB == nil || !groupBindingTablesReady(DB, &ChannelGroupBinding{}) || !groupBindingTablesReady(DB, &TokenGroupBinding{}) {
-		return nil
+	if DB == nil {
+		return errors.New("database is nil")
 	}
-	return DB.Transaction(func(tx *gorm.DB) error {
+	type skippedBinding struct {
+		entity string
+		id     int
+		reason string
+	}
+	const maxSkippedBindingSamples = 10
+	skippedCount := 0
+	skipped := make([]skippedBinding, 0, maxSkippedBindingSamples)
+	recordSkipped := func(entity string, id int, err error) {
+		skippedCount++
+		if len(skipped) < maxSkippedBindingSamples {
+			skipped = append(skipped, skippedBinding{entity: entity, id: id, reason: err.Error()})
+		}
+	}
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var groupProbe []Group
+		if err := tx.Select("id", "code", "status").Limit(1).Find(&groupProbe).Error; err != nil {
+			return fmt.Errorf("检查分组表失败: %w", err)
+		}
+		var aliasProbe []GroupAlias
+		if err := tx.Select("id", "alias", "group_id").Limit(1).Find(&aliasProbe).Error; err != nil {
+			return fmt.Errorf("检查分组别名表失败: %w", err)
+		}
+
+		var channelBindings []ChannelGroupBinding
+		if err := tx.Select("channel_id", "group_id", "position").Find(&channelBindings).Error; err != nil {
+			return fmt.Errorf("加载现有渠道分组关联失败: %w", err)
+		}
+		channelsWithBindings := make(map[int]struct{}, len(channelBindings))
+		for _, binding := range channelBindings {
+			channelsWithBindings[binding.ChannelId] = struct{}{}
+		}
+
+		var tokenBindings []TokenGroupBinding
+		if err := tx.Select("token_id", "group_id", "position", "ratio_limit").Find(&tokenBindings).Error; err != nil {
+			return fmt.Errorf("加载现有令牌分组关联失败: %w", err)
+		}
+		tokensWithBindings := make(map[int]struct{}, len(tokenBindings))
+		for _, binding := range tokenBindings {
+			tokensWithBindings[binding.TokenId] = struct{}{}
+		}
+
 		var channels []*Channel
-		if err := tx.Find(&channels).Error; err != nil {
-			return err
+		if err := tx.Select("id", groupBindingGroupColumn()).Find(&channels).Error; err != nil {
+			return fmt.Errorf("加载待回填渠道失败: %w", err)
 		}
 		for _, channel := range channels {
-			existingIDs, err := loadChannelBindingIDs(tx, channel.Id)
-			if err != nil {
-				return err
-			}
-			if len(existingIDs) > 0 {
+			if _, ok := channelsWithBindings[channel.Id]; ok {
 				continue
 			}
-			if err := prepareChannelGroupBindings(tx, channel, groupBindingResolvePolicy{allowAllDisabled: true}); err != nil {
+			if err := prepareChannelGroupBindings(tx, channel, groupBindingResolvePolicy{allowAllDisabled: true, tablesVerified: true}); err != nil {
+				if isInvalidLegacyGroupCodeError(err) {
+					recordSkipped("渠道", channel.Id, err)
+					continue
+				}
 				return fmt.Errorf("回填渠道 %d 分组失败: %w", channel.Id, err)
 			}
-			if err := writeChannelGroupBindings(tx, channel); err != nil {
+			if err := insertChannelGroupBindingsForBackfill(tx, channel); err != nil {
 				return fmt.Errorf("回填渠道 %d 分组失败: %w", channel.Id, err)
 			}
 		}
 		var tokens []*Token
-		if err := tx.Find(&tokens).Error; err != nil {
-			return err
+		if err := tx.Select("id", groupBindingGroupColumn(), "group_mode", "group_ratio_limits").Find(&tokens).Error; err != nil {
+			return fmt.Errorf("加载待回填令牌失败: %w", err)
 		}
-		hasGroupModeColumn := tx.Migrator().HasColumn(&Token{}, "GroupMode")
 		for _, token := range tokens {
-			existingIDs, err := loadTokenBindingIDs(tx, token.Id)
-			if err != nil {
-				return err
-			}
-			if len(existingIDs) > 0 {
-				if hasGroupModeColumn && token.GroupMode != TokenGroupModeExplicit {
+			if _, ok := tokensWithBindings[token.Id]; ok {
+				if token.GroupMode != TokenGroupModeExplicit {
 					if err := tx.Model(&Token{}).Where("id = ?", token.Id).Update("group_mode", TokenGroupModeExplicit).Error; err != nil {
 						return err
 					}
@@ -617,20 +795,37 @@ func BackfillGroupBindings() error {
 				continue
 			}
 			token.GroupMode = inferStoredTokenGroupMode(token)
-			if err := prepareTokenGroupBindings(tx, token, groupBindingResolvePolicy{allowAllDisabled: true}); err != nil {
+			if err := prepareTokenGroupBindings(tx, token, groupBindingResolvePolicy{allowAllDisabled: true, tablesVerified: true}); err != nil {
+				if isInvalidLegacyGroupCodeError(err) {
+					recordSkipped("令牌", token.Id, err)
+					continue
+				}
 				return fmt.Errorf("回填令牌 %d 分组失败: %w", token.Id, err)
 			}
-			if hasGroupModeColumn {
-				if err := tx.Model(&Token{}).Where("id = ?", token.Id).Update("group_mode", token.GroupMode).Error; err != nil {
-					return err
-				}
-			}
-			if err := writeTokenGroupBindings(tx, token); err != nil {
+			if err := tx.Model(&Token{}).Where("id = ?", token.Id).Update("group_mode", token.GroupMode).Error; err != nil {
 				return err
+			}
+			if err := insertTokenGroupBindingsForBackfill(tx, token); err != nil {
+				return fmt.Errorf("回填令牌 %d 分组失败: %w", token.Id, err)
 			}
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	if skippedCount > 0 {
+		samples := make([]string, 0, len(skipped))
+		for _, item := range skipped {
+			samples = append(samples, fmt.Sprintf("%s %d（%s）", item.entity, item.id, item.reason))
+		}
+		remaining := ""
+		if skippedCount > len(skipped) {
+			remaining = fmt.Sprintf("；另有 %d 条未展示", skippedCount-len(skipped))
+		}
+		common.SysError(fmt.Sprintf("警告：关联回填跳过 %d 条历史非法分组记录，原值均已保留供管理员修复；样本：%s%s", skippedCount, strings.Join(samples, "；"), remaining))
+	}
+	return nil
 }
 
 func deleteChannelGroupBindings(tx *gorm.DB, channelIDs []int) error {

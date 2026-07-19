@@ -172,8 +172,31 @@ func (c ChannelInfo) Value() (driver.Value, error) {
 
 // Scan implements sql.Scanner interface
 func (c *ChannelInfo) Scan(value interface{}) error {
-	bytesValue, _ := value.([]byte)
-	return common.Unmarshal(bytesValue, c)
+	if c == nil {
+		return errors.New("channel info is nil")
+	}
+	var data []byte
+	switch typed := value.(type) {
+	case nil:
+		*c = ChannelInfo{}
+		return nil
+	case string:
+		data = []byte(typed)
+	case []byte:
+		data = typed
+	default:
+		return fmt.Errorf("不支持的渠道信息数据库类型: %T", value)
+	}
+	if strings.TrimSpace(string(data)) == "" {
+		*c = ChannelInfo{}
+		return nil
+	}
+	var decoded ChannelInfo
+	if err := common.Unmarshal(data, &decoded); err != nil {
+		return fmt.Errorf("解析渠道信息失败: %w", err)
+	}
+	*c = decoded
+	return nil
 }
 
 func (channel *Channel) GetKeys() []string {

@@ -1,11 +1,13 @@
 package model
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
@@ -74,7 +76,7 @@ func NormalizeGroupCode(code string) (string, error) {
 	if strings.Contains(code, ",") {
 		return "", errors.New("分组标识不能包含逗号")
 	}
-	if len(code) > 64 {
+	if utf8.RuneCountInString(code) > 64 {
 		return "", errors.New("分组标识长度不能超过 64 个字符")
 	}
 	return code, nil
@@ -88,7 +90,7 @@ func normalizeGroupName(name, fallback string) (string, error) {
 	if name == "" {
 		return "", errors.New("分组名称不能为空")
 	}
-	if len(name) > 128 {
+	if utf8.RuneCountInString(name) > 128 {
 		return "", errors.New("分组名称长度不能超过 128 个字符")
 	}
 	return name, nil
@@ -319,9 +321,7 @@ func collectGroupCode(set map[string]struct{}, value string, allowAuto bool) {
 		}
 		if _, err := NormalizeGroupCode(item); err != nil {
 			// 迁移阶段不让一个历史脏值阻塞整个服务启动；保留原值供管理员修复。
-			if strings.Contains(item, ",") {
-				continue
-			}
+			continue
 		}
 		set[item] = struct{}{}
 	}
@@ -347,9 +347,15 @@ func pluckLegacyGroupValues(tx *gorm.DB, model interface{}, fieldName, columnNam
 	if !hasModelColumns(tx, model, fieldName) {
 		return nil, nil
 	}
-	var values []string
-	if err := tx.Unscoped().Model(model).Pluck(columnName, &values).Error; err != nil {
+	var nullableValues []sql.NullString
+	if err := tx.Unscoped().Model(model).Pluck(columnName, &nullableValues).Error; err != nil {
 		return nil, err
+	}
+	values := make([]string, 0, len(nullableValues))
+	for _, value := range nullableValues {
+		if value.Valid {
+			values = append(values, value.String)
+		}
 	}
 	return values, nil
 }
@@ -360,9 +366,106 @@ func collectLegacyGroupValues(codes map[string]struct{}, values []string) {
 	}
 }
 
+func legacyGroupNameCandidate(code string, attempt int) string {
+	if attempt == 0 {
+		return code
+	}
+	if attempt == 1 {
+		return code + " (legacy)"
+	}
+	return fmt.Sprintf("%s (legacy %d)", code, attempt)
+}
+
+func findAvailableLegacyGroupName(tx *gorm.DB, code string, excludeID int) (string, error) {
+	const maxNameAttempts = 10000
+	for attempt := 0; attempt < maxNameAttempts; attempt++ {
+		candidate := legacyGroupNameCandidate(code, attempt)
+		var occupied Group
+		query := lockForUpdate(tx).Select("id").Where("name = ?", candidate)
+		if excludeID > 0 {
+			query = query.Where("id <> ?", excludeID)
+		}
+		err := query.First(&occupied).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return candidate, nil
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("为历史分组 %q 分配显示名称失败：候选名称冲突过多", code)
+}
+
+func ensureMySQLGroupIdentityCaseSensitivity(tx *gorm.DB) error {
+	if !common.UsingMySQL {
+		return nil
+	}
+	columns := []struct {
+		table  string
+		column string
+	}{
+		{table: "groups", column: "code"},
+		{table: "group_aliases", column: "alias"},
+	}
+	for _, column := range columns {
+		var collation string
+		result := tx.Raw(`SELECT COLLATION_NAME FROM information_schema.columns
+			WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
+			column.table, column.column).Scan(&collation)
+		if result.Error != nil {
+			return fmt.Errorf("读取 %s.%s 排序规则失败: %w", column.table, column.column, result.Error)
+		}
+		if result.RowsAffected != 1 || strings.TrimSpace(collation) == "" {
+			return fmt.Errorf("读取 %s.%s 排序规则失败: 未找到目标列", column.table, column.column)
+		}
+		if strings.EqualFold(collation, "utf8mb4_bin") {
+			continue
+		}
+		statement := fmt.Sprintf(
+			"ALTER TABLE `%s` MODIFY COLUMN `%s` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL",
+			column.table,
+			column.column,
+		)
+		if err := tx.Exec(statement).Error; err != nil {
+			return fmt.Errorf("迁移 %s.%s 为大小写敏感排序规则失败: %w", column.table, column.column, err)
+		}
+	}
+	return nil
+}
+
+func createLegacyGroup(tx *gorm.DB, template Group) (*Group, error) {
+	if template.Ratio == 0 {
+		template.Ratio = 1
+	}
+	const maxNameAttempts = 10000
+	for attempt := 0; attempt < maxNameAttempts; attempt++ {
+		candidate := template
+		candidate.Id = 0
+		candidate.Name = legacyGroupNameCandidate(template.Code, attempt)
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&candidate).Error; err != nil {
+			return nil, err
+		}
+
+		// 同 code 的并发创建会落到这里；显示名冲突时则继续尝试下一个候选名。
+		var stored Group
+		// MySQL 默认 REPEATABLE READ 下需要当前读，才能看到冲突事务刚提交的记录。
+		err := lockForUpdate(tx).Where("code = ?", template.Code).First(&stored).Error
+		if err == nil {
+			return &stored, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+	}
+	return nil, fmt.Errorf("为历史分组 %q 分配显示名称失败：候选名称冲突过多", template.Code)
+}
+
 // migrateGroupIdentity 将旧配置和旧表中的名称收敛到 groups。该过程只新增/更新缺失
 // 数据，重复执行不会改变已有 ID 或显示名称。
 func migrateGroupIdentity() error {
+	if err := ensureMySQLGroupIdentityCaseSensitivity(DB); err != nil {
+		return err
+	}
 	options := make(map[string]string)
 	var rows []Option
 	if err := DB.Find(&rows).Error; err != nil {
@@ -510,22 +613,17 @@ func migrateGroupIdentity() error {
 			var group Group
 			err := tx.Where("code = ?", code).First(&group).Error
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				name := code
-				group = Group{
+				_, createErr := createLegacyGroup(tx, Group{
 					Code:           code,
-					Name:           name,
 					Description:    descriptions[code],
 					Ratio:          ratioValues[code],
 					UserSelectable: selectable[code],
 					Status:         GroupStatusActive,
 					CreatedTime:    now,
 					UpdatedTime:    now,
-				}
-				if group.Ratio == 0 {
-					group.Ratio = 1
-				}
-				if err := tx.Create(&group).Error; err != nil {
-					return err
+				})
+				if createErr != nil {
+					return createErr
 				}
 				continue
 			}
@@ -534,7 +632,11 @@ func migrateGroupIdentity() error {
 			}
 			updates := map[string]interface{}{}
 			if group.Name == "" {
-				updates["name"] = code
+				name, nameErr := findAvailableLegacyGroupName(tx, code, group.Id)
+				if nameErr != nil {
+					return nameErr
+				}
+				updates["name"] = name
 			}
 			if group.Ratio == 0 {
 				if ratio, ok := ratioValues[code]; ok && ratio > 0 {
@@ -562,7 +664,17 @@ func migrateGroupIdentity() error {
 				return err
 			}
 			for _, user := range users {
-				if groupID, resolveErr := ResolveGroupIDByCodeWithDB(tx, user.Group); resolveErr == nil && groupID > 0 && user.GroupId != groupID {
+				if _, err := NormalizeGroupCode(user.Group); err != nil {
+					continue
+				}
+				groupID, resolveErr := ResolveGroupIDByCodeWithDB(tx, user.Group)
+				if errors.Is(resolveErr, gorm.ErrRecordNotFound) {
+					continue
+				}
+				if resolveErr != nil {
+					return fmt.Errorf("回填用户 %d 分组 ID 失败: %w", user.Id, resolveErr)
+				}
+				if groupID > 0 && user.GroupId != groupID {
 					if err := tx.Model(&User{}).Where("id = ?", user.Id).Update("group_id", groupID).Error; err != nil {
 						return err
 					}
@@ -575,7 +687,17 @@ func migrateGroupIdentity() error {
 				return err
 			}
 			for _, ability := range abilities {
-				if groupID, resolveErr := ResolveGroupIDByCodeWithDB(tx, ability.Group); resolveErr == nil && groupID > 0 && ability.GroupId != groupID {
+				if _, err := NormalizeGroupCode(ability.Group); err != nil {
+					continue
+				}
+				groupID, resolveErr := ResolveGroupIDByCodeWithDB(tx, ability.Group)
+				if errors.Is(resolveErr, gorm.ErrRecordNotFound) {
+					continue
+				}
+				if resolveErr != nil {
+					return fmt.Errorf("回填渠道 %d 模型 %q 的能力分组 ID 失败: %w", ability.ChannelId, ability.Model, resolveErr)
+				}
+				if groupID > 0 && ability.GroupId != groupID {
 					if err := tx.Model(&Ability{}).
 						Where("channel_id = ? AND model = ? AND "+commonGroupCol+" = ?", ability.ChannelId, ability.Model, ability.Group).
 						Update("group_id", groupID).Error; err != nil {
@@ -600,9 +722,15 @@ func migrateGroupIdentity() error {
 				if code == "" || strings.EqualFold(code, "auto") {
 					continue
 				}
+				if _, err := NormalizeGroupCode(code); err != nil {
+					continue
+				}
 				var group Group
 				if err := tx.Where("code = ?", code).First(&group).Error; err != nil {
-					continue
+					if errors.Is(err, gorm.ErrRecordNotFound) {
+						continue
+					}
+					return fmt.Errorf("回填自动分组 %q 失败: %w", code, err)
 				}
 				if _, ok := seen[group.Id]; ok {
 					continue
