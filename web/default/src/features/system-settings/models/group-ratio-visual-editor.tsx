@@ -17,7 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useState, useMemo, useEffect, useCallback, memo } from 'react'
-import { Pencil, Plus, Trash2, GripVertical, ChevronDown } from 'lucide-react'
+import {
+  ArrowRightLeft,
+  Pencil,
+  Plus,
+  Trash2,
+  GripVertical,
+  ChevronDown,
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import {
@@ -59,6 +66,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import type { GroupDetailInput } from '../types'
 import { safeJsonParse } from '../utils/json-parser'
 import {
@@ -66,6 +74,7 @@ import {
   getGroupIdDisplayValue,
   getGroupNameByCode,
 } from './group-identity'
+import { GroupTokenMigrationDialog } from './group-token-migration-dialog'
 
 type GroupRatioVisualEditorProps = {
   groups: EditableGroupDetail[]
@@ -779,6 +788,8 @@ function GroupPricingTable({
   onRetry,
 }: GroupPricingTableProps) {
   const { t } = useTranslation()
+  const [migrationDialogOpen, setMigrationDialogOpen] = useState(false)
+  const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null)
 
   const updateRow = useCallback(
     (
@@ -837,6 +848,9 @@ function GroupPricingTable({
   }, [groups])
 
   const hasMissingName = groups.some((group) => !group.name.trim())
+  const pendingDeleteGroup = groups.find(
+    (group) => group._key === pendingDeleteKey
+  )
 
   return (
     <Card className={sectionCardClassName}>
@@ -850,15 +864,29 @@ function GroupPricingTable({
               )}
             </CardDescription>
           </div>
-          <Button
-            onClick={addRow}
-            size='sm'
-            className='sm:self-start'
-            disabled={isLoading || Boolean(loadError)}
-          >
-            <Plus className='mr-2 h-4 w-4' />
-            {t('Add group')}
-          </Button>
+          <div className='flex flex-wrap gap-2 sm:self-start'>
+            <Button
+              variant='outline'
+              onClick={() => setMigrationDialogOpen(true)}
+              size='sm'
+              disabled={
+                isLoading ||
+                Boolean(loadError) ||
+                groups.filter((group) => Number(group.id) > 0).length < 2
+              }
+            >
+              <ArrowRightLeft className='mr-2 h-4 w-4' />
+              {t('Migrate tokens')}
+            </Button>
+            <Button
+              onClick={addRow}
+              size='sm'
+              disabled={isLoading || Boolean(loadError)}
+            >
+              <Plus className='mr-2 h-4 w-4' />
+              {t('Add group')}
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent>
@@ -978,7 +1006,13 @@ function GroupPricingTable({
                           <Button
                             variant='ghost'
                             size='sm'
-                            onClick={() => removeRow(group._key)}
+                            onClick={() => {
+                              if (Number(group.id) > 0) {
+                                setPendingDeleteKey(group._key)
+                              } else {
+                                removeRow(group._key)
+                              }
+                            }}
                             aria-label={t('Delete')}
                           >
                             <Trash2 className='h-4 w-4' />
@@ -1006,6 +1040,27 @@ function GroupPricingTable({
           )}
         </div>
       </CardContent>
+      <GroupTokenMigrationDialog
+        open={migrationDialogOpen}
+        onOpenChange={setMigrationDialogOpen}
+        groups={groups}
+      />
+      <ConfirmDialog
+        open={Boolean(pendingDeleteGroup)}
+        onOpenChange={(open) => {
+          if (!open) setPendingDeleteKey(null)
+        }}
+        title={t('Mark this group for deletion?')}
+        desc={t(
+          'If tokens are still bound to this group, migrate them first. Channels, users, or other references can also prevent deletion when you save.'
+        )}
+        confirmText={t('Mark for deletion')}
+        destructive
+        handleConfirm={() => {
+          if (pendingDeleteKey) removeRow(pendingDeleteKey)
+          setPendingDeleteKey(null)
+        }}
+      />
     </Card>
   )
 }

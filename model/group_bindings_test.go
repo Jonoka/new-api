@@ -151,6 +151,622 @@ func TestTokenGroupBindingsPreserveOrderAndModes(t *testing.T) {
 	}
 }
 
+func TestMigrateTokenGroupReplacesBindingAndRatioLimit(t *testing.T) {
+	defaultGroup, vipGroup := setupGroupBindingsTest(t)
+	token := &Token{
+		UserId:           101,
+		Key:              "token-group-migration-single",
+		Name:             "migration-single",
+		GroupMode:        TokenGroupModeExplicit,
+		GroupIds:         []int{vipGroup.Id},
+		GroupRatioLimits: `{"vip":2.5}`,
+		UnlimitedQuota:   true,
+	}
+	if err := token.Insert(); err != nil {
+		t.Fatalf("创建待迁移令牌失败: %v", err)
+	}
+
+	preview, err := PreviewTokenGroupMigration(vipGroup.Id, defaultGroup.Id)
+	if err != nil {
+		t.Fatalf("预览令牌分组迁移失败: %v", err)
+	}
+	if preview.MigratedTokens != 1 || preview.SingleGroupTokens != 1 || preview.AffectedUsers != 1 {
+		t.Fatalf("迁移预览统计错误: %#v", preview)
+	}
+
+	result, err := MigrateTokenGroup(vipGroup.Id, defaultGroup.Id)
+	if err != nil {
+		t.Fatalf("迁移令牌分组失败: %v", err)
+	}
+	if result.MigratedTokens != 1 || result.DeduplicatedTokens != 0 {
+		t.Fatalf("迁移结果统计错误: %#v", result)
+	}
+
+	var stored Token
+	if err := DB.Unscoped().First(&stored, token.Id).Error; err != nil {
+		t.Fatalf("读取迁移后令牌失败: %v", err)
+	}
+	if stored.Group != defaultGroup.Code || stored.GroupMode != TokenGroupModeExplicit {
+		t.Fatalf("令牌兼容字段未同步: group=%q mode=%q", stored.Group, stored.GroupMode)
+	}
+	limits := stored.GetGroupRatioLimitsMap()
+	if len(limits) != 1 || limits[defaultGroup.Code] != 2.5 {
+		t.Fatalf("倍率保护未迁移到目标分组: %#v", limits)
+	}
+	var bindings []TokenGroupBinding
+	if err := DB.Where("token_id = ?", token.Id).Order("position ASC").Find(&bindings).Error; err != nil {
+		t.Fatalf("读取迁移后绑定失败: %v", err)
+	}
+	if len(bindings) != 1 || bindings[0].GroupId != defaultGroup.Id || bindings[0].Position != 0 || bindings[0].RatioLimit == nil || *bindings[0].RatioLimit != 2.5 {
+		t.Fatalf("稳定绑定未正确迁移: %#v", bindings)
+	}
+
+	repeated, err := MigrateTokenGroup(vipGroup.Id, defaultGroup.Id)
+	if err != nil {
+		t.Fatalf("重复迁移不应失败: %v", err)
+	}
+	if repeated.MigratedTokens != 0 {
+		t.Fatalf("重复迁移应保持幂等，实际迁移 %d 个令牌", repeated.MigratedTokens)
+	}
+}
+
+func TestMigrateTokenGroupDeduplicatesAndKeepsTargetOrderAndLimit(t *testing.T) {
+	defaultGroup, vipGroup := setupGroupBindingsTest(t)
+	otherGroup := &Group{Code: "other", Name: "其他分组", Ratio: 1, Status: GroupStatusActive}
+	if err := DB.Create(otherGroup).Error; err != nil {
+		t.Fatalf("创建其他分组失败: %v", err)
+	}
+	token := &Token{
+		UserId:           102,
+		Key:              "token-group-migration-deduplicate",
+		Name:             "migration-deduplicate",
+		GroupMode:        TokenGroupModeExplicit,
+		GroupIds:         []int{vipGroup.Id, otherGroup.Id, defaultGroup.Id},
+		GroupRatioLimits: `{"vip":2,"default":1.25}`,
+		UnlimitedQuota:   true,
+	}
+	if err := token.Insert(); err != nil {
+		t.Fatalf("创建多分组令牌失败: %v", err)
+	}
+
+	result, err := MigrateTokenGroup(vipGroup.Id, defaultGroup.Id)
+	if err != nil {
+		t.Fatalf("迁移多分组令牌失败: %v", err)
+	}
+	if result.MigratedTokens != 1 || result.DeduplicatedTokens != 1 || result.MultiGroupTokens != 1 {
+		t.Fatalf("多分组迁移统计错误: %#v", result)
+	}
+
+	reloaded, err := GetTokenById(token.Id)
+	if err != nil {
+		t.Fatalf("读取多分组令牌失败: %v", err)
+	}
+	if reloaded.Group != "other,default" {
+		t.Fatalf("去重后分组顺序错误: %q", reloaded.Group)
+	}
+	if len(reloaded.GroupIds) != 2 || reloaded.GroupIds[0] != otherGroup.Id || reloaded.GroupIds[1] != defaultGroup.Id {
+		t.Fatalf("去重后稳定 ID 顺序错误: %#v", reloaded.GroupIds)
+	}
+	limits := reloaded.GetGroupRatioLimitsMap()
+	if len(limits) != 1 || limits[defaultGroup.Code] != 1.25 {
+		t.Fatalf("目标分组原倍率保护未保留: %#v", limits)
+	}
+	var bindings []TokenGroupBinding
+	if err := DB.Where("token_id = ?", token.Id).Order("position ASC").Find(&bindings).Error; err != nil {
+		t.Fatalf("读取去重后绑定失败: %v", err)
+	}
+	if len(bindings) != 2 || bindings[0].GroupId != otherGroup.Id || bindings[0].Position != 0 || bindings[1].GroupId != defaultGroup.Id || bindings[1].Position != 1 {
+		t.Fatalf("去重后绑定顺序未压缩: %#v", bindings)
+	}
+	if bindings[1].RatioLimit == nil || *bindings[1].RatioLimit != 1.25 {
+		t.Fatalf("目标分组绑定倍率保护未保留: %#v", bindings[1])
+	}
+}
+
+func TestMigrateTokenGroupBackfillsLegacyTokenAndLeavesAutoUntouched(t *testing.T) {
+	defaultGroup, vipGroup := setupGroupBindingsTest(t)
+	legacyToken := &Token{
+		UserId:           103,
+		Key:              "token-group-migration-legacy",
+		Name:             "migration-legacy",
+		Group:            vipGroup.Code,
+		GroupMode:        TokenGroupModeExplicit,
+		GroupRatioLimits: `{"vip":1.8}`,
+		UnlimitedQuota:   true,
+	}
+	if err := DB.Create(legacyToken).Error; err != nil {
+		t.Fatalf("创建历史令牌失败: %v", err)
+	}
+	autoToken := &Token{
+		UserId:         103,
+		Key:            "token-group-migration-auto",
+		Name:           "migration-auto",
+		Group:          "auto",
+		GroupMode:      TokenGroupModeAuto,
+		UnlimitedQuota: true,
+	}
+	if err := DB.Create(autoToken).Error; err != nil {
+		t.Fatalf("创建 auto 令牌失败: %v", err)
+	}
+
+	result, err := MigrateTokenGroup(vipGroup.Id, defaultGroup.Id)
+	if err != nil {
+		t.Fatalf("迁移历史令牌失败: %v", err)
+	}
+	if result.MigratedTokens != 1 {
+		t.Fatalf("历史令牌迁移数量错误: %#v", result)
+	}
+
+	var migrated Token
+	if err := DB.First(&migrated, legacyToken.Id).Error; err != nil {
+		t.Fatalf("读取迁移后的历史令牌失败: %v", err)
+	}
+	if migrated.Group != defaultGroup.Code || migrated.GetGroupRatioLimitsMap()[defaultGroup.Code] != 1.8 {
+		t.Fatalf("历史令牌兼容字段未同步: %#v", migrated)
+	}
+	var binding TokenGroupBinding
+	if err := DB.First(&binding, "token_id = ?", legacyToken.Id).Error; err != nil {
+		t.Fatalf("历史令牌未回填稳定绑定: %v", err)
+	}
+	if binding.GroupId != defaultGroup.Id || binding.Position != 0 {
+		t.Fatalf("历史令牌稳定绑定错误: %#v", binding)
+	}
+	var storedAuto Token
+	if err := DB.First(&storedAuto, autoToken.Id).Error; err != nil {
+		t.Fatalf("读取 auto 令牌失败: %v", err)
+	}
+	if storedAuto.Group != "auto" || storedAuto.GroupMode != TokenGroupModeAuto {
+		t.Fatalf("auto 令牌被错误修改: %#v", storedAuto)
+	}
+}
+
+func TestMigrateTokenGroupRejectsInvalidTargetAndRollsBackInvalidRatioJSON(t *testing.T) {
+	defaultGroup, vipGroup := setupGroupBindingsTest(t)
+	if _, err := MigrateTokenGroup(vipGroup.Id, vipGroup.Id); err == nil {
+		t.Fatal("源分组与目标分组相同时应拒绝迁移")
+	}
+	if err := DB.Model(&Group{}).Where("id = ?", defaultGroup.Id).Update("status", GroupStatusDisabled).Error; err != nil {
+		t.Fatalf("禁用目标分组失败: %v", err)
+	}
+	if _, err := MigrateTokenGroup(vipGroup.Id, defaultGroup.Id); err == nil {
+		t.Fatal("目标分组禁用时应拒绝迁移")
+	}
+	if err := DB.Model(&Group{}).Where("id = ?", defaultGroup.Id).Update("status", GroupStatusActive).Error; err != nil {
+		t.Fatalf("重新启用目标分组失败: %v", err)
+	}
+
+	validToken := &Token{
+		UserId:         104,
+		Key:            "token-group-migration-valid-before-rollback",
+		Name:           "valid-before-rollback",
+		GroupMode:      TokenGroupModeExplicit,
+		GroupIds:       []int{vipGroup.Id},
+		UnlimitedQuota: true,
+	}
+	if err := validToken.Insert(); err != nil {
+		t.Fatalf("创建正常令牌失败: %v", err)
+	}
+	invalidToken := &Token{
+		UserId:           104,
+		Key:              "token-group-migration-invalid-json",
+		Name:             "invalid-json",
+		Group:            vipGroup.Code,
+		GroupMode:        TokenGroupModeExplicit,
+		GroupRatioLimits: "{invalid",
+		UnlimitedQuota:   true,
+	}
+	if err := DB.Create(invalidToken).Error; err != nil {
+		t.Fatalf("创建倍率 JSON 异常令牌失败: %v", err)
+	}
+	if err := DB.Create(&TokenGroupBinding{TokenId: invalidToken.Id, GroupId: vipGroup.Id, Position: 0}).Error; err != nil {
+		t.Fatalf("创建倍率 JSON 异常令牌绑定失败: %v", err)
+	}
+
+	if _, err := MigrateTokenGroup(vipGroup.Id, defaultGroup.Id); err == nil {
+		t.Fatal("倍率保护 JSON 非法时应回滚整笔迁移")
+	}
+	var storedValid Token
+	if err := DB.First(&storedValid, validToken.Id).Error; err != nil {
+		t.Fatalf("读取回滚后的正常令牌失败: %v", err)
+	}
+	if storedValid.Group != vipGroup.Code {
+		t.Fatalf("迁移失败后正常令牌仍被修改: %q", storedValid.Group)
+	}
+	var sourceBindingCount int64
+	if err := DB.Model(&TokenGroupBinding{}).Where("group_id = ?", vipGroup.Id).Count(&sourceBindingCount).Error; err != nil {
+		t.Fatalf("统计回滚后的源绑定失败: %v", err)
+	}
+	if sourceBindingCount != 2 {
+		t.Fatalf("迁移失败后源绑定数量改变: %d", sourceBindingCount)
+	}
+}
+
+func TestMigrateTokenGroupUsesExactStableIdentityForLegacyCandidates(t *testing.T) {
+	defaultGroup, vipGroup := setupGroupBindingsTest(t)
+	upperVIP := &Group{Code: "VIP", Name: "大写 VIP", Ratio: 1, Status: GroupStatusActive}
+	if err := DB.Create(upperVIP).Error; err != nil {
+		t.Fatalf("创建大小写不同的分组失败: %v", err)
+	}
+	spacedToken := &Token{
+		UserId:         105,
+		Key:            "token-group-migration-spaced-legacy",
+		Name:           "spaced-legacy",
+		Group:          "default, vip",
+		GroupMode:      TokenGroupModeExplicit,
+		UnlimitedQuota: true,
+	}
+	if err := DB.Create(spacedToken).Error; err != nil {
+		t.Fatalf("创建带空格历史令牌失败: %v", err)
+	}
+	upperToken := &Token{
+		UserId:           106,
+		Key:              "token-group-migration-uppercase",
+		Name:             "uppercase",
+		Group:            upperVIP.Code,
+		GroupMode:        TokenGroupModeExplicit,
+		GroupRatioLimits: "{invalid",
+		UnlimitedQuota:   true,
+	}
+	if err := DB.Create(upperToken).Error; err != nil {
+		t.Fatalf("创建大写分组令牌失败: %v", err)
+	}
+
+	result, err := MigrateTokenGroup(vipGroup.Id, defaultGroup.Id)
+	if err != nil {
+		t.Fatalf("迁移带空格历史令牌失败: %v", err)
+	}
+	if result.MigratedTokens != 1 || result.DeduplicatedTokens != 1 {
+		t.Fatalf("精确候选统计错误: %#v", result)
+	}
+	var migrated Token
+	if err := DB.First(&migrated, spacedToken.Id).Error; err != nil {
+		t.Fatalf("读取带空格历史令牌失败: %v", err)
+	}
+	if migrated.Group != defaultGroup.Code {
+		t.Fatalf("带空格历史令牌未迁移: %q", migrated.Group)
+	}
+	var untouched Token
+	if err := DB.First(&untouched, upperToken.Id).Error; err != nil {
+		t.Fatalf("读取大写分组令牌失败: %v", err)
+	}
+	if untouched.Group != upperVIP.Code {
+		t.Fatalf("大小写不同的分组被误迁移: %q", untouched.Group)
+	}
+}
+
+func TestMigrateTokenGroupResolvesSourceAliases(t *testing.T) {
+	defaultGroup, vipGroup := setupGroupBindingsTest(t)
+	alias := &GroupAlias{Alias: "legacy-vip", GroupId: vipGroup.Id, CreatedAt: 1}
+	if err := DB.Create(alias).Error; err != nil {
+		t.Fatalf("创建源分组别名失败: %v", err)
+	}
+	legacyOnly := &Token{
+		UserId:           112,
+		Key:              "token-group-migration-alias-legacy",
+		Name:             "alias-legacy",
+		Group:            alias.Alias,
+		GroupMode:        TokenGroupModeExplicit,
+		GroupRatioLimits: `{"legacy-vip":1.7}`,
+		UnlimitedQuota:   true,
+	}
+	if err := DB.Create(legacyOnly).Error; err != nil {
+		t.Fatalf("创建仅含别名的历史令牌失败: %v", err)
+	}
+	stable := &Token{
+		UserId:         112,
+		Key:            "token-group-migration-alias-stable",
+		Name:           "alias-stable",
+		GroupMode:      TokenGroupModeExplicit,
+		GroupIds:       []int{vipGroup.Id},
+		UnlimitedQuota: true,
+	}
+	if err := stable.Insert(); err != nil {
+		t.Fatalf("创建稳定绑定别名令牌失败: %v", err)
+	}
+	if err := DB.Model(&Token{}).Where("id = ?", stable.Id).Update("group", alias.Alias).Error; err != nil {
+		t.Fatalf("把稳定令牌镜像改为别名失败: %v", err)
+	}
+
+	result, err := MigrateTokenGroup(vipGroup.Id, defaultGroup.Id)
+	if err != nil {
+		t.Fatalf("通过源分组别名迁移失败: %v", err)
+	}
+	if result.MigratedTokens != 2 {
+		t.Fatalf("别名迁移数量错误: %#v", result)
+	}
+	var tokens []Token
+	if err := DB.Where("id IN ?", []int{legacyOnly.Id, stable.Id}).Order("id ASC").Find(&tokens).Error; err != nil {
+		t.Fatalf("读取别名迁移后的令牌失败: %v", err)
+	}
+	for _, token := range tokens {
+		if token.Group != defaultGroup.Code {
+			t.Fatalf("别名迁移后未写入目标 canonical code: token=%d group=%q", token.Id, token.Group)
+		}
+	}
+	if tokens[0].GetGroupRatioLimitsMap()[defaultGroup.Code] != 1.7 {
+		t.Fatalf("别名倍率保护未迁移到目标 canonical code: %q", tokens[0].GroupRatioLimits)
+	}
+	if err := SaveGroupConfig(nil, []int{vipGroup.Id}); err != nil {
+		t.Fatalf("迁移别名令牌后删除源分组失败: %v", err)
+	}
+	var aliasCount int64
+	if err := DB.Model(&GroupAlias{}).Where("group_id = ?", vipGroup.Id).Count(&aliasCount).Error; err != nil {
+		t.Fatalf("统计删除后的分组别名失败: %v", err)
+	}
+	if aliasCount != 0 {
+		t.Fatalf("删除源分组后仍残留 %d 个孤立别名", aliasCount)
+	}
+}
+
+func TestMigrateTokenGroupDoesNotInheritSourceLimitWhenTargetAlreadyExists(t *testing.T) {
+	defaultGroup, vipGroup := setupGroupBindingsTest(t)
+	token := &Token{
+		UserId:           110,
+		Key:              "token-group-migration-target-without-limit",
+		Name:             "target-without-limit",
+		GroupMode:        TokenGroupModeExplicit,
+		GroupIds:         []int{defaultGroup.Id, vipGroup.Id},
+		GroupRatioLimits: `{"vip":2.2}`,
+		UnlimitedQuota:   true,
+	}
+	if err := token.Insert(); err != nil {
+		t.Fatalf("创建目标无倍率保护令牌失败: %v", err)
+	}
+	if _, err := MigrateTokenGroup(vipGroup.Id, defaultGroup.Id); err != nil {
+		t.Fatalf("迁移目标无倍率保护令牌失败: %v", err)
+	}
+	var stored Token
+	if err := DB.First(&stored, token.Id).Error; err != nil {
+		t.Fatalf("读取目标无倍率保护令牌失败: %v", err)
+	}
+	if stored.Group != defaultGroup.Code || strings.TrimSpace(stored.GroupRatioLimits) != "" {
+		t.Fatalf("源倍率保护被错误继承到已有目标: %#v", stored)
+	}
+	var binding TokenGroupBinding
+	if err := DB.First(&binding, "token_id = ?", token.Id).Error; err != nil {
+		t.Fatalf("读取目标无倍率保护绑定失败: %v", err)
+	}
+	if binding.GroupId != defaultGroup.Id || binding.RatioLimit != nil {
+		t.Fatalf("已有目标错误继承源绑定倍率: %#v", binding)
+	}
+}
+
+func TestMigrateTokenGroupCleansDeletedTokenWithoutRebindingTarget(t *testing.T) {
+	defaultGroup, vipGroup := setupGroupBindingsTest(t)
+	token := &Token{
+		UserId:           111,
+		Key:              "token-group-migration-deleted",
+		Name:             "deleted",
+		GroupMode:        TokenGroupModeExplicit,
+		GroupIds:         []int{vipGroup.Id},
+		GroupRatioLimits: `{"vip":1.6}`,
+		UnlimitedQuota:   true,
+	}
+	if err := token.Insert(); err != nil {
+		t.Fatalf("创建待删除令牌失败: %v", err)
+	}
+	if err := token.Delete(); err != nil {
+		t.Fatalf("软删除令牌失败: %v", err)
+	}
+
+	result, err := MigrateTokenGroup(vipGroup.Id, defaultGroup.Id)
+	if err != nil {
+		t.Fatalf("清理软删除令牌分组失败: %v", err)
+	}
+	if result.MigratedTokens != 0 || result.CleanedDeletedTokens != 1 {
+		t.Fatalf("软删除令牌统计错误: %#v", result)
+	}
+	var stored Token
+	if err := DB.Unscoped().First(&stored, token.Id).Error; err != nil {
+		t.Fatalf("读取清理后的软删除令牌失败: %v", err)
+	}
+	if stored.Group != "" || stored.GroupMode != TokenGroupModeInherit || stored.GroupRatioLimits != "" {
+		t.Fatalf("软删除令牌历史分组未清空: %#v", stored)
+	}
+	var bindingCount int64
+	if err := DB.Model(&TokenGroupBinding{}).Where("token_id = ?", token.Id).Count(&bindingCount).Error; err != nil {
+		t.Fatalf("统计软删除令牌绑定失败: %v", err)
+	}
+	if bindingCount != 0 {
+		t.Fatalf("软删除令牌不应重新绑定目标分组，实际 %d 条", bindingCount)
+	}
+}
+
+func TestBatchDeleteTokensRemovesOnlySelectedTokenBindings(t *testing.T) {
+	_, vipGroup := setupGroupBindingsTest(t)
+	selected := &Token{
+		UserId: 201, Key: "batch-delete-selected", Name: "batch-delete-selected",
+		GroupMode: TokenGroupModeExplicit, GroupIds: []int{vipGroup.Id}, UnlimitedQuota: true,
+	}
+	otherUser := &Token{
+		UserId: 202, Key: "batch-delete-other-user", Name: "batch-delete-other-user",
+		GroupMode: TokenGroupModeExplicit, GroupIds: []int{vipGroup.Id}, UnlimitedQuota: true,
+	}
+	if err := selected.Insert(); err != nil {
+		t.Fatalf("创建待批量删除令牌失败: %v", err)
+	}
+	if err := otherUser.Insert(); err != nil {
+		t.Fatalf("创建其他用户令牌失败: %v", err)
+	}
+
+	deleted, err := BatchDeleteTokens([]int{otherUser.Id, selected.Id}, selected.UserId)
+	if err != nil {
+		t.Fatalf("批量删除令牌失败: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("批量删除数量错误: %d", deleted)
+	}
+	var selectedBindings, otherBindings int64
+	if err := DB.Model(&TokenGroupBinding{}).Where("token_id = ?", selected.Id).Count(&selectedBindings).Error; err != nil {
+		t.Fatalf("统计已删除令牌绑定失败: %v", err)
+	}
+	if err := DB.Model(&TokenGroupBinding{}).Where("token_id = ?", otherUser.Id).Count(&otherBindings).Error; err != nil {
+		t.Fatalf("统计其他用户令牌绑定失败: %v", err)
+	}
+	if selectedBindings != 0 || otherBindings != 1 {
+		t.Fatalf("批量删除影响范围错误: selected=%d other=%d", selectedBindings, otherBindings)
+	}
+	if err := DB.First(&Token{}, otherUser.Id).Error; err != nil {
+		t.Fatalf("其他用户令牌被误删: %v", err)
+	}
+}
+
+func TestMigrateTokenGroupRejectsInconsistentBindingMirrors(t *testing.T) {
+	defaultGroup, vipGroup := setupGroupBindingsTest(t)
+	partialToken := &Token{
+		UserId:         107,
+		Key:            "token-group-migration-partial-binding",
+		Name:           "partial-binding",
+		GroupMode:      TokenGroupModeExplicit,
+		GroupIds:       []int{vipGroup.Id},
+		UnlimitedQuota: true,
+	}
+	if err := partialToken.Insert(); err != nil {
+		t.Fatalf("创建部分绑定测试令牌失败: %v", err)
+	}
+	if err := DB.Model(&Token{}).Where("id = ?", partialToken.Id).Update("group", "vip,default").Error; err != nil {
+		t.Fatalf("制造分组镜像不一致失败: %v", err)
+	}
+	if _, err := MigrateTokenGroup(vipGroup.Id, defaultGroup.Id); err == nil {
+		t.Fatal("稳定绑定与 CSV 不一致时应拒绝迁移")
+	}
+
+	if err := DB.Model(&Token{}).Where("id = ?", partialToken.Id).Update("group", vipGroup.Code).Error; err != nil {
+		t.Fatalf("恢复分组 CSV 失败: %v", err)
+	}
+	if err := DB.Model(&Token{}).Where("id = ?", partialToken.Id).Update("group_ratio_limits", `{"vip":2}`).Error; err != nil {
+		t.Fatalf("制造倍率镜像不一致失败: %v", err)
+	}
+	if _, err := MigrateTokenGroup(vipGroup.Id, defaultGroup.Id); err == nil {
+		t.Fatal("稳定倍率保护与 JSON 镜像不一致时应拒绝迁移")
+	}
+
+	var stored Token
+	if err := DB.First(&stored, partialToken.Id).Error; err != nil {
+		t.Fatalf("读取拒绝迁移后的令牌失败: %v", err)
+	}
+	if stored.Group != vipGroup.Code {
+		t.Fatalf("镜像不一致时仍修改了令牌: %q", stored.Group)
+	}
+}
+
+func TestMigrateTokenGroupAllowsDisabledSourceAndRejectsMissingGroups(t *testing.T) {
+	defaultGroup, vipGroup := setupGroupBindingsTest(t)
+	token := &Token{
+		UserId:         108,
+		Key:            "token-group-migration-disabled-source",
+		Name:           "disabled-source",
+		GroupMode:      TokenGroupModeExplicit,
+		GroupIds:       []int{vipGroup.Id},
+		UnlimitedQuota: true,
+	}
+	if err := token.Insert(); err != nil {
+		t.Fatalf("创建禁用源分组测试令牌失败: %v", err)
+	}
+	if err := DB.Model(&Group{}).Where("id = ?", vipGroup.Id).Update("status", GroupStatusDisabled).Error; err != nil {
+		t.Fatalf("禁用源分组失败: %v", err)
+	}
+	if _, err := MigrateTokenGroup(999999, defaultGroup.Id); err == nil {
+		t.Fatal("源分组不存在时应拒绝迁移")
+	}
+	if _, err := MigrateTokenGroup(vipGroup.Id, 999999); err == nil {
+		t.Fatal("目标分组不存在时应拒绝迁移")
+	}
+	if _, err := MigrateTokenGroup(vipGroup.Id, defaultGroup.Id); err != nil {
+		t.Fatalf("禁用的源分组应允许迁移: %v", err)
+	}
+}
+
+func TestMigrateTokenGroupRollsBackWritesWhenLaterBindingFails(t *testing.T) {
+	defaultGroup, vipGroup := setupGroupBindingsTest(t)
+	first := &Token{
+		UserId:         109,
+		Key:            "token-group-migration-transaction-first",
+		Name:           "transaction-first",
+		GroupMode:      TokenGroupModeExplicit,
+		GroupIds:       []int{vipGroup.Id},
+		UnlimitedQuota: true,
+	}
+	second := &Token{
+		UserId:         109,
+		Key:            "token-group-migration-transaction-second",
+		Name:           "transaction-second",
+		GroupMode:      TokenGroupModeExplicit,
+		GroupIds:       []int{vipGroup.Id},
+		UnlimitedQuota: true,
+	}
+	if err := first.Insert(); err != nil {
+		t.Fatalf("创建第一个事务测试令牌失败: %v", err)
+	}
+	if err := second.Insert(); err != nil {
+		t.Fatalf("创建第二个事务测试令牌失败: %v", err)
+	}
+	triggerSQL := fmt.Sprintf(`
+		CREATE TRIGGER fail_second_group_migration
+		BEFORE INSERT ON token_groups
+		WHEN NEW.token_id = %d AND NEW.group_id = %d
+		BEGIN
+			SELECT RAISE(ABORT, 'forced migration failure');
+		END`, second.Id, defaultGroup.Id)
+	if err := DB.Exec(triggerSQL).Error; err != nil {
+		t.Fatalf("创建事务失败注入触发器失败: %v", err)
+	}
+
+	if _, err := MigrateTokenGroup(vipGroup.Id, defaultGroup.Id); err == nil {
+		t.Fatal("第二个令牌写入失败时整笔迁移应失败")
+	}
+	var tokens []Token
+	if err := DB.Where("id IN ?", []int{first.Id, second.Id}).Order("id ASC").Find(&tokens).Error; err != nil {
+		t.Fatalf("读取事务回滚后的令牌失败: %v", err)
+	}
+	if len(tokens) != 2 || tokens[0].Group != vipGroup.Code || tokens[1].Group != vipGroup.Code {
+		t.Fatalf("事务失败后令牌镜像未完整回滚: %#v", tokens)
+	}
+	var sourceBindings int64
+	if err := DB.Model(&TokenGroupBinding{}).
+		Where("token_id IN ? AND group_id = ?", []int{first.Id, second.Id}, vipGroup.Id).
+		Count(&sourceBindings).Error; err != nil {
+		t.Fatalf("统计事务回滚后的稳定绑定失败: %v", err)
+	}
+	if sourceBindings != 2 {
+		t.Fatalf("事务失败后稳定绑定未完整回滚: %d", sourceBindings)
+	}
+}
+
+func TestMigrateTokenGroupBatchesMoreThanSQLiteParameterLimit(t *testing.T) {
+	defaultGroup, vipGroup := setupGroupBindingsTest(t)
+	const tokenCount = 501
+	tokens := make([]Token, tokenCount)
+	for index := range tokens {
+		tokens[index] = Token{
+			UserId:         113,
+			Key:            fmt.Sprintf("token-group-migration-batch-%d", index),
+			Name:           fmt.Sprintf("migration-batch-%d", index),
+			Group:          vipGroup.Code,
+			GroupMode:      TokenGroupModeExplicit,
+			UnlimitedQuota: true,
+		}
+	}
+	if err := DB.CreateInBatches(&tokens, 100).Error; err != nil {
+		t.Fatalf("批量创建待迁移令牌失败: %v", err)
+	}
+
+	result, err := MigrateTokenGroup(vipGroup.Id, defaultGroup.Id)
+	if err != nil {
+		t.Fatalf("分批迁移大量令牌失败: %v", err)
+	}
+	if result.MigratedTokens != tokenCount {
+		t.Fatalf("大量令牌迁移数量错误: %d", result.MigratedTokens)
+	}
+	var targetBindings int64
+	if err := DB.Model(&TokenGroupBinding{}).Where("group_id = ?", defaultGroup.Id).Count(&targetBindings).Error; err != nil {
+		t.Fatalf("统计大量迁移后的目标绑定失败: %v", err)
+	}
+	if targetBindings != tokenCount {
+		t.Fatalf("大量迁移后的目标绑定数量错误: %d", targetBindings)
+	}
+}
+
 func TestBatchInsertChannelsWritesIDsAndBindings(t *testing.T) {
 	_, vipGroup := setupGroupBindingsTest(t)
 	channels := make([]Channel, 51)

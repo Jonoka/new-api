@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
@@ -38,6 +39,64 @@ func GetGroupDetails(c *gin.Context) {
 type GroupDetailsUpdateRequest struct {
 	Groups     []model.GroupConfig `json:"groups"`
 	DeletedIDs []int               `json:"deleted_ids"`
+}
+
+type TokenGroupMigrationRequest struct {
+	SourceGroupID int `json:"source_group_id"`
+	TargetGroupID int `json:"target_group_id"`
+}
+
+func decodeTokenGroupMigrationRequest(c *gin.Context) (*TokenGroupMigrationRequest, bool) {
+	var request TokenGroupMigrationRequest
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorMsg(c, "令牌分组迁移参数格式错误")
+		return nil, false
+	}
+	return &request, true
+}
+
+// PreviewTokenGroupMigration 返回令牌分组迁移会影响的数据量。
+func PreviewTokenGroupMigration(c *gin.Context) {
+	request, ok := decodeTokenGroupMigrationRequest(c)
+	if !ok {
+		return
+	}
+	summary, err := model.PreviewTokenGroupMigration(request.SourceGroupID, request.TargetGroupID)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, summary)
+}
+
+// MigrateTokenGroup 将明确绑定源分组的令牌迁移到目标分组。
+func MigrateTokenGroup(c *gin.Context) {
+	request, ok := decodeTokenGroupMigrationRequest(c)
+	if !ok {
+		return
+	}
+	summary, err := model.MigrateTokenGroup(request.SourceGroupID, request.TargetGroupID)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	model.RecordLog(
+		c.GetInt("id"),
+		model.LogTypeManage,
+		fmt.Sprintf(
+			"迁移令牌分组：%s（ID %d）到 %s（ID %d），共迁移 %d 个有效令牌、清理 %d 个已删除令牌，其中 %d 个令牌合并了重复分组；缓存清理成功 %d 个、失败 %d 个",
+			summary.SourceGroup.Name,
+			summary.SourceGroup.Id,
+			summary.TargetGroup.Name,
+			summary.TargetGroup.Id,
+			summary.MigratedTokens,
+			summary.CleanedDeletedTokens,
+			summary.DeduplicatedTokens,
+			summary.CacheInvalidated,
+			summary.CacheInvalidationFailed,
+		),
+	)
+	common.ApiSuccess(c, summary)
 }
 
 // UpdateGroupDetails 批量保存分组显示属性和自动分组顺序。

@@ -61,6 +61,7 @@ import GroupTable from './components/GroupTable';
 import AutoGroupList from './components/AutoGroupList';
 import GroupGroupRatioRules from './components/GroupGroupRatioRules';
 import GroupSpecialUsableRules from './components/GroupSpecialUsableRules';
+import GroupTokenMigrationModal from './components/GroupTokenMigrationModal';
 
 const { Text, Title, Paragraph } = Typography;
 
@@ -84,6 +85,7 @@ export default function GroupRatioSettings(props) {
   const [loading, setLoading] = useState(false);
   const [editMode, setEditMode] = useState('visual');
   const [showGuide, setShowGuide] = useState(false);
+  const [migrationVisible, setMigrationVisible] = useState(false);
 
   const [inputs, setInputs] = useState({
     GroupRatio: '',
@@ -373,6 +375,13 @@ export default function GroupRatioSettings(props) {
           groups={groups}
           disabled={!groupsLoaded}
           onChange={handleGroupTableChange}
+          onMigrate={() => setMigrationVisible(true)}
+        />
+        <GroupTokenMigrationModal
+          visible={migrationVisible}
+          groups={groups}
+          onCancel={() => setMigrationVisible(false)}
+          onMigrated={() => notifyGroupDetailsUpdated()}
         />
       </Form.Section>
 

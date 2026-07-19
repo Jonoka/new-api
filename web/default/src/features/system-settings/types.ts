@@ -74,6 +74,31 @@ export type UpdateGroupDetailsResponse = {
   data?: GroupDetail[]
 }
 
+export type TokenGroupMigrationRequest = {
+  source_group_id: number
+  target_group_id: number
+}
+
+export type TokenGroupMigrationSummary = {
+  source_group: Pick<GroupDetail, 'id' | 'code' | 'name'>
+  target_group: Pick<GroupDetail, 'id' | 'code' | 'name'>
+  migrated_tokens: number
+  deduplicated_tokens: number
+  single_group_tokens: number
+  multi_group_tokens: number
+  affected_users: number
+  cleaned_deleted_tokens: number
+  cache_invalidated: number
+  cache_invalidation_failed: number
+  warning?: string
+}
+
+export type TokenGroupMigrationResponse = {
+  success: boolean
+  message?: string
+  data?: TokenGroupMigrationSummary
+}
+
 export type OkpayRatePreviewResponse = {
   success: boolean
   message: string

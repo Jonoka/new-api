@@ -467,3 +467,92 @@ func TestSaveGroupConfigProtectsStableBindingReferences(t *testing.T) {
 		})
 	}
 }
+
+func TestSaveGroupConfigProtectsLegacyAliasReferences(t *testing.T) {
+	tests := []struct {
+		name   string
+		create func(alias string) error
+	}{
+		{
+			name: "channel",
+			create: func(alias string) error {
+				return DB.Create(&Channel{
+					Name: "legacy-alias-channel", Key: "legacy-alias-channel-key",
+					Models: "gpt-test", Group: "default, " + alias,
+				}).Error
+			},
+		},
+		{
+			name: "token",
+			create: func(alias string) error {
+				return DB.Create(&Token{
+					UserId: 1, Key: "legacy-alias-token", Name: "legacy-alias-token",
+					Group: "default, " + alias, GroupMode: TokenGroupModeExplicit,
+				}).Error
+			},
+		},
+		{
+			name: "user",
+			create: func(alias string) error {
+				return DB.Create(&User{
+					Username: "legacy-alias-user", Password: "legacy-alias-password", Group: alias,
+				}).Error
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, vipGroup := setupGroupBindingsTest(t)
+			alias := "legacy%_!vip"
+			if err := DB.Create(&GroupAlias{Alias: alias, GroupId: vipGroup.Id}).Error; err != nil {
+				t.Fatalf("创建分组兼容别名失败: %v", err)
+			}
+			if err := test.create(alias); err != nil {
+				t.Fatalf("创建仅引用兼容别名的 %s 失败: %v", test.name, err)
+			}
+			if err := SaveGroupConfig(nil, []int{vipGroup.Id}); err == nil {
+				t.Fatalf("存在 %s 兼容别名引用时删除分组应被拒绝", test.name)
+			}
+
+			var groupCount, aliasCount int64
+			if err := DB.Model(&Group{}).Where("id = ?", vipGroup.Id).Count(&groupCount).Error; err != nil {
+				t.Fatalf("检查分组是否保留失败: %v", err)
+			}
+			if err := DB.Model(&GroupAlias{}).Where("group_id = ?", vipGroup.Id).Count(&aliasCount).Error; err != nil {
+				t.Fatalf("检查分组兼容别名是否保留失败: %v", err)
+			}
+			if groupCount != 1 || aliasCount != 1 {
+				t.Fatalf("引用保护失败: group=%d alias=%d", groupCount, aliasCount)
+			}
+		})
+	}
+}
+
+func TestSaveGroupConfigIgnoresPartialLegacyAliasMatches(t *testing.T) {
+	_, vipGroup := setupGroupBindingsTest(t)
+	alias := "legacy-vip"
+	if err := DB.Create(&GroupAlias{Alias: alias, GroupId: vipGroup.Id}).Error; err != nil {
+		t.Fatalf("创建分组兼容别名失败: %v", err)
+	}
+	if err := DB.Create(&Token{
+		UserId: 1, Key: "legacy-alias-partial-token", Name: "legacy-alias-partial-token",
+		Group: alias + "-extra", GroupMode: TokenGroupModeExplicit,
+	}).Error; err != nil {
+		t.Fatalf("创建部分匹配兼容别名的令牌失败: %v", err)
+	}
+
+	if err := SaveGroupConfig(nil, []int{vipGroup.Id}); err != nil {
+		t.Fatalf("部分匹配不应阻止删除分组: %v", err)
+	}
+	var groupCount, aliasCount int64
+	if err := DB.Model(&Group{}).Where("id = ?", vipGroup.Id).Count(&groupCount).Error; err != nil {
+		t.Fatalf("检查分组删除结果失败: %v", err)
+	}
+	if err := DB.Model(&GroupAlias{}).Where("group_id = ?", vipGroup.Id).Count(&aliasCount).Error; err != nil {
+		t.Fatalf("检查兼容别名删除结果失败: %v", err)
+	}
+	if groupCount != 0 || aliasCount != 0 {
+		t.Fatalf("部分匹配被误判为真实引用: group=%d alias=%d", groupCount, aliasCount)
+	}
+}

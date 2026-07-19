@@ -236,6 +236,53 @@ func GetGroupByCodeOrAliasWithDB(tx *gorm.DB, code string) (*Group, error) {
 	return &group, nil
 }
 
+func groupLegacyIdentifiers(tx *gorm.DB, group *Group) ([]string, map[string]struct{}, error) {
+	if group == nil {
+		return nil, nil, errors.New("group is nil")
+	}
+	identifiers := []string{group.Code}
+	identifierSet := map[string]struct{}{group.Code: {}}
+	if tx.Migrator().HasTable(&GroupAlias{}) {
+		var aliases []string
+		if err := tx.Model(&GroupAlias{}).
+			Where("group_id = ?", group.Id).
+			Order("id ASC").
+			Pluck("alias", &aliases).Error; err != nil {
+			return nil, nil, err
+		}
+		for _, alias := range aliases {
+			alias = strings.TrimSpace(alias)
+			if alias == "" {
+				continue
+			}
+			if _, exists := identifierSet[alias]; exists {
+				continue
+			}
+			identifiers = append(identifiers, alias)
+			identifierSet[alias] = struct{}{}
+		}
+	}
+	return identifiers, identifierSet, nil
+}
+
+func legacyGroupSubstringPattern(group string) string {
+	group = strings.NewReplacer(
+		"!", "!!",
+		"%", "!%",
+		"_", "!_",
+	).Replace(group)
+	return "%" + group + "%"
+}
+
+func containsLegacyGroupIdentifier(value string, identifiers map[string]struct{}) bool {
+	for _, code := range splitLegacyGroupCodes(value) {
+		if _, exists := identifiers[code]; exists {
+			return true
+		}
+	}
+	return false
+}
+
 func ResolveGroupIDByCode(code string) (int, error) {
 	group, err := GetGroupByCodeOrAlias(code)
 	if err != nil {
@@ -834,13 +881,34 @@ func countGroupIDReference(tx *gorm.DB, model interface{}, fieldName string, gro
 	return count, nil
 }
 
-func countLegacyGroupReference(tx *gorm.DB, model interface{}, fieldName, condition string, args ...interface{}) (int64, error) {
+func countLegacyGroupReferences(
+	tx *gorm.DB,
+	model interface{},
+	fieldName string,
+	identifiers []string,
+	identifierSet map[string]struct{},
+) (int64, error) {
 	if !hasModelColumns(tx, model, fieldName) {
 		return 0, nil
 	}
-	var count int64
-	if err := tx.Unscoped().Model(model).Where(condition, args...).Count(&count).Error; err != nil {
+	if len(identifiers) == 0 {
+		return 0, nil
+	}
+
+	condition := commonGroupCol + " LIKE ? ESCAPE '!'"
+	query := tx.Unscoped().Model(model).Where(condition, legacyGroupSubstringPattern(identifiers[0]))
+	for _, identifier := range identifiers[1:] {
+		query = query.Or(condition, legacyGroupSubstringPattern(identifier))
+	}
+	var values []string
+	if err := query.Pluck("group", &values).Error; err != nil {
 		return 0, err
+	}
+	var count int64
+	for _, value := range values {
+		if containsLegacyGroupIdentifier(value, identifierSet) {
+			count++
+		}
 	}
 	return count, nil
 }
@@ -848,6 +916,10 @@ func countLegacyGroupReference(tx *gorm.DB, model interface{}, fieldName, condit
 func groupBusinessReferenceCount(tx *gorm.DB, group *Group) (int64, error) {
 	if group == nil {
 		return 0, nil
+	}
+	identifiers, identifierSet, err := groupLegacyIdentifiers(tx, group)
+	if err != nil {
+		return 0, err
 	}
 	checks := []struct {
 		model     interface{}
@@ -869,35 +941,18 @@ func groupBusinessReferenceCount(tx *gorm.DB, group *Group) (int64, error) {
 	legacyChecks := []struct {
 		model     interface{}
 		fieldName string
-		condition string
-		args      []interface{}
 	}{
-		{
-			model:     &Channel{},
-			fieldName: "Group",
-			condition: channelGroupFilterCondition(),
-			args:      []interface{}{channelGroupFilterPattern(group.Code)},
-		},
-		{
-			model:     &Token{},
-			fieldName: "Group",
-			condition: channelGroupFilterCondition(),
-			args:      []interface{}{channelGroupFilterPattern(group.Code)},
-		},
-		{
-			model:     &User{},
-			fieldName: "Group",
-			condition: commonGroupCol + " = ?",
-			args:      []interface{}{group.Code},
-		},
+		{model: &Channel{}, fieldName: "Group"},
+		{model: &Token{}, fieldName: "Group"},
+		{model: &User{}, fieldName: "Group"},
 	}
 	for _, check := range legacyChecks {
-		count, err := countLegacyGroupReference(
+		count, err := countLegacyGroupReferences(
 			tx,
 			check.model,
 			check.fieldName,
-			check.condition,
-			check.args...,
+			identifiers,
+			identifierSet,
 		)
 		if err != nil {
 			return 0, err
@@ -984,6 +1039,11 @@ func SaveGroupConfig(configs []GroupConfig, deletedIDs []int) error {
 			}
 			if referenceCount > 0 {
 				return fmt.Errorf("分组 %s 仍被业务数据引用，不能删除", group.Name)
+			}
+			if tx.Migrator().HasTable(&GroupAlias{}) {
+				if err := tx.Where("group_id = ?", group.Id).Delete(&GroupAlias{}).Error; err != nil {
+					return fmt.Errorf("删除分组 %s 的兼容别名失败: %w", group.Name, err)
+				}
 			}
 			if err := tx.Delete(&group).Error; err != nil {
 				return err

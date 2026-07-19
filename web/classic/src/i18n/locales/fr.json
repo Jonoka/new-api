@@ -4014,6 +4014,22 @@
     "规格价格": "Prix par spécification",
     "计费分辨率": "Résolution facturée",
     "计费质量": "Qualité facturée",
-    "规格价格状态": "Statut du prix par spécification"
+    "规格价格状态": "Statut du prix par spécification",
+    "迁移预览失败": "Échec de l’aperçu de la migration",
+    "迁移失败": "Échec de la migration",
+    "已成功迁移 {{count}} 个令牌": "{{count}} jetons ont été migrés",
+    "迁移令牌分组": "Migrer les groupes de jetons",
+    "迁移中...": "Migration...",
+    "迁移令牌": "Migrer les jetons",
+    "所有明确绑定源分组的令牌都会迁移到目标分组，自动分组和继承分组不受影响。": "Tous les jetons explicitement liés au groupe source seront déplacés vers le groupe cible. Les groupes automatiques et hérités ne sont pas affectés.",
+    "源分组": "Groupe source",
+    "选择源分组": "Sélectionner le groupe source",
+    "迁移目标分组": "Groupe cible",
+    "选择目标分组": "Sélectionner le groupe cible",
+    "正在统计受影响令牌...": "Analyse des jetons concernés...",
+    "将迁移 {{count}} 个令牌": "{{count}} jetons seront migrés",
+    "影响 {{users}} 个用户，并移除 {{duplicates}} 个重复绑定": "{{users}} utilisateurs concernés ; {{duplicates}} liaisons en double seront supprimées",
+    "同时清理 {{count}} 个已删除令牌的历史分组引用": "Les anciennes références de groupe seront aussi supprimées de {{count}} jetons supprimés",
+    "确认标记删除该分组？如有绑定令牌，请先使用“迁移令牌”。": "Marquer ce groupe pour suppression ? Si des jetons y sont encore liés, utilisez d’abord Migrer les jetons."
   }
 }

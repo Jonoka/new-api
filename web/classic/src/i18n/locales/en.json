@@ -4195,6 +4195,22 @@
     "规格价格": "Specification price",
     "计费分辨率": "Billing resolution",
     "计费质量": "Billing quality",
-    "规格价格状态": "Specification price status"
+    "规格价格状态": "Specification price status",
+    "迁移预览失败": "Failed to preview migration",
+    "迁移失败": "Migration failed",
+    "已成功迁移 {{count}} 个令牌": "Successfully migrated {{count}} tokens",
+    "迁移令牌分组": "Migrate token groups",
+    "迁移中...": "Migrating...",
+    "迁移令牌": "Migrate tokens",
+    "所有明确绑定源分组的令牌都会迁移到目标分组，自动分组和继承分组不受影响。": "All tokens explicitly bound to the source group will be moved to the target group. Automatic and inherited groups are not affected.",
+    "源分组": "Source group",
+    "选择源分组": "Select source group",
+    "迁移目标分组": "Target group",
+    "选择目标分组": "Select target group",
+    "正在统计受影响令牌...": "Checking affected tokens...",
+    "将迁移 {{count}} 个令牌": "{{count}} tokens will be migrated",
+    "影响 {{users}} 个用户，并移除 {{duplicates}} 个重复绑定": "{{users}} users affected; {{duplicates}} duplicate bindings will be removed",
+    "同时清理 {{count}} 个已删除令牌的历史分组引用": "Stale group references will also be cleared from {{count}} deleted tokens",
+    "确认标记删除该分组？如有绑定令牌，请先使用“迁移令牌”。": "Mark this group for deletion? If tokens are still bound, use Migrate tokens first."
   }
 }

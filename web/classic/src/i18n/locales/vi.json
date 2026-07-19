@@ -4543,6 +4543,22 @@
     "规格价格": "Giá theo thông số",
     "计费分辨率": "Độ phân giải tính phí",
     "计费质量": "Chất lượng tính phí",
-    "规格价格状态": "Trạng thái giá theo thông số"
+    "规格价格状态": "Trạng thái giá theo thông số",
+    "迁移预览失败": "Không thể xem trước việc di chuyển",
+    "迁移失败": "Di chuyển thất bại",
+    "已成功迁移 {{count}} 个令牌": "Đã di chuyển thành công {{count}} token",
+    "迁移令牌分组": "Di chuyển nhóm token",
+    "迁移中...": "Đang di chuyển...",
+    "迁移令牌": "Di chuyển token",
+    "所有明确绑定源分组的令牌都会迁移到目标分组，自动分组和继承分组不受影响。": "Tất cả token được liên kết rõ ràng với nhóm nguồn sẽ được chuyển sang nhóm đích. Nhóm tự động và kế thừa không bị ảnh hưởng.",
+    "源分组": "Nhóm nguồn",
+    "选择源分组": "Chọn nhóm nguồn",
+    "迁移目标分组": "Nhóm đích",
+    "选择目标分组": "Chọn nhóm đích",
+    "正在统计受影响令牌...": "Đang kiểm tra token bị ảnh hưởng...",
+    "将迁移 {{count}} 个令牌": "Sẽ di chuyển {{count}} token",
+    "影响 {{users}} 个用户，并移除 {{duplicates}} 个重复绑定": "Ảnh hưởng {{users}} người dùng và xóa {{duplicates}} liên kết trùng lặp",
+    "同时清理 {{count}} 个已删除令牌的历史分组引用": "Đồng thời xóa tham chiếu nhóm cũ khỏi {{count}} token đã xóa",
+    "确认标记删除该分组？如有绑定令牌，请先使用“迁移令牌”。": "Đánh dấu nhóm này để xóa? Nếu token vẫn được liên kết, hãy di chuyển chúng trước."
   }
 }

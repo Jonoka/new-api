@@ -26,7 +26,7 @@ import {
   Typography,
   Popconfirm,
 } from '@douyinfe/semi-ui';
-import { IconPlus, IconDelete } from '@douyinfe/semi-icons';
+import { IconArrowRight, IconPlus, IconDelete } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 import CardTable from '../../../../components/common/ui/CardTable';
 import { createUniqueGroupCode } from '../../../../helpers';
@@ -44,7 +44,12 @@ const buildRows = (groups) =>
 
 const serializeRows = (rows) => rows.map(({ _rowId, ...group }) => group);
 
-export default function GroupTable({ groups, onChange, disabled = false }) {
+export default function GroupTable({
+  groups,
+  onChange,
+  onMigrate,
+  disabled = false,
+}) {
   const { t } = useTranslation();
   const [rows, setRows] = useState(() => buildRows(groups));
   const reservedCodesRef = useRef(
@@ -200,7 +205,7 @@ export default function GroupTable({ groups, onChange, disabled = false }) {
         width: 50,
         render: (_, record) => (
           <Popconfirm
-            title={t('确认删除该分组？')}
+            title={t('确认标记删除该分组？如有绑定令牌，请先使用“迁移令牌”。')}
             onConfirm={() => removeRow(record._rowId)}
             position='left'
             disabled={disabled}
@@ -229,7 +234,17 @@ export default function GroupTable({ groups, onChange, disabled = false }) {
         size='small'
         empty={<Text type='tertiary'>{t('暂无分组，点击下方按钮添加')}</Text>}
       />
-      <div className='mt-3 flex justify-center'>
+      <div className='mt-3 flex flex-wrap justify-center gap-2'>
+        <Button
+          icon={<IconArrowRight />}
+          theme='outline'
+          disabled={
+            disabled || rows.filter((row) => Number(row.id) > 0).length < 2
+          }
+          onClick={onMigrate}
+        >
+          {t('迁移令牌')}
+        </Button>
         <Button
           icon={<IconPlus />}
           theme='outline'

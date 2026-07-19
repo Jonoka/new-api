@@ -325,6 +325,10 @@ func (token *Token) Update() (err error) {
 		}
 	}()
 	err = DB.Transaction(func(tx *gorm.DB) error {
+		var locked Token
+		if err := lockForUpdate(tx).Select("id").First(&locked, "id = ?", token.Id).Error; err != nil {
+			return err
+		}
 		if err := PrepareTokenGroupBindingsForUpdate(tx, token); err != nil {
 			return err
 		}
@@ -364,6 +368,10 @@ func (token *Token) Delete() (err error) {
 		}
 	}()
 	err = DB.Transaction(func(tx *gorm.DB) error {
+		var locked Token
+		if err := lockForUpdate(tx).Select("id").First(&locked, "id = ?", token.Id).Error; err != nil {
+			return err
+		}
 		if err := deleteTokenGroupBindings(tx, []int{token.Id}); err != nil {
 			return err
 		}
@@ -547,7 +555,10 @@ func BatchDeleteTokens(ids []int, userId int) (int, error) {
 	}
 
 	var tokens []Token
-	if err := tx.Where("user_id = ? AND id IN (?)", userId, ids).Find(&tokens).Error; err != nil {
+	if err := lockForUpdate(tx).
+		Where("user_id = ? AND id IN (?)", userId, ids).
+		Order("id ASC").
+		Find(&tokens).Error; err != nil {
 		tx.Rollback()
 		return 0, err
 	}

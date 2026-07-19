@@ -25,6 +25,9 @@ import type {
   GroupDetailsResponse,
   OkpayRatePreviewResponse,
   SystemOptionsResponse,
+  TokenGroupMigrationRequest,
+  TokenGroupMigrationResponse,
+  TokenGroupMigrationSummary,
   UpdateGroupDetailsRequest,
   UpdateGroupDetailsResponse,
   UpdateOptionRequest,
@@ -62,6 +65,32 @@ export async function updateGroupDetails(
     request
   )
   return res.data
+}
+
+export async function previewTokenGroupMigration(
+  request: TokenGroupMigrationRequest
+): Promise<TokenGroupMigrationSummary> {
+  const res = await api.post<TokenGroupMigrationResponse>(
+    '/api/group/token-migration/preview',
+    request
+  )
+  if (!res.data.success || !res.data.data) {
+    throw new Error(res.data.message || 'Failed to preview token migration')
+  }
+  return res.data.data
+}
+
+export async function migrateTokenGroup(
+  request: TokenGroupMigrationRequest
+): Promise<TokenGroupMigrationSummary> {
+  const res = await api.post<TokenGroupMigrationResponse>(
+    '/api/group/token-migration',
+    request
+  )
+  if (!res.data.success || !res.data.data) {
+    throw new Error(res.data.message || 'Failed to migrate tokens')
+  }
+  return res.data.data
 }
 
 export async function confirmPaymentCompliance() {
