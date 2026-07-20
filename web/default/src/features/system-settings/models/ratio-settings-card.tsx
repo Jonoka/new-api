@@ -440,13 +440,10 @@ export function RatioSettingsCard({
   )
 
   const saveGroupRatios = useCallback(
-    async (values: GroupFormValues) => {
+    (values: GroupFormValues): Record<string, string> => {
       const normalized = {
-        GroupRatio: normalizeJsonString(values.GroupRatio),
         TopupGroupRatio: normalizeJsonString(values.TopupGroupRatio),
-        UserUsableGroups: normalizeJsonString(values.UserUsableGroups),
         GroupGroupRatio: normalizeJsonString(values.GroupGroupRatio),
-        AutoGroups: normalizeJsonString(values.AutoGroups),
         DefaultUseAutoGroup: values.DefaultUseAutoGroup,
         GroupSpecialUsableGroup: normalizeJsonString(
           values.GroupSpecialUsableGroup
@@ -459,18 +456,20 @@ export function RatioSettingsCard({
           'group_ratio_setting.group_special_usable_group',
       }
 
-      const updates = (
+      const changedKeys = (
         Object.keys(normalized) as Array<keyof typeof normalized>
       ).filter(
         (key) => normalized[key] !== groupNormalizedDefaults.current[key]
       )
 
-      for (const key of updates) {
+      const updates: Record<string, string> = {}
+      for (const key of changedKeys) {
         const apiKey = apiKeyMap[key] || key
-        await updateOption.mutateAsync({ key: apiKey, value: normalized[key] })
+        updates[apiKey] = String(normalized[key])
       }
+      return updates
     },
-    [updateOption]
+    []
   )
 
   const handleResetRatios = useCallback(() => {

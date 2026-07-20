@@ -4030,6 +4030,9 @@
     "将迁移 {{count}} 个令牌": "{{count}} jetons seront migrés",
     "影响 {{users}} 个用户，并移除 {{duplicates}} 个重复绑定": "{{users}} utilisateurs concernés ; {{duplicates}} liaisons en double seront supprimées",
     "同时清理 {{count}} 个已删除令牌的历史分组引用": "Les anciennes références de groupe seront aussi supprimées de {{count}} jetons supprimés",
-    "确认标记删除该分组？如有绑定令牌，请先使用“迁移令牌”。": "Marquer ce groupe pour suppression ? Si des jetons y sont encore liés, utilisez d’abord Migrer les jetons."
+    "确认标记删除该分组？如有绑定令牌，请先使用“迁移令牌”。": "Marquer ce groupe pour suppression ? Si des jetons y sont encore liés, utilisez d’abord Migrer les jetons.",
+    "所有明确绑定源分组的令牌都会切换为自动选择，并清除其他分组和全部倍率保护。": "Tous les jetons explicitement liés au groupe source passeront en mode auto, avec suppression des autres groupes et de toutes les limites de ratio.",
+    "影响 {{users}} 个用户；{{count}} 个多分组令牌会移除其他全部分组": "{{users}} utilisateurs concernés ; tous les autres groupes seront supprimés pour {{count}} jetons multigroupes",
+    "确认标记删除该分组？保存时绑定令牌会自动切换为 auto；渠道、用户等其他引用仍会阻止删除。": "Marquer ce groupe pour suppression ? Les jetons liés passeront en mode auto lors de l’enregistrement ; les canaux, utilisateurs et autres références peuvent toujours empêcher la suppression."
   }
 }

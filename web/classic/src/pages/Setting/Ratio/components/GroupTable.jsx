@@ -205,7 +205,9 @@ export default function GroupTable({
         width: 50,
         render: (_, record) => (
           <Popconfirm
-            title={t('确认标记删除该分组？如有绑定令牌，请先使用“迁移令牌”。')}
+            title={t(
+              '确认标记删除该分组？保存时绑定令牌会自动切换为 auto；渠道、用户等其他引用仍会阻止删除。',
+            )}
             onConfirm={() => removeRow(record._rowId)}
             position='left'
             disabled={disabled}
@@ -239,7 +241,7 @@ export default function GroupTable({
           icon={<IconArrowRight />}
           theme='outline'
           disabled={
-            disabled || rows.filter((row) => Number(row.id) > 0).length < 2
+            disabled || rows.filter((row) => Number(row.id) > 0).length < 1
           }
           onClick={onMigrate}
         >

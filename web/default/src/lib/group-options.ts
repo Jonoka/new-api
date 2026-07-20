@@ -141,12 +141,10 @@ function buildUserGroupDescription(
   name: string,
   description: string
 ): string | undefined {
-  const parts: string[] = []
-  if (name !== code) parts.push(code)
-  if (description && description !== code && description !== name) {
-    parts.push(description)
+  if (!description || description === code || description === name) {
+    return undefined
   }
-  return parts.length > 0 ? parts.join(' · ') : undefined
+  return description
 }
 
 export function createUserGroupOptions(groups: UserGroupMap): GroupOption[] {

@@ -921,7 +921,7 @@ function GroupPricingTable({
               disabled={
                 isLoading ||
                 Boolean(loadError) ||
-                groups.filter((group) => Number(group.id) > 0).length < 2
+                groups.filter((group) => Number(group.id) > 0).length < 1
               }
             >
               <ArrowRightLeft className='mr-2 h-4 w-4' />
@@ -1101,7 +1101,7 @@ function GroupPricingTable({
         }}
         title={t('Mark this group for deletion?')}
         desc={t(
-          'If tokens are still bound to this group, migrate them first. Channels, users, or other references can also prevent deletion when you save.'
+          'Tokens bound to this group will switch to automatic grouping when you save. Channels, users, or other references can still prevent deletion.'
         )}
         confirmText={t('Mark for deletion')}
         destructive

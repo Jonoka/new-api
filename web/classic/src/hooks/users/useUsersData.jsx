@@ -19,7 +19,13 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { API, showError, showSuccess } from '../../helpers';
+import {
+  API,
+  createGroupOptions,
+  extractGroupDetailsResponse,
+  showError,
+  showSuccess,
+} from '../../helpers';
 import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
 
@@ -259,18 +265,12 @@ export const useUsersData = () => {
   // Fetch groups data
   const fetchGroups = async () => {
     try {
-      let res = await API.get(`/api/group/`);
-      if (res === undefined) {
-        return;
-      }
-      setGroupOptions(
-        res.data.data.map((group) => ({
-          label: group,
-          value: group,
-        })),
-      );
+      const res = await API.get('/api/group/details');
+      if (res === undefined) return;
+      const groups = extractGroupDetailsResponse(res.data);
+      setGroupOptions(createGroupOptions(groups || []));
     } catch (error) {
-      showError(error.message);
+      showError(error?.message || t('刷新失败'));
     }
   };
 

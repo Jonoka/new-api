@@ -42,6 +42,7 @@ type User struct {
 	RequestCount     int            `json:"request_count" gorm:"type:int;default:0;"`               // request number
 	Group            string         `json:"group" gorm:"type:varchar(64);default:'default'"`
 	GroupId          int            `json:"group_id" gorm:"index;default:0"`
+	GroupName        string         `json:"group_name" gorm:"-"`
 	AffCode          string         `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
 	AffCount         int            `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
 	AffQuota         int            `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`           // 邀请剩余额度
@@ -54,6 +55,30 @@ type User struct {
 	StripeCustomer   string         `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
 	CreatedAt        int64          `json:"created_at" gorm:"autoCreateTime;column:created_at"`
 	LastLoginAt      int64          `json:"last_login_at" gorm:"default:0;column:last_login_at"`
+}
+
+func applyUserGroupNames(users []*User, groupNames map[string]string) {
+	for _, user := range users {
+		if user == nil {
+			continue
+		}
+		group := strings.TrimSpace(user.Group)
+		if group == "" {
+			continue
+		}
+		user.GroupName = group
+		if name := strings.TrimSpace(groupNames[group]); name != "" {
+			user.GroupName = name
+		}
+	}
+}
+
+func FillUserGroupNames(users ...*User) {
+	groupNames, err := GetGroupDisplayNameMap()
+	if err != nil {
+		groupNames = map[string]string{}
+	}
+	applyUserGroupNames(users, groupNames)
 }
 
 func (user *User) ToBaseUser() *UserBase {
@@ -240,6 +265,7 @@ func GetAllUsers(pageInfo *common.PageInfo) (users []*User, total int64, err err
 	if err = tx.Commit().Error; err != nil {
 		return nil, 0, err
 	}
+	FillUserGroupNames(users...)
 
 	return users, total, nil
 }
@@ -333,6 +359,7 @@ func SearchUsers(keyword string, group string, role *int, status *int, startIdx 
 	if err = tx.Commit().Error; err != nil {
 		return nil, 0, err
 	}
+	FillUserGroupNames(users...)
 
 	return users, total, nil
 }

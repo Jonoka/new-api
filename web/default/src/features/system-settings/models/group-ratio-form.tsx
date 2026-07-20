@@ -79,7 +79,7 @@ type GroupFormValues = {
 
 type GroupRatioFormProps = {
   form: UseFormReturn<GroupFormValues>
-  onSave: (values: GroupFormValues) => Promise<void>
+  onSave: (values: GroupFormValues) => Record<string, string>
   isSaving: boolean
 }
 
@@ -247,11 +247,14 @@ export const GroupRatioForm = memo(function GroupRatioForm({
       }
 
       try {
+        const optionUpdates = onSave(values)
         const response = await saveGroupDetails({
           groups: createGroupDetailsPayload(groups),
           deleted_ids: deletedGroupIds,
+          option_updates: optionUpdates,
         })
         if (!response.success) return
+        const saveWarning = response.message?.trim()
 
         const savedGroups = response.data ?? (await getGroupDetails())
         queryClient.setQueryData(groupDetailsQueryKey, savedGroups)
@@ -265,17 +268,21 @@ export const GroupRatioForm = memo(function GroupRatioForm({
         // 分组名称会显示在模型广场；立即使五分钟缓存失效。
         await queryClient.invalidateQueries({ queryKey: ['pricing'] })
 
-        // 组间特殊倍率等高级配置仍通过旧 Option 接口保存。
-        await onSave(values)
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ['system-options'] }),
           queryClient.invalidateQueries({ queryKey: ['channels'] }),
+          queryClient.invalidateQueries({ queryKey: ['groups'] }),
+          queryClient.invalidateQueries({ queryKey: ['keys'] }),
           queryClient.invalidateQueries({ queryKey: ['user-groups'] }),
           queryClient.invalidateQueries({ queryKey: ['user-self-groups'] }),
         ])
-        toast.success(t('Group settings saved successfully'))
+        if (saveWarning) {
+          toast.warning(saveWarning)
+        } else {
+          toast.success(t('Group settings saved successfully'))
+        }
       } catch {
-        // 请求层和旧 Option mutation 已负责展示具体错误。
+        // 请求层负责展示具体错误。
       }
     },
     [

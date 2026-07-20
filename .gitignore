@@ -30,6 +30,12 @@ worktrees/
 artifacts/
 .claude
 .cursor
+.playwright-cli/
+.serena/
+output/
+web/classic/pnpm-lock.yaml
+web/classic/pnpm-workspace.yaml
+web/default/src/i18n/locales/_reports/*.untranslated.json
 
 electron/node_modules
 electron/dist

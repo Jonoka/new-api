@@ -21,7 +21,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Spin, Tag } from '@douyinfe/semi-ui';
 import { IconAlertTriangle, IconClock, IconPulse } from '@douyinfe/semi-icons';
 
-import { API } from '../../../../helpers';
+import { API, getGroupDisplayName } from '../../../../helpers';
 import { LatencyTrendChart, UptimeTrendChart } from './PerformanceCharts';
 import SuccessRateSparkline from './SuccessRateSparkline';
 import {
@@ -89,7 +89,7 @@ const SectionHeader = ({ icon, title, description, accent }) => (
   </div>
 );
 
-const ModelPerformancePanel = ({ modelName, t }) => {
+const ModelPerformancePanel = ({ modelName, groupNames = {}, t }) => {
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
@@ -229,7 +229,7 @@ const ModelPerformancePanel = ({ modelName, t }) => {
                     style={{ borderColor: 'var(--semi-color-border)' }}
                   >
                     <Tag color='blue' size='small'>
-                      {row.group}
+                      {getGroupDisplayName(row.group, groupNames)}
                     </Tag>
                   </td>
                   <td

@@ -22,6 +22,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { CalendarClock, CreditCard, RefreshCw, Settings2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { createGroupOptions, type GroupOption } from '@/lib/group-options'
 import { Button } from '@/components/ui/button'
 import {
   Form,
@@ -59,10 +60,10 @@ import {
   sideDrawerHeaderClassName,
   sideDrawerSwitchItemClassName,
 } from '@/components/drawer-layout'
+import { getGroupDetails } from '@/features/channels/api'
 import {
   createPlan,
   updatePlan,
-  getGroups,
   createWaffoPancakeSubscriptionProduct,
   listWaffoPancakeSubscriptionProductOptions,
 } from '../api'
@@ -92,7 +93,7 @@ export function SubscriptionsMutateDrawer({
   const isEdit = !!currentRow?.plan?.id
   const { triggerRefresh } = useSubscriptions()
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [groupOptions, setGroupOptions] = useState<string[]>([])
+  const [groupOptions, setGroupOptions] = useState<GroupOption[]>([])
   const [creatingPancakeProduct, setCreatingPancakeProduct] = useState(false)
   const [pancakeProducts, setPancakeProducts] = useState<
     { id: string; name: string; status: string }[]
@@ -111,9 +112,9 @@ export function SubscriptionsMutateDrawer({
       } else {
         form.reset(PLAN_FORM_DEFAULTS)
       }
-      getGroups()
+      getGroupDetails()
         .then((res) => {
-          if (res.success) setGroupOptions(res.data || [])
+          if (res.success) setGroupOptions(createGroupOptions(res.data))
         })
         .catch(() => {})
       // Best-effort — empty list still lets the operator use "+ Create".
@@ -406,7 +407,7 @@ export function SubscriptionsMutateDrawer({
                       <Select
                         items={[
                           { value: '__none__', label: t('No Upgrade') },
-                          ...groupOptions.map((g) => ({ value: g, label: g })),
+                          ...groupOptions,
                         ]}
                         onValueChange={(v) =>
                           field.onChange(v === '__none__' ? '' : v)
@@ -423,9 +424,9 @@ export function SubscriptionsMutateDrawer({
                             <SelectItem value='__none__'>
                               {t('No Upgrade')}
                             </SelectItem>
-                            {groupOptions.map((g) => (
-                              <SelectItem key={g} value={g}>
-                                {g}
+                            {groupOptions.map((group) => (
+                              <SelectItem key={group.value} value={group.value}>
+                                {group.label}
                               </SelectItem>
                             ))}
                           </SelectGroup>

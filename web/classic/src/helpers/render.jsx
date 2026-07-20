@@ -803,7 +803,7 @@ export function renderText(text, limit) {
 /**
  * Render group tags based on the input group string
  * @param {string} group - The input group string
- * @param {Record<string, string>} labels - Optional display names keyed by stable group code
+ * @param {Record<string, string>} labels - Optional display names keyed by legacy group code
  * @returns {JSX.Element} - The rendered group tags
  */
 export function renderGroup(group, labels = {}) {
@@ -949,7 +949,6 @@ export const renderGroupOption = (item) => {
     disabled,
     selected,
     label,
-    value,
     focused,
     className,
     style,
@@ -959,6 +958,7 @@ export const renderGroupOption = (item) => {
     emptyContent,
     ...rest
   } = item;
+  const description = String(item.fullLabel || '').trim();
 
   const baseStyle = {
     display: 'flex',
@@ -996,11 +996,13 @@ export const renderGroupOption = (item) => {
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
         <Typography.Text strong type={disabled ? 'tertiary' : undefined}>
-          {value}
-        </Typography.Text>
-        <Typography.Text type='secondary' size='small'>
           {label}
         </Typography.Text>
+        {description && description !== label && (
+          <Typography.Text type='secondary' size='small'>
+            {description}
+          </Typography.Text>
+        )}
       </div>
       {item.ratio && renderRatio(item.ratio)}
     </div>

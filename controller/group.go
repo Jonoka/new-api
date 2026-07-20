@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -37,13 +38,15 @@ func GetGroupDetails(c *gin.Context) {
 }
 
 type GroupDetailsUpdateRequest struct {
-	Groups     []model.GroupConfig `json:"groups"`
-	DeletedIDs []int               `json:"deleted_ids"`
+	Groups        []model.GroupConfig `json:"groups"`
+	DeletedIDs    []int               `json:"deleted_ids"`
+	OptionUpdates map[string]string   `json:"option_updates,omitempty"`
 }
 
 type TokenGroupMigrationRequest struct {
-	SourceGroupID int `json:"source_group_id"`
-	TargetGroupID int `json:"target_group_id"`
+	SourceGroupID   int    `json:"source_group_id"`
+	TargetGroupID   *int   `json:"target_group_id,omitempty"`
+	TargetGroupMode string `json:"target_group_mode,omitempty"`
 }
 
 func decodeTokenGroupMigrationRequest(c *gin.Context) (*TokenGroupMigrationRequest, bool) {
@@ -55,13 +58,47 @@ func decodeTokenGroupMigrationRequest(c *gin.Context) (*TokenGroupMigrationReque
 	return &request, true
 }
 
+func (request *TokenGroupMigrationRequest) resolveTarget() (string, int, error) {
+	if request == nil {
+		return "", 0, fmt.Errorf("令牌分组迁移参数不能为空")
+	}
+	mode := strings.ToLower(strings.TrimSpace(request.TargetGroupMode))
+	if mode == "" {
+		mode = model.TokenGroupModeExplicit
+	}
+	switch mode {
+	case model.TokenGroupModeExplicit:
+		if request.TargetGroupID == nil || *request.TargetGroupID <= 0 {
+			return "", 0, fmt.Errorf("显式迁移必须指定大于 0 的目标分组 ID")
+		}
+		return mode, *request.TargetGroupID, nil
+	case model.TokenGroupModeAuto:
+		if request.TargetGroupID != nil && *request.TargetGroupID != 0 {
+			return "", 0, fmt.Errorf("迁移到 auto 时不能指定目标分组 ID")
+		}
+		return mode, 0, nil
+	default:
+		return "", 0, fmt.Errorf("不支持的令牌分组迁移目标模式: %s", mode)
+	}
+}
+
 // PreviewTokenGroupMigration 返回令牌分组迁移会影响的数据量。
 func PreviewTokenGroupMigration(c *gin.Context) {
 	request, ok := decodeTokenGroupMigrationRequest(c)
 	if !ok {
 		return
 	}
-	summary, err := model.PreviewTokenGroupMigration(request.SourceGroupID, request.TargetGroupID)
+	targetMode, targetGroupID, err := request.resolveTarget()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	var summary *model.TokenGroupMigrationSummary
+	if targetMode == model.TokenGroupModeAuto {
+		summary, err = model.PreviewTokenGroupMigrationToAuto(request.SourceGroupID)
+	} else {
+		summary, err = model.PreviewTokenGroupMigration(request.SourceGroupID, targetGroupID)
+	}
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -75,23 +112,41 @@ func MigrateTokenGroup(c *gin.Context) {
 	if !ok {
 		return
 	}
-	summary, err := model.MigrateTokenGroup(request.SourceGroupID, request.TargetGroupID)
+	targetMode, targetGroupID, err := request.resolveTarget()
 	if err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	var summary *model.TokenGroupMigrationSummary
+	if targetMode == model.TokenGroupModeAuto {
+		summary, err = model.MigrateTokenGroupToAuto(request.SourceGroupID)
+	} else {
+		summary, err = model.MigrateTokenGroup(request.SourceGroupID, targetGroupID)
+	}
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	targetDescription := fmt.Sprintf("%s（ID %d）", summary.TargetGroup.Name, summary.TargetGroup.Id)
+	detailDescription := fmt.Sprintf("其中 %d 个令牌合并了重复分组", summary.DeduplicatedTokens)
+	if summary.TargetGroupMode == model.TokenGroupModeAuto {
+		targetDescription = "自动选择（auto）"
+		detailDescription = fmt.Sprintf(
+			"其中 %d 个多分组令牌已移除其他全部分组和倍率保护",
+			summary.MultiGroupTokens,
+		)
 	}
 	model.RecordLog(
 		c.GetInt("id"),
 		model.LogTypeManage,
 		fmt.Sprintf(
-			"迁移令牌分组：%s（ID %d）到 %s（ID %d），共迁移 %d 个有效令牌、清理 %d 个已删除令牌，其中 %d 个令牌合并了重复分组；缓存清理成功 %d 个、失败 %d 个",
+			"迁移令牌分组：%s（ID %d）到 %s，共迁移 %d 个有效令牌、清理 %d 个已删除令牌，%s；缓存清理成功 %d 个、失败 %d 个",
 			summary.SourceGroup.Name,
 			summary.SourceGroup.Id,
-			summary.TargetGroup.Name,
-			summary.TargetGroup.Id,
+			targetDescription,
 			summary.MigratedTokens,
 			summary.CleanedDeletedTokens,
-			summary.DeduplicatedTokens,
+			detailDescription,
 			summary.CacheInvalidated,
 			summary.CacheInvalidationFailed,
 		),
@@ -106,11 +161,38 @@ func UpdateGroupDetails(c *gin.Context) {
 		common.ApiErrorMsg(c, "分组配置格式错误")
 		return
 	}
-	if err := model.SaveGroupConfig(request.Groups, request.DeletedIDs); err != nil {
+	result, err := model.SaveGroupConfigWithOptionsAndResult(
+		request.Groups,
+		request.DeletedIDs,
+		request.OptionUpdates,
+	)
+	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	GetGroupDetails(c)
+	groups, err := model.GetAllGroups(true)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if result.MigratedTokens > 0 || result.CleanedDeletedTokens > 0 {
+		model.RecordLog(
+			c.GetInt("id"),
+			model.LogTypeManage,
+			fmt.Sprintf(
+				"保存分组配置：删除分组时将 %d 个有效令牌切换为自动选择，并清理 %d 个已删除令牌的历史分组；缓存清理成功 %d 个、失败 %d 个",
+				result.MigratedTokens,
+				result.CleanedDeletedTokens,
+				result.CacheInvalidated,
+				result.CacheInvalidationFailed,
+			),
+		)
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": result.Warning,
+		"data":    groups,
+	})
 }
 
 func GetUserGroups(c *gin.Context) {

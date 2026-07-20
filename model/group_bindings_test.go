@@ -1463,3 +1463,463 @@ func TestPrepareGroupBindingsStillRejectsInvalidLegacyValues(t *testing.T) {
 		})
 	}
 }
+
+func TestMigrateTokenGroupToAutoClearsAllGroupsAndRepairsDirtyMirrors(t *testing.T) {
+	defaultGroup, vipGroup := setupGroupBindingsTest(t)
+	otherGroup := &Group{Code: "other-auto", Name: "其他自动分组", Ratio: 1, Status: GroupStatusActive}
+	if err := DB.Create(otherGroup).Error; err != nil {
+		t.Fatalf("创建其他分组失败: %v", err)
+	}
+	token := &Token{
+		UserId:           301,
+		Key:              "token-migrate-to-auto",
+		Name:             "token-migrate-to-auto",
+		GroupMode:        TokenGroupModeExplicit,
+		GroupIds:         []int{vipGroup.Id, otherGroup.Id},
+		GroupRatioLimits: `{"vip":2.5,"other-auto":1.5}`,
+		UnlimitedQuota:   true,
+	}
+	if err := token.Insert(); err != nil {
+		t.Fatalf("创建多分组令牌失败: %v", err)
+	}
+	if err := DB.Model(&Token{}).Where("id = ?", token.Id).Updates(map[string]interface{}{
+		"group":              vipGroup.Code,
+		"group_ratio_limits": "{broken-json",
+	}).Error; err != nil {
+		t.Fatalf("构造不一致令牌镜像失败: %v", err)
+	}
+	deletedToken := &Token{
+		UserId:         302,
+		Key:            "deleted-token-migrate-to-auto",
+		Name:           "deleted-token-migrate-to-auto",
+		GroupMode:      TokenGroupModeExplicit,
+		GroupIds:       []int{vipGroup.Id},
+		UnlimitedQuota: true,
+	}
+	if err := deletedToken.Insert(); err != nil {
+		t.Fatalf("创建待清理软删除令牌失败: %v", err)
+	}
+	if err := deletedToken.Delete(); err != nil {
+		t.Fatalf("软删除令牌失败: %v", err)
+	}
+	unrelated := &Token{
+		UserId:         303,
+		Key:            "unrelated-token-migrate-to-auto",
+		Name:           "unrelated-token-migrate-to-auto",
+		GroupMode:      TokenGroupModeExplicit,
+		GroupIds:       []int{defaultGroup.Id},
+		UnlimitedQuota: true,
+	}
+	if err := unrelated.Insert(); err != nil {
+		t.Fatalf("创建无关令牌失败: %v", err)
+	}
+
+	preview, err := PreviewTokenGroupMigrationToAuto(vipGroup.Id)
+	if err != nil {
+		t.Fatalf("预览迁移到 auto 失败: %v", err)
+	}
+	if preview.TargetGroupMode != TokenGroupModeAuto || preview.TargetGroup.Id != 0 || preview.TargetGroup.Code != TokenGroupModeAuto {
+		t.Fatalf("auto 目标信息错误: %#v", preview)
+	}
+	if preview.MigratedTokens != 1 || preview.MultiGroupTokens != 1 || preview.CleanedDeletedTokens != 1 {
+		t.Fatalf("auto 迁移预览统计错误: %#v", preview)
+	}
+	var before Token
+	if err := DB.First(&before, token.Id).Error; err != nil {
+		t.Fatalf("读取预览后的令牌失败: %v", err)
+	}
+	if before.Group != vipGroup.Code || before.GroupRatioLimits != "{broken-json" {
+		t.Fatalf("预览不应写入令牌: %#v", before)
+	}
+
+	result, err := MigrateTokenGroupToAuto(vipGroup.Id)
+	if err != nil {
+		t.Fatalf("迁移到 auto 失败: %v", err)
+	}
+	if result.MigratedTokens != 1 || result.MultiGroupTokens != 1 || result.CleanedDeletedTokens != 1 {
+		t.Fatalf("auto 迁移结果统计错误: %#v", result)
+	}
+	var stored Token
+	if err := DB.First(&stored, token.Id).Error; err != nil {
+		t.Fatalf("读取迁移后的令牌失败: %v", err)
+	}
+	if stored.Group != TokenGroupModeAuto || stored.GroupMode != TokenGroupModeAuto || stored.GroupRatioLimits != "" {
+		t.Fatalf("令牌未只保留 auto: %#v", stored)
+	}
+	var bindingCount int64
+	if err := DB.Model(&TokenGroupBinding{}).Where("token_id = ?", token.Id).Count(&bindingCount).Error; err != nil {
+		t.Fatalf("统计迁移后绑定失败: %v", err)
+	}
+	if bindingCount != 0 {
+		t.Fatalf("迁移到 auto 后仍有 %d 条显式分组绑定", bindingCount)
+	}
+	var storedDeleted Token
+	if err := DB.Unscoped().First(&storedDeleted, deletedToken.Id).Error; err != nil {
+		t.Fatalf("读取清理后的软删除令牌失败: %v", err)
+	}
+	if storedDeleted.Group != "" || storedDeleted.GroupMode != TokenGroupModeInherit || storedDeleted.GroupRatioLimits != "" {
+		t.Fatalf("软删除令牌未恢复 inherit: %#v", storedDeleted)
+	}
+	var storedUnrelated Token
+	if err := DB.First(&storedUnrelated, unrelated.Id).Error; err != nil {
+		t.Fatalf("读取无关令牌失败: %v", err)
+	}
+	if storedUnrelated.Group != defaultGroup.Code || storedUnrelated.GroupMode != TokenGroupModeExplicit {
+		t.Fatalf("无关令牌被错误修改: %#v", storedUnrelated)
+	}
+
+	repeated, err := MigrateTokenGroupToAuto(vipGroup.Id)
+	if err != nil {
+		t.Fatalf("重复迁移到 auto 不应失败: %v", err)
+	}
+	if repeated.MigratedTokens != 0 || repeated.CleanedDeletedTokens != 0 {
+		t.Fatalf("重复迁移到 auto 应保持幂等: %#v", repeated)
+	}
+}
+
+func TestSaveGroupConfigDeletesGroupAfterMigratingAliasTokenToAuto(t *testing.T) {
+	_, vipGroup := setupGroupBindingsTest(t)
+	alias := "legacy-delete-to-auto"
+	if err := DB.Create(&GroupAlias{Alias: alias, GroupId: vipGroup.Id}).Error; err != nil {
+		t.Fatalf("创建分组别名失败: %v", err)
+	}
+	token := &Token{
+		UserId:           304,
+		Key:              "legacy-delete-to-auto-token",
+		Name:             "legacy-delete-to-auto-token",
+		Group:            "default," + alias,
+		GroupMode:        TokenGroupModeExplicit,
+		GroupRatioLimits: "{broken-json",
+		UnlimitedQuota:   true,
+	}
+	if err := DB.Create(token).Error; err != nil {
+		t.Fatalf("创建别名历史令牌失败: %v", err)
+	}
+
+	if err := SaveGroupConfig(nil, []int{vipGroup.Id}); err != nil {
+		t.Fatalf("删除仅被令牌引用的分组失败: %v", err)
+	}
+	var stored Token
+	if err := DB.First(&stored, token.Id).Error; err != nil {
+		t.Fatalf("读取自动迁移后的令牌失败: %v", err)
+	}
+	if stored.Group != TokenGroupModeAuto || stored.GroupMode != TokenGroupModeAuto || stored.GroupRatioLimits != "" {
+		t.Fatalf("删除分组时令牌未切换到 auto: %#v", stored)
+	}
+	var groupCount, aliasCount, bindingCount int64
+	if err := DB.Model(&Group{}).Where("id = ?", vipGroup.Id).Count(&groupCount).Error; err != nil {
+		t.Fatalf("统计删除后的分组失败: %v", err)
+	}
+	if err := DB.Model(&GroupAlias{}).Where("group_id = ?", vipGroup.Id).Count(&aliasCount).Error; err != nil {
+		t.Fatalf("统计删除后的别名失败: %v", err)
+	}
+	if err := DB.Model(&TokenGroupBinding{}).Where("token_id = ?", token.Id).Count(&bindingCount).Error; err != nil {
+		t.Fatalf("统计删除后的令牌绑定失败: %v", err)
+	}
+	if groupCount != 0 || aliasCount != 0 || bindingCount != 0 {
+		t.Fatalf("删除后仍有残留: group=%d alias=%d binding=%d", groupCount, aliasCount, bindingCount)
+	}
+}
+
+func TestSaveGroupConfigRollsBackAutoMigrationWhenNonTokenReferenceBlocksDelete(t *testing.T) {
+	_, vipGroup := setupGroupBindingsTest(t)
+	token := &Token{
+		UserId:         305,
+		Key:            "rollback-delete-to-auto-token",
+		Name:           "rollback-delete-to-auto-token",
+		GroupMode:      TokenGroupModeExplicit,
+		GroupIds:       []int{vipGroup.Id},
+		UnlimitedQuota: true,
+	}
+	if err := token.Insert(); err != nil {
+		t.Fatalf("创建待回滚令牌失败: %v", err)
+	}
+	if err := DB.Create(&ChannelGroupBinding{ChannelId: 9901, GroupId: vipGroup.Id, Position: 0}).Error; err != nil {
+		t.Fatalf("创建非令牌阻塞引用失败: %v", err)
+	}
+
+	err := SaveGroupConfig(nil, []int{vipGroup.Id})
+	if err == nil || !strings.Contains(err.Error(), "非令牌业务数据引用") {
+		t.Fatalf("非令牌引用应阻止删除，实际错误: %v", err)
+	}
+	var stored Token
+	if err := DB.First(&stored, token.Id).Error; err != nil {
+		t.Fatalf("读取回滚后的令牌失败: %v", err)
+	}
+	if stored.Group != vipGroup.Code || stored.GroupMode != TokenGroupModeExplicit {
+		t.Fatalf("删除失败后令牌迁移未回滚: %#v", stored)
+	}
+	var groupCount, bindingCount int64
+	if err := DB.Model(&Group{}).Where("id = ?", vipGroup.Id).Count(&groupCount).Error; err != nil {
+		t.Fatalf("统计回滚后的分组失败: %v", err)
+	}
+	if err := DB.Model(&TokenGroupBinding{}).
+		Where("token_id = ? AND group_id = ?", token.Id, vipGroup.Id).
+		Count(&bindingCount).Error; err != nil {
+		t.Fatalf("统计回滚后的令牌绑定失败: %v", err)
+	}
+	if groupCount != 1 || bindingCount != 1 {
+		t.Fatalf("删除失败未完整回滚: group=%d binding=%d", groupCount, bindingCount)
+	}
+}
+
+func TestSaveGroupConfigReportsTokenCacheInvalidationFailure(t *testing.T) {
+	_, vipGroup := setupGroupBindingsTest(t)
+	token := &Token{
+		UserId:         306,
+		Key:            "cache-warning-delete-to-auto-token",
+		Name:           "cache-warning-delete-to-auto-token",
+		GroupMode:      TokenGroupModeExplicit,
+		GroupIds:       []int{vipGroup.Id},
+		UnlimitedQuota: true,
+	}
+	if err := token.Insert(); err != nil {
+		t.Fatalf("创建缓存告警测试令牌失败: %v", err)
+	}
+	oldRedisEnabled, oldRDB := common.RedisEnabled, common.RDB
+	common.RedisEnabled = true
+	common.RDB = nil
+	t.Cleanup(func() {
+		common.RedisEnabled = oldRedisEnabled
+		common.RDB = oldRDB
+	})
+
+	result, err := SaveGroupConfigWithResult(nil, []int{vipGroup.Id})
+	if err != nil {
+		t.Fatalf("缓存清理失败不应回滚已提交的分组保存: %v", err)
+	}
+	if result.MigratedTokens != 1 || result.CacheInvalidated != 0 || result.CacheInvalidationFailed != 1 {
+		t.Fatalf("缓存清理告警统计错误: %#v", result)
+	}
+	if !strings.Contains(result.Warning, "缓存清理失败") {
+		t.Fatalf("缓存清理失败未返回可展示警告: %#v", result)
+	}
+	var stored Token
+	if err := DB.First(&stored, token.Id).Error; err != nil {
+		t.Fatalf("读取缓存失败后的令牌失败: %v", err)
+	}
+	if stored.Group != TokenGroupModeAuto || stored.GroupMode != TokenGroupModeAuto {
+		t.Fatalf("缓存清理失败不应回滚数据库迁移: %#v", stored)
+	}
+}
+
+func TestLockTokenGroupBindingGroupsRejectsDeletedTarget(t *testing.T) {
+	_, vipGroup := setupGroupBindingsTest(t)
+	selection := &Token{
+		GroupMode: TokenGroupModeExplicit,
+		GroupIds:  []int{vipGroup.Id},
+	}
+	if err := PrepareTokenGroupBindings(DB, selection); err != nil {
+		t.Fatalf("准备令牌分组失败: %v", err)
+	}
+	if err := DB.Delete(vipGroup).Error; err != nil {
+		t.Fatalf("构造并发删除后的分组状态失败: %v", err)
+	}
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		return lockTokenGroupBindingGroups(tx, selection)
+	})
+	if err == nil || !strings.Contains(err.Error(), "写入期间已被删除") {
+		t.Fatalf("写入令牌绑定前必须重新确认并锁定分组，实际错误: %v", err)
+	}
+}
+
+func TestLockChannelGroupBindingGroupsRejectsDeletedTarget(t *testing.T) {
+	_, vipGroup := setupGroupBindingsTest(t)
+	selection := &Channel{GroupIds: []int{vipGroup.Id}}
+	if err := PrepareChannelGroupBindings(DB, selection); err != nil {
+		t.Fatalf("准备渠道分组失败: %v", err)
+	}
+	if err := DB.Delete(vipGroup).Error; err != nil {
+		t.Fatalf("构造并发删除后的分组状态失败: %v", err)
+	}
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		return lockChannelGroupBindingGroups(tx, selection)
+	})
+	if err == nil || !strings.Contains(err.Error(), "写入期间已被删除") {
+		t.Fatalf("写入渠道绑定前必须重新确认并锁定分组，实际错误: %v", err)
+	}
+}
+
+func TestWriteChannelGroupBindingsRollsBackEntityWhenTargetDeleted(t *testing.T) {
+	_, vipGroup := setupGroupBindingsTest(t)
+	channel := &Channel{
+		Name:     "entity-first-channel",
+		Key:      "entity-first-key",
+		Models:   "gpt-test",
+		GroupIds: []int{vipGroup.Id},
+		Status:   common.ChannelStatusEnabled,
+	}
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := PrepareChannelGroupBindings(tx, channel); err != nil {
+			return err
+		}
+		if err := tx.Create(channel).Error; err != nil {
+			return err
+		}
+		if err := tx.Delete(&Group{}, vipGroup.Id).Error; err != nil {
+			return err
+		}
+		if err := writeChannelGroupBindings(tx, channel); err != nil {
+			return err
+		}
+		return channel.AddAbilities(tx)
+	})
+	if err == nil || !strings.Contains(err.Error(), "写入期间已被删除") {
+		t.Fatalf("实体先写时必须在绑定前复核目标分组，实际错误: %v", err)
+	}
+	var groupCount, channelCount, bindingCount, abilityCount int64
+	if err := DB.Model(&Group{}).Where("id = ?", vipGroup.Id).Count(&groupCount).Error; err != nil {
+		t.Fatalf("统计回滚后的分组失败: %v", err)
+	}
+	if err := DB.Model(&Channel{}).Where("name = ?", channel.Name).Count(&channelCount).Error; err != nil {
+		t.Fatalf("统计回滚后的渠道失败: %v", err)
+	}
+	if err := DB.Model(&ChannelGroupBinding{}).Count(&bindingCount).Error; err != nil {
+		t.Fatalf("统计回滚后的渠道绑定失败: %v", err)
+	}
+	if err := DB.Model(&Ability{}).Count(&abilityCount).Error; err != nil {
+		t.Fatalf("统计回滚后的能力失败: %v", err)
+	}
+	if groupCount != 1 || channelCount != 0 || bindingCount != 0 || abilityCount != 0 {
+		t.Fatalf(
+			"目标分组失效后的事务未完整回滚: group=%d channel=%d binding=%d ability=%d",
+			groupCount,
+			channelCount,
+			bindingCount,
+			abilityCount,
+		)
+	}
+}
+
+func TestChannelUpdateRejectsDeletedTargetWithoutChangingBindingsOrAbilities(t *testing.T) {
+	defaultGroup, vipGroup := setupGroupBindingsTest(t)
+	channel := &Channel{
+		Name:     "channel-update-lock",
+		Key:      "channel-update-lock-key",
+		Models:   "gpt-old",
+		GroupIds: []int{vipGroup.Id},
+		Status:   common.ChannelStatusEnabled,
+	}
+	if err := channel.Insert(); err != nil {
+		t.Fatalf("创建待更新渠道失败: %v", err)
+	}
+	if err := DB.Delete(defaultGroup).Error; err != nil {
+		t.Fatalf("删除待选目标分组失败: %v", err)
+	}
+	update := &Channel{
+		Id:       channel.Id,
+		Name:     "channel-update-changed",
+		Models:   "gpt-new",
+		GroupIds: []int{defaultGroup.Id},
+	}
+	err := update.Update()
+	if err == nil {
+		t.Fatal("更新到已删除分组必须失败")
+	}
+	var stored Channel
+	if err := DB.First(&stored, channel.Id).Error; err != nil {
+		t.Fatalf("读取拒绝更新后的渠道失败: %v", err)
+	}
+	if stored.Name != channel.Name || stored.Models != channel.Models || stored.Group != vipGroup.Code {
+		t.Fatalf("拒绝更新后渠道实体被修改: %#v", stored)
+	}
+	var bindings []ChannelGroupBinding
+	if err := DB.Where("channel_id = ?", channel.Id).Find(&bindings).Error; err != nil {
+		t.Fatalf("读取拒绝更新后的渠道绑定失败: %v", err)
+	}
+	var abilities []Ability
+	if err := DB.Where("channel_id = ?", channel.Id).Find(&abilities).Error; err != nil {
+		t.Fatalf("读取拒绝更新后的能力失败: %v", err)
+	}
+	if len(bindings) != 1 || bindings[0].GroupId != vipGroup.Id {
+		t.Fatalf("拒绝更新后渠道绑定被修改: %#v", bindings)
+	}
+	if len(abilities) != 1 || abilities[0].GroupId != vipGroup.Id || abilities[0].Model != channel.Models {
+		t.Fatalf("拒绝更新后能力被修改: %#v", abilities)
+	}
+}
+
+func TestBatchInsertChannelsRejectsDeletedTargetAtomically(t *testing.T) {
+	defaultGroup, vipGroup := setupGroupBindingsTest(t)
+	if err := DB.Delete(vipGroup).Error; err != nil {
+		t.Fatalf("删除批量导入目标分组失败: %v", err)
+	}
+	channels := []Channel{
+		{Name: "batch-valid", Key: "batch-valid-key", Models: "gpt-test", GroupIds: []int{defaultGroup.Id}, Status: common.ChannelStatusEnabled},
+		{Name: "batch-invalid", Key: "batch-invalid-key", Models: "gpt-test", GroupIds: []int{vipGroup.Id}, Status: common.ChannelStatusEnabled},
+	}
+	if err := BatchInsertChannels(channels); err == nil {
+		t.Fatal("批量导入包含已删除目标分组时必须失败")
+	}
+	var channelCount, bindingCount, abilityCount int64
+	if err := DB.Model(&Channel{}).Where("name IN ?", []string{"batch-valid", "batch-invalid"}).Count(&channelCount).Error; err != nil {
+		t.Fatalf("统计批量回滚后的渠道失败: %v", err)
+	}
+	if err := DB.Model(&ChannelGroupBinding{}).Count(&bindingCount).Error; err != nil {
+		t.Fatalf("统计批量回滚后的渠道绑定失败: %v", err)
+	}
+	if err := DB.Model(&Ability{}).Count(&abilityCount).Error; err != nil {
+		t.Fatalf("统计批量回滚后的能力失败: %v", err)
+	}
+	if channelCount != 0 || bindingCount != 0 || abilityCount != 0 {
+		t.Fatalf("批量导入失败未完整回滚: channel=%d binding=%d ability=%d", channelCount, bindingCount, abilityCount)
+	}
+}
+
+func TestEditChannelByTagRejectsDeletedTargetWithoutChangingAbilities(t *testing.T) {
+	defaultGroup, vipGroup := setupGroupBindingsTest(t)
+	tag := "group-lock-tag"
+	channel := &Channel{
+		Name:     "tag-edit-channel",
+		Key:      "tag-edit-channel-key",
+		Models:   "gpt-old",
+		GroupIds: []int{vipGroup.Id},
+		Status:   common.ChannelStatusEnabled,
+		Tag:      &tag,
+	}
+	if err := channel.Insert(); err != nil {
+		t.Fatalf("创建标签渠道失败: %v", err)
+	}
+	if err := DB.Delete(defaultGroup).Error; err != nil {
+		t.Fatalf("删除标签编辑目标分组失败: %v", err)
+	}
+	newModels := "gpt-new"
+	targetGroupIDs := []int{defaultGroup.Id}
+	err := EditChannelByTag(
+		tag,
+		nil,
+		nil,
+		&newModels,
+		nil,
+		&targetGroupIDs,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	if err == nil {
+		t.Fatal("标签渠道编辑到已删除分组必须失败")
+	}
+	var stored Channel
+	if err := DB.First(&stored, channel.Id).Error; err != nil {
+		t.Fatalf("读取拒绝标签编辑后的渠道失败: %v", err)
+	}
+	if stored.Models != channel.Models || stored.Group != vipGroup.Code {
+		t.Fatalf("拒绝标签编辑后渠道实体被修改: %#v", stored)
+	}
+	var bindings []ChannelGroupBinding
+	if err := DB.Where("channel_id = ?", channel.Id).Find(&bindings).Error; err != nil {
+		t.Fatalf("读取拒绝标签编辑后的渠道绑定失败: %v", err)
+	}
+	var abilities []Ability
+	if err := DB.Where("channel_id = ?", channel.Id).Find(&abilities).Error; err != nil {
+		t.Fatalf("读取拒绝标签编辑后的能力失败: %v", err)
+	}
+	if len(bindings) != 1 || bindings[0].GroupId != vipGroup.Id {
+		t.Fatalf("拒绝标签编辑后渠道绑定被修改: %#v", bindings)
+	}
+	if len(abilities) != 1 || abilities[0].GroupId != vipGroup.Id || abilities[0].Model != channel.Models {
+		t.Fatalf("拒绝标签编辑后能力被修改: %#v", abilities)
+	}
+}

@@ -2,8 +2,10 @@ package model
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -19,6 +21,34 @@ import (
 type Option struct {
 	Key   string `json:"key" gorm:"primaryKey"`
 	Value string `json:"value"`
+}
+
+var optionWriteMutex sync.Mutex
+
+func sortedUniqueOptionKeys(keys []string) []string {
+	ordered := append([]string(nil), keys...)
+	sort.Strings(ordered)
+	unique := ordered[:0]
+	for _, key := range ordered {
+		if key == "" || (len(unique) > 0 && unique[len(unique)-1] == key) {
+			continue
+		}
+		unique = append(unique, key)
+	}
+	return unique
+}
+
+func lockOptionRowsForWrite(tx *gorm.DB, keys []string) error {
+	keys = sortedUniqueOptionKeys(keys)
+	if len(keys) == 0 {
+		return nil
+	}
+	var options []Option
+	return lockForUpdate(tx.Model(&Option{})).
+		Select(commonKeyCol).
+		Where(commonKeyCol+" IN ?", keys).
+		Order(commonKeyCol + " ASC").
+		Find(&options).Error
 }
 
 func AllOption() ([]*Option, error) {
@@ -220,12 +250,14 @@ func InitOptionMap() {
 }
 
 func loadOptionsFromDatabase() {
+	optionWriteMutex.Lock()
+	defer optionWriteMutex.Unlock()
 	options, _ := AllOption()
 	for _, option := range options {
 		if option.Key == "AutomaticRetryStatusCodes" {
 			if normalized, migrated := operation_setting.NormalizeAutomaticRetryStatusCodesOption(option.Value); migrated {
 				if err := DB.Model(&Option{}).
-					Where("key = ? AND value = ?", option.Key, option.Value).
+					Where(commonKeyCol+" = ? AND value = ?", option.Key, option.Value).
 					Update("value", normalized).Error; err != nil {
 					common.SysLog("failed to migrate legacy automatic retry status codes: " + err.Error())
 				}
@@ -251,17 +283,24 @@ func UpdateOption(key string, value string) error {
 	if err := validateOptionValue(key, value); err != nil {
 		return err
 	}
-	// Save to database first
-	option := Option{
-		Key: key,
+	optionWriteMutex.Lock()
+	defer optionWriteMutex.Unlock()
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockGroupReferenceOptionWrite(tx, key, value); err != nil {
+			return err
+		}
+		if err := lockOptionRowsForWrite(tx, []string{key}); err != nil {
+			return err
+		}
+		option := Option{Key: key}
+		if err := tx.FirstOrCreate(&option, Option{Key: key}).Error; err != nil {
+			return err
+		}
+		option.Value = value
+		return tx.Save(&option).Error
+	}); err != nil {
+		return err
 	}
-	// https://gorm.io/docs/update.html#Save-All-Fields
-	DB.FirstOrCreate(&option, Option{Key: key})
-	option.Value = value
-	// Save is a combination function.
-	// If save value does not contain primary key, it will execute Create,
-	// otherwise it will execute Update (with all fields).
-	DB.Save(&option)
 	// Update OptionMap
 	return updateOptionMap(key, value)
 }
@@ -280,8 +319,28 @@ func UpdateOptionsBulk(values map[string]string) error {
 			return err
 		}
 	}
+	optionWriteMutex.Lock()
+	defer optionWriteMutex.Unlock()
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		for k, v := range values {
+		groupIDs := make([]int, 0)
+		keys := make([]string, 0, len(values))
+		for key, value := range values {
+			ids, err := groupReferenceOptionGroupIDs(tx, key, value)
+			if err != nil {
+				return err
+			}
+			groupIDs = append(groupIDs, ids...)
+			keys = append(keys, key)
+		}
+		if err := lockGroupRowsForBindingWrite(tx, groupIDs, "分组选项"); err != nil {
+			return err
+		}
+		keys = sortedUniqueOptionKeys(keys)
+		if err := lockOptionRowsForWrite(tx, keys); err != nil {
+			return err
+		}
+		for _, k := range keys {
+			v := values[k]
 			option := Option{Key: k}
 			if err := tx.FirstOrCreate(&option, Option{Key: k}).Error; err != nil {
 				return err
@@ -707,6 +766,11 @@ func updateOptionMap(key string, value string) (err error) {
 
 func validateOptionValue(key string, value string) error {
 	switch key {
+	case "DefaultUseAutoGroup":
+		if value != "true" && value != "false" {
+			return fmt.Errorf("默认使用自动分组必须是 true 或 false")
+		}
+		return nil
 	case "ModelPriceUnit":
 		return ratio_setting.CheckModelPriceUnitJSONString(value)
 	case "ModelPriceVariants":

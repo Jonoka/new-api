@@ -106,7 +106,7 @@ export const extractGroupDetailsResponse = (payload) => {
 export const formatGroupLabel = (group = {}) => {
   const code = String(group.code ?? group.value ?? '').trim();
   const name = String(group.name ?? '').trim();
-  return name && name !== code ? `${name} (${code})` : name || code;
+  return name || code;
 };
 
 export const createGroupOptions = (groups) =>
@@ -130,6 +130,22 @@ export const createUserGroupOptions = (groupMap) =>
       label: name || code,
       description: String(info.description || info.desc || ''),
       ratio: info.ratio,
+    };
+  });
+
+export const createPlaygroundGroupOptions = (groupMap) =>
+  Object.entries(groupMap || {}).map(([code, info = {}]) => {
+    const normalizedCode = String(code).trim();
+    const name = String(info.name || '').trim() || normalizedCode;
+    const description = String(info.desc || '').trim();
+    return {
+      label: name,
+      value: normalizedCode,
+      ratio: info.ratio,
+      fullLabel:
+        description && description !== name && description !== normalizedCode
+          ? description
+          : '',
     };
   });
 

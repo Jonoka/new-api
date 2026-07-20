@@ -5202,6 +5202,7 @@
     "{{count}} tokens migrated successfully.": "已成功迁移 {{count}} 个令牌。",
     "Migrate tokens between groups": "迁移令牌分组",
     "All tokens explicitly bound to the source group will be moved to the target group. Automatic and inherited groups are not affected.": "所有明确绑定源分组的令牌都会迁移到目标分组，自动分组和继承分组不受影响。",
+    "All tokens explicitly bound to the source group will switch to automatic grouping. Their other groups and all ratio limits will be removed.": "所有明确绑定源分组的令牌都会切换为自动分组，其其他分组和全部倍率保护都会被移除。",
     "Migrating...": "迁移中...",
     "Migrate tokens": "迁移令牌",
     "Source group": "源分组",
@@ -5210,9 +5211,11 @@
     "Checking affected tokens...": "正在统计受影响令牌...",
     "{{count}} tokens will be migrated.": "将迁移 {{count}} 个令牌。",
     "{{users}} users affected; {{duplicates}} duplicate bindings will be removed.": "影响 {{users}} 个用户，并移除 {{duplicates}} 个重复绑定。",
+    "{{users}} users affected; {{count}} multi-group tokens will have all other groups removed.": "影响 {{users}} 个用户；{{count}} 个多分组令牌会移除其他全部分组。",
     "{{count}} deleted token records will have stale group references cleared.": "同时清理 {{count}} 个已删除令牌的历史分组引用。",
     "Mark this group for deletion?": "将此分组标记为删除？",
     "If tokens are still bound to this group, migrate them first. Channels, users, or other references can also prevent deletion when you save.": "如果仍有令牌绑定此分组，请先迁移令牌。渠道、用户或其他业务引用也可能在保存时阻止删除。",
+    "Tokens bound to this group will switch to automatic grouping when you save. Channels, users, or other references can still prevent deletion.": "保存时，绑定此分组的令牌会切换为自动分组。渠道、用户或其他业务引用仍可能阻止删除。",
     "Mark for deletion": "标记删除"
   }
 }

@@ -428,7 +428,6 @@ export function EditTagDialog({ open, onOpenChange }: EditTagDialogProps) {
                     key={group.id ?? group.code}
                     group={group.code}
                     label={group.name}
-                    title={group.name !== group.code ? group.code : undefined}
                     className={`cursor-pointer rounded-sm transition-opacity hover:opacity-70 ${
                       selectedGroups.includes(group.code)
                         ? 'bg-muted/70 px-1'

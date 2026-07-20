@@ -66,6 +66,7 @@ export type GroupDetailsResponse =
 export type UpdateGroupDetailsRequest = {
   groups: GroupDetailInput[]
   deleted_ids: number[]
+  option_updates?: Record<string, string>
 }
 
 export type UpdateGroupDetailsResponse = {
@@ -74,14 +75,22 @@ export type UpdateGroupDetailsResponse = {
   data?: GroupDetail[]
 }
 
-export type TokenGroupMigrationRequest = {
-  source_group_id: number
-  target_group_id: number
-}
+export type TokenGroupMigrationRequest =
+  | {
+      source_group_id: number
+      target_group_id: number
+      target_group_mode?: 'explicit'
+    }
+  | {
+      source_group_id: number
+      target_group_mode: 'auto'
+      target_group_id?: never
+    }
 
 export type TokenGroupMigrationSummary = {
   source_group: Pick<GroupDetail, 'id' | 'code' | 'name'>
   target_group: Pick<GroupDetail, 'id' | 'code' | 'name'>
+  target_group_mode: 'explicit' | 'auto'
   migrated_tokens: number
   deduplicated_tokens: number
   single_group_tokens: number

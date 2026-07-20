@@ -39,7 +39,13 @@ import {
   IconSave,
 } from '@douyinfe/semi-icons';
 import { Clock, RefreshCw } from 'lucide-react';
-import { API, showError, showSuccess } from '../../../../helpers';
+import {
+  API,
+  createGroupOptions,
+  extractGroupDetailsResponse,
+  showError,
+  showSuccess,
+} from '../../../../helpers';
 import {
   quotaToDisplayAmount,
   displayAmountToQuota,
@@ -129,13 +135,10 @@ const AddEditSubscriptionModal = ({
   useEffect(() => {
     if (!visible) return;
     setGroupLoading(true);
-    API.get('/api/group')
+    API.get('/api/group/details')
       .then((res) => {
-        if (res.data?.success) {
-          setGroupOptions(res.data?.data || []);
-        } else {
-          setGroupOptions([]);
-        }
+        const groups = extractGroupDetailsResponse(res?.data);
+        setGroupOptions(createGroupOptions(groups || []));
       })
       .catch(() => setGroupOptions([]))
       .finally(() => setGroupLoading(false));
@@ -334,9 +337,9 @@ const AddEditSubscriptionModal = ({
                         )}
                       >
                         <Select.Option value=''>{t('不升级')}</Select.Option>
-                        {(groupOptions || []).map((g) => (
-                          <Select.Option key={g} value={g}>
-                            {g}
+                        {(groupOptions || []).map((group) => (
+                          <Select.Option key={group.value} value={group.value}>
+                            {group.label}
                           </Select.Option>
                         ))}
                       </Form.Select>

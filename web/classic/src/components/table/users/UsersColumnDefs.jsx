@@ -313,17 +313,15 @@ const renderOperations = (
           </Button>
         </>
       )}
-      {canManageRoles &&
-        record.role === 100 &&
-        record.id !== currentUserId && (
-          <Button
-            type='secondary'
-            size='small'
-            onClick={() => showDemoteModal(record)}
-          >
-            {t('降级')} → {t('管理员')}
-          </Button>
-        )}
+      {canManageRoles && record.role === 100 && record.id !== currentUserId && (
+        <Button
+          type='secondary'
+          size='small'
+          onClick={() => showDemoteModal(record)}
+        >
+          {t('降级')} → {t('管理员')}
+        </Button>
+      )}
       <Dropdown menu={moreMenu} trigger='click' position='bottomRight'>
         <Button type='tertiary' size='small' icon={<IconMore />} />
       </Dropdown>
@@ -371,7 +369,7 @@ export const getUsersColumns = ({
       title: t('分组'),
       dataIndex: 'group',
       render: (text, record, index) => {
-        return <div>{renderGroup(text)}</div>;
+        return <div>{renderGroup(record.group_name || text)}</div>;
       },
     },
     {

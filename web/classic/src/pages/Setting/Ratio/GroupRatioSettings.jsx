@@ -67,6 +67,7 @@ const { Text, Title, Paragraph } = Typography;
 
 const OPTION_KEYS = [
   'GroupRatio',
+  'TopupGroupRatio',
   'UserUsableGroups',
   'GroupGroupRatio',
   'group_ratio_setting.group_special_usable_group',
@@ -75,6 +76,7 @@ const OPTION_KEYS = [
 ];
 
 const LEGACY_OPTION_KEYS = [
+  'TopupGroupRatio',
   'GroupGroupRatio',
   'group_ratio_setting.group_special_usable_group',
   'DefaultUseAutoGroup',
@@ -89,6 +91,7 @@ export default function GroupRatioSettings(props) {
 
   const [inputs, setInputs] = useState({
     GroupRatio: '',
+    TopupGroupRatio: '',
     UserUsableGroups: '',
     GroupGroupRatio: '',
     'group_ratio_setting.group_special_usable_group': '',
@@ -248,39 +251,30 @@ export default function GroupRatioSettings(props) {
       return showWarning(t('你似乎并没有修改什么'));
     }
 
-    const requestQueue = [];
-    let groupResponseIndex = -1;
-    if (groupsChanged) {
-      groupResponseIndex = requestQueue.length;
-      requestQueue.push(API.put('/api/group/details', groupPayload));
-    }
-
-    updateArray.forEach((item) => {
-      const value =
-        typeof inputs[item.key] === 'boolean'
-          ? String(inputs[item.key])
-          : inputs[item.key];
-      requestQueue.push(API.put('/api/option/', { key: item.key, value }));
-    });
+    const optionUpdates = Object.fromEntries(
+      updateArray.map((item) => {
+        const value =
+          typeof inputs[item.key] === 'boolean'
+            ? String(inputs[item.key])
+            : inputs[item.key];
+        return [item.key, value];
+      }),
+    );
 
     setLoading(true);
     try {
-      const responses = await Promise.all(requestQueue);
-      if (responses.includes(undefined)) {
-        return showError(
-          requestQueue.length > 1 ? t('部分保存失败，请重试') : t('保存失败'),
-        );
+      const requestPayload = groupsChanged
+        ? groupPayload
+        : { groups: [], deleted_ids: [] };
+      const groupResponse = await API.put('/api/group/details', {
+        ...requestPayload,
+        option_updates: optionUpdates,
+      });
+      if (groupResponse?.data?.success === false) {
+        return showError(groupResponse.data.message || t('保存失败'));
       }
-      for (let i = 0; i < responses.length; i++) {
-        if (responses[i]?.data?.success === false) {
-          return showError(responses[i].data.message || t('保存失败'));
-        }
-      }
-
       if (groupsChanged) {
-        let savedGroups = extractGroupDetailsResponse(
-          responses[groupResponseIndex]?.data,
-        );
+        let savedGroups = extractGroupDetailsResponse(groupResponse?.data);
         if (savedGroups === null) {
           savedGroups = await fetchGroupDetails();
         }
@@ -289,10 +283,15 @@ export default function GroupRatioSettings(props) {
 
       await props.refresh();
       if (groupsChanged) notifyGroupDetailsUpdated();
-      showSuccess(t('保存成功'));
+      const groupSaveWarning = groupResponse?.data?.message || '';
+      if (groupSaveWarning) {
+        showWarning(groupSaveWarning);
+      } else {
+        showSuccess(t('保存成功'));
+      }
     } catch (error) {
       console.error('Unexpected error:', error);
-      showError(t('保存失败，请重试'));
+      showError(error?.message || t('保存失败，请重试'));
     } finally {
       setLoading(false);
     }

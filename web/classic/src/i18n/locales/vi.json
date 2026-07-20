@@ -4559,6 +4559,9 @@
     "将迁移 {{count}} 个令牌": "Sẽ di chuyển {{count}} token",
     "影响 {{users}} 个用户，并移除 {{duplicates}} 个重复绑定": "Ảnh hưởng {{users}} người dùng và xóa {{duplicates}} liên kết trùng lặp",
     "同时清理 {{count}} 个已删除令牌的历史分组引用": "Đồng thời xóa tham chiếu nhóm cũ khỏi {{count}} token đã xóa",
-    "确认标记删除该分组？如有绑定令牌，请先使用“迁移令牌”。": "Đánh dấu nhóm này để xóa? Nếu token vẫn được liên kết, hãy di chuyển chúng trước."
+    "确认标记删除该分组？如有绑定令牌，请先使用“迁移令牌”。": "Đánh dấu nhóm này để xóa? Nếu token vẫn được liên kết, hãy di chuyển chúng trước.",
+    "所有明确绑定源分组的令牌都会切换为自动选择，并清除其他分组和全部倍率保护。": "Tất cả token được liên kết rõ ràng với nhóm nguồn sẽ chuyển sang auto, đồng thời xóa các nhóm khác và mọi giới hạn hệ số.",
+    "影响 {{users}} 个用户；{{count}} 个多分组令牌会移除其他全部分组": "Ảnh hưởng {{users}} người dùng; {{count}} token đa nhóm sẽ bị xóa tất cả nhóm còn lại",
+    "确认标记删除该分组？保存时绑定令牌会自动切换为 auto；渠道、用户等其他引用仍会阻止删除。": "Đánh dấu nhóm này để xóa? Token liên kết sẽ chuyển sang auto khi lưu; kênh, người dùng và các tham chiếu khác vẫn có thể ngăn việc xóa."
   }
 }

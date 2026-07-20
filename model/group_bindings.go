@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -11,7 +12,8 @@ import (
 )
 
 type GroupReference struct {
-	Id   int    `json:"id"`
+	Id int `json:"id"`
+	// Code 仅供旧客户端兼容，新客户端应使用 Id 关联、使用 Name 展示。
 	Code string `json:"code"`
 	Name string `json:"name"`
 }
@@ -23,7 +25,7 @@ func newGroupReference(group *Group) GroupReference {
 	return GroupReference{Id: group.Id, Code: group.Code, Name: group.Name}
 }
 
-// ChannelGroupBinding 是渠道与分组的稳定关联；Position 保留管理端选择顺序。
+// ChannelGroupBinding 通过 GroupId 关联渠道与分组；Position 保留管理端选择顺序。
 type ChannelGroupBinding struct {
 	ChannelId int `json:"channel_id" gorm:"primaryKey;autoIncrement:false;uniqueIndex:idx_channel_group_position,priority:1"`
 	GroupId   int `json:"group_id" gorm:"primaryKey;autoIncrement:false;index"`
@@ -385,6 +387,9 @@ func writeChannelGroupBindings(tx *gorm.DB, channel *Channel) error {
 	if channel == nil || channel.Id <= 0 || !groupBindingTablesReady(tx, &ChannelGroupBinding{}) {
 		return nil
 	}
+	if err := lockChannelGroupBindingGroups(tx, channel); err != nil {
+		return err
+	}
 	return replaceChannelGroupBindings(tx, channel)
 }
 
@@ -621,9 +626,59 @@ func insertTokenGroupBindingsForBackfill(tx *gorm.DB, token *Token) error {
 	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&bindings).Error
 }
 
+func lockGroupRowsForBindingWrite(tx *gorm.DB, groupIDs []int, owner string) error {
+	if tx == nil {
+		return errors.New("database is nil")
+	}
+	if len(groupIDs) == 0 {
+		return nil
+	}
+	ids := append([]int(nil), groupIDs...)
+	sort.Ints(ids)
+	uniqueIDs := ids[:0]
+	for _, id := range ids {
+		if id <= 0 || (len(uniqueIDs) > 0 && uniqueIDs[len(uniqueIDs)-1] == id) {
+			continue
+		}
+		uniqueIDs = append(uniqueIDs, id)
+	}
+	if len(uniqueIDs) == 0 {
+		return fmt.Errorf("%s分组不能为空", owner)
+	}
+	var lockedGroups []Group
+	if err := lockForUpdate(tx.Model(&Group{})).
+		Select("id").
+		Where("id IN ?", uniqueIDs).
+		Order("id ASC").
+		Find(&lockedGroups).Error; err != nil {
+		return err
+	}
+	if len(lockedGroups) != len(uniqueIDs) {
+		return fmt.Errorf("%s分组在写入期间已被删除，请重试", owner)
+	}
+	return nil
+}
+
+func lockChannelGroupBindingGroups(tx *gorm.DB, channel *Channel) error {
+	if channel == nil || len(channel.GroupIds) == 0 {
+		return nil
+	}
+	return lockGroupRowsForBindingWrite(tx, channel.GroupIds, "渠道")
+}
+
+func lockTokenGroupBindingGroups(tx *gorm.DB, token *Token) error {
+	if token == nil || token.GroupMode != TokenGroupModeExplicit || len(token.GroupIds) == 0 {
+		return nil
+	}
+	return lockGroupRowsForBindingWrite(tx, token.GroupIds, "令牌")
+}
+
 func writeTokenGroupBindings(tx *gorm.DB, token *Token) error {
 	if token == nil || token.Id <= 0 || !groupBindingTablesReady(tx, &TokenGroupBinding{}) {
 		return nil
+	}
+	if err := lockTokenGroupBindingGroups(tx, token); err != nil {
+		return err
 	}
 	return replaceTokenGroupBindings(tx, token)
 }

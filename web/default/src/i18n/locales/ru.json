@@ -5202,6 +5202,7 @@
     "{{count}} tokens migrated successfully.": "{{count}} tokens migrated successfully.",
     "Migrate tokens between groups": "Migrate tokens between groups",
     "All tokens explicitly bound to the source group will be moved to the target group. Automatic and inherited groups are not affected.": "All tokens explicitly bound to the source group will be moved to the target group. Automatic and inherited groups are not affected.",
+    "All tokens explicitly bound to the source group will switch to automatic grouping. Their other groups and all ratio limits will be removed.": "Все токены, явно привязанные к исходной группе, будут переведены в автоматический режим. Остальные группы и все ограничения коэффициентов будут удалены.",
     "Migrating...": "Migrating...",
     "Migrate tokens": "Migrate tokens",
     "Source group": "Source group",
@@ -5210,9 +5211,11 @@
     "Checking affected tokens...": "Checking affected tokens...",
     "{{count}} tokens will be migrated.": "{{count}} tokens will be migrated.",
     "{{users}} users affected; {{duplicates}} duplicate bindings will be removed.": "{{users}} users affected; {{duplicates}} duplicate bindings will be removed.",
+    "{{users}} users affected; {{count}} multi-group tokens will have all other groups removed.": "Затронуто пользователей: {{users}}; у {{count}} токенов с несколькими группами будут удалены все остальные группы.",
     "{{count}} deleted token records will have stale group references cleared.": "{{count}} deleted token records will have stale group references cleared.",
     "Mark this group for deletion?": "Mark this group for deletion?",
     "If tokens are still bound to this group, migrate them first. Channels, users, or other references can also prevent deletion when you save.": "If tokens are still bound to this group, migrate them first. Channels, users, or other references can also prevent deletion when you save.",
+    "Tokens bound to this group will switch to automatic grouping when you save. Channels, users, or other references can still prevent deletion.": "При сохранении привязанные к этой группе токены перейдут в автоматический режим. Каналы, пользователи и другие ссылки всё ещё могут помешать удалению.",
     "Mark for deletion": "Mark for deletion"
   }
 }

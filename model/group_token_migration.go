@@ -14,6 +14,7 @@ import (
 type TokenGroupMigrationSummary struct {
 	SourceGroup             GroupReference `json:"source_group"`
 	TargetGroup             GroupReference `json:"target_group"`
+	TargetGroupMode         string         `json:"target_group_mode"`
 	MigratedTokens          int            `json:"migrated_tokens"`
 	DeduplicatedTokens      int            `json:"deduplicated_tokens"`
 	SingleGroupTokens       int            `json:"single_group_tokens"`
@@ -29,9 +30,42 @@ type tokenGroupMigrationPlan struct {
 	token Token
 }
 
-func validateTokenGroupMigration(tx *gorm.DB, sourceGroupID, targetGroupID int, lock bool) (*Group, *Group, error) {
-	if sourceGroupID <= 0 || targetGroupID <= 0 {
-		return nil, nil, errors.New("源分组和目标分组 ID 必须大于 0")
+func automaticTokenGroupReference() GroupReference {
+	return GroupReference{Id: 0, Code: TokenGroupModeAuto, Name: "自动选择"}
+}
+
+func validateTokenGroupMigration(
+	tx *gorm.DB,
+	sourceGroupID int,
+	targetGroupID int,
+	targetGroupMode string,
+	lock bool,
+) (*Group, *Group, error) {
+	if sourceGroupID <= 0 {
+		return nil, nil, errors.New("源分组 ID 必须大于 0")
+	}
+	if targetGroupMode != TokenGroupModeExplicit && targetGroupMode != TokenGroupModeAuto {
+		return nil, nil, fmt.Errorf("不支持的令牌分组迁移目标模式: %s", targetGroupMode)
+	}
+	if targetGroupMode == TokenGroupModeAuto {
+		if targetGroupID != 0 {
+			return nil, nil, errors.New("迁移到 auto 时不能指定目标分组 ID")
+		}
+		query := tx.Model(&Group{}).Where("id = ?", sourceGroupID)
+		if lock {
+			query = lockForUpdate(query)
+		}
+		var sourceGroup Group
+		if err := query.First(&sourceGroup).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil, fmt.Errorf("源分组 ID %d 不存在", sourceGroupID)
+			}
+			return nil, nil, err
+		}
+		return &sourceGroup, nil, nil
+	}
+	if targetGroupID <= 0 {
+		return nil, nil, errors.New("目标分组 ID 必须大于 0")
 	}
 	if sourceGroupID == targetGroupID {
 		return nil, nil, errors.New("源分组和目标分组不能相同")
@@ -63,6 +97,64 @@ func validateTokenGroupMigration(tx *gorm.DB, sourceGroupID, targetGroupID int, 
 		return nil, nil, fmt.Errorf("目标分组 %s 已禁用，不能接收令牌", targetGroup.Name)
 	}
 	return sourceGroup, targetGroup, nil
+}
+
+func buildTokenGroupAutoMigrationPlans(
+	tokens []Token,
+	bindingsByTokenID map[int][]TokenGroupBinding,
+	sourceGroupID int,
+	legacyIdentifierSet map[string]struct{},
+	summary *TokenGroupMigrationSummary,
+) []tokenGroupMigrationPlan {
+	plans := make([]tokenGroupMigrationPlan, 0, len(tokens))
+	affectedUsers := make(map[int]struct{})
+	for index := range tokens {
+		token := &tokens[index]
+		tokenBindings := bindingsByTokenID[token.Id]
+		containsSourceBinding := false
+		for _, binding := range tokenBindings {
+			if binding.GroupId == sourceGroupID {
+				containsSourceBinding = true
+				break
+			}
+		}
+		if !containsSourceBinding && !containsLegacyGroupIdentifier(token.Group, legacyIdentifierSet) {
+			continue
+		}
+
+		if token.DeletedAt.Valid {
+			token.Group = ""
+			token.GroupMode = TokenGroupModeInherit
+			token.GroupIds = nil
+			token.GroupDetails = nil
+			token.GroupRatioLimits = ""
+			plans = append(plans, tokenGroupMigrationPlan{token: *token})
+			summary.CleanedDeletedTokens++
+			continue
+		}
+
+		groupCount := len(tokenBindings)
+		if legacyGroupCount := len(splitLegacyGroupCodes(token.Group)); legacyGroupCount > groupCount {
+			groupCount = legacyGroupCount
+		}
+		if groupCount <= 1 {
+			summary.SingleGroupTokens++
+		} else {
+			summary.MultiGroupTokens++
+		}
+		if token.UserId > 0 {
+			affectedUsers[token.UserId] = struct{}{}
+		}
+		token.Group = TokenGroupModeAuto
+		token.GroupMode = TokenGroupModeAuto
+		token.GroupIds = nil
+		token.GroupDetails = nil
+		token.GroupRatioLimits = ""
+		plans = append(plans, tokenGroupMigrationPlan{token: *token})
+		summary.MigratedTokens++
+	}
+	summary.AffectedUsers = len(affectedUsers)
+	return plans
 }
 
 func affectedTokensForGroupQuery(tx *gorm.DB, sourceGroupID int, legacyIdentifiers []string) *gorm.DB {
@@ -200,9 +292,16 @@ func buildTokenGroupMigrationPlans(
 	tx *gorm.DB,
 	sourceGroupID int,
 	targetGroupID int,
+	targetGroupMode string,
 	lock bool,
 ) ([]tokenGroupMigrationPlan, *TokenGroupMigrationSummary, error) {
-	sourceGroup, targetGroup, err := validateTokenGroupMigration(tx, sourceGroupID, targetGroupID, lock)
+	sourceGroup, targetGroup, err := validateTokenGroupMigration(
+		tx,
+		sourceGroupID,
+		targetGroupID,
+		targetGroupMode,
+		lock,
+	)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -220,8 +319,13 @@ func buildTokenGroupMigrationPlans(
 	}
 
 	summary := &TokenGroupMigrationSummary{
-		SourceGroup: newGroupReference(sourceGroup),
-		TargetGroup: newGroupReference(targetGroup),
+		SourceGroup:     newGroupReference(sourceGroup),
+		TargetGroupMode: targetGroupMode,
+	}
+	if targetGroupMode == TokenGroupModeAuto {
+		summary.TargetGroup = automaticTokenGroupReference()
+	} else {
+		summary.TargetGroup = newGroupReference(targetGroup)
 	}
 	if len(tokens) == 0 {
 		return nil, summary, nil
@@ -276,6 +380,16 @@ func buildTokenGroupMigrationPlans(
 		}
 	} else {
 		tokens = exactTokens
+	}
+	if targetGroupMode == TokenGroupModeAuto {
+		plans := buildTokenGroupAutoMigrationPlans(
+			tokens,
+			bindingsByTokenID,
+			sourceGroupID,
+			legacyIdentifierSet,
+			summary,
+		)
+		return plans, summary, nil
 	}
 
 	var allGroups []Group
@@ -468,17 +582,167 @@ func buildTokenGroupMigrationPlans(
 	return plans, summary, nil
 }
 
-// PreviewTokenGroupMigration 返回迁移会影响的令牌数量，不修改数据。
-func PreviewTokenGroupMigration(sourceGroupID, targetGroupID int) (*TokenGroupMigrationSummary, error) {
+func applyTokenGroupMigrationPlans(tx *gorm.DB, plans []tokenGroupMigrationPlan) error {
+	for index := range plans {
+		token := &plans[index].token
+		if err := tx.Unscoped().Model(&Token{}).Where("id = ?", token.Id).Updates(map[string]interface{}{
+			"group":              token.Group,
+			"group_mode":         token.GroupMode,
+			"group_ratio_limits": token.GroupRatioLimits,
+		}).Error; err != nil {
+			return fmt.Errorf("更新令牌 %d 分组镜像失败: %w", token.Id, err)
+		}
+		if err := replaceTokenGroupBindings(tx, token); err != nil {
+			return fmt.Errorf("更新令牌 %d 分组绑定失败: %w", token.Id, err)
+		}
+	}
+	return nil
+}
+
+func verifyTokenGroupMigrationSourceCleared(
+	tx *gorm.DB,
+	sourceGroupID int,
+	sourceGroup GroupReference,
+) error {
+	var remainingBindings int64
+	if err := tx.Model(&TokenGroupBinding{}).
+		Where("group_id = ?", sourceGroupID).
+		Count(&remainingBindings).Error; err != nil {
+		return err
+	}
+	legacyIdentifiers, legacyIdentifierSet, err := groupLegacyIdentifiers(
+		tx,
+		&Group{Id: sourceGroup.Id, Code: sourceGroup.Code},
+	)
+	if err != nil {
+		return err
+	}
+	var remainingTokens []Token
+	if err := affectedTokensForGroupQuery(tx, sourceGroupID, legacyIdentifiers).
+		Select("id", groupBindingGroupColumn()).
+		Find(&remainingTokens).Error; err != nil {
+		return err
+	}
+	var remainingLegacy int64
+	for _, token := range remainingTokens {
+		if containsLegacyGroupIdentifier(token.Group, legacyIdentifierSet) {
+			remainingLegacy++
+		}
+	}
+	if remainingBindings > 0 || remainingLegacy > 0 {
+		return fmt.Errorf(
+			"源分组仍有 %d 条稳定绑定和 %d 条旧令牌引用，迁移已回滚",
+			remainingBindings,
+			remainingLegacy,
+		)
+	}
+	return nil
+}
+
+// migrateTokenGroupInTx 在调用方事务内完成令牌迁移，不提交事务也不清理缓存。
+func migrateTokenGroupInTx(
+	tx *gorm.DB,
+	sourceGroupID int,
+	targetGroupID int,
+	targetGroupMode string,
+) ([]tokenGroupMigrationPlan, *TokenGroupMigrationSummary, error) {
+	plans, summary, err := buildTokenGroupMigrationPlans(
+		tx,
+		sourceGroupID,
+		targetGroupID,
+		targetGroupMode,
+		true,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := applyTokenGroupMigrationPlans(tx, plans); err != nil {
+		return nil, nil, err
+	}
+	if err := verifyTokenGroupMigrationSourceCleared(tx, sourceGroupID, summary.SourceGroup); err != nil {
+		return nil, nil, err
+	}
+	return plans, summary, nil
+}
+
+func invalidateTokenGroupMigrationCaches(
+	plans []tokenGroupMigrationPlan,
+	summary *TokenGroupMigrationSummary,
+) {
+	if !common.RedisEnabled || len(plans) == 0 || summary == nil {
+		return
+	}
+	seenTokenIDs := make(map[int]struct{}, len(plans))
+	keys := make([]string, 0, len(plans))
+	for _, plan := range plans {
+		if plan.token.DeletedAt.Valid || plan.token.Key == "" {
+			continue
+		}
+		if _, exists := seenTokenIDs[plan.token.Id]; exists {
+			continue
+		}
+		seenTokenIDs[plan.token.Id] = struct{}{}
+		keys = append(keys, plan.token.Key)
+	}
+	if len(keys) == 0 {
+		return
+	}
+	var invalidateErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		invalidateErr = cacheDeleteTokens(keys)
+		if invalidateErr == nil {
+			break
+		}
+	}
+	if invalidateErr == nil {
+		summary.CacheInvalidated = len(keys)
+		return
+	}
+	summary.CacheInvalidationFailed = len(keys)
+	common.SysLog(fmt.Sprintf("failed to invalidate %d migrated token caches: %v", len(keys), invalidateErr))
+	summary.Warning = fmt.Sprintf(
+		"数据库迁移已完成，但 %d 个令牌缓存清理失败，请在 Redis 恢复后清理令牌缓存",
+		summary.CacheInvalidationFailed,
+	)
+}
+
+func previewTokenGroupMigration(
+	sourceGroupID int,
+	targetGroupID int,
+	targetGroupMode string,
+) (*TokenGroupMigrationSummary, error) {
 	if DB == nil {
 		return nil, errors.New("database is nil")
 	}
-	_, summary, err := buildTokenGroupMigrationPlans(DB, sourceGroupID, targetGroupID, false)
+	_, summary, err := buildTokenGroupMigrationPlans(
+		DB,
+		sourceGroupID,
+		targetGroupID,
+		targetGroupMode,
+		false,
+	)
 	return summary, err
 }
 
-// MigrateTokenGroup 将所有明确绑定源分组的令牌原子迁移到目标分组。
-func MigrateTokenGroup(sourceGroupID, targetGroupID int) (*TokenGroupMigrationSummary, error) {
+// PreviewTokenGroupMigration 返回显式分组迁移会影响的令牌数量，不修改数据。
+func PreviewTokenGroupMigration(sourceGroupID, targetGroupID int) (*TokenGroupMigrationSummary, error) {
+	return previewTokenGroupMigration(
+		sourceGroupID,
+		targetGroupID,
+		TokenGroupModeExplicit,
+	)
+}
+
+// PreviewTokenGroupMigrationToAuto 返回迁移到自动选择会影响的令牌数量，不修改数据。
+func PreviewTokenGroupMigrationToAuto(sourceGroupID int) (*TokenGroupMigrationSummary, error) {
+	return previewTokenGroupMigration(sourceGroupID, 0, TokenGroupModeAuto)
+}
+
+func migrateTokenGroup(
+	sourceGroupID int,
+	targetGroupID int,
+	targetGroupMode string,
+) (*TokenGroupMigrationSummary, error) {
 	if DB == nil {
 		return nil, errors.New("database is nil")
 	}
@@ -486,81 +750,27 @@ func MigrateTokenGroup(sourceGroupID, targetGroupID int) (*TokenGroupMigrationSu
 	var summary *TokenGroupMigrationSummary
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var err error
-		plans, summary, err = buildTokenGroupMigrationPlans(tx, sourceGroupID, targetGroupID, true)
-		if err != nil {
-			return err
-		}
-		for index := range plans {
-			token := &plans[index].token
-			if err := tx.Unscoped().Model(&Token{}).Where("id = ?", token.Id).Updates(map[string]interface{}{
-				"group":              token.Group,
-				"group_mode":         token.GroupMode,
-				"group_ratio_limits": token.GroupRatioLimits,
-			}).Error; err != nil {
-				return fmt.Errorf("更新令牌 %d 分组镜像失败: %w", token.Id, err)
-			}
-			if err := replaceTokenGroupBindings(tx, token); err != nil {
-				return fmt.Errorf("更新令牌 %d 分组绑定失败: %w", token.Id, err)
-			}
-		}
-
-		var remainingBindings int64
-		if err := tx.Model(&TokenGroupBinding{}).Where("group_id = ?", sourceGroupID).Count(&remainingBindings).Error; err != nil {
-			return err
-		}
-		legacyIdentifiers, legacyIdentifierSet, err := groupLegacyIdentifiers(
+		plans, summary, err = migrateTokenGroupInTx(
 			tx,
-			&Group{Id: summary.SourceGroup.Id, Code: summary.SourceGroup.Code},
+			sourceGroupID,
+			targetGroupID,
+			targetGroupMode,
 		)
-		if err != nil {
-			return err
-		}
-		var remainingTokens []Token
-		if err := affectedTokensForGroupQuery(tx, sourceGroupID, legacyIdentifiers).
-			Select("id", groupBindingGroupColumn()).
-			Find(&remainingTokens).Error; err != nil {
-			return err
-		}
-		var remainingLegacy int64
-		for _, token := range remainingTokens {
-			if containsLegacyGroupIdentifier(token.Group, legacyIdentifierSet) {
-				remainingLegacy++
-			}
-		}
-		if remainingBindings > 0 || remainingLegacy > 0 {
-			return fmt.Errorf("源分组仍有 %d 条稳定绑定和 %d 条旧令牌引用，迁移已回滚", remainingBindings, remainingLegacy)
-		}
-		return nil
+		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-
-	if common.RedisEnabled && len(plans) > 0 {
-		for _, plan := range plans {
-			if plan.token.DeletedAt.Valid || plan.token.Key == "" {
-				continue
-			}
-			var invalidateErr error
-			for attempt := 0; attempt < 3; attempt++ {
-				invalidateErr = cacheDeleteToken(plan.token.Key)
-				if invalidateErr == nil {
-					break
-				}
-			}
-			if invalidateErr != nil {
-				summary.CacheInvalidationFailed++
-				common.SysLog(fmt.Sprintf("failed to invalidate migrated token %d cache: %v", plan.token.Id, invalidateErr))
-				continue
-			}
-			summary.CacheInvalidated++
-		}
-		if summary.CacheInvalidationFailed > 0 {
-			summary.Warning = fmt.Sprintf(
-				"数据库迁移已完成，但 %d 个令牌缓存清理失败，请在 Redis 恢复后清理令牌缓存",
-				summary.CacheInvalidationFailed,
-			)
-		}
-	}
+	invalidateTokenGroupMigrationCaches(plans, summary)
 	return summary, nil
+}
+
+// MigrateTokenGroup 将所有明确绑定源分组的令牌原子迁移到目标分组。
+func MigrateTokenGroup(sourceGroupID, targetGroupID int) (*TokenGroupMigrationSummary, error) {
+	return migrateTokenGroup(sourceGroupID, targetGroupID, TokenGroupModeExplicit)
+}
+
+// MigrateTokenGroupToAuto 将所有明确绑定源分组的令牌切换为自动选择。
+func MigrateTokenGroupToAuto(sourceGroupID int) (*TokenGroupMigrationSummary, error) {
+	return migrateTokenGroup(sourceGroupID, 0, TokenGroupModeAuto)
 }

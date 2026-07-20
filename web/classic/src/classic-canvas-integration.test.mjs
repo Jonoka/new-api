@@ -89,8 +89,13 @@ test('classic canvas launcher exposes optional capability groups', () => {
 
 test('classic group selector displays group names instead of descriptions', () => {
   const source = readSource('helpers/api.js');
+  const renderSource = readSource('helpers/render.jsx');
+  const groupRenderer = renderSource.slice(
+    renderSource.indexOf('export const renderGroupOption'),
+    renderSource.indexOf('export function renderNumber'),
+  );
 
-  assert.match(source, /label:\s*group/);
-  assert.match(source, /value:\s*group/);
-  assert.doesNotMatch(source, /label:\s*\n\s*info\.desc/);
+  assert.match(source, /createPlaygroundGroupOptions\(data\)/);
+  assert.match(groupRenderer, /<Typography\.Text strong[\s\S]*?\{label\}/);
+  assert.doesNotMatch(groupRenderer, /\{value\}/);
 });

@@ -480,7 +480,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
 
       const other = parseLogOther(log.other)
       const displayName = sensitiveVisible ? tokenName : '••••'
-      let group = log.group
+      let group = log.group_name || log.group
       if (!group) group = other?.group || ''
 
       const metaParts: string[] = []

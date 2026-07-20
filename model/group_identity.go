@@ -10,14 +10,15 @@ import (
 	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-// Group 是路由/用户分组的稳定身份。
+// Group 使用 Id 作为唯一稳定身份。
 //
-// Code 是兼容旧 API 和内部运行时的不可变标识；Name 是只用于展示的可变名称。
-// 这样修改名称不会改变渠道、令牌、订阅或历史数据所指向的分组身份。
+// Code 仅保留给旧 API、旧配置和迁移期运行时使用，不应作为第二个名称展示；
+// Name 是当前分组名称。所有新的持久化关联都必须使用 Group.Id。
 type Group struct {
 	Id             int     `json:"id"`
 	Code           string  `json:"code" gorm:"size:64;not null;uniqueIndex:idx_groups_code"`
@@ -36,8 +37,7 @@ type Group struct {
 
 func (Group) TableName() string { return "groups" }
 
-// GroupAlias 为将来修改 Code 保留兼容入口。当前管理 API 不允许直接修改 Code，
-// 但解析层可以优先查询该表，从而支持平滑迁移旧客户端。
+// GroupAlias 把旧字符串输入解析到稳定 Group.Id，仅用于兼容历史客户端和数据。
 type GroupAlias struct {
 	Id        int    `json:"id"`
 	Alias     string `json:"alias" gorm:"size:64;not null;uniqueIndex:idx_group_aliases_alias"`
@@ -107,6 +107,14 @@ type GroupConfig struct {
 	Status         int     `json:"status"`
 	AutoEnabled    bool    `json:"auto_enabled"`
 	AutoOrder      int     `json:"auto_order"`
+}
+
+type GroupConfigSaveResult struct {
+	MigratedTokens          int    `json:"migrated_tokens"`
+	CleanedDeletedTokens    int    `json:"cleaned_deleted_tokens"`
+	CacheInvalidated        int    `json:"cache_invalidated"`
+	CacheInvalidationFailed int    `json:"cache_invalidation_failed"`
+	Warning                 string `json:"warning,omitempty"`
 }
 
 func (g *Group) ToConfig(autoMembers map[int]AutoGroupMember) GroupConfig {
@@ -189,6 +197,70 @@ func GetActiveGroupNameMap() (map[string]string, error) {
 	return result, nil
 }
 
+// GetGroupDisplayNameMap 返回历史字符串输入到当前名称的映射。
+// 日志等历史数据可能保存旧 code 或 alias，因此展示层不能只解析当前启用 code。
+func GetGroupDisplayNameMap() (map[string]string, error) {
+	var groups []Group
+	if err := DB.Model(&Group{}).
+		Select("id", "code", "name").
+		Order("id ASC").
+		Find(&groups).Error; err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]string, len(groups)*3)
+	nameByID := make(map[int]string, len(groups))
+	for _, group := range groups {
+		name := strings.TrimSpace(group.Name)
+		if name == "" {
+			name = strings.TrimSpace(group.Code)
+		}
+		if name == "" {
+			continue
+		}
+		nameByID[group.Id] = name
+		if code := strings.TrimSpace(group.Code); code != "" {
+			if _, exists := result[code]; !exists {
+				result[code] = name
+			}
+		}
+	}
+
+	// 展示输入沿用正式解析语义：当前 code 优先，其次是历史 alias。
+	// 同一优先级按稳定 ID 顺序保留第一项，避免脏数据导致结果随查询顺序变化。
+	if DB.Migrator().HasTable(&GroupAlias{}) {
+		var aliases []GroupAlias
+		if err := DB.Model(&GroupAlias{}).
+			Select("id", "alias", "group_id").
+			Order("id ASC").
+			Find(&aliases).Error; err != nil {
+			return nil, err
+		}
+		for _, alias := range aliases {
+			value := strings.TrimSpace(alias.Alias)
+			name := nameByID[alias.GroupId]
+			if value == "" || name == "" {
+				continue
+			}
+			if _, exists := result[value]; !exists {
+				result[value] = name
+			}
+		}
+	}
+
+	// Name 只用于展示兼容，不能覆盖可参与业务解析的 code 或 alias。
+	for _, group := range groups {
+		name := nameByID[group.Id]
+		if name == "" {
+			continue
+		}
+		if _, exists := result[name]; !exists {
+			result[name] = name
+		}
+	}
+	return result, nil
+}
+
 func GetGroupById(id int) (*Group, error) {
 	var group Group
 	if err := DB.First(&group, "id = ?", id).Error; err != nil {
@@ -255,6 +327,15 @@ func groupLegacyIdentifiers(tx *gorm.DB, group *Group) ([]string, map[string]str
 			if alias == "" {
 				continue
 			}
+			// 当前 code 是正式身份。历史 alias 若与其他组的当前 code 冲突，
+			// 该字符串必须归当前 code 所属组，不能再作为本组的兼容引用。
+			resolvedGroup, resolveErr := GetGroupByCodeOrAliasWithDB(tx, alias)
+			if resolveErr != nil {
+				return nil, nil, resolveErr
+			}
+			if resolvedGroup.Id != group.Id {
+				continue
+			}
 			if _, exists := identifierSet[alias]; exists {
 				continue
 			}
@@ -314,7 +395,7 @@ func GetGroupsByIds(ids []int) (map[int]*Group, error) {
 	return result, nil
 }
 
-// ResolveGroupIdsByCodes 将旧 API 的字符串分组解析为稳定 ID，并保留输入顺序。
+// ResolveGroupIdsByCodes 将旧 API 的字符串分组解析为 ID，并保留输入顺序。
 func ResolveGroupIdsByCodes(codes []string) ([]int, error) {
 	ids := make([]int, 0, len(codes))
 	seen := make(map[int]struct{}, len(codes))
@@ -867,7 +948,387 @@ func upsertOption(tx *gorm.DB, key, value string) error {
 	if err := tx.FirstOrCreate(&option, Option{Key: key}).Error; err != nil {
 		return err
 	}
-	return tx.Model(&Option{}).Where("key = ?", key).Update("value", value).Error
+	return tx.Model(&Option{}).Where(commonKeyCol+" = ?", key).Update("value", value).Error
+}
+
+var groupReferenceOptionKeys = []string{
+	"GroupGroupRatio",
+	"TopupGroupRatio",
+	"group_ratio_setting.group_special_usable_group",
+	"ModelRequestRateLimitGroup",
+	"ModelRequestRateLimitUserGroup",
+}
+
+var groupProjectionOptionKeys = []string{
+	"GroupRatio",
+	"group_ratio_setting.group_ratio",
+	"UserUsableGroups",
+	"AutoGroups",
+}
+
+var groupConfigEditableOptionKeys = []string{
+	"DefaultUseAutoGroup",
+	"GroupGroupRatio",
+	"TopupGroupRatio",
+	"group_ratio_setting.group_special_usable_group",
+}
+
+var groupConfigJSONOptionKeys = map[string]struct{}{
+	"GroupGroupRatio": {},
+	"TopupGroupRatio": {},
+	"group_ratio_setting.group_special_usable_group": {},
+}
+
+func normalizeGroupConfigOptionUpdates(values map[string]string) map[string]string {
+	if values == nil {
+		return nil
+	}
+	normalized := make(map[string]string, len(values))
+	for key, value := range values {
+		if _, isJSONMap := groupConfigJSONOptionKeys[key]; isJSONMap && strings.TrimSpace(value) == "" {
+			value = "{}"
+		}
+		normalized[key] = value
+	}
+	return normalized
+}
+
+func validateGroupConfigOptionUpdates(values map[string]string) error {
+	if len(values) == 0 {
+		return nil
+	}
+	allowed := make(map[string]struct{}, len(groupConfigEditableOptionKeys))
+	for _, key := range groupConfigEditableOptionKeys {
+		allowed[key] = struct{}{}
+	}
+	projectionKeys := make(map[string]struct{}, len(groupProjectionOptionKeys))
+	for _, key := range groupProjectionOptionKeys {
+		projectionKeys[key] = struct{}{}
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	keys = sortedUniqueOptionKeys(keys)
+	for _, key := range keys {
+		if _, projected := projectionKeys[key]; projected {
+			return fmt.Errorf("分组选项 %s 由分组配置自动生成，不能直接提交", key)
+		}
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("分组配置不允许修改选项 %s", key)
+		}
+		if err := validateOptionValue(key, values[key]); err != nil {
+			return fmt.Errorf("分组选项 %s 校验失败: %w", key, err)
+		}
+	}
+	return nil
+}
+
+func groupConfigManagedOptionKeys() []string {
+	keys := make([]string, 0, len(groupReferenceOptionKeys)+len(groupProjectionOptionKeys)+len(groupConfigEditableOptionKeys))
+	keys = append(keys, groupReferenceOptionKeys...)
+	keys = append(keys, groupProjectionOptionKeys...)
+	keys = append(keys, groupConfigEditableOptionKeys...)
+	return keys
+}
+
+func groupReferenceOptionGroupIDs(tx *gorm.DB, key string, value string) ([]int, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, nil
+	}
+	identifiers := make(map[string]struct{})
+	addIdentifier := func(identifier string) {
+		identifier = strings.TrimSpace(identifier)
+		if identifier != "" {
+			identifiers[identifier] = struct{}{}
+		}
+	}
+	switch key {
+	case "GroupRatio", "group_ratio_setting.group_ratio":
+		values := make(map[string]float64)
+		if err := common.UnmarshalJsonStr(value, &values); err != nil {
+			return nil, fmt.Errorf("解析分组选项 %s 失败: %w", key, err)
+		}
+		for identifier := range values {
+			addIdentifier(identifier)
+		}
+	case "UserUsableGroups":
+		values := make(map[string]string)
+		if err := common.UnmarshalJsonStr(value, &values); err != nil {
+			return nil, fmt.Errorf("解析分组选项 %s 失败: %w", key, err)
+		}
+		for identifier := range values {
+			addIdentifier(identifier)
+		}
+	case "AutoGroups":
+		var values []string
+		if err := common.UnmarshalJsonStr(value, &values); err != nil {
+			return nil, fmt.Errorf("解析分组选项 %s 失败: %w", key, err)
+		}
+		for _, identifier := range values {
+			addIdentifier(identifier)
+		}
+	case "GroupGroupRatio":
+		values := make(map[string]map[string]float64)
+		if err := common.UnmarshalJsonStr(value, &values); err != nil {
+			return nil, fmt.Errorf("解析分组选项 %s 失败: %w", key, err)
+		}
+		for owner, targets := range values {
+			addIdentifier(owner)
+			for target := range targets {
+				addIdentifier(target)
+			}
+		}
+	case "TopupGroupRatio":
+		values := make(map[string]float64)
+		if err := common.UnmarshalJsonStr(value, &values); err != nil {
+			return nil, fmt.Errorf("解析分组选项 %s 失败: %w", key, err)
+		}
+		for identifier := range values {
+			addIdentifier(identifier)
+		}
+	case "group_ratio_setting.group_special_usable_group":
+		values := make(map[string]map[string]string)
+		if err := common.UnmarshalJsonStr(value, &values); err != nil {
+			return nil, fmt.Errorf("解析分组选项 %s 失败: %w", key, err)
+		}
+		for owner, rules := range values {
+			addIdentifier(owner)
+			for target := range rules {
+				target = strings.TrimSpace(target)
+				target = strings.TrimPrefix(target, "+:")
+				target = strings.TrimPrefix(target, "-:")
+				addIdentifier(target)
+			}
+		}
+	case "ModelRequestRateLimitGroup":
+		values := make(map[string]setting.RateLimitCounts)
+		if err := common.UnmarshalJsonStr(value, &values); err != nil {
+			return nil, fmt.Errorf("解析分组选项 %s 失败: %w", key, err)
+		}
+		for identifier := range values {
+			addIdentifier(identifier)
+		}
+	case "ModelRequestRateLimitUserGroup":
+		values := make(map[string]setting.UserGroupRateLimit)
+		if err := common.UnmarshalJsonStr(value, &values); err != nil {
+			return nil, fmt.Errorf("解析分组选项 %s 失败: %w", key, err)
+		}
+		for owner, config := range values {
+			addIdentifier(owner)
+			for target := range config.Groups {
+				addIdentifier(target)
+			}
+		}
+	default:
+		return nil, nil
+	}
+
+	orderedIdentifiers := make([]string, 0, len(identifiers))
+	for identifier := range identifiers {
+		orderedIdentifiers = append(orderedIdentifiers, identifier)
+	}
+	sort.Strings(orderedIdentifiers)
+	groupIDs := make([]int, 0, len(orderedIdentifiers))
+	for _, identifier := range orderedIdentifiers {
+		group, err := getGroupByCodeOrAliasStrict(tx, identifier)
+		if err != nil {
+			return nil, fmt.Errorf("分组选项 %s 引用了不存在的分组 %q: %w", key, identifier, err)
+		}
+		groupIDs = append(groupIDs, group.Id)
+	}
+	return groupIDs, nil
+}
+
+func lockGroupReferenceOptionWrite(tx *gorm.DB, key string, value string) error {
+	groupIDs, err := groupReferenceOptionGroupIDs(tx, key, value)
+	if err != nil {
+		return err
+	}
+	return lockGroupRowsForBindingWrite(tx, groupIDs, "分组选项")
+}
+
+func validateStoredGroupReferenceOptions(tx *gorm.DB) error {
+	keys := make([]string, 0, len(groupReferenceOptionKeys)+len(groupProjectionOptionKeys))
+	keys = append(keys, groupReferenceOptionKeys...)
+	keys = append(keys, groupProjectionOptionKeys...)
+	keys = sortedUniqueOptionKeys(keys)
+	var options []Option
+	if err := tx.Where(commonKeyCol+" IN ?", keys).Order(commonKeyCol + " ASC").Find(&options).Error; err != nil {
+		return err
+	}
+	for _, option := range options {
+		if _, err := groupReferenceOptionGroupIDs(tx, option.Key, option.Value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func matchesDeletedGroupIdentifier(value string, identifiers map[string]struct{}) bool {
+	_, exists := identifiers[strings.TrimSpace(value)]
+	return exists
+}
+
+func marshalPrunedGroupOption(key string, value interface{}) (string, error) {
+	data, err := common.Marshal(value)
+	if err != nil {
+		return "", fmt.Errorf("序列化分组选项 %s 失败: %w", key, err)
+	}
+	return string(data), nil
+}
+
+func pruneDeletedGroupOptionReferences(
+	tx *gorm.DB,
+	deletedGroups []Group,
+) (map[string]string, error) {
+	result := make(map[string]string)
+	if len(deletedGroups) == 0 {
+		return result, nil
+	}
+	identifiers := make(map[string]struct{})
+	for index := range deletedGroups {
+		_, groupIdentifiers, err := groupLegacyIdentifiers(tx, &deletedGroups[index])
+		if err != nil {
+			return nil, fmt.Errorf("加载分组 %s 的兼容标识失败: %w", deletedGroups[index].Name, err)
+		}
+		for identifier := range groupIdentifiers {
+			identifiers[identifier] = struct{}{}
+		}
+	}
+
+	var options []Option
+	if err := tx.Where(commonKeyCol+" IN ?", groupReferenceOptionKeys).Order(commonKeyCol + " ASC").Find(&options).Error; err != nil {
+		return nil, err
+	}
+	for _, option := range options {
+		if strings.TrimSpace(option.Value) == "" {
+			continue
+		}
+		changed := false
+		var prunedValue string
+		switch option.Key {
+		case "GroupGroupRatio":
+			values := make(map[string]map[string]float64)
+			if err := common.UnmarshalJsonStr(option.Value, &values); err != nil {
+				return nil, fmt.Errorf("解析分组选项 %s 失败: %w", option.Key, err)
+			}
+			for owner, targets := range values {
+				if matchesDeletedGroupIdentifier(owner, identifiers) {
+					delete(values, owner)
+					changed = true
+					continue
+				}
+				for target := range targets {
+					if matchesDeletedGroupIdentifier(target, identifiers) {
+						delete(targets, target)
+						changed = true
+					}
+				}
+			}
+			if changed {
+				var err error
+				prunedValue, err = marshalPrunedGroupOption(option.Key, values)
+				if err != nil {
+					return nil, err
+				}
+			}
+		case "TopupGroupRatio":
+			values := make(map[string]float64)
+			if err := common.UnmarshalJsonStr(option.Value, &values); err != nil {
+				return nil, fmt.Errorf("解析分组选项 %s 失败: %w", option.Key, err)
+			}
+			for code := range values {
+				if matchesDeletedGroupIdentifier(code, identifiers) {
+					delete(values, code)
+					changed = true
+				}
+			}
+			if changed {
+				var err error
+				prunedValue, err = marshalPrunedGroupOption(option.Key, values)
+				if err != nil {
+					return nil, err
+				}
+			}
+		case "group_ratio_setting.group_special_usable_group":
+			values := make(map[string]map[string]string)
+			if err := common.UnmarshalJsonStr(option.Value, &values); err != nil {
+				return nil, fmt.Errorf("解析分组选项 %s 失败: %w", option.Key, err)
+			}
+			for owner, rules := range values {
+				if matchesDeletedGroupIdentifier(owner, identifiers) {
+					delete(values, owner)
+					changed = true
+					continue
+				}
+				for target := range rules {
+					identifier := strings.TrimSpace(target)
+					identifier = strings.TrimPrefix(identifier, "+:")
+					identifier = strings.TrimPrefix(identifier, "-:")
+					if matchesDeletedGroupIdentifier(identifier, identifiers) {
+						delete(rules, target)
+						changed = true
+					}
+				}
+			}
+			if changed {
+				var err error
+				prunedValue, err = marshalPrunedGroupOption(option.Key, values)
+				if err != nil {
+					return nil, err
+				}
+			}
+		case "ModelRequestRateLimitGroup":
+			values := make(map[string]setting.RateLimitCounts)
+			if err := common.UnmarshalJsonStr(option.Value, &values); err != nil {
+				return nil, fmt.Errorf("解析分组选项 %s 失败: %w", option.Key, err)
+			}
+			for code := range values {
+				if matchesDeletedGroupIdentifier(code, identifiers) {
+					delete(values, code)
+					changed = true
+				}
+			}
+			if changed {
+				var err error
+				prunedValue, err = marshalPrunedGroupOption(option.Key, values)
+				if err != nil {
+					return nil, err
+				}
+			}
+		case "ModelRequestRateLimitUserGroup":
+			values := make(map[string]setting.UserGroupRateLimit)
+			if err := common.UnmarshalJsonStr(option.Value, &values); err != nil {
+				return nil, fmt.Errorf("解析分组选项 %s 失败: %w", option.Key, err)
+			}
+			for owner, config := range values {
+				if matchesDeletedGroupIdentifier(owner, identifiers) {
+					delete(values, owner)
+					changed = true
+					continue
+				}
+				for target := range config.Groups {
+					if matchesDeletedGroupIdentifier(target, identifiers) {
+						delete(config.Groups, target)
+						changed = true
+					}
+				}
+				values[owner] = config
+			}
+			if changed {
+				var err error
+				prunedValue, err = marshalPrunedGroupOption(option.Key, values)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		if changed {
+			result[option.Key] = prunedValue
+		}
+	}
+	return result, nil
 }
 
 func countGroupIDReference(tx *gorm.DB, model interface{}, fieldName string, groupID int) (int64, error) {
@@ -885,6 +1346,7 @@ func countLegacyGroupReferences(
 	tx *gorm.DB,
 	model interface{},
 	fieldName string,
+	columnName string,
 	identifiers []string,
 	identifierSet map[string]struct{},
 ) (int64, error) {
@@ -895,18 +1357,22 @@ func countLegacyGroupReferences(
 		return 0, nil
 	}
 
-	condition := commonGroupCol + " LIKE ? ESCAPE '!'"
+	column := columnName
+	if columnName == "group" {
+		column = commonGroupCol
+	}
+	condition := column + " LIKE ? ESCAPE '!'"
 	query := tx.Unscoped().Model(model).Where(condition, legacyGroupSubstringPattern(identifiers[0]))
 	for _, identifier := range identifiers[1:] {
 		query = query.Or(condition, legacyGroupSubstringPattern(identifier))
 	}
-	var values []string
-	if err := query.Pluck("group", &values).Error; err != nil {
+	var values []sql.NullString
+	if err := query.Pluck(columnName, &values).Error; err != nil {
 		return 0, err
 	}
 	var count int64
 	for _, value := range values {
-		if containsLegacyGroupIdentifier(value, identifierSet) {
+		if value.Valid && containsLegacyGroupIdentifier(value.String, identifierSet) {
 			count++
 		}
 	}
@@ -939,18 +1405,24 @@ func groupBusinessReferenceCount(tx *gorm.DB, group *Group) (int64, error) {
 		total += count
 	}
 	legacyChecks := []struct {
-		model     interface{}
-		fieldName string
+		model      interface{}
+		fieldName  string
+		columnName string
 	}{
-		{model: &Channel{}, fieldName: "Group"},
-		{model: &Token{}, fieldName: "Group"},
-		{model: &User{}, fieldName: "Group"},
+		{model: &Channel{}, fieldName: "Group", columnName: "group"},
+		{model: &Token{}, fieldName: "Group", columnName: "group"},
+		{model: &User{}, fieldName: "Group", columnName: "group"},
+		{model: &Ability{}, fieldName: "Group", columnName: "group"},
+		{model: &SubscriptionPlan{}, fieldName: "UpgradeGroup", columnName: "upgrade_group"},
+		{model: &UserSubscription{}, fieldName: "UpgradeGroup", columnName: "upgrade_group"},
+		{model: &UserSubscription{}, fieldName: "PrevUserGroup", columnName: "prev_user_group"},
 	}
 	for _, check := range legacyChecks {
 		count, err := countLegacyGroupReferences(
 			tx,
 			check.model,
 			check.fieldName,
+			check.columnName,
 			identifiers,
 			identifierSet,
 		)
@@ -962,16 +1434,69 @@ func groupBusinessReferenceCount(tx *gorm.DB, group *Group) (int64, error) {
 	return total, nil
 }
 
-// SaveGroupConfig 保存分组显示属性和自动分组顺序，并同步旧配置镜像。
-func SaveGroupConfig(configs []GroupConfig, deletedIDs []int) error {
-	if len(configs) == 0 && len(deletedIDs) == 0 {
-		return errors.New("分组配置不能为空")
+func groupConfigWriteLockIDs(configs []GroupConfig, deletedIDs []int) []int {
+	ids := make([]int, 0, len(configs)+len(deletedIDs))
+	for _, config := range configs {
+		if config.Id > 0 {
+			ids = append(ids, config.Id)
+		}
 	}
+	ids = append(ids, deletedIDs...)
+	sort.Ints(ids)
+	unique := ids[:0]
+	for _, id := range ids {
+		if id <= 0 || (len(unique) > 0 && unique[len(unique)-1] == id) {
+			continue
+		}
+		unique = append(unique, id)
+	}
+	return unique
+}
+
+func lockGroupConfigRowsForWrite(tx *gorm.DB, configs []GroupConfig, deletedIDs []int) (map[int]Group, error) {
+	ids := groupConfigWriteLockIDs(configs, deletedIDs)
+	lockedByID := make(map[int]Group, len(ids))
+	if len(ids) == 0 {
+		return lockedByID, nil
+	}
+	var groups []Group
+	if err := lockForUpdate(tx.Model(&Group{})).
+		Where("id IN ?", ids).
+		Order("id ASC").
+		Find(&groups).Error; err != nil {
+		return nil, err
+	}
+	for _, group := range groups {
+		lockedByID[group.Id] = group
+	}
+	return lockedByID, nil
+}
+
+// SaveGroupConfigWithOptionsAndResult 原子保存分组与分组页面高级选项，
+// 并返回自动迁移和缓存清理结果。
+func SaveGroupConfigWithOptionsAndResult(
+	configs []GroupConfig,
+	deletedIDs []int,
+	optionUpdates map[string]string,
+) (*GroupConfigSaveResult, error) {
+	if len(configs) == 0 && len(deletedIDs) == 0 && len(optionUpdates) == 0 {
+		return nil, errors.New("分组配置不能为空")
+	}
+	optionUpdates = normalizeGroupConfigOptionUpdates(optionUpdates)
+	if err := validateGroupConfigOptionUpdates(optionUpdates); err != nil {
+		return nil, err
+	}
+	optionWriteMutex.Lock()
+	defer optionWriteMutex.Unlock()
+	result := &GroupConfigSaveResult{}
 	projection := map[string]string{}
+	migratedTokenPlans := make([]tokenGroupMigrationPlan, 0)
 	err := DB.Transaction(func(tx *gorm.DB) error {
+		prepared := make([]GroupConfig, len(configs))
 		seenCodes := make(map[string]struct{}, len(configs))
+		seenNames := make(map[string]struct{}, len(configs))
 		seenIDs := make(map[int]struct{}, len(configs))
-		for _, item := range configs {
+		for index, item := range configs {
 			code, err := NormalizeGroupCode(item.Code)
 			if err != nil {
 				return err
@@ -984,6 +1509,10 @@ func SaveGroupConfig(configs []GroupConfig, deletedIDs []int) error {
 				return fmt.Errorf("分组标识重复: %s", code)
 			}
 			seenCodes[code] = struct{}{}
+			if _, ok := seenNames[name]; ok {
+				return fmt.Errorf("分组名称重复: %s", name)
+			}
+			seenNames[name] = struct{}{}
 			if item.Id > 0 {
 				if _, ok := seenIDs[item.Id]; ok {
 					return fmt.Errorf("分组 ID 重复: %d", item.Id)
@@ -993,8 +1522,218 @@ func SaveGroupConfig(configs []GroupConfig, deletedIDs []int) error {
 			if item.Ratio < 0 {
 				return fmt.Errorf("分组 %s 的倍率不能小于 0", code)
 			}
+			item.Code = code
+			item.Name = name
+			prepared[index] = item
+		}
+
+		existingByID := make(map[int]Group, len(seenIDs))
+		for index := range prepared {
+			item := &prepared[index]
+			if item.Id <= 0 {
+				var existing Group
+				err := tx.Where("code = ?", item.Code).First(&existing).Error
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					continue
+				}
+				if err != nil {
+					return err
+				}
+				if existing.Name != item.Name {
+					return fmt.Errorf("分组标识已存在: %s", item.Code)
+				}
+				if _, exists := seenIDs[existing.Id]; exists {
+					return fmt.Errorf("分组 ID 重复: %d", existing.Id)
+				}
+				item.Id = existing.Id
+				seenIDs[existing.Id] = struct{}{}
+				existingByID[existing.Id] = existing
+				continue
+			}
+			var existing Group
+			if err := tx.First(&existing, "id = ?", item.Id).Error; err != nil {
+				return err
+			}
+			if existing.Code != item.Code {
+				return fmt.Errorf("分组 %d 的 code 不允许修改", item.Id)
+			}
+			existingByID[item.Id] = existing
+		}
+
+		seenDeletedIDs := make(map[int]struct{}, len(deletedIDs))
+		normalizedDeletedIDs := make([]int, 0, len(deletedIDs))
+		for _, id := range deletedIDs {
+			if id <= 0 {
+				continue
+			}
+			if _, exists := seenDeletedIDs[id]; exists {
+				return fmt.Errorf("待删除分组 ID 重复: %d", id)
+			}
+			seenDeletedIDs[id] = struct{}{}
+			if _, exists := seenIDs[id]; exists {
+				return fmt.Errorf("分组 ID %d 不能同时保存和删除", id)
+			}
+			normalizedDeletedIDs = append(normalizedDeletedIDs, id)
+		}
+		sort.Ints(normalizedDeletedIDs)
+
+		// 所有现有保存组和待删除组必须在任何选项行之前按统一顺序加锁，
+		// 与分组选项写入的 group -> option 锁序保持一致。
+		lockedGroups, err := lockGroupConfigRowsForWrite(tx, prepared, normalizedDeletedIDs)
+		if err != nil {
+			return err
+		}
+		for index := range prepared {
+			item := &prepared[index]
+			if item.Id <= 0 {
+				continue
+			}
+			existing, exists := lockedGroups[item.Id]
+			if !exists {
+				return fmt.Errorf("分组 ID %d 在保存期间已被删除，请重试", item.Id)
+			}
+			if existing.Code != item.Code {
+				return fmt.Errorf("分组 %d 的 code 不允许修改", item.Id)
+			}
+			existingByID[item.Id] = existing
+		}
+		deletedGroups := make([]Group, 0, len(normalizedDeletedIDs))
+		for _, id := range normalizedDeletedIDs {
+			if group, exists := lockedGroups[id]; exists {
+				deletedGroups = append(deletedGroups, group)
+			}
+		}
+		for index := range deletedGroups {
+			group := &deletedGroups[index]
+			if group.Code == "default" {
+				return errors.New("default 分组不能删除")
+			}
+		}
+		if len(prepared) == 0 && len(deletedGroups) == 0 && len(optionUpdates) == 0 {
+			return nil
+		}
+		for index := range deletedGroups {
+			group := &deletedGroups[index]
+			plans, migrationSummary, err := migrateTokenGroupInTx(
+				tx,
+				group.Id,
+				0,
+				TokenGroupModeAuto,
+			)
+			if err != nil {
+				return fmt.Errorf("把分组 %s 的令牌迁移到 auto 失败: %w", group.Name, err)
+			}
+			migratedTokenPlans = append(migratedTokenPlans, plans...)
+			result.MigratedTokens += migrationSummary.MigratedTokens
+			result.CleanedDeletedTokens += migrationSummary.CleanedDeletedTokens
+			referenceCount, err := groupBusinessReferenceCount(tx, group)
+			if err != nil {
+				return err
+			}
+			if referenceCount > 0 {
+				return fmt.Errorf("分组 %s 仍被非令牌业务数据引用，不能删除", group.Name)
+			}
+		}
+		if err := lockOptionRowsForWrite(tx, groupConfigManagedOptionKeys()); err != nil {
+			return err
+		}
+		optionUpdateKeys := make([]string, 0, len(optionUpdates))
+		for key := range optionUpdates {
+			optionUpdateKeys = append(optionUpdateKeys, key)
+		}
+		optionUpdateKeys = sortedUniqueOptionKeys(optionUpdateKeys)
+		for _, key := range optionUpdateKeys {
+			value := optionUpdates[key]
+			if err := upsertOption(tx, key, value); err != nil {
+				return err
+			}
+			projection[key] = value
+		}
+		prunedOptions, err := pruneDeletedGroupOptionReferences(tx, deletedGroups)
+		if err != nil {
+			return err
+		}
+		for key, value := range prunedOptions {
+			projection[key] = value
+		}
+		if len(prepared) == 0 && len(deletedGroups) == 0 {
+			return validateStoredGroupReferenceOptions(tx)
+		}
+
+		finalNameByID := make(map[int]string, len(existingByID))
+		for _, item := range prepared {
+			if item.Id > 0 {
+				finalNameByID[item.Id] = item.Name
+			}
+		}
+		for _, item := range prepared {
+			var holder Group
+			err := tx.Where("name = ?", item.Name).First(&holder).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if holder.Id == item.Id {
+				continue
+			}
+			if _, deleted := seenDeletedIDs[holder.Id]; deleted {
+				continue
+			}
+			if finalName, moving := finalNameByID[holder.Id]; moving && finalName != holder.Name {
+				continue
+			}
+			return fmt.Errorf("分组名称重复: %s", item.Name)
+		}
+
+		// 先删除已通过引用校验的分组，释放它们占用的唯一名称。
+		for index := range deletedGroups {
+			group := &deletedGroups[index]
+			if tx.Migrator().HasTable(&GroupAlias{}) {
+				if err := tx.Where("group_id = ?", group.Id).Delete(&GroupAlias{}).Error; err != nil {
+					return fmt.Errorf("删除分组 %s 的兼容别名失败: %w", group.Name, err)
+				}
+			}
+			if err := tx.Delete(group).Error; err != nil {
+				return err
+			}
+		}
+
+		// 唯一索引会让 A/B -> B/A 的逐行更新在第一步就冲突。
+		// 事务内先把所有参与换名的记录移到唯一占位名，再写最终名称。
+		temporaryNonce := time.Now().UnixNano()
+		for _, item := range prepared {
+			existing, ok := existingByID[item.Id]
+			if !ok || existing.Name == item.Name {
+				continue
+			}
+			var temporaryName string
+			for attempt := 0; attempt < 100; attempt++ {
+				candidate := fmt.Sprintf("__group_name_swap_%d_%d_%d", item.Id, temporaryNonce, attempt)
+				if _, reserved := seenNames[candidate]; reserved {
+					continue
+				}
+				var count int64
+				if err := tx.Model(&Group{}).Where("name = ?", candidate).Count(&count).Error; err != nil {
+					return err
+				}
+				if count == 0 {
+					temporaryName = candidate
+					break
+				}
+			}
+			if temporaryName == "" {
+				return fmt.Errorf("无法为分组 %s 分配临时名称", existing.Name)
+			}
+			if err := tx.Model(&Group{}).Where("id = ?", item.Id).Update("name", temporaryName).Error; err != nil {
+				return fmt.Errorf("准备修改分组 %s 的名称失败: %w", existing.Name, err)
+			}
+		}
+
+		for _, item := range prepared {
 			if item.Id == 0 {
-				group := Group{Code: code, Name: name, Description: item.Description, Ratio: item.Ratio, UserSelectable: item.UserSelectable, Status: item.Status, CreatedTime: time.Now().Unix(), UpdatedTime: time.Now().Unix()}
+				group := Group{Code: item.Code, Name: item.Name, Description: item.Description, Ratio: item.Ratio, UserSelectable: item.UserSelectable, Status: item.Status, CreatedTime: time.Now().Unix(), UpdatedTime: time.Now().Unix()}
 				if group.Ratio == 0 {
 					group.Ratio = 1
 				}
@@ -1004,17 +1743,9 @@ func SaveGroupConfig(configs []GroupConfig, deletedIDs []int) error {
 				if err := tx.Create(&group).Error; err != nil {
 					return err
 				}
-				item.Id = group.Id
 				continue
 			}
-			var existing Group
-			if err := tx.First(&existing, "id = ?", item.Id).Error; err != nil {
-				return err
-			}
-			if existing.Code != code {
-				return fmt.Errorf("分组 %d 的 code 不允许修改", item.Id)
-			}
-			updates := map[string]interface{}{"name": name, "description": item.Description, "ratio": item.Ratio, "user_selectable": item.UserSelectable, "status": item.Status, "updated_time": time.Now().Unix()}
+			updates := map[string]interface{}{"name": item.Name, "description": item.Description, "ratio": item.Ratio, "user_selectable": item.UserSelectable, "status": item.Status, "updated_time": time.Now().Unix()}
 			if item.Status == 0 {
 				updates["status"] = GroupStatusDisabled
 			}
@@ -1022,38 +1753,11 @@ func SaveGroupConfig(configs []GroupConfig, deletedIDs []int) error {
 				return err
 			}
 		}
-		for _, id := range deletedIDs {
-			if id <= 0 {
-				continue
-			}
-			var group Group
-			if err := tx.First(&group, "id = ?", id).Error; err != nil {
-				return err
-			}
-			if group.Code == "default" {
-				return errors.New("default 分组不能删除")
-			}
-			referenceCount, err := groupBusinessReferenceCount(tx, &group)
-			if err != nil {
-				return err
-			}
-			if referenceCount > 0 {
-				return fmt.Errorf("分组 %s 仍被业务数据引用，不能删除", group.Name)
-			}
-			if tx.Migrator().HasTable(&GroupAlias{}) {
-				if err := tx.Where("group_id = ?", group.Id).Delete(&GroupAlias{}).Error; err != nil {
-					return fmt.Errorf("删除分组 %s 的兼容别名失败: %w", group.Name, err)
-				}
-			}
-			if err := tx.Delete(&group).Error; err != nil {
-				return err
-			}
-		}
 		if err := tx.Where("1 = 1").Delete(&AutoGroupMember{}).Error; err != nil {
 			return err
 		}
 		ordered := make([]GroupConfig, 0)
-		for _, item := range configs {
+		for _, item := range prepared {
 			if item.AutoEnabled {
 				ordered = append(ordered, item)
 			}
@@ -1072,31 +1776,62 @@ func SaveGroupConfig(configs []GroupConfig, deletedIDs []int) error {
 				return err
 			}
 		}
-		var err error
-		projection, err = buildGroupOptionProjection(tx)
+		groupProjection, err := buildGroupOptionProjection(tx)
 		if err != nil {
 			return err
 		}
-		for key, value := range projection {
-			if err := upsertOption(tx, key, value); err != nil {
+		for key, value := range groupProjection {
+			projection[key] = value
+		}
+		projectionKeys := make([]string, 0, len(projection))
+		for key := range projection {
+			projectionKeys = append(projectionKeys, key)
+		}
+		projectionKeys = sortedUniqueOptionKeys(projectionKeys)
+		if err := lockOptionRowsForWrite(tx, projectionKeys); err != nil {
+			return err
+		}
+		for _, key := range projectionKeys {
+			if err := upsertOption(tx, key, projection[key]); err != nil {
 				return err
 			}
 		}
-		return nil
+		return validateStoredGroupReferenceOptions(tx)
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
+	cacheSummary := &TokenGroupMigrationSummary{}
+	invalidateTokenGroupMigrationCaches(migratedTokenPlans, cacheSummary)
+	result.CacheInvalidated = cacheSummary.CacheInvalidated
+	result.CacheInvalidationFailed = cacheSummary.CacheInvalidationFailed
+	result.Warning = cacheSummary.Warning
 	// DB 事务成功后刷新运行时设置；旧配置镜像仍可被旧版本读取。
 	common.OptionMapRWMutex.Lock()
 	if common.OptionMap == nil {
 		common.OptionMap = make(map[string]string)
 	}
 	common.OptionMapRWMutex.Unlock()
-	for key, value := range projection {
-		if err := updateOptionMap(key, value); err != nil {
-			return err
+	projectionKeys := make([]string, 0, len(projection))
+	for key := range projection {
+		projectionKeys = append(projectionKeys, key)
+	}
+	projectionKeys = sortedUniqueOptionKeys(projectionKeys)
+	for _, key := range projectionKeys {
+		if err := updateOptionMap(key, projection[key]); err != nil {
+			return nil, err
 		}
 	}
-	return nil
+	return result, nil
+}
+
+// SaveGroupConfigWithResult 保留不携带高级选项的调用契约。
+func SaveGroupConfigWithResult(configs []GroupConfig, deletedIDs []int) (*GroupConfigSaveResult, error) {
+	return SaveGroupConfigWithOptionsAndResult(configs, deletedIDs, nil)
+}
+
+// SaveGroupConfig 保留原有调用契约。
+func SaveGroupConfig(configs []GroupConfig, deletedIDs []int) error {
+	_, err := SaveGroupConfigWithResult(configs, deletedIDs)
+	return err
 }

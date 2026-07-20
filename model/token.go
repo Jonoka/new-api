@@ -259,8 +259,9 @@ func GetTokenById(id int) (*Token, error) {
 		err = HydrateTokenGroupBindings(DB, []*Token{&token})
 	}
 	if shouldUpdateRedis(true, err) {
+		tokenID, tokenKey := token.Id, token.Key
 		gopool.Go(func() {
-			if err := cacheSetToken(token); err != nil {
+			if err := cacheRefreshToken(tokenID, tokenKey, true); err != nil {
 				common.SysLog("failed to update user status cache: " + err.Error())
 			}
 		})
@@ -272,8 +273,9 @@ func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
 	defer func() {
 		// Update Redis cache asynchronously on successful DB read
 		if shouldUpdateRedis(fromDB, err) && token != nil {
+			tokenID, tokenKey := token.Id, token.Key
 			gopool.Go(func() {
-				if err := cacheSetToken(*token); err != nil {
+				if err := cacheRefreshToken(tokenID, tokenKey, true); err != nil {
 					common.SysLog("failed to update user status cache: " + err.Error())
 				}
 			})
@@ -305,6 +307,9 @@ func (token *Token) Insert() error {
 		if err := PrepareTokenGroupBindings(tx, token); err != nil {
 			return err
 		}
+		if err := lockTokenGroupBindingGroups(tx, token); err != nil {
+			return err
+		}
 		if err := tx.Create(token).Error; err != nil {
 			return err
 		}
@@ -316,8 +321,9 @@ func (token *Token) Insert() error {
 func (token *Token) Update() (err error) {
 	defer func() {
 		if shouldUpdateRedis(true, err) {
+			tokenID, tokenKey := token.Id, token.Key
 			gopool.Go(func() {
-				err := cacheSetToken(*token)
+				err := cacheRefreshToken(tokenID, tokenKey, false)
 				if err != nil {
 					common.SysLog("failed to update token cache: " + err.Error())
 				}
@@ -325,11 +331,14 @@ func (token *Token) Update() (err error) {
 		}
 	}()
 	err = DB.Transaction(func(tx *gorm.DB) error {
-		var locked Token
-		if err := lockForUpdate(tx).Select("id").First(&locked, "id = ?", token.Id).Error; err != nil {
+		if err := PrepareTokenGroupBindingsForUpdate(tx, token); err != nil {
 			return err
 		}
-		if err := PrepareTokenGroupBindingsForUpdate(tx, token); err != nil {
+		if err := lockTokenGroupBindingGroups(tx, token); err != nil {
+			return err
+		}
+		var locked Token
+		if err := lockForUpdate(tx).Select("id").First(&locked, "id = ?", token.Id).Error; err != nil {
 			return err
 		}
 		if err := tx.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
@@ -344,8 +353,9 @@ func (token *Token) Update() (err error) {
 func (token *Token) SelectUpdate() (err error) {
 	defer func() {
 		if shouldUpdateRedis(true, err) {
+			tokenID, tokenKey := token.Id, token.Key
 			gopool.Go(func() {
-				err := cacheSetToken(*token)
+				err := cacheRefreshToken(tokenID, tokenKey, true)
 				if err != nil {
 					common.SysLog("failed to update token cache: " + err.Error())
 				}

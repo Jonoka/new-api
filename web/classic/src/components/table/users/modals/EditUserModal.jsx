@@ -25,6 +25,8 @@ import {
   showSuccess,
   renderQuota,
   getCurrencyConfig,
+  createGroupOptions,
+  extractGroupDetailsResponse,
 } from '../../../../helpers';
 import {
   quotaToDisplayAmount,
@@ -100,10 +102,17 @@ const EditUserModal = (props) => {
 
   const fetchGroups = async () => {
     try {
-      let res = await API.get(`/api/group/`);
-      setGroupOptions(res.data.data.map((g) => ({ label: g, value: g })));
+      const res = await API.get('/api/group/details');
+      if (res?.data?.success === false) {
+        throw new Error(res.data.message || t('获取分组失败'));
+      }
+      const groups = extractGroupDetailsResponse(res?.data);
+      if (groups === null) {
+        throw new Error(res?.data?.message || t('获取分组失败'));
+      }
+      setGroupOptions(createGroupOptions(groups));
     } catch (e) {
-      showError(e.message);
+      showError(e?.message || t('获取分组失败'));
     }
   };
 
@@ -172,7 +181,11 @@ const EditUserModal = (props) => {
   const adjustQuota = async () => {
     const quotaVal = parseInt(adjustQuotaLocal) || 0;
     if (quotaVal <= 0 && adjustMode !== 'override') return;
-    if (adjustMode === 'override' && (adjustQuotaLocal === '' || adjustQuotaLocal == null)) return;
+    if (
+      adjustMode === 'override' &&
+      (adjustQuotaLocal === '' || adjustQuotaLocal == null)
+    )
+      return;
     setAdjustLoading(true);
     try {
       const res = await API.post('/api/user/manage', {
@@ -420,7 +433,10 @@ const EditUserModal = (props) => {
                             ? `▾ ${t('收起原生额度输入')}`
                             : `▸ ${t('使用原生额度输入')}`}
                         </div>
-                        <div style={{ display: showQuotaInput ? 'block' : 'none' }} className='mt-2'>
+                        <div
+                          style={{ display: showQuotaInput ? 'block' : 'none' }}
+                          className='mt-2'
+                        >
                           <Form.InputNumber
                             field='quota'
                             label={t('额度')}
@@ -558,7 +574,10 @@ const EditUserModal = (props) => {
             ? `▾ ${t('收起原生额度输入')}`
             : `▸ ${t('使用原生额度输入')}`}
         </div>
-        <div style={{ display: showAdjustQuotaRaw ? 'block' : 'none' }} className='mt-2'>
+        <div
+          style={{ display: showAdjustQuotaRaw ? 'block' : 'none' }}
+          className='mt-2'
+        >
           <div className='mb-1'>
             <Text size='small'>{t('额度')}</Text>
           </div>

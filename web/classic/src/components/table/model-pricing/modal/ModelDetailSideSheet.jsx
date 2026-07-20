@@ -171,6 +171,7 @@ const ModelDetailSideSheet = ({
                 <div className='pt-4'>
                   <ModelPerformancePanel
                     modelName={modelData.model_name}
+                    groupNames={groupNames}
                     t={t}
                   />
                 </div>

@@ -24,6 +24,7 @@ import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess, showWarning } from '../../../../helpers';
 
 const { Text } = Typography;
+const AUTO_TARGET = 'auto';
 
 function groupLabel(group) {
   return `ID ${group.id} · ${group.name || group.code}`;
@@ -58,9 +59,17 @@ export default function GroupTokenMigrationModal({
   );
   const request = useMemo(() => {
     const source = Number(sourceGroupId);
+    if (source <= 0) return null;
+    if (targetGroupId === AUTO_TARGET) {
+      return { source_group_id: source, target_group_mode: 'auto' };
+    }
     const target = Number(targetGroupId);
-    if (source <= 0 || target <= 0 || source === target) return null;
-    return { source_group_id: source, target_group_id: target };
+    if (target <= 0 || source === target) return null;
+    return {
+      source_group_id: source,
+      target_group_id: target,
+      target_group_mode: 'explicit',
+    };
   }, [sourceGroupId, targetGroupId]);
 
   useEffect(() => {
@@ -75,6 +84,7 @@ export default function GroupTokenMigrationModal({
   useEffect(() => {
     if (
       targetGroupId &&
+      targetGroupId !== AUTO_TARGET &&
       !targetGroups.some((group) => String(group.id) === String(targetGroupId))
     ) {
       setTargetGroupId('');
@@ -156,9 +166,13 @@ export default function GroupTokenMigrationModal({
       maskClosable={!migrating}
     >
       <Text type='tertiary'>
-        {t(
-          '所有明确绑定源分组的令牌都会迁移到目标分组，自动分组和继承分组不受影响。',
-        )}
+        {targetGroupId === AUTO_TARGET
+          ? t(
+              '所有明确绑定源分组的令牌都会切换为自动选择，并清除其他分组和全部倍率保护。',
+            )
+          : t(
+              '所有明确绑定源分组的令牌都会迁移到目标分组，自动分组和继承分组不受影响。',
+            )}
       </Text>
 
       <Form layout='vertical' style={{ marginTop: 16 }}>
@@ -189,6 +203,9 @@ export default function GroupTokenMigrationModal({
               disabled={!sourceGroupId || migrating}
               onChange={(value) => setTargetGroupId(String(value || ''))}
             >
+              <Select.Option value={AUTO_TARGET}>
+                auto · {t('自动选择')}
+              </Select.Option>
               {targetGroups.map((group) => (
                 <Select.Option key={group.id} value={String(group.id)}>
                   {groupLabel(group)}
@@ -217,12 +234,24 @@ export default function GroupTokenMigrationModal({
               count: preview.migrated_tokens,
             })}
           </Text>
-          <Text type='tertiary' style={{ display: 'block', marginTop: 4 }}>
-            {t('影响 {{users}} 个用户，并移除 {{duplicates}} 个重复绑定', {
-              users: preview.affected_users,
-              duplicates: preview.deduplicated_tokens,
-            })}
-          </Text>
+          {preview.target_group_mode === 'auto' ? (
+            <Text type='tertiary' style={{ display: 'block', marginTop: 4 }}>
+              {t(
+                '影响 {{users}} 个用户；{{count}} 个多分组令牌会移除其他全部分组',
+                {
+                  users: preview.affected_users,
+                  count: preview.multi_group_tokens,
+                },
+              )}
+            </Text>
+          ) : (
+            <Text type='tertiary' style={{ display: 'block', marginTop: 4 }}>
+              {t('影响 {{users}} 个用户，并移除 {{duplicates}} 个重复绑定', {
+                users: preview.affected_users,
+                duplicates: preview.deduplicated_tokens,
+              })}
+            </Text>
+          )}
           {preview.cleaned_deleted_tokens > 0 && (
             <Text type='tertiary' style={{ display: 'block', marginTop: 4 }}>
               {t('同时清理 {{count}} 个已删除令牌的历史分组引用', {

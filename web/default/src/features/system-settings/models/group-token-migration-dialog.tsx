@@ -32,6 +32,9 @@ import {
 } from '@/components/ui/select'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { migrateTokenGroup, previewTokenGroupMigration } from '../api'
+import type { TokenGroupMigrationRequest } from '../types'
+
+const AUTO_TARGET = 'auto'
 
 type MigrationGroup = {
   id?: number
@@ -70,11 +73,19 @@ export function GroupTokenMigrationDialog({
       ),
     [persistedGroups, sourceGroupID]
   )
-  const request = useMemo(() => {
+  const request = useMemo<TokenGroupMigrationRequest | null>(() => {
     const source = Number(sourceGroupID)
+    if (source <= 0) return null
+    if (targetGroupID === AUTO_TARGET) {
+      return { source_group_id: source, target_group_mode: 'auto' }
+    }
     const target = Number(targetGroupID)
-    if (source <= 0 || target <= 0 || source === target) return null
-    return { source_group_id: source, target_group_id: target }
+    if (target <= 0 || source === target) return null
+    return {
+      source_group_id: source,
+      target_group_id: target,
+      target_group_mode: 'explicit',
+    }
   }, [sourceGroupID, targetGroupID])
 
   useEffect(() => {
@@ -87,6 +98,7 @@ export function GroupTokenMigrationDialog({
   useEffect(() => {
     if (
       targetGroupID &&
+      targetGroupID !== AUTO_TARGET &&
       !targetGroups.some((group) => String(group.id) === targetGroupID)
     ) {
       setTargetGroupID('')
@@ -99,6 +111,7 @@ export function GroupTokenMigrationDialog({
       'group-token-migration-preview',
       request?.source_group_id,
       request?.target_group_id,
+      request?.target_group_mode,
     ],
     queryFn: () => previewTokenGroupMigration(request!),
     enabled: open && request !== null,
@@ -140,9 +153,15 @@ export function GroupTokenMigrationDialog({
       open={open}
       onOpenChange={onOpenChange}
       title={t('Migrate tokens between groups')}
-      desc={t(
-        'All tokens explicitly bound to the source group will be moved to the target group. Automatic and inherited groups are not affected.'
-      )}
+      desc={
+        targetGroupID === AUTO_TARGET
+          ? t(
+              'All tokens explicitly bound to the source group will switch to automatic grouping. Their other groups and all ratio limits will be removed.'
+            )
+          : t(
+              'All tokens explicitly bound to the source group will be moved to the target group. Automatic and inherited groups are not affected.'
+            )
+      }
       confirmText={
         migration.isPending ? t('Migrating...') : t('Migrate tokens')
       }
@@ -188,6 +207,9 @@ export function GroupTokenMigrationDialog({
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
+                <SelectItem value={AUTO_TARGET}>
+                  {t('Auto (Circuit Breaker)')}
+                </SelectItem>
                 {targetGroups.map((group) => (
                   <SelectItem key={group.id} value={String(group.id)}>
                     {groupLabel(group)}
@@ -220,15 +242,27 @@ export function GroupTokenMigrationDialog({
               count: preview.migrated_tokens,
             })}
           </div>
-          <p className='text-muted-foreground'>
-            {t(
-              '{{users}} users affected; {{duplicates}} duplicate bindings will be removed.',
-              {
-                users: preview.affected_users,
-                duplicates: preview.deduplicated_tokens,
-              }
-            )}
-          </p>
+          {preview.target_group_mode === 'auto' ? (
+            <p className='text-muted-foreground'>
+              {t(
+                '{{users}} users affected; {{count}} multi-group tokens will have all other groups removed.',
+                {
+                  users: preview.affected_users,
+                  count: preview.multi_group_tokens,
+                }
+              )}
+            </p>
+          ) : (
+            <p className='text-muted-foreground'>
+              {t(
+                '{{users}} users affected; {{duplicates}} duplicate bindings will be removed.',
+                {
+                  users: preview.affected_users,
+                  duplicates: preview.deduplicated_tokens,
+                }
+              )}
+            </p>
+          )}
           {preview.cleaned_deleted_tokens > 0 && (
             <p className='text-muted-foreground'>
               {t(

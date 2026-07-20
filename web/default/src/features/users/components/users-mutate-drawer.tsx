@@ -23,9 +23,10 @@ import { useQuery } from '@tanstack/react-query'
 import { Pencil } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { useAuthStore } from '@/stores/auth-store'
 import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
 import { formatQuota, parseQuotaFromDollars } from '@/lib/format'
-import { useAuthStore } from '@/stores/auth-store'
+import { createGroupOptions } from '@/lib/group-options'
 import { Button } from '@/components/ui/button'
 import {
   Form,
@@ -63,7 +64,8 @@ import {
   sideDrawerFormClassName,
   sideDrawerHeaderClassName,
 } from '@/components/drawer-layout'
-import { createUser, updateUser, getUser, getGroups } from '../api'
+import { getGroupDetails } from '@/features/channels/api'
+import { createUser, updateUser, getUser } from '../api'
 import {
   BINDING_FIELDS,
   ERROR_MESSAGES,
@@ -108,11 +110,11 @@ export function UsersMutateDrawer({
   // Fetch groups
   const { data: groupsData } = useQuery({
     queryKey: ['groups'],
-    queryFn: getGroups,
+    queryFn: getGroupDetails,
     staleTime: 5 * 60 * 1000,
   })
 
-  const groups = groupsData?.data || []
+  const groups = createGroupOptions(groupsData?.data)
 
   const form = useForm<UserFormValues>({
     resolver: zodResolver(userFormSchema),
@@ -338,12 +340,7 @@ export function UsersMutateDrawer({
                       <FormItem>
                         <FormLabel>{t('Group')}</FormLabel>
                         <Select
-                          items={[
-                            ...groups.map((group) => ({
-                              value: group,
-                              label: group,
-                            })),
-                          ]}
+                          items={groups}
                           onValueChange={field.onChange}
                           value={field.value}
                         >
@@ -355,8 +352,11 @@ export function UsersMutateDrawer({
                           <SelectContent alignItemWithTrigger={false}>
                             <SelectGroup>
                               {groups.map((group) => (
-                                <SelectItem key={group} value={group}>
-                                  {group}
+                                <SelectItem
+                                  key={group.value}
+                                  value={group.value}
+                                >
+                                  {group.label}
                                 </SelectItem>
                               ))}
                             </SelectGroup>

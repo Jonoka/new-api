@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"sort"
 	"strings"
 	"sync"
 
@@ -475,31 +476,63 @@ func GetChannelById(id int, selectAll bool) (*Channel, error) {
 	return channel, nil
 }
 
+func lockChannelRowsForBindingWrite(tx *gorm.DB, channelIDs []int) error {
+	if tx == nil {
+		return errors.New("database is nil")
+	}
+	ids := append([]int(nil), channelIDs...)
+	sort.Ints(ids)
+	uniqueIDs := ids[:0]
+	for _, id := range ids {
+		if id <= 0 || (len(uniqueIDs) > 0 && uniqueIDs[len(uniqueIDs)-1] == id) {
+			continue
+		}
+		uniqueIDs = append(uniqueIDs, id)
+	}
+	if len(uniqueIDs) == 0 {
+		return errors.New("渠道 ID 不能为空")
+	}
+	var lockedChannels []Channel
+	if err := lockForUpdate(tx.Model(&Channel{})).
+		Select("id").
+		Where("id IN ?", uniqueIDs).
+		Order("id ASC").
+		Find(&lockedChannels).Error; err != nil {
+		return err
+	}
+	if len(lockedChannels) != len(uniqueIDs) {
+		return errors.New("渠道在分组写入期间已被删除，请重试")
+	}
+	return nil
+}
+
 func BatchInsertChannels(channels []Channel) error {
 	if len(channels) == 0 {
 		return nil
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
+		groupIDs := make([]int, 0)
+		for i := range channels {
+			if err := PrepareChannelGroupBindings(tx, &channels[i]); err != nil {
+				return err
+			}
+			groupIDs = append(groupIDs, channels[i].GroupIds...)
+		}
+		if err := lockGroupRowsForBindingWrite(tx, groupIDs, "渠道"); err != nil {
+			return err
+		}
 		for start := 0; start < len(channels); start += 50 {
 			end := start + 50
 			if end > len(channels) {
 				end = len(channels)
 			}
 			chunk := channels[start:end]
-			for i := range chunk {
-				if err := PrepareChannelGroupBindings(tx, &chunk[i]); err != nil {
-					return err
-				}
-			}
 			if err := tx.Create(&chunk).Error; err != nil {
 				return err
 			}
 			for i := range chunk {
 				if chunk[i].Id <= 0 {
 					return errors.New("批量创建渠道后未获得有效 ID")
-				}
-				if err := PrepareChannelGroupBindings(tx, &chunk[i]); err != nil {
-					return err
 				}
 				if err := writeChannelGroupBindings(tx, &chunk[i]); err != nil {
 					return err
@@ -590,10 +623,13 @@ func (channel *Channel) Insert() error {
 		if err := PrepareChannelGroupBindings(tx, channel); err != nil {
 			return err
 		}
+		if err := lockChannelGroupBindingGroups(tx, channel); err != nil {
+			return err
+		}
 		if err := tx.Create(channel).Error; err != nil {
 			return err
 		}
-		if err := ReplaceChannelGroupBindings(tx, channel); err != nil {
+		if err := writeChannelGroupBindings(tx, channel); err != nil {
 			return err
 		}
 		return channel.AddAbilities(tx)
@@ -661,6 +697,12 @@ func (channel *Channel) Update() error {
 			channel.Group = existing.Group
 			channel.GroupIds = existing.GroupIds
 			channel.GroupDetails = existing.GroupDetails
+		}
+		if err := lockChannelGroupBindingGroups(tx, channel); err != nil {
+			return err
+		}
+		if err := lockChannelRowsForBindingWrite(tx, []int{channel.Id}); err != nil {
+			return err
 		}
 
 		updateChannelMultiKeyState(tx, channel)
@@ -914,13 +956,11 @@ func DisableChannelByTag(tag string) error {
 func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *string, group *string, groupIDs *[]int, priority *int64, weight *uint, concurrencyLimit *int, paramOverride *string, headerOverride *string) error {
 	updateData := Channel{}
 	shouldReCreateAbilities := false
-	updatedTag := tag
-	var normalizedGroupIDs []int
-	var normalizedGroup string
+	var requestedGroupIDs []int
+	var requestedGroup string
 	// 如果 newTag 不为空且不等于 tag，则更新 tag
 	if newTag != nil && *newTag != tag {
 		updateData.Tag = newTag
-		updatedTag = *newTag
 	}
 	if modelMapping != nil {
 		updateData.ModelMapping = modelMapping
@@ -933,18 +973,11 @@ func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *
 		if len(*groupIDs) == 0 {
 			return errors.New("渠道分组不能为空")
 		}
-		codes, err := ResolveGroupCodesByIds(*groupIDs)
-		if err != nil {
-			return err
-		}
-		normalizedGroupIDs = append([]int(nil), *groupIDs...)
-		normalizedGroup = strings.Join(codes, ",")
-		updateData.Group = normalizedGroup
+		requestedGroupIDs = append([]int(nil), *groupIDs...)
 		shouldReCreateAbilities = true
 	} else if group != nil && *group != "" {
 		shouldReCreateAbilities = true
-		updateData.Group = *group
-		normalizedGroup = *group
+		requestedGroup = *group
 	}
 	if priority != nil {
 		updateData.Priority = priority
@@ -964,19 +997,73 @@ func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *
 
 	if shouldReCreateAbilities {
 		return DB.Transaction(func(tx *gorm.DB) error {
-			if err := tx.Model(&Channel{}).Where("tag = ?", tag).Updates(updateData).Error; err != nil {
-				return err
-			}
 			var channels []*Channel
-			if err := tx.Where("tag = ?", updatedTag).Find(&channels).Error; err != nil {
+			if err := tx.Where("tag = ?", tag).Order("id ASC").Find(&channels).Error; err != nil {
 				return err
 			}
+			if len(channels) == 0 {
+				return nil
+			}
+			if err := HydrateChannelGroupBindings(tx, channels); err != nil {
+				return err
+			}
+			type preparedChannelGroups struct {
+				group   string
+				ids     []int
+				details []GroupReference
+			}
+			preparedGroups := make(map[int]preparedChannelGroups, len(channels))
+			channelIDs := make([]int, 0, len(channels))
+			allGroupIDs := make([]int, 0)
 			for _, channel := range channels {
 				if groupIDs != nil {
-					channel.GroupIds = append([]int(nil), normalizedGroupIDs...)
-					channel.Group = normalizedGroup
+					channel.GroupIds = append([]int(nil), requestedGroupIDs...)
+				} else if requestedGroup != "" {
+					channel.GroupIds = nil
+					channel.Group = requestedGroup
 				}
-				if err := ReplaceChannelGroupBindingsForUpdate(tx, channel); err != nil {
+				if err := PrepareChannelGroupBindingsForUpdate(tx, channel); err != nil {
+					return fmt.Errorf("更新标签渠道 %d 分组失败: %w", channel.Id, err)
+				}
+				channelIDs = append(channelIDs, channel.Id)
+				allGroupIDs = append(allGroupIDs, channel.GroupIds...)
+				preparedGroups[channel.Id] = preparedChannelGroups{
+					group:   channel.Group,
+					ids:     append([]int(nil), channel.GroupIds...),
+					details: append([]GroupReference(nil), channel.GroupDetails...),
+				}
+			}
+			if err := lockGroupRowsForBindingWrite(tx, allGroupIDs, "渠道"); err != nil {
+				return err
+			}
+			if err := lockChannelRowsForBindingWrite(tx, channelIDs); err != nil {
+				return err
+			}
+			var matchingCount int64
+			if err := tx.Model(&Channel{}).
+				Where("id IN ? AND tag = ?", channelIDs, tag).
+				Count(&matchingCount).Error; err != nil {
+				return err
+			}
+			if matchingCount != int64(len(channelIDs)) {
+				return errors.New("标签渠道在锁定期间发生变化，请重试")
+			}
+			if groupIDs != nil || requestedGroup != "" {
+				updateData.Group = preparedGroups[channelIDs[0]].group
+			}
+			if err := tx.Model(&Channel{}).Where("id IN ?", channelIDs).Updates(updateData).Error; err != nil {
+				return err
+			}
+			var persistedChannels []*Channel
+			if err := tx.Where("id IN ?", channelIDs).Order("id ASC").Find(&persistedChannels).Error; err != nil {
+				return err
+			}
+			for _, channel := range persistedChannels {
+				selection := preparedGroups[channel.Id]
+				channel.Group = selection.group
+				channel.GroupIds = append([]int(nil), selection.ids...)
+				channel.GroupDetails = append([]GroupReference(nil), selection.details...)
+				if err := writeChannelGroupBindings(tx, channel); err != nil {
 					return fmt.Errorf("更新标签渠道 %d 分组失败: %w", channel.Id, err)
 				}
 				if err := channel.UpdateAbilities(tx); err != nil {

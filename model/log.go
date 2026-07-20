@@ -49,10 +49,41 @@ type Log struct {
 	ChannelName       string `json:"channel_name" gorm:"->"`
 	TokenId           int    `json:"token_id" gorm:"default:0;index"`
 	Group             string `json:"group" gorm:"index"`
+	GroupName         string `json:"group_name" gorm:"-"`
 	Ip                string `json:"ip" gorm:"index;default:''"`
 	RequestId         string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
 	UpstreamRequestId string `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
 	Other             string `json:"other"`
+}
+
+func applyLogGroupNames(logs []*Log, groupNames map[string]string) {
+	for _, log := range logs {
+		if log == nil {
+			continue
+		}
+		group := strings.TrimSpace(log.Group)
+		if group == "" {
+			other, _ := common.StrToMap(log.Other)
+			if value, ok := other["group"].(string); ok {
+				group = strings.TrimSpace(value)
+			}
+		}
+		if group == "" {
+			continue
+		}
+		log.GroupName = group
+		if name := strings.TrimSpace(groupNames[group]); name != "" {
+			log.GroupName = name
+		}
+	}
+}
+
+func hydrateLogGroupNames(logs []*Log) {
+	groupNames, err := GetGroupDisplayNameMap()
+	if err != nil {
+		groupNames = map[string]string{}
+	}
+	applyLogGroupNames(logs, groupNames)
 }
 
 // don't use iota, avoid change log type value
@@ -67,6 +98,7 @@ const (
 )
 
 func formatUserLogs(logs []*Log, startIdx int) {
+	hydrateLogGroupNames(logs)
 	for i := range logs {
 		logs[i].ChannelName = ""
 		logs[i].Ip = ""
@@ -470,6 +502,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 			logs[i].ChannelName = channelMap[logs[i].ChannelId]
 		}
 	}
+	hydrateLogGroupNames(logs)
 
 	return logs, total, err
 }

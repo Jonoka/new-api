@@ -5,6 +5,7 @@ import {
   buildGroupDetailsPayload,
   buildGroupSelectionPayload,
   createGroupOptions,
+  createPlaygroundGroupOptions,
   createUniqueGroupCode,
   createUserGroupOptions,
   extractGroupDetailsResponse,
@@ -35,7 +36,7 @@ test('显示名称映射不会改变内部 code', () => {
   assert.equal(getGroupDisplayName('group_1', null), 'group_1');
 });
 
-test('修改显示名称不会改变稳定 ID 和分组标识', () => {
+test('分组保存以 ID 关联并保留旧客户端兼容字段', () => {
   const original = {
     id: 42,
     code: 'codex-pro',
@@ -48,7 +49,7 @@ test('修改显示名称不会改变稳定 ID 和分组标识', () => {
   const renamed = { ...original, name: 'Codex 高速专线' };
   const payload = buildGroupDetailsPayload([renamed], []);
 
-  assert.equal(formatGroupLabel(renamed), 'Codex 高速专线 (codex-pro)');
+  assert.equal(formatGroupLabel(renamed), 'Codex 高速专线');
   assert.equal(payload.groups[0].id, 42);
   assert.equal(payload.groups[0].code, 'codex-pro');
   assert.equal(payload.groups[0].name, 'Codex 高速专线');
@@ -94,6 +95,32 @@ test('选择器显示名称但始终以 code 作为选中值', () => {
   assert.equal(userOption.label, '尊贵用户');
   assert.equal(userOption.value, 'vip');
   assert.equal(userOption.legacy_code, 'legacy-vip');
+});
+
+test('操练场显示当前名称但提交接口对象键', () => {
+  const [option] = createPlaygroundGroupOptions({
+    'Codex-Team': {
+      name: 'Codex-福利组',
+      desc: '福利线路',
+      ratio: 0.05,
+    },
+  });
+
+  assert.deepEqual(option, {
+    label: 'Codex-福利组',
+    value: 'Codex-Team',
+    ratio: 0.05,
+    fullLabel: '福利线路',
+  });
+
+  const [duplicateDescription] = createPlaygroundGroupOptions({
+    'Codex-Team': {
+      name: 'Codex-福利组',
+      desc: 'Codex-福利组',
+      ratio: 0.05,
+    },
+  });
+  assert.equal(duplicateDescription.fullLabel, '');
 });
 
 test('编辑记录优先按 group_ids 回填，旧记录才回退 group 字符串', () => {

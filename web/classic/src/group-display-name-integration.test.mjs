@@ -62,6 +62,26 @@ test('Auto 与规则编辑器统一使用名称 label 和内部 code value', () 
   assert.match(usableRulesSource, /optionList=\{groupOptions\}/);
 });
 
+test('分组和高级配置通过单次原子请求保存且不使用 staging', () => {
+  const settingsSource = readSource(
+    'pages/Setting/Ratio/GroupRatioSettings.jsx',
+  );
+
+  assert.equal(
+    [...settingsSource.matchAll(/API\.put\('\/api\/group\/details'/g)].length,
+    1,
+  );
+  assert.match(settingsSource, /option_updates:\s*optionUpdates/);
+  assert.match(
+    settingsSource,
+    /groupsChanged\s*\?\s*groupPayload\s*:\s*\{\s*groups:\s*\[\],\s*deleted_ids:\s*\[\]\s*\}/,
+  );
+  assert.doesNotMatch(settingsSource, /API\.put\('\/api\/option\/'/);
+  assert.doesNotMatch(settingsSource, /prepareGroupNamesForInitialSave/);
+  assert.doesNotMatch(settingsSource, /__group_prepare_/);
+  assert.match(settingsSource, /'TopupGroupRatio'/);
+});
+
 test('模型广场消费 group_names 但筛选和计价仍使用内部 code', () => {
   const hookSource = readSource('hooks/model-pricing/useModelPricingData.jsx');
   const filterSource = readSource(
@@ -72,6 +92,12 @@ test('模型广场消费 group_names 但筛选和计价仍使用内部 code', ()
   );
   const billingSource = readSource(
     'components/table/model-pricing/billing/BillingGuide.jsx',
+  );
+  const performanceSource = readSource(
+    'components/table/model-pricing/performance/ModelPerformancePanel.jsx',
+  );
+  const sideSheetSource = readSource(
+    'components/table/model-pricing/modal/ModelDetailSideSheet.jsx',
   );
 
   assert.match(hookSource, /group_names/);
@@ -85,4 +111,38 @@ test('模型广场消费 group_names 但筛选和计价仍使用内部 code', ()
     billingSource,
     /getGroupDisplayName\(group\.value, groupNames\)/,
   );
+  assert.match(
+    performanceSource,
+    /getGroupDisplayName\(row\.group, groupNames\)/,
+  );
+  assert.match(
+    sideSheetSource,
+    /<ModelPerformancePanel[\s\S]*?groupNames=\{groupNames\}/,
+  );
+});
+
+test('用户编辑器显示当前分组名称但继续提交内部 code', () => {
+  const source = readSource('components/table/users/modals/EditUserModal.jsx');
+
+  assert.match(source, /API\.get\('\/api\/group\/details'\)/);
+  assert.match(source, /extractGroupDetailsResponse\(res\?\.data\)/);
+  assert.match(source, /setGroupOptions\(createGroupOptions\(groups\)\)/);
+  assert.doesNotMatch(source, /API\.get\(`\/api\/group\/`\)/);
+});
+
+test('用户筛选和订阅套餐统一显示名称并提交内部 code', () => {
+  const usersSource = readSource('hooks/users/useUsersData.jsx');
+  const subscriptionsSource = readSource(
+    'components/table/subscriptions/modals/AddEditSubscriptionModal.jsx',
+  );
+
+  for (const source of [usersSource, subscriptionsSource]) {
+    assert.match(source, /API\.get\('\/api\/group\/details'\)/);
+    assert.match(source, /extractGroupDetailsResponse\(res(?:\?|)\.data\)/);
+    assert.match(source, /createGroupOptions\(groups \|\| \[\]\)/);
+  }
+  assert.match(subscriptionsSource, /value=\{group\.value\}/);
+  assert.match(subscriptionsSource, /\{group\.label\}/);
+  assert.doesNotMatch(usersSource, /API\.get\(`\/api\/group\/`\)/);
+  assert.doesNotMatch(subscriptionsSource, /API\.get\('\/api\/group'\)/);
 });
