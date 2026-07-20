@@ -8,10 +8,13 @@ import {
   createPlaygroundGroupOptions,
   createUniqueGroupCode,
   createUserGroupOptions,
+  extractAutoGroupConfigResponse,
   extractGroupDetailsResponse,
   formatGroupLabel,
   getGroupDisplayName,
   getDeletedGroupIds,
+  groupDetailsToLegacyOptions,
+  normalizeAutoGroupConfig,
   reorderAutoGroupItems,
   resolveGroupCodes,
 } from './groupDetails.js';
@@ -95,6 +98,35 @@ test('选择器显示名称但始终以 code 作为选中值', () => {
   assert.equal(userOption.label, '尊贵用户');
   assert.equal(userOption.value, 'vip');
   assert.equal(userOption.legacy_code, 'legacy-vip');
+});
+
+test('虚拟 auto 配置独立于实体分组并投影到旧可选分组', () => {
+  const autoGroup = extractAutoGroupConfigResponse({
+    success: true,
+    data: [],
+    auto_group: {
+      user_selectable: true,
+      description: '按线路健康度自动选择',
+    },
+  });
+  assert.deepEqual(autoGroup, {
+    user_selectable: true,
+    description: '按线路健康度自动选择',
+  });
+
+  const projection = groupDetailsToLegacyOptions(
+    [{ id: 1, code: 'default', name: '默认', user_selectable: true }],
+    autoGroup,
+  );
+  assert.deepEqual(JSON.parse(projection.UserUsableGroups), {
+    default: '',
+    auto: '按线路健康度自动选择',
+  });
+  assert.equal(
+    normalizeAutoGroupConfig({ user_selectable: false, description: '' })
+      .description,
+    '自动选择最佳可用分组，失败时按配置顺序切换',
+  );
 });
 
 test('操练场显示当前名称但提交接口对象键', () => {

@@ -59,7 +59,7 @@ import {
   SettingsSwitchItem,
 } from '../components/settings-form-layout'
 import { SettingsPageActionsPortal } from '../components/settings-page-context'
-import type { GroupDetail, GroupDetailInput } from '../types'
+import type { AutoGroupConfig, GroupDetail, GroupDetailInput } from '../types'
 import { reserveGroupCodes } from './group-identity'
 import {
   GroupRatioVisualEditor,
@@ -150,6 +150,10 @@ export const GroupRatioForm = memo(function GroupRatioForm({
   const [editMode, setEditMode] = useState<'visual' | 'json'>('visual')
   const [guideOpen, setGuideOpen] = useState(false)
   const [groups, setGroups] = useState<EditableGroupDetail[]>([])
+  const [autoGroup, setAutoGroup] = useState<AutoGroupConfig>({
+    user_selectable: false,
+    description: '',
+  })
   const [reservedGroupCodes, setReservedGroupCodes] = useState<Set<string>>(
     () => new Set()
   )
@@ -168,11 +172,12 @@ export const GroupRatioForm = memo(function GroupRatioForm({
 
   useEffect(() => {
     if (!groupDetailsQuery.data) return
-    setGroups(groupDetailsQuery.data.map(createEditableGroup))
+    setGroups(groupDetailsQuery.data.groups.map(createEditableGroup))
+    setAutoGroup(groupDetailsQuery.data.autoGroup)
     setReservedGroupCodes((current) =>
       reserveGroupCodes(
         current,
-        groupDetailsQuery.data.map((group) => group.code)
+        groupDetailsQuery.data.groups.map((group) => group.code)
       )
     )
     setDeletedGroupIds([])
@@ -252,29 +257,44 @@ export const GroupRatioForm = memo(function GroupRatioForm({
           groups: createGroupDetailsPayload(groups),
           deleted_ids: deletedGroupIds,
           option_updates: optionUpdates,
+          auto_group: autoGroup,
         })
         if (!response.success) return
         const saveWarning = response.message?.trim()
 
-        const savedGroups = response.data ?? (await getGroupDetails())
-        queryClient.setQueryData(groupDetailsQueryKey, savedGroups)
+        const savedDetails = response.data
+          ? {
+              groups: response.data,
+              autoGroup: response.auto_group ?? autoGroup,
+            }
+          : await getGroupDetails()
+        queryClient.setQueryData(groupDetailsQueryKey, savedDetails)
         queryClient.setQueryData(['channels', 'group-details'], {
           success: true,
-          data: savedGroups,
+          data: savedDetails.groups,
         })
-        setGroups(savedGroups.map(createEditableGroup))
+        setGroups(savedDetails.groups.map(createEditableGroup))
+        setAutoGroup(savedDetails.autoGroup)
         setDeletedGroupIds([])
 
         // 分组名称会显示在模型广场；立即使五分钟缓存失效。
         await queryClient.invalidateQueries({ queryKey: ['pricing'] })
+        try {
+          window.localStorage.removeItem('status')
+        } catch {
+          // 无可用存储时仍继续刷新查询缓存。
+        }
 
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ['system-options'] }),
+          queryClient.invalidateQueries({ queryKey: ['status'] }),
           queryClient.invalidateQueries({ queryKey: ['channels'] }),
           queryClient.invalidateQueries({ queryKey: ['groups'] }),
           queryClient.invalidateQueries({ queryKey: ['keys'] }),
           queryClient.invalidateQueries({ queryKey: ['user-groups'] }),
           queryClient.invalidateQueries({ queryKey: ['user-self-groups'] }),
+          queryClient.invalidateQueries({ queryKey: ['playground-groups'] }),
+          queryClient.invalidateQueries({ queryKey: ['canvas-groups'] }),
         ])
         if (saveWarning) {
           toast.warning(saveWarning)
@@ -287,6 +307,7 @@ export const GroupRatioForm = memo(function GroupRatioForm({
     },
     [
       deletedGroupIds,
+      autoGroup,
       groupDetailsQuery.data,
       groupDetailsQuery.isError,
       groups,
@@ -349,12 +370,15 @@ export const GroupRatioForm = memo(function GroupRatioForm({
           <div className='space-y-6'>
             <GroupRatioVisualEditor
               groups={groups}
+              autoGroup={autoGroup}
+              autoSelectableLocked={form.watch('DefaultUseAutoGroup')}
               reservedGroupCodes={reservedGroupCodes}
               isLoadingGroups={groupDetailsQuery.isPending}
               groupLoadError={groupLoadError}
               topupGroupRatio={form.watch('TopupGroupRatio')}
               groupGroupRatio={form.watch('GroupGroupRatio')}
               onGroupsChange={handleGroupsChange}
+              onAutoGroupChange={setAutoGroup}
               onRetryGroups={() => {
                 void groupDetailsQuery.refetch()
               }}
@@ -386,7 +410,15 @@ export const GroupRatioForm = memo(function GroupRatioForm({
                   <FormControl>
                     <Switch
                       checked={field.value}
-                      onCheckedChange={field.onChange}
+                      onCheckedChange={(checked) => {
+                        field.onChange(checked)
+                        if (checked) {
+                          setAutoGroup((current) => ({
+                            ...current,
+                            user_selectable: true,
+                          }))
+                        }
+                      }}
                     />
                   </FormControl>
                 </SettingsSwitchItem>
@@ -476,7 +508,15 @@ export const GroupRatioForm = memo(function GroupRatioForm({
                   <FormControl>
                     <Switch
                       checked={field.value}
-                      onCheckedChange={field.onChange}
+                      onCheckedChange={(checked) => {
+                        field.onChange(checked)
+                        if (checked) {
+                          setAutoGroup((current) => ({
+                            ...current,
+                            user_selectable: true,
+                          }))
+                        }
+                      }}
                     />
                   </FormControl>
                 </SettingsSwitchItem>

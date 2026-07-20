@@ -46,7 +46,10 @@ const serializeRows = (rows) => rows.map(({ _rowId, ...group }) => group);
 
 export default function GroupTable({
   groups,
+  autoGroup,
   onChange,
+  onAutoGroupChange,
+  autoSelectableLocked = false,
   onMigrate,
   disabled = false,
 }) {
@@ -59,10 +62,29 @@ export default function GroupTable({
         .filter(Boolean),
     ),
   );
+  const displayRows = useMemo(
+    () => [
+      {
+        _rowId: 'virtual_auto',
+        _virtualAuto: true,
+        id: null,
+        name: t('自动选择') + ' (auto)',
+        ratio: t('自动'),
+        user_selectable: autoGroup?.user_selectable === true,
+        description: autoGroup?.description || '',
+      },
+      ...rows,
+    ],
+    [autoGroup, rows, t],
+  );
 
   // 通过 ref 读取最新回调，避免输入时重建列定义导致光标跳动。
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const autoGroupRef = useRef(autoGroup);
+  autoGroupRef.current = autoGroup;
+  const onAutoGroupChangeRef = useRef(onAutoGroupChange);
+  onAutoGroupChangeRef.current = onAutoGroupChange;
 
   const emitAndSet = useCallback((updater) => {
     setRows((previousRows) => {
@@ -135,32 +157,40 @@ export default function GroupTable({
         dataIndex: 'name',
         key: 'name',
         width: 180,
-        render: (_, record) => (
-          <Input
-            size='small'
-            value={record.name}
-            disabled={disabled}
-            placeholder={t('请输入分组名称')}
-            onChange={(value) => updateRow(record._rowId, 'name', value)}
-          />
-        ),
+        render: (_, record) =>
+          record._virtualAuto ? (
+            <Text strong>{record.name}</Text>
+          ) : (
+            <Input
+              size='small'
+              value={record.name}
+              disabled={disabled}
+              placeholder={t('请输入分组名称')}
+              onChange={(value) => updateRow(record._rowId, 'name', value)}
+            />
+          ),
       },
       {
         title: t('倍率'),
         dataIndex: 'ratio',
         key: 'ratio',
         width: 120,
-        render: (_, record) => (
-          <InputNumber
-            size='small'
-            min={0}
-            step={0.1}
-            value={record.ratio}
-            disabled={disabled}
-            style={{ width: '100%' }}
-            onChange={(value) => updateRow(record._rowId, 'ratio', value ?? 0)}
-          />
-        ),
+        render: (_, record) =>
+          record._virtualAuto ? (
+            <Text type='tertiary'>{record.ratio}</Text>
+          ) : (
+            <InputNumber
+              size='small'
+              min={0}
+              step={0.1}
+              value={record.ratio}
+              disabled={disabled}
+              style={{ width: '100%' }}
+              onChange={(value) =>
+                updateRow(record._rowId, 'ratio', value ?? 0)
+              }
+            />
+          ),
       },
       {
         title: t('用户可选'),
@@ -171,10 +201,17 @@ export default function GroupTable({
         render: (_, record) => (
           <Checkbox
             checked={record.user_selectable}
-            disabled={disabled}
-            onChange={(event) =>
-              updateRow(record._rowId, 'user_selectable', event.target.checked)
-            }
+            disabled={disabled || (record._virtualAuto && autoSelectableLocked)}
+            onChange={(event) => {
+              if (record._virtualAuto) {
+                onAutoGroupChangeRef.current?.({
+                  ...autoGroupRef.current,
+                  user_selectable: event.target.checked,
+                });
+                return;
+              }
+              updateRow(record._rowId, 'user_selectable', event.target.checked);
+            }}
           />
         ),
       },
@@ -183,15 +220,22 @@ export default function GroupTable({
         dataIndex: 'description',
         key: 'description',
         render: (_, record) =>
-          record.user_selectable ? (
+          record._virtualAuto || record.user_selectable ? (
             <Input
               size='small'
               value={record.description}
               disabled={disabled}
               placeholder={t('分组描述')}
-              onChange={(value) =>
-                updateRow(record._rowId, 'description', value)
-              }
+              onChange={(value) => {
+                if (record._virtualAuto) {
+                  onAutoGroupChangeRef.current?.({
+                    ...autoGroupRef.current,
+                    description: value,
+                  });
+                  return;
+                }
+                updateRow(record._rowId, 'description', value);
+              }}
             />
           ) : (
             <Text type='tertiary' size='small'>
@@ -203,34 +247,35 @@ export default function GroupTable({
         title: '',
         key: 'actions',
         width: 50,
-        render: (_, record) => (
-          <Popconfirm
-            title={t(
-              '确认标记删除该分组？保存时绑定令牌会自动切换为 auto；渠道、用户等其他引用仍会阻止删除。',
-            )}
-            onConfirm={() => removeRow(record._rowId)}
-            position='left'
-            disabled={disabled}
-          >
-            <Button
-              icon={<IconDelete />}
-              type='danger'
-              theme='borderless'
-              size='small'
+        render: (_, record) =>
+          record._virtualAuto ? null : (
+            <Popconfirm
+              title={t(
+                '确认标记删除该分组？保存时绑定令牌会自动切换为 auto；渠道、用户等其他引用仍会阻止删除。',
+              )}
+              onConfirm={() => removeRow(record._rowId)}
+              position='left'
               disabled={disabled}
-            />
-          </Popconfirm>
-        ),
+            >
+              <Button
+                icon={<IconDelete />}
+                type='danger'
+                theme='borderless'
+                size='small'
+                disabled={disabled}
+              />
+            </Popconfirm>
+          ),
       },
     ],
-    [disabled, removeRow, t, updateRow],
+    [autoSelectableLocked, disabled, removeRow, t, updateRow],
   );
 
   return (
     <div>
       <CardTable
         columns={columns}
-        dataSource={rows}
+        dataSource={displayRows}
         rowKey='_rowId'
         hidePagination
         size='small'

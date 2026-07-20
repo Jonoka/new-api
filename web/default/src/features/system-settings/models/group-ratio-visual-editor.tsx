@@ -69,7 +69,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { ConfirmDialog } from '@/components/confirm-dialog'
-import type { GroupDetailInput } from '../types'
+import type { AutoGroupConfig, GroupDetailInput } from '../types'
 import { safeJsonParse } from '../utils/json-parser'
 import { applyAutoGroupOrder } from './auto-group-order'
 import {
@@ -81,6 +81,8 @@ import { GroupTokenMigrationDialog } from './group-token-migration-dialog'
 
 type GroupRatioVisualEditorProps = {
   groups: EditableGroupDetail[]
+  autoGroup: AutoGroupConfig
+  autoSelectableLocked: boolean
   reservedGroupCodes: ReadonlySet<string>
   isLoadingGroups: boolean
   groupLoadError: string | null
@@ -88,6 +90,7 @@ type GroupRatioVisualEditorProps = {
   groupGroupRatio: string
   onChange: (field: string, value: string) => void
   onGroupsChange: (groups: EditableGroupDetail[]) => void
+  onAutoGroupChange: (config: AutoGroupConfig) => void
   onRetryGroups: () => void
 }
 
@@ -198,6 +201,8 @@ function AutoGroupReorderItem({
 
 export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   groups,
+  autoGroup,
+  autoSelectableLocked,
   reservedGroupCodes,
   isLoadingGroups,
   groupLoadError,
@@ -205,6 +210,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   groupGroupRatio,
   onChange,
   onGroupsChange,
+  onAutoGroupChange,
   onRetryGroups,
 }: GroupRatioVisualEditorProps) {
   const { t } = useTranslation()
@@ -461,10 +467,13 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
     <div className='space-y-4'>
       <GroupPricingTable
         groups={groups}
+        autoGroup={autoGroup}
+        autoSelectableLocked={autoSelectableLocked}
         reservedGroupCodes={reservedGroupCodes}
         isLoading={isLoadingGroups}
         loadError={groupLoadError}
         onGroupsChange={onGroupsChange}
+        onAutoGroupChange={onAutoGroupChange}
         onRetry={onRetryGroups}
       />
 
@@ -821,19 +830,25 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
 
 type GroupPricingTableProps = {
   groups: EditableGroupDetail[]
+  autoGroup: AutoGroupConfig
+  autoSelectableLocked: boolean
   reservedGroupCodes: ReadonlySet<string>
   isLoading: boolean
   loadError: string | null
   onGroupsChange: (groups: EditableGroupDetail[]) => void
+  onAutoGroupChange: (config: AutoGroupConfig) => void
   onRetry: () => void
 }
 
 function GroupPricingTable({
   groups,
+  autoGroup,
+  autoSelectableLocked,
   reservedGroupCodes,
   isLoading,
   loadError,
   onGroupsChange,
+  onAutoGroupChange,
   onRetry,
 }: GroupPricingTableProps) {
   const { t } = useTranslation()
@@ -979,97 +994,133 @@ function GroupPricingTable({
                       </div>
                     </TableCell>
                   </TableRow>
-                ) : groups.length === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={6}
-                      className='text-muted-foreground h-20 text-center text-sm'
-                    >
-                      {t('No groups yet. Add a group to get started.')}
-                    </TableCell>
-                  </TableRow>
                 ) : (
-                  groups.map((group) => {
-                    const groupId = getGroupIdDisplayValue(group.id)
-                    return (
-                      <TableRow key={group._key}>
-                        <TableCell className='text-muted-foreground font-mono text-xs'>
-                          {groupId === 'New' ? t(groupId) : groupId}
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            value={group.name}
-                            onChange={(event) =>
-                              updateRow(group._key, 'name', event.target.value)
+                  <>
+                    <TableRow className='bg-muted/25'>
+                      <TableCell className='text-muted-foreground font-mono text-xs'>
+                        -
+                      </TableCell>
+                      <TableCell className='font-medium'>
+                        {t('Auto (Circuit Breaker)')}
+                      </TableCell>
+                      <TableCell className='text-muted-foreground'>
+                        {t('Auto')}
+                      </TableCell>
+                      <TableCell>
+                        <div className='flex justify-center'>
+                          <Checkbox
+                            checked={autoGroup.user_selectable}
+                            disabled={autoSelectableLocked}
+                            onCheckedChange={(checked) =>
+                              onAutoGroupChange({
+                                ...autoGroup,
+                                user_selectable: checked === true,
+                              })
                             }
-                            aria-invalid={
-                              !group.name.trim() ||
-                              duplicateNames.includes(group.name.trim())
-                            }
+                            aria-label={t('User selectable')}
                           />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            type='number'
-                            min={0}
-                            step={0.1}
-                            value={String(group.ratio)}
-                            onChange={(event) =>
-                              updateRow(
-                                group._key,
-                                'ratio',
-                                normalizeRatio(event.target.value)
-                              )
-                            }
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <div className='flex justify-center'>
-                            <Checkbox
-                              checked={group.user_selectable}
-                              onCheckedChange={(checked) =>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          value={autoGroup.description}
+                          placeholder={t('Group description')}
+                          onChange={(event) =>
+                            onAutoGroupChange({
+                              ...autoGroup,
+                              description: event.target.value,
+                            })
+                          }
+                        />
+                      </TableCell>
+                      <TableCell />
+                    </TableRow>
+                    {groups.map((group) => {
+                      const groupId = getGroupIdDisplayValue(group.id)
+                      return (
+                        <TableRow key={group._key}>
+                          <TableCell className='text-muted-foreground font-mono text-xs'>
+                            {groupId === 'New' ? t(groupId) : groupId}
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              value={group.name}
+                              onChange={(event) =>
                                 updateRow(
                                   group._key,
-                                  'user_selectable',
-                                  checked === true
+                                  'name',
+                                  event.target.value
                                 )
                               }
-                              aria-label={t('User selectable')}
-                            />
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            value={group.description}
-                            placeholder={t('Group description')}
-                            onChange={(event) =>
-                              updateRow(
-                                group._key,
-                                'description',
-                                event.target.value
-                              )
-                            }
-                          />
-                        </TableCell>
-                        <TableCell className='text-right'>
-                          <Button
-                            variant='ghost'
-                            size='sm'
-                            onClick={() => {
-                              if (Number(group.id) > 0) {
-                                setPendingDeleteKey(group._key)
-                              } else {
-                                removeRow(group._key)
+                              aria-invalid={
+                                !group.name.trim() ||
+                                duplicateNames.includes(group.name.trim())
                               }
-                            }}
-                            aria-label={t('Delete')}
-                          >
-                            <Trash2 className='h-4 w-4' />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type='number'
+                              min={0}
+                              step={0.1}
+                              value={String(group.ratio)}
+                              onChange={(event) =>
+                                updateRow(
+                                  group._key,
+                                  'ratio',
+                                  normalizeRatio(event.target.value)
+                                )
+                              }
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <div className='flex justify-center'>
+                              <Checkbox
+                                checked={group.user_selectable}
+                                onCheckedChange={(checked) =>
+                                  updateRow(
+                                    group._key,
+                                    'user_selectable',
+                                    checked === true
+                                  )
+                                }
+                                aria-label={t('User selectable')}
+                              />
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              value={group.description}
+                              placeholder={t('Group description')}
+                              onChange={(event) =>
+                                updateRow(
+                                  group._key,
+                                  'description',
+                                  event.target.value
+                                )
+                              }
+                            />
+                          </TableCell>
+                          <TableCell className='text-right'>
+                            <Button
+                              variant='ghost'
+                              size='sm'
+                              onClick={() => {
+                                if (Number(group.id) > 0) {
+                                  setPendingDeleteKey(group._key)
+                                } else {
+                                  removeRow(group._key)
+                                }
+                              }}
+                              aria-label={t('Delete')}
+                            >
+                              <Trash2 className='h-4 w-4' />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </>
                 )}
               </TableBody>
             </Table>

@@ -19,6 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 
 export const GROUP_DETAILS_UPDATED_EVENT = 'new-api:group-details-updated';
 
+export const DEFAULT_AUTO_GROUP_DESCRIPTION =
+  '自动选择最佳可用分组，失败时按配置顺序切换';
+
 export const notifyGroupDetailsUpdated = () => {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new window.Event(GROUP_DETAILS_UPDATED_EVENT));
@@ -103,6 +106,21 @@ export const extractGroupDetailsResponse = (payload) => {
   return null;
 };
 
+export const normalizeAutoGroupConfig = (config = {}, applyDefault = true) => {
+  const description = String(config?.description ?? '');
+  return {
+    user_selectable: config?.user_selectable === true,
+    description: applyDefault
+      ? description.trim() || DEFAULT_AUTO_GROUP_DESCRIPTION
+      : description,
+  };
+};
+
+export const extractAutoGroupConfigResponse = (payload) =>
+  normalizeAutoGroupConfig(
+    payload?.auto_group ?? payload?.data?.auto_group ?? {},
+  );
+
 export const formatGroupLabel = (group = {}) => {
   const code = String(group.code ?? group.value ?? '').trim();
   const name = String(group.name ?? '').trim();
@@ -149,8 +167,9 @@ export const createPlaygroundGroupOptions = (groupMap) =>
     };
   });
 
-export const groupDetailsToLegacyOptions = (groups) => {
+export const groupDetailsToLegacyOptions = (groups, autoGroupConfig) => {
   const normalized = normalizeGroupDetails(groups);
+  const virtualAuto = normalizeAutoGroupConfig(autoGroupConfig);
   const groupRatio = {};
   const userUsableGroups = {};
   const autoGroups = normalized
@@ -165,6 +184,9 @@ export const groupDetailsToLegacyOptions = (groups) => {
       userUsableGroups[group.code] = group.description;
     }
   });
+  if (virtualAuto.user_selectable) {
+    userUsableGroups.auto = virtualAuto.description;
+  }
 
   return {
     GroupRatio: JSON.stringify(groupRatio, null, 2),

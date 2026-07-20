@@ -177,6 +177,7 @@ func InitOptionMap() {
 	common.OptionMap["TopupGroupRatio"] = common.TopupGroupRatio2JSONString()
 	common.OptionMap["Chats"] = setting.Chats2JsonString()
 	common.OptionMap["AutoGroups"] = setting.AutoGroups2JsonString()
+	common.OptionMap["AutoGroupConfig"] = setting.AutoGroupConfig2JsonString()
 	common.OptionMap["DefaultUseAutoGroup"] = strconv.FormatBool(setting.DefaultUseAutoGroup)
 	common.OptionMap["PayMethods"] = operation_setting.PayMethods2JsonString()
 	common.OptionMap["GitHubClientId"] = ""
@@ -253,7 +254,9 @@ func loadOptionsFromDatabase() {
 	optionWriteMutex.Lock()
 	defer optionWriteMutex.Unlock()
 	options, _ := AllOption()
+	loadedValues := make(map[string]string, len(options))
 	for _, option := range options {
+		loadedValues[option.Key] = option.Value
 		if option.Key == "AutomaticRetryStatusCodes" {
 			if normalized, migrated := operation_setting.NormalizeAutomaticRetryStatusCodesOption(option.Value); migrated {
 				if err := DB.Model(&Option{}).
@@ -269,6 +272,19 @@ func loadOptionsFromDatabase() {
 			common.SysLog("failed to update option map: " + err.Error())
 		}
 	}
+	config, err := resolveAutoGroupConfigFromOptions(DB, loadedValues)
+	if err != nil {
+		common.SysLog("failed to normalize auto group config in memory: " + err.Error())
+		return
+	}
+	raw, err := common.Marshal(config)
+	if err != nil {
+		common.SysLog("failed to serialize auto group config: " + err.Error())
+		return
+	}
+	if err := updateOptionMap("AutoGroupConfig", string(raw)); err != nil {
+		common.SysLog("failed to update auto group config: " + err.Error())
+	}
 }
 
 func SyncOptions(frequency int) {
@@ -279,7 +295,66 @@ func SyncOptions(frequency int) {
 	}
 }
 
+func normalizeAutoGroupOptionUpdatesWithDB(tx *gorm.DB, values map[string]string) (map[string]string, error) {
+	if len(values) == 0 {
+		return values, nil
+	}
+	defaultValue, updatesDefault := values["DefaultUseAutoGroup"]
+	configValue, updatesConfig := values["AutoGroupConfig"]
+	if !updatesDefault && !updatesConfig {
+		return values, nil
+	}
+
+	keys := []string{"AutoGroupConfig", "DefaultUseAutoGroup"}
+	var rows []Option
+	if err := tx.Where(commonKeyCol+" IN ?", keys).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	stored := make(map[string]string, len(rows))
+	for _, row := range rows {
+		stored[row.Key] = row.Value
+	}
+
+	defaultUseAuto := setting.DefaultUseAutoGroup
+	if storedDefault, ok := stored["DefaultUseAutoGroup"]; ok {
+		defaultUseAuto = strings.EqualFold(strings.TrimSpace(storedDefault), "true")
+	}
+	if updatesDefault {
+		defaultUseAuto = strings.EqualFold(strings.TrimSpace(defaultValue), "true")
+	}
+	if !defaultUseAuto {
+		return values, nil
+	}
+
+	config := setting.GetAutoGroupConfig()
+	if storedConfig, ok := stored["AutoGroupConfig"]; ok {
+		if err := common.UnmarshalJsonStr(storedConfig, &config); err != nil {
+			return nil, fmt.Errorf("解析已保存的自动分组配置失败: %w", err)
+		}
+	}
+	if updatesConfig {
+		if err := common.UnmarshalJsonStr(configValue, &config); err != nil {
+			return nil, fmt.Errorf("自动分组配置格式错误: %w", err)
+		}
+	}
+	config = setting.NormalizeAutoGroupConfig(config)
+	config.UserSelectable = true
+	raw, err := common.Marshal(config)
+	if err != nil {
+		return nil, err
+	}
+	normalized := make(map[string]string, len(values)+1)
+	for key, value := range values {
+		normalized[key] = value
+	}
+	normalized["AutoGroupConfig"] = string(raw)
+	return normalized, nil
+}
+
 func UpdateOption(key string, value string) error {
+	if key == "DefaultUseAutoGroup" || key == "AutoGroupConfig" {
+		return UpdateOptionsBulk(map[string]string{key: value})
+	}
 	if err := validateOptionValue(key, value); err != nil {
 		return err
 	}
@@ -332,6 +407,12 @@ func UpdateOptionsBulk(values map[string]string) error {
 			groupIDs = append(groupIDs, ids...)
 			keys = append(keys, key)
 		}
+		if _, updatesDefault := values["DefaultUseAutoGroup"]; updatesDefault {
+			keys = append(keys, "AutoGroupConfig")
+		}
+		if _, updatesConfig := values["AutoGroupConfig"]; updatesConfig {
+			keys = append(keys, "DefaultUseAutoGroup")
+		}
 		if err := lockGroupRowsForBindingWrite(tx, groupIDs, "分组选项"); err != nil {
 			return err
 		}
@@ -339,6 +420,16 @@ func UpdateOptionsBulk(values map[string]string) error {
 		if err := lockOptionRowsForWrite(tx, keys); err != nil {
 			return err
 		}
+		var err error
+		values, err = normalizeAutoGroupOptionUpdatesWithDB(tx, values)
+		if err != nil {
+			return err
+		}
+		keys = keys[:0]
+		for key := range values {
+			keys = append(keys, key)
+		}
+		keys = sortedUniqueOptionKeys(keys)
 		for _, k := range keys {
 			v := values[k]
 			option := Option{Key: k}
@@ -505,6 +596,8 @@ func updateOptionMap(key string, value string) (err error) {
 		err = setting.UpdateChatsByJsonString(value)
 	case "AutoGroups":
 		err = setting.UpdateAutoGroupsByJsonString(value)
+	case "AutoGroupConfig":
+		err = setting.UpdateAutoGroupConfigByJsonString(value)
 	case "CustomCallbackAddress":
 		operation_setting.CustomCallbackAddress = value
 	case "EpayId":
@@ -766,6 +859,12 @@ func updateOptionMap(key string, value string) (err error) {
 
 func validateOptionValue(key string, value string) error {
 	switch key {
+	case "AutoGroupConfig":
+		var config setting.AutoGroupConfig
+		if err := common.UnmarshalJsonStr(value, &config); err != nil {
+			return fmt.Errorf("自动分组配置格式错误: %w", err)
+		}
+		return nil
 	case "DefaultUseAutoGroup":
 		if value != "true" && value != "false" {
 			return fmt.Errorf("默认使用自动分组必须是 true 或 false")

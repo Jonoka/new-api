@@ -47,7 +47,7 @@ func TestMigrateGroupIdentityIsIdempotent(t *testing.T) {
 	}
 	options := []Option{
 		{Key: "GroupRatio", Value: `{"default":1,"vip":0.5}`},
-		{Key: "UserUsableGroups", Value: `{"default":"默认","vip":"VIP"}`},
+		{Key: "UserUsableGroups", Value: `{"default":"默认","vip":"VIP","auto":"自动择优"}`},
 		{Key: "AutoGroups", Value: `["vip","default"]`},
 	}
 	if err := db.Create(&options).Error; err != nil {
@@ -85,6 +85,143 @@ func TestMigrateGroupIdentityIsIdempotent(t *testing.T) {
 	}
 	if len(members) != 2 || members[0].Position != 0 || members[1].Position != 1 {
 		t.Fatalf("自动分组顺序错误: %#v", members)
+	}
+	var autoConfigOption Option
+	if err := db.First(&autoConfigOption, commonKeyCol+" = ?", "AutoGroupConfig").Error; err != nil {
+		t.Fatalf("读取虚拟 auto 配置失败: %v", err)
+	}
+	var autoConfig setting.AutoGroupConfig
+	if err := common.UnmarshalJsonStr(autoConfigOption.Value, &autoConfig); err != nil {
+		t.Fatalf("解析虚拟 auto 配置失败: %v", err)
+	}
+	if !autoConfig.UserSelectable || autoConfig.Description != "自动择优" {
+		t.Fatalf("虚拟 auto 配置迁移错误: %#v", autoConfig)
+	}
+	var autoEntityCount int64
+	if err := db.Model(&Group{}).Where("code = ?", TokenGroupModeAuto).Count(&autoEntityCount).Error; err != nil {
+		t.Fatalf("统计 auto 实体失败: %v", err)
+	}
+	if autoEntityCount != 0 {
+		t.Fatalf("虚拟 auto 不应创建实体分组，实际数量 %d", autoEntityCount)
+	}
+}
+
+func TestMigrateGroupIdentityQuarantinesLegacyAutoEntity(t *testing.T) {
+	db := openGroupIdentityTestDB(t)
+	if err := db.AutoMigrate(&Option{}, &Group{}, &GroupAlias{}, &AutoGroupMember{}, &Token{}, &User{}, &Ability{}); err != nil {
+		t.Fatalf("迁移测试表失败: %v", err)
+	}
+	legacyAuto := &Group{
+		Code:           TokenGroupModeAuto,
+		Name:           "旧 auto 实体",
+		Description:    "旧自动描述",
+		Ratio:          1,
+		UserSelectable: true,
+		Status:         GroupStatusActive,
+	}
+	if err := db.Create(legacyAuto).Error; err != nil {
+		t.Fatalf("创建历史 auto 实体失败: %v", err)
+	}
+	if err := db.Create(&Option{Key: "AutoGroups", Value: `["default"]`}).Error; err != nil {
+		t.Fatalf("创建自动分组选项失败: %v", err)
+	}
+
+	if err := MigrateGroupIdentity(); err != nil {
+		t.Fatalf("迁移历史 auto 实体失败: %v", err)
+	}
+	var configOption Option
+	if err := db.First(&configOption, commonKeyCol+" = ?", "AutoGroupConfig").Error; err != nil {
+		t.Fatalf("读取迁移后的 auto 配置失败: %v", err)
+	}
+	var config setting.AutoGroupConfig
+	if err := common.UnmarshalJsonStr(configOption.Value, &config); err != nil {
+		t.Fatalf("解析迁移后的 auto 配置失败: %v", err)
+	}
+	if !config.UserSelectable || config.Description != legacyAuto.Description {
+		t.Fatalf("历史 auto 元数据未被吸收: %#v", config)
+	}
+	groups, err := GetAllGroups(true)
+	if err != nil {
+		t.Fatalf("读取管理分组失败: %v", err)
+	}
+	for _, group := range groups {
+		if isVirtualAutoCode(group.Code) {
+			t.Fatalf("历史 auto 实体仍暴露给管理接口: %#v", group)
+		}
+	}
+	var storedLegacyAuto Group
+	if err := db.First(&storedLegacyAuto, legacyAuto.Id).Error; err != nil {
+		t.Fatalf("历史 auto 实体应保留供引用审计: %v", err)
+	}
+}
+
+func TestSaveGroupConfigProjectsVirtualAutoWithoutEntity(t *testing.T) {
+	db := openGroupIdentityTestDB(t)
+	if err := db.AutoMigrate(&Option{}, &Group{}, &GroupAlias{}, &AutoGroupMember{}, &Token{}, &TokenGroupBinding{}); err != nil {
+		t.Fatalf("迁移测试表失败: %v", err)
+	}
+	previousAutoConfig := setting.AutoGroupConfig2JsonString()
+	previousAutoGroups := setting.AutoGroups2JsonString()
+	previousUsableGroups := setting.UserUsableGroups2JSONString()
+	previousGroupRatios := ratio_setting.GroupRatio2JSONString()
+	t.Cleanup(func() {
+		_ = setting.UpdateAutoGroupConfigByJsonString(previousAutoConfig)
+		_ = setting.UpdateAutoGroupsByJsonString(previousAutoGroups)
+		_ = setting.UpdateUserUsableGroupsByJSONString(previousUsableGroups)
+		_ = ratio_setting.UpdateGroupRatioByJSONString(previousGroupRatios)
+	})
+
+	config := setting.AutoGroupConfig{UserSelectable: true, Description: "按线路健康度自动选择"}
+	_, err := SaveGroupConfigWithOptionsAndAutoConfigResult(
+		[]GroupConfig{{
+			Code:           "default",
+			Name:           "默认分组",
+			Description:    "默认线路",
+			Ratio:          1,
+			UserSelectable: true,
+			Status:         GroupStatusActive,
+			AutoEnabled:    true,
+		}},
+		nil,
+		nil,
+		&config,
+	)
+	if err != nil {
+		t.Fatalf("保存虚拟 auto 配置失败: %v", err)
+	}
+
+	var usableOption Option
+	if err := db.First(&usableOption, commonKeyCol+" = ?", "UserUsableGroups").Error; err != nil {
+		t.Fatalf("读取兼容投影失败: %v", err)
+	}
+	var usable map[string]string
+	if err := common.UnmarshalJsonStr(usableOption.Value, &usable); err != nil {
+		t.Fatalf("解析兼容投影失败: %v", err)
+	}
+	if usable[TokenGroupModeAuto] != config.Description {
+		t.Fatalf("auto 描述未投影到旧配置: %#v", usable)
+	}
+
+	config.UserSelectable = false
+	if _, err := SaveGroupConfigWithOptionsAndAutoConfigResult(nil, nil, nil, &config); err != nil {
+		t.Fatalf("关闭虚拟 auto 失败: %v", err)
+	}
+	if err := db.First(&usableOption, commonKeyCol+" = ?", "UserUsableGroups").Error; err != nil {
+		t.Fatalf("重新读取兼容投影失败: %v", err)
+	}
+	usable = nil
+	if err := common.UnmarshalJsonStr(usableOption.Value, &usable); err != nil {
+		t.Fatalf("重新解析兼容投影失败: %v", err)
+	}
+	if _, exists := usable[TokenGroupModeAuto]; exists {
+		t.Fatalf("关闭后旧配置仍包含 auto: %#v", usable)
+	}
+	var autoEntityCount int64
+	if err := db.Model(&Group{}).Where("code = ?", TokenGroupModeAuto).Count(&autoEntityCount).Error; err != nil {
+		t.Fatalf("统计 auto 实体失败: %v", err)
+	}
+	if autoEntityCount != 0 {
+		t.Fatalf("保存虚拟配置不应创建 auto 实体，实际数量 %d", autoEntityCount)
 	}
 }
 
@@ -1161,9 +1298,11 @@ func TestSaveGroupConfigWithOptionsCommitsGroupsAndOptionsAtomically(t *testing.
 	common.OptionMap = make(map[string]string)
 	common.OptionMapRWMutex.Unlock()
 	oldDefaultUseAutoGroup := setting.DefaultUseAutoGroup
+	oldAutoGroupConfig := setting.AutoGroupConfig2JsonString()
 	oldTopupGroupRatio := common.TopupGroupRatio2JSONString()
 	t.Cleanup(func() {
 		setting.DefaultUseAutoGroup = oldDefaultUseAutoGroup
+		_ = setting.UpdateAutoGroupConfigByJsonString(oldAutoGroupConfig)
 		_ = common.UpdateTopupGroupRatioByJSONString(oldTopupGroupRatio)
 		common.OptionMapRWMutex.Lock()
 		common.OptionMap = oldOptionMap
@@ -1194,7 +1333,7 @@ func TestSaveGroupConfigWithOptionsCommitsGroupsAndOptionsAtomically(t *testing.
 		t.Fatalf("读取原子创建的分组失败: %v", err)
 	}
 	var storedOptions []Option
-	if err := DB.Where("key IN ?", []string{"DefaultUseAutoGroup", "TopupGroupRatio"}).Find(&storedOptions).Error; err != nil {
+	if err := DB.Where("key IN ?", []string{"AutoGroupConfig", "DefaultUseAutoGroup", "TopupGroupRatio"}).Find(&storedOptions).Error; err != nil {
 		t.Fatalf("读取原子保存的选项失败: %v", err)
 	}
 	optionByKey := make(map[string]string, len(storedOptions))
@@ -1203,6 +1342,13 @@ func TestSaveGroupConfigWithOptionsCommitsGroupsAndOptionsAtomically(t *testing.
 	}
 	if optionByKey["DefaultUseAutoGroup"] != "true" || optionByKey["TopupGroupRatio"] != topupValue {
 		t.Fatalf("原子保存的选项错误: %#v", optionByKey)
+	}
+	var autoConfig setting.AutoGroupConfig
+	if err := common.UnmarshalJsonStr(optionByKey["AutoGroupConfig"], &autoConfig); err != nil {
+		t.Fatalf("解析原子保存的 auto 配置失败: %v", err)
+	}
+	if !autoConfig.UserSelectable {
+		t.Fatalf("旧客户端启用默认 auto 时未同步启用虚拟 auto: %#v", autoConfig)
 	}
 	common.OptionMapRWMutex.RLock()
 	runtimeDefault := common.OptionMap["DefaultUseAutoGroup"]

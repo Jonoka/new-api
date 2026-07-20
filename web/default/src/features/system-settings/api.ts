@@ -21,7 +21,7 @@ import type {
   ConfirmPaymentComplianceResponse,
   DeleteLogsResponse,
   FetchUpstreamRatiosRequest,
-  GroupDetail,
+  GroupDetailsData,
   GroupDetailsResponse,
   OkpayRatePreviewResponse,
   SystemOptionsResponse,
@@ -46,15 +46,24 @@ export async function updateSystemOption(request: UpdateOptionRequest) {
   return res.data
 }
 
-export async function getGroupDetails(): Promise<GroupDetail[]> {
+export async function getGroupDetails(): Promise<GroupDetailsData> {
   const res = await api.get<GroupDetailsResponse>('/api/group/details')
   if (Array.isArray(res.data)) {
-    return res.data
+    return {
+      groups: res.data,
+      autoGroup: { user_selectable: false, description: '' },
+    }
   }
   if (!res.data.success) {
     throw new Error(res.data.message || 'Failed to load groups')
   }
-  return res.data.data
+  return {
+    groups: res.data.data,
+    autoGroup: res.data.auto_group ?? {
+      user_selectable: false,
+      description: '',
+    },
+  }
 }
 
 export async function updateGroupDetails(

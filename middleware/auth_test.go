@@ -288,3 +288,94 @@ func TestTokenAuthRejectsSkippedInvalidLegacyGroupBeforeDownstream(t *testing.T)
 	require.False(t, downstreamCalled)
 	require.Contains(t, recorder.Body.String(), "无权访问")
 }
+
+func TestTokenAuthAllowsVirtualAutoWithoutLegacyUsableKey(t *testing.T) {
+	db := setupAuthMiddlewareTestDB(t)
+	require.NoError(t, db.AutoMigrate(
+		&model.Token{},
+		&model.Group{},
+		&model.TokenGroupBinding{},
+	))
+	require.NoError(t, db.Create(&model.User{
+		Id:       1301,
+		Username: "auto-token-user",
+		Group:    "default",
+		Role:     common.RoleCommonUser,
+		Status:   common.UserStatusEnabled,
+		Quota:    100,
+	}).Error)
+	const tokenKey = "autotoken1301"
+	require.NoError(t, db.Create(&model.Token{
+		Id:             1301,
+		UserId:         1301,
+		Key:            tokenKey,
+		Name:           "virtual-auto-token",
+		Status:         common.TokenStatusEnabled,
+		ExpiredTime:    -1,
+		UnlimitedQuota: true,
+		Group:          model.TokenGroupModeAuto,
+		GroupMode:      model.TokenGroupModeAuto,
+	}).Error)
+	previousRedisEnabled, previousRDB := common.RedisEnabled, common.RDB
+	common.RedisEnabled = true
+	common.RDB = newAuthRedisHashTestClient(map[string]string{
+		"Id":                 "1301",
+		"UserId":             "1301",
+		"Status":             strconv.Itoa(common.TokenStatusEnabled),
+		"Name":               "virtual-auto-token",
+		"ExpiredTime":        "-1",
+		"RemainQuota":        "100",
+		"UnlimitedQuota":     "true",
+		"ModelLimitsEnabled": "false",
+		"UsedQuota":          "0",
+		"Group":              model.TokenGroupModeAuto,
+		"GroupMode":          model.TokenGroupModeAuto,
+		"GroupRatioLimits":   "",
+		"CrossGroupRetry":    "false",
+	}, map[string]string{
+		"Id":       "1301",
+		"Group":    "default",
+		"GroupId":  "1",
+		"Quota":    "100",
+		"Status":   strconv.Itoa(common.UserStatusEnabled),
+		"Role":     strconv.Itoa(common.RoleCommonUser),
+		"Username": "auto-token-user",
+		"Setting":  "",
+		"Email":    "",
+	})
+	t.Cleanup(func() {
+		_ = common.RDB.Close()
+		common.RedisEnabled, common.RDB = previousRedisEnabled, previousRDB
+	})
+
+	previousUsableGroups := setting.UserUsableGroups2JSONString()
+	previousAutoGroups := setting.AutoGroups2JsonString()
+	previousAutoConfig := setting.AutoGroupConfig2JsonString()
+	previousGroupRatios := ratio_setting.GroupRatio2JSONString()
+	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"default":"default"}`))
+	require.NoError(t, setting.UpdateAutoGroupsByJsonString(`["default"]`))
+	require.NoError(t, setting.UpdateAutoGroupConfigByJsonString(`{"user_selectable":true,"description":"自动选择"}`))
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1}`))
+	t.Cleanup(func() {
+		_ = setting.UpdateUserUsableGroupsByJSONString(previousUsableGroups)
+		_ = setting.UpdateAutoGroupsByJsonString(previousAutoGroups)
+		_ = setting.UpdateAutoGroupConfigByJsonString(previousAutoConfig)
+		_ = ratio_setting.UpdateGroupRatioByJSONString(previousGroupRatios)
+	})
+
+	gin.SetMode(gin.TestMode)
+	downstreamCalled := false
+	router := gin.New()
+	router.GET("/v1/models", TokenAuth(), func(c *gin.Context) {
+		downstreamCalled = true
+		c.Status(http.StatusNoContent)
+	})
+	request := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	request.RemoteAddr = "127.0.0.1:12345"
+	request.Header.Set("Authorization", "Bearer sk-"+tokenKey)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusNoContent, recorder.Code, recorder.Body.String())
+	require.True(t, downstreamCalled)
+}

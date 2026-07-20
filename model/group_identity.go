@@ -60,6 +60,10 @@ const (
 	GroupStatusActive   = 1
 )
 
+func isVirtualAutoCode(code string) bool {
+	return strings.EqualFold(strings.TrimSpace(code), TokenGroupModeAuto)
+}
+
 var reservedGroupCodes = map[string]struct{}{
 	"":     {},
 	"auto": {},
@@ -148,7 +152,9 @@ func getAutoGroupMembers(tx *gorm.DB) (map[int]AutoGroupMember, error) {
 
 // GetAllGroups 返回结构化分组列表。默认只返回启用分组，管理端可请求全部。
 func GetAllGroups(includeDisabled bool) ([]*Group, error) {
-	query := DB.Model(&Group{}).Order("id ASC")
+	query := DB.Model(&Group{}).
+		Where("LOWER(code) <> ?", TokenGroupModeAuto).
+		Order("id ASC")
 	if !includeDisabled {
 		query = query.Where("status = ?", GroupStatusActive)
 	}
@@ -185,7 +191,7 @@ func GetActiveGroupNameMap() (map[string]string, error) {
 	result := make(map[string]string, len(groups))
 	for _, group := range groups {
 		code := strings.TrimSpace(group.Code)
-		if code == "" {
+		if code == "" || isVirtualAutoCode(code) {
 			continue
 		}
 		name := strings.TrimSpace(group.Name)
@@ -211,6 +217,9 @@ func GetGroupDisplayNameMap() (map[string]string, error) {
 	result := make(map[string]string, len(groups)*3)
 	nameByID := make(map[int]string, len(groups))
 	for _, group := range groups {
+		if isVirtualAutoCode(group.Code) {
+			continue
+		}
 		name := strings.TrimSpace(group.Name)
 		if name == "" {
 			name = strings.TrimSpace(group.Code)
@@ -250,6 +259,9 @@ func GetGroupDisplayNameMap() (map[string]string, error) {
 
 	// Name 只用于展示兼容，不能覆盖可参与业务解析的 code 或 alias。
 	for _, group := range groups {
+		if isVirtualAutoCode(group.Code) {
+			continue
+		}
 		name := nameByID[group.Id]
 		if name == "" {
 			continue
@@ -265,6 +277,9 @@ func GetGroupById(id int) (*Group, error) {
 	var group Group
 	if err := DB.First(&group, "id = ?", id).Error; err != nil {
 		return nil, err
+	}
+	if isVirtualAutoCode(group.Code) {
+		return nil, gorm.ErrRecordNotFound
 	}
 	var member AutoGroupMember
 	if err := DB.First(&member, "group_id = ?", id).Error; err == nil {
@@ -284,7 +299,7 @@ func GetGroupByCodeOrAlias(code string) (*Group, error) {
 // GetGroupByCodeOrAliasWithDB 在事务中解析旧字符串入口。
 func GetGroupByCodeOrAliasWithDB(tx *gorm.DB, code string) (*Group, error) {
 	code = strings.TrimSpace(code)
-	if code == "" {
+	if code == "" || isVirtualAutoCode(code) {
 		return nil, gorm.ErrRecordNotFound
 	}
 	var group Group
@@ -459,6 +474,85 @@ func readOptionValue(options map[string]string, key string) string {
 	return strings.TrimSpace(options[key])
 }
 
+func legacyAutoTokenExists(tx *gorm.DB) (bool, error) {
+	if !hasModelColumns(tx, &Token{}, "Group") {
+		return false, nil
+	}
+	query := tx.Model(&Token{}).Select("id")
+	if hasModelColumns(tx, &Token{}, "GroupMode") {
+		query = query.Where(commonGroupCol+" = ? OR group_mode = ?", TokenGroupModeAuto, TokenGroupModeAuto)
+	} else {
+		query = query.Where(commonGroupCol+" = ?", TokenGroupModeAuto)
+	}
+	var token Token
+	if err := query.Take(&token).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func resolveAutoGroupConfigFromOptions(tx *gorm.DB, options map[string]string) (setting.AutoGroupConfig, error) {
+	if raw := readOptionValue(options, "AutoGroupConfig"); raw != "" {
+		var config setting.AutoGroupConfig
+		if err := common.UnmarshalJsonStr(raw, &config); err != nil {
+			return setting.AutoGroupConfig{}, fmt.Errorf("解析自动分组配置失败: %w", err)
+		}
+		if strings.EqualFold(readOptionValue(options, "DefaultUseAutoGroup"), "true") {
+			config.UserSelectable = true
+		}
+		return setting.NormalizeAutoGroupConfig(config), nil
+	}
+
+	config := setting.NormalizeAutoGroupConfig(setting.AutoGroupConfig{})
+	if hasModelColumns(tx, &Group{}, "Code") {
+		var legacyAuto Group
+		err := tx.Where("LOWER(code) = ?", TokenGroupModeAuto).First(&legacyAuto).Error
+		if err == nil {
+			config.UserSelectable = legacyAuto.UserSelectable
+			if description := strings.TrimSpace(legacyAuto.Description); description != "" {
+				config.Description = description
+			}
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return setting.AutoGroupConfig{}, err
+		}
+	}
+	if raw := readOptionValue(options, "UserUsableGroups"); raw != "" {
+		var groups map[string]string
+		if err := common.UnmarshalJsonStr(raw, &groups); err == nil {
+			if description, ok := groups[TokenGroupModeAuto]; ok {
+				config.UserSelectable = true
+				config.Description = strings.TrimSpace(description)
+			}
+		}
+	}
+	if strings.EqualFold(readOptionValue(options, "DefaultUseAutoGroup"), "true") {
+		config.UserSelectable = true
+	}
+	if !config.UserSelectable {
+		exists, err := legacyAutoTokenExists(tx)
+		if err != nil {
+			return setting.AutoGroupConfig{}, err
+		}
+		config.UserSelectable = exists
+	}
+	return setting.NormalizeAutoGroupConfig(config), nil
+}
+
+func loadAutoGroupConfigFromDB(tx *gorm.DB) (setting.AutoGroupConfig, error) {
+	keys := []string{"AutoGroupConfig", "UserUsableGroups", "DefaultUseAutoGroup"}
+	var rows []Option
+	if err := tx.Where(commonKeyCol+" IN ?", keys).Find(&rows).Error; err != nil {
+		return setting.AutoGroupConfig{}, err
+	}
+	options := make(map[string]string, len(rows))
+	for _, row := range rows {
+		options[row.Key] = row.Value
+	}
+	return resolveAutoGroupConfigFromOptions(tx, options)
+}
+
 func hasModelColumns(tx *gorm.DB, model interface{}, fields ...string) bool {
 	if tx == nil || !tx.Migrator().HasTable(model) {
 		return false
@@ -602,6 +696,15 @@ func migrateGroupIdentity() error {
 	for _, row := range rows {
 		options[row.Key] = row.Value
 	}
+	autoGroupConfig, err := resolveAutoGroupConfigFromOptions(DB, options)
+	if err != nil {
+		return err
+	}
+	autoGroupConfigJSON, err := common.Marshal(autoGroupConfig)
+	if err != nil {
+		return err
+	}
+	shouldMigrateAutoGroupConfig := readOptionValue(options, "AutoGroupConfig") == ""
 
 	codes := map[string]struct{}{"default": {}}
 	ratioValues := make(map[string]float64)
@@ -737,6 +840,12 @@ func migrateGroupIdentity() error {
 
 	now := time.Now().Unix()
 	return DB.Transaction(func(tx *gorm.DB) error {
+		if shouldMigrateAutoGroupConfig {
+			option := Option{Key: "AutoGroupConfig", Value: string(autoGroupConfigJSON)}
+			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&option).Error; err != nil {
+				return fmt.Errorf("迁移自动分组配置失败: %w", err)
+			}
+		}
 		for _, code := range orderedCodes {
 			var group Group
 			err := tx.Where("code = ?", code).First(&group).Error
@@ -914,6 +1023,13 @@ func buildGroupOptionProjection(tx *gorm.DB) (map[string]string, error) {
 			}
 		}
 	}
+	autoGroupConfig, err := loadAutoGroupConfigFromDB(tx)
+	if err != nil {
+		return nil, err
+	}
+	if autoGroupConfig.UserSelectable {
+		usable[TokenGroupModeAuto] = autoGroupConfig.Description
+	}
 	ratioJSON, err := common.Marshal(ratio)
 	if err != nil {
 		return nil, err
@@ -935,7 +1051,9 @@ func buildGroupOptionProjection(tx *gorm.DB) (map[string]string, error) {
 }
 
 func GetAllGroupsFromDB(tx *gorm.DB) ([]*Group, error) {
-	query := tx.Model(&Group{}).Order("id ASC")
+	query := tx.Model(&Group{}).
+		Where("LOWER(code) <> ?", TokenGroupModeAuto).
+		Order("id ASC")
 	var groups []*Group
 	if err := query.Find(&groups).Error; err != nil {
 		return nil, err
@@ -967,6 +1085,7 @@ var groupProjectionOptionKeys = []string{
 }
 
 var groupConfigEditableOptionKeys = []string{
+	"AutoGroupConfig",
 	"DefaultUseAutoGroup",
 	"GroupGroupRatio",
 	"TopupGroupRatio",
@@ -974,6 +1093,7 @@ var groupConfigEditableOptionKeys = []string{
 }
 
 var groupConfigJSONOptionKeys = map[string]struct{}{
+	"AutoGroupConfig": {},
 	"GroupGroupRatio": {},
 	"TopupGroupRatio": {},
 	"group_ratio_setting.group_special_usable_group": {},
@@ -1058,6 +1178,9 @@ func groupReferenceOptionGroupIDs(tx *gorm.DB, key string, value string) ([]int,
 			return nil, fmt.Errorf("解析分组选项 %s 失败: %w", key, err)
 		}
 		for identifier := range values {
+			if strings.EqualFold(strings.TrimSpace(identifier), TokenGroupModeAuto) {
+				continue
+			}
 			addIdentifier(identifier)
 		}
 	case "AutoGroups":
@@ -1098,6 +1221,9 @@ func groupReferenceOptionGroupIDs(tx *gorm.DB, key string, value string) ([]int,
 				target = strings.TrimSpace(target)
 				target = strings.TrimPrefix(target, "+:")
 				target = strings.TrimPrefix(target, "-:")
+				if strings.EqualFold(strings.TrimSpace(target), TokenGroupModeAuto) {
+					continue
+				}
 				addIdentifier(target)
 			}
 		}
@@ -1472,6 +1598,30 @@ func lockGroupConfigRowsForWrite(tx *gorm.DB, configs []GroupConfig, deletedIDs 
 	return lockedByID, nil
 }
 
+// SaveGroupConfigWithOptionsAndAutoConfigResult 原子保存实体分组、虚拟 auto
+// 配置和分组页面高级选项。auto 配置缺失时保留数据库中的现有值。
+func SaveGroupConfigWithOptionsAndAutoConfigResult(
+	configs []GroupConfig,
+	deletedIDs []int,
+	optionUpdates map[string]string,
+	autoConfig *setting.AutoGroupConfig,
+) (*GroupConfigSaveResult, error) {
+	if autoConfig == nil {
+		return SaveGroupConfigWithOptionsAndResult(configs, deletedIDs, optionUpdates)
+	}
+	updates := make(map[string]string, len(optionUpdates)+1)
+	for key, value := range optionUpdates {
+		updates[key] = value
+	}
+	normalized := setting.NormalizeAutoGroupConfig(*autoConfig)
+	raw, err := common.Marshal(normalized)
+	if err != nil {
+		return nil, err
+	}
+	updates["AutoGroupConfig"] = string(raw)
+	return SaveGroupConfigWithOptionsAndResult(configs, deletedIDs, updates)
+}
+
 // SaveGroupConfigWithOptionsAndResult 原子保存分组与分组页面高级选项，
 // 并返回自动迁移和缓存清理结果。
 func SaveGroupConfigWithOptionsAndResult(
@@ -1637,6 +1787,11 @@ func SaveGroupConfigWithOptionsAndResult(
 		if err := lockOptionRowsForWrite(tx, groupConfigManagedOptionKeys()); err != nil {
 			return err
 		}
+		normalizedUpdates, err := normalizeAutoGroupOptionUpdatesWithDB(tx, optionUpdates)
+		if err != nil {
+			return err
+		}
+		optionUpdates = normalizedUpdates
 		optionUpdateKeys := make([]string, 0, len(optionUpdates))
 		for key := range optionUpdates {
 			optionUpdateKeys = append(optionUpdateKeys, key)
@@ -1656,7 +1811,35 @@ func SaveGroupConfigWithOptionsAndResult(
 		for key, value := range prunedOptions {
 			projection[key] = value
 		}
+		writeGroupProjection := func() error {
+			groupProjection, err := buildGroupOptionProjection(tx)
+			if err != nil {
+				return err
+			}
+			for key, value := range groupProjection {
+				projection[key] = value
+			}
+			projectionKeys := make([]string, 0, len(projection))
+			for key := range projection {
+				projectionKeys = append(projectionKeys, key)
+			}
+			projectionKeys = sortedUniqueOptionKeys(projectionKeys)
+			if err := lockOptionRowsForWrite(tx, projectionKeys); err != nil {
+				return err
+			}
+			for _, key := range projectionKeys {
+				if err := upsertOption(tx, key, projection[key]); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
 		if len(prepared) == 0 && len(deletedGroups) == 0 {
+			if _, autoConfigChanged := optionUpdates["AutoGroupConfig"]; autoConfigChanged {
+				if err := writeGroupProjection(); err != nil {
+					return err
+				}
+			}
 			return validateStoredGroupReferenceOptions(tx)
 		}
 
@@ -1776,25 +1959,8 @@ func SaveGroupConfigWithOptionsAndResult(
 				return err
 			}
 		}
-		groupProjection, err := buildGroupOptionProjection(tx)
-		if err != nil {
+		if err := writeGroupProjection(); err != nil {
 			return err
-		}
-		for key, value := range groupProjection {
-			projection[key] = value
-		}
-		projectionKeys := make([]string, 0, len(projection))
-		for key := range projection {
-			projectionKeys = append(projectionKeys, key)
-		}
-		projectionKeys = sortedUniqueOptionKeys(projectionKeys)
-		if err := lockOptionRowsForWrite(tx, projectionKeys); err != nil {
-			return err
-		}
-		for _, key := range projectionKeys {
-			if err := upsertOption(tx, key, projection[key]); err != nil {
-				return err
-			}
 		}
 		return validateStoredGroupReferenceOptions(tx)
 	})

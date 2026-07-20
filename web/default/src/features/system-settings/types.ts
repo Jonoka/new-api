@@ -55,24 +55,37 @@ export type GroupDetailInput = Omit<GroupDetail, 'id'> & {
   id?: number
 }
 
+export type AutoGroupConfig = {
+  user_selectable: boolean
+  description: string
+}
+
+export type GroupDetailsData = {
+  groups: GroupDetail[]
+  autoGroup: AutoGroupConfig
+}
+
 export type GroupDetailsResponse =
   | GroupDetail[]
   | {
       success: boolean
       message?: string
       data: GroupDetail[]
+      auto_group?: AutoGroupConfig
     }
 
 export type UpdateGroupDetailsRequest = {
   groups: GroupDetailInput[]
   deleted_ids: number[]
   option_updates?: Record<string, string>
+  auto_group?: AutoGroupConfig
 }
 
 export type UpdateGroupDetailsResponse = {
   success: boolean
   message?: string
   data?: GroupDetail[]
+  auto_group?: AutoGroupConfig
 }
 
 export type TokenGroupMigrationRequest =

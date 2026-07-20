@@ -23,6 +23,7 @@ import React, {
   useRef,
   useCallback,
   useMemo,
+  useContext,
 } from 'react';
 import {
   Button,
@@ -46,17 +47,21 @@ import {
   compareObjects,
   createGroupOptions,
   API,
+  extractAutoGroupConfigResponse,
   extractGroupDetailsResponse,
   getDeletedGroupIds,
   groupDetailsToLegacyOptions,
   notifyGroupDetailsUpdated,
+  normalizeAutoGroupConfig,
   parseAutoGroupCodes,
+  setStatusData,
   showError,
   showSuccess,
   showWarning,
   verifyJSON,
 } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
+import { StatusContext } from '../../../context/Status';
 import GroupTable from './components/GroupTable';
 import AutoGroupList from './components/AutoGroupList';
 import GroupGroupRatioRules from './components/GroupGroupRatioRules';
@@ -84,6 +89,7 @@ const LEGACY_OPTION_KEYS = [
 
 export default function GroupRatioSettings(props) {
   const { t } = useTranslation();
+  const [, statusDispatch] = useContext(StatusContext);
   const [loading, setLoading] = useState(false);
   const [editMode, setEditMode] = useState('visual');
   const [showGuide, setShowGuide] = useState(false);
@@ -104,8 +110,11 @@ export default function GroupRatioSettings(props) {
   const groupDataVersionRef = useRef(0);
   const groupsRef = useRef([]);
   const originalGroupsRef = useRef([]);
+  const autoGroupRef = useRef(normalizeAutoGroupConfig());
+  const originalAutoGroupRef = useRef(normalizeAutoGroupConfig());
   const groupsLoadedRef = useRef(false);
   const [groups, setGroups] = useState([]);
+  const [autoGroup, setAutoGroup] = useState(() => normalizeAutoGroupConfig());
   const [groupsLoaded, setGroupsLoaded] = useState(false);
   const [autoListVersion, setAutoListVersion] = useState(0);
 
@@ -117,18 +126,24 @@ export default function GroupRatioSettings(props) {
     [groups],
   );
 
-  const syncGroupsState = useCallback((nextGroups) => {
+  const syncGroupsState = useCallback((nextGroups, nextAutoGroup) => {
     const safeGroups = Array.isArray(nextGroups) ? nextGroups : [];
+    const safeAutoGroup =
+      nextAutoGroup === undefined
+        ? autoGroupRef.current
+        : normalizeAutoGroupConfig(nextAutoGroup, false);
     const previousCodes = groupsRef.current
       .map((group) => group.code)
       .join('\u0000');
     const nextCodes = safeGroups.map((group) => group.code).join('\u0000');
 
     groupsRef.current = safeGroups;
+    autoGroupRef.current = safeAutoGroup;
     setGroups(safeGroups);
+    setAutoGroup(safeAutoGroup);
     setInputs((previousInputs) => ({
       ...previousInputs,
-      ...groupDetailsToLegacyOptions(safeGroups),
+      ...groupDetailsToLegacyOptions(safeGroups, safeAutoGroup),
     }));
 
     if (previousCodes !== nextCodes) {
@@ -137,12 +152,15 @@ export default function GroupRatioSettings(props) {
   }, []);
 
   const commitGroupDetails = useCallback(
-    (nextGroups) => {
+    (nextGroups, nextAutoGroup) => {
       originalGroupsRef.current = structuredClone(nextGroups);
+      originalAutoGroupRef.current = structuredClone(
+        normalizeAutoGroupConfig(nextAutoGroup),
+      );
       groupsLoadedRef.current = true;
       setGroupsLoaded(true);
       groupDataVersionRef.current += 1;
-      syncGroupsState(nextGroups);
+      syncGroupsState(nextGroups, nextAutoGroup);
     },
     [syncGroupsState],
   );
@@ -157,7 +175,10 @@ export default function GroupRatioSettings(props) {
     if (responseGroups === null) {
       throw new Error(response?.data?.message || '');
     }
-    return responseGroups;
+    return {
+      groups: responseGroups,
+      autoGroup: extractAutoGroupConfigResponse(response?.data),
+    };
   }, []);
 
   useEffect(() => {
@@ -165,8 +186,10 @@ export default function GroupRatioSettings(props) {
     setLoading(true);
 
     fetchGroupDetails()
-      .then((responseGroups) => {
-        if (active) commitGroupDetails(responseGroups);
+      .then((responseDetails) => {
+        if (active) {
+          commitGroupDetails(responseDetails.groups, responseDetails.autoGroup);
+        }
       })
       .catch((error) => {
         if (active) showError(error?.message || t('刷新失败'));
@@ -208,6 +231,9 @@ export default function GroupRatioSettings(props) {
     const groupsChanged =
       JSON.stringify(groupPayload.groups) !==
         JSON.stringify(originalPayload.groups) || deletedIds.length > 0;
+    const autoGroupChanged =
+      JSON.stringify(autoGroupRef.current) !==
+      JSON.stringify(originalAutoGroupRef.current);
 
     const hasMissingName = groupsRef.current.some(
       (group) => !String(group.name || '').trim(),
@@ -247,7 +273,7 @@ export default function GroupRatioSettings(props) {
       );
     }
 
-    if (!groupsChanged && !updateArray.length) {
+    if (!groupsChanged && !autoGroupChanged && !updateArray.length) {
       return showWarning(t('你似乎并没有修改什么'));
     }
 
@@ -269,20 +295,40 @@ export default function GroupRatioSettings(props) {
       const groupResponse = await API.put('/api/group/details', {
         ...requestPayload,
         option_updates: optionUpdates,
+        auto_group: autoGroupRef.current,
       });
       if (groupResponse?.data?.success === false) {
         return showError(groupResponse.data.message || t('保存失败'));
       }
-      if (groupsChanged) {
+      if (groupsChanged || autoGroupChanged) {
         let savedGroups = extractGroupDetailsResponse(groupResponse?.data);
+        let savedAutoGroup = groupResponse?.data?.auto_group
+          ? extractAutoGroupConfigResponse(groupResponse.data)
+          : autoGroupRef.current;
         if (savedGroups === null) {
-          savedGroups = await fetchGroupDetails();
+          const savedDetails = await fetchGroupDetails();
+          savedGroups = savedDetails.groups;
+          savedAutoGroup = savedDetails.autoGroup;
         }
-        commitGroupDetails(savedGroups);
+        commitGroupDetails(savedGroups, savedAutoGroup);
       }
 
       await props.refresh();
-      if (groupsChanged) notifyGroupDetailsUpdated();
+      if (groupsChanged || autoGroupChanged) notifyGroupDetailsUpdated();
+      if (updateArray.some((item) => item.key === 'DefaultUseAutoGroup')) {
+        try {
+          const statusResponse = await API.get('/api/status');
+          if (statusResponse?.data?.success) {
+            statusDispatch({
+              type: 'set',
+              payload: statusResponse.data.data,
+            });
+            setStatusData(statusResponse.data.data);
+          }
+        } catch {
+          // 下次页面状态刷新时会自动重新获取。
+        }
+      }
       const groupSaveWarning = groupResponse?.data?.message || '';
       if (groupSaveWarning) {
         showWarning(groupSaveWarning);
@@ -307,7 +353,7 @@ export default function GroupRatioSettings(props) {
     if (groupsLoadedRef.current) {
       Object.assign(
         currentInputs,
-        groupDetailsToLegacyOptions(groupsRef.current),
+        groupDetailsToLegacyOptions(groupsRef.current, autoGroupRef.current),
       );
     }
     setInputs(currentInputs);
@@ -321,6 +367,27 @@ export default function GroupRatioSettings(props) {
   const handleGroupTableChange = useCallback(
     (nextGroups) => syncGroupsState(nextGroups),
     [syncGroupsState],
+  );
+
+  const handleAutoGroupChange = useCallback(
+    (nextAutoGroup) => syncGroupsState(groupsRef.current, nextAutoGroup),
+    [syncGroupsState],
+  );
+
+  const handleDefaultUseAutoGroupChange = useCallback(
+    (value) => {
+      setInputs((previous) => ({
+        ...previous,
+        DefaultUseAutoGroup: value,
+      }));
+      if (value && !autoGroupRef.current.user_selectable) {
+        handleAutoGroupChange({
+          ...autoGroupRef.current,
+          user_selectable: true,
+        });
+      }
+    },
+    [handleAutoGroupChange],
   );
 
   const handleAutoGroupsChange = useCallback(
@@ -372,8 +439,11 @@ export default function GroupRatioSettings(props) {
         <GroupTable
           key={`gt_${groupDv}`}
           groups={groups}
+          autoGroup={autoGroup}
+          autoSelectableLocked={!!inputs.DefaultUseAutoGroup}
           disabled={!groupsLoaded}
           onChange={handleGroupTableChange}
+          onAutoGroupChange={handleAutoGroupChange}
           onMigrate={() => setMigrationVisible(true)}
         />
         <GroupTokenMigrationModal
@@ -403,12 +473,7 @@ export default function GroupRatioSettings(props) {
                   size='default'
                   checkedText='｜'
                   uncheckedText='〇'
-                  onChange={(value) =>
-                    setInputs((prev) => ({
-                      ...prev,
-                      DefaultUseAutoGroup: value,
-                    }))
-                  }
+                  onChange={handleDefaultUseAutoGroupChange}
                 />
               </div>
               <Text type='tertiary' size='small' style={{ marginTop: 4 }}>
@@ -616,12 +681,7 @@ export default function GroupRatioSettings(props) {
                 '创建令牌默认选择auto分组，初始令牌也将设为auto（否则留空，为用户默认分组）',
               )}
               field={'DefaultUseAutoGroup'}
-              onChange={(value) =>
-                setInputs((prev) => ({
-                  ...prev,
-                  DefaultUseAutoGroup: value,
-                }))
-              }
+              onChange={handleDefaultUseAutoGroupChange}
             />
           </Col>
         </Row>

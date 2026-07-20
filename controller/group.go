@@ -34,13 +34,19 @@ func GetGroupDetails(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, groups)
+	c.JSON(http.StatusOK, gin.H{
+		"success":    true,
+		"message":    "",
+		"data":       groups,
+		"auto_group": setting.GetAutoGroupConfig(),
+	})
 }
 
 type GroupDetailsUpdateRequest struct {
-	Groups        []model.GroupConfig `json:"groups"`
-	DeletedIDs    []int               `json:"deleted_ids"`
-	OptionUpdates map[string]string   `json:"option_updates,omitempty"`
+	Groups        []model.GroupConfig      `json:"groups"`
+	DeletedIDs    []int                    `json:"deleted_ids"`
+	OptionUpdates map[string]string        `json:"option_updates,omitempty"`
+	AutoGroup     *setting.AutoGroupConfig `json:"auto_group,omitempty"`
 }
 
 type TokenGroupMigrationRequest struct {
@@ -161,10 +167,11 @@ func UpdateGroupDetails(c *gin.Context) {
 		common.ApiErrorMsg(c, "分组配置格式错误")
 		return
 	}
-	result, err := model.SaveGroupConfigWithOptionsAndResult(
+	result, err := model.SaveGroupConfigWithOptionsAndAutoConfigResult(
 		request.Groups,
 		request.DeletedIDs,
 		request.OptionUpdates,
+		request.AutoGroup,
 	)
 	if err != nil {
 		common.ApiError(c, err)
@@ -189,9 +196,10 @@ func UpdateGroupDetails(c *gin.Context) {
 		)
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": result.Warning,
-		"data":    groups,
+		"success":    true,
+		"message":    result.Warning,
+		"data":       groups,
+		"auto_group": setting.GetAutoGroupConfig(),
 	})
 }
 
@@ -221,13 +229,13 @@ func GetUserGroups(c *gin.Context) {
 			}
 		}
 	}
-	if _, ok := userUsableGroups["auto"]; ok {
+	if desc, ok := userUsableGroups["auto"]; ok {
 		usableGroups["auto"] = map[string]interface{}{
 			"id":    0,
 			"code":  "auto",
 			"name":  "自动选择",
 			"ratio": "自动",
-			"desc":  setting.GetUsableGroupDescription("auto"),
+			"desc":  desc,
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{
