@@ -74,7 +74,10 @@ func TestMigrateChannelAnalyticsLogDBCreatesFactTablesAndIndexes(t *testing.T) {
 	assert.True(t, db.Migrator().HasTable(&ChannelMetricBackfillJob{}))
 	assert.True(t, db.Migrator().HasIndex(&ChannelMetricBucket{}, "ux_cmb_identity"))
 	assert.True(t, db.Migrator().HasIndex(&ChannelMetricBucket{}, "idx_cmb_scope_time"))
+	assert.True(t, db.Migrator().HasIndex(&ChannelMetricBucket{}, "idx_cmb_group_time"))
+	assert.True(t, db.Migrator().HasIndex(&ChannelMetricBucket{}, "idx_cmb_upmodel_time"))
 	assert.True(t, db.Migrator().HasIndex(&ChannelFailureEvent{}, "idx_cfe_channel_time"))
+	assert.True(t, db.Migrator().HasIndex(&ChannelFailureEvent{}, "idx_cfe_origin_time"))
 
 	// AutoMigrate 必须可重复执行，便于主节点重启。
 	require.NoError(t, MigrateChannelAnalyticsLogDB(db))

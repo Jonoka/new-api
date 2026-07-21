@@ -395,9 +395,11 @@ func SetApiRouter(router *gin.Engine) {
 			channelAnalyticsRoute.GET("/trend", controller.GetChannelAnalyticsTrend)
 			channelAnalyticsRoute.GET("/channels", controller.GetChannelAnalyticsChannels)
 			channelAnalyticsRoute.GET("/channels/:id/models", controller.GetChannelAnalyticsModels)
+			channelAnalyticsRoute.GET("/stability", controller.GetChannelAnalyticsStability)
 			channelAnalyticsRoute.GET("/status-codes", controller.GetChannelAnalyticsStatusCodes)
 			channelAnalyticsRoute.GET("/failures", controller.GetChannelAnalyticsFailures)
 			channelAnalyticsRoute.GET("/filters", controller.GetChannelAnalyticsFilters)
+			channelAnalyticsRoute.GET("/filters/models", controller.GetChannelAnalyticsFilterModels)
 		}
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())

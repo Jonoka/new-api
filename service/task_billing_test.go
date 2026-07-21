@@ -823,6 +823,7 @@ func TestTaskBillingOtherIncludesPriceUnitAndVideoRatios(t *testing.T) {
 	}
 
 	other := taskBillingOther(task)
+	assert.Equal(t, true, other["is_task"])
 	assert.Equal(t, types.ModelPriceUnitSecond, other["model_price_unit"])
 	assert.Equal(t, float64(8), other["seconds"])
 	assert.Equal(t, 1.4, other["resolution"])

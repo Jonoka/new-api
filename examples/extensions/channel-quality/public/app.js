@@ -4,6 +4,7 @@
   const API_ROOT = '/api/channel-analytics'
   const DEFAULT_PAGE_SIZE = 30
   const MODEL_PAGE_SIZE = 30
+  const STABILITY_WINDOWS = [900, 3600, 21600, 86400, 604800]
 
   const channelTypes = {
     0: '未知',
@@ -106,6 +107,10 @@
     retentionDays: 7,
     statusScope: 'upstream',
     modelDimension: 'requested',
+    stabilityPage: 1,
+    stabilityTotal: 0,
+    stabilityItems: [],
+    stabilityWindows: [...STABILITY_WINDOWS],
     channelPage: 1,
     channelTotal: 0,
     failurePage: 1,
@@ -235,6 +240,12 @@
     toast.classList.remove('is-hidden')
     window.clearTimeout(showToast.timer)
     showToast.timer = window.setTimeout(() => toast.classList.add('is-hidden'), 3800)
+  }
+
+  function formatProbeError(message) {
+    const normalized = String(message || '探测失败').replace(/\s+/g, ' ').trim()
+    const limit = 280
+    return normalized.length > limit ? `${normalized.slice(0, limit - 1)}…` : normalized
   }
 
   function formatInteger(value) {
@@ -375,6 +386,7 @@
     return {
       channelId: $('channelFilter').value,
       channelType: $('channelTypeFilter').value,
+      group: $('groupFilter').value,
       requestedModel: requestedOption?.dataset.model || $('requestedModelFilter').value,
       requestedModelHash: requestedOption?.dataset.modelHash || '',
       upstreamModel: upstreamOption?.dataset.model || $('upstreamModelFilter').value,
@@ -383,6 +395,7 @@
       statusCode: $('statusCodeFilter').value.trim(),
       stream: $('streamFilter').value,
       trafficSource: $('trafficSourceFilter').value || 'relay',
+      dataOrigin: $('dataOriginFilter').value || 'live,legacy',
     }
   }
 
@@ -394,10 +407,12 @@
       end_timestamp: String(end),
       granularity: state.granularity,
       traffic_source: filters.trafficSource,
+      data_origin: filters.dataOrigin,
     })
 
     if (filters.channelId) params.set('channel_ids', filters.channelId)
     if (filters.channelType) params.set('channel_types', filters.channelType)
+    if (filters.group) params.set('groups', filters.group)
     // 新接口用完整哈希筛选，避免模型展示快照被截断后误伤查询；旧宿主仍回退到文本参数。
     if (filters.requestedModelHash) params.set('requested_model_hashes', filters.requestedModelHash)
     else if (filters.requestedModel) params.set('requested_models', filters.requestedModel)
@@ -414,6 +429,12 @@
       if (value !== undefined && value !== null && value !== '') params.set(key, String(value))
     })
     return params
+  }
+
+  function effectiveQueryStart() {
+    const [start, end] = rangeTimestamps()
+    if (state.view !== 'operations' || !state.stabilityWindows.length) return start
+    return end - Math.max(...state.stabilityWindows)
   }
 
   function extractMeta(...payloads) {
@@ -442,6 +463,14 @@
     const uncovered = arrayValue(meta, ['uncovered_channel_types', 'uncovered_transports'])
     const reliableFrom = normalizeTimestamp(firstDefined(meta, ['reliable_from_ts', 'reliable_from'], 0))
     const detailAvailable = firstDefined(meta, ['detail_available'], true)
+    const selectedOrigins = $('dataOriginFilter')?.value || 'live,legacy'
+    const backfill = firstDefined(meta, ['backfill'], null)
+    const backfillStatus = String(firstDefined(backfill, ['status'], ''))
+    const backfillTotal = numberValue(backfill, ['total_rows'])
+    const backfillScanned = numberValue(backfill, ['scanned_rows'])
+    const backfillConverted = numberValue(backfill, ['converted_rows'])
+    const backfillSkipped = numberValue(backfill, ['skipped_rows'])
+    const backfillProgress = backfillTotal > 0 ? Math.min(100, backfillScanned / backfillTotal * 100) : 0
 
     if (partial) messages.push('当前区间数据不完整')
     if (invalidSamples > 0) messages.push(`${formatInteger(invalidSamples)} 条无效样本未计入统计`)
@@ -458,8 +487,21 @@
       messages.push(`部分渠道类型尚未完整采集：${names.join('、')}`)
     }
     if (detailAvailable === false) messages.push('完整日志明细当前不可用')
-    if (reliableFrom && rangeTimestamps()[0] < reliableFrom) {
-      messages.push(`可靠统计始于 ${formatDateTime(reliableFrom)}`)
+    if (selectedOrigins.includes('legacy')) {
+      messages.push('历史日志为推导口径，重试链、失败请求用量、TTFT 和上游原始状态码可能不完整')
+      if (backfillStatus === 'running' || backfillStatus === 'pending') {
+        messages.push(`历史日志回填中：${formatInteger(backfillScanned)} / ${formatInteger(backfillTotal)}（${backfillProgress.toFixed(1)}%）`)
+      } else if (backfillStatus === 'failed') {
+        const lastError = String(firstDefined(backfill, ['last_error'], '未知错误'))
+        messages.push(`历史日志回填失败：${formatProbeError(lastError)}`)
+      } else if (backfillStatus === 'completed') {
+        messages.push(`历史日志已完成回填：转换 ${formatInteger(backfillConverted)} 条，跳过 ${formatInteger(backfillSkipped)} 条`)
+      }
+    }
+    if (reliableFrom && effectiveQueryStart() < reliableFrom) {
+      messages.push(selectedOrigins.includes('legacy')
+        ? `实时精确采集始于 ${formatDateTime(reliableFrom)}，更早区间使用历史日志推导`
+        : `实时精确统计始于 ${formatDateTime(reliableFrom)}`)
     }
 
     const notice = $('qualityNotice')
@@ -470,7 +512,7 @@
     }
     notice.classList.toggle(
       'quality-notice--danger',
-      partial || invalidSamples > 0 || hashCollisions > 0 || droppedMetrics > 0 || pendingBatches > 0 || flushErrorOutstanding
+      backfillStatus === 'failed' || invalidSamples > 0 || hashCollisions > 0 || droppedMetrics > 0 || pendingBatches > 0 || flushErrorOutstanding
     )
     notice.innerHTML = `<span aria-hidden="true">⚠</span><div><strong>数据质量提示：</strong>${escapeHtml(messages.join('；'))}</div>`
     notice.classList.remove('is-hidden')
@@ -483,10 +525,22 @@
     const lastFlushErrorAt = normalizeTimestamp(firstDefined(meta, ['runtime_last_flush_error_at'], 0))
     const lastFlushedAt = normalizeTimestamp(firstDefined(meta, ['last_flushed_at'], 0))
     const runtimeWarning = status === 'ok' && (pendingBatches > 0 || lastFlushErrorAt > lastFlushedAt)
+    const backfill = firstDefined(meta, ['backfill'], null)
+    const backfillStatus = String(firstDefined(backfill, ['status'], ''))
+    const backfillTotal = numberValue(backfill, ['total_rows'])
+    const backfillScanned = numberValue(backfill, ['scanned_rows'])
+    const backfillProgress = backfillTotal > 0 ? Math.min(100, backfillScanned / backfillTotal * 100) : 0
+    const selectedOrigins = $('dataOriginFilter')?.value || 'live,legacy'
+    const backfillRunning = selectedOrigins.includes('legacy') &&
+      (backfillStatus === 'running' || backfillStatus === 'pending')
     const label = status === 'loading'
       ? '正在刷新统计数据'
       : status === 'error'
         ? '最近刷新失败'
+        : backfillRunning
+          ? `历史日志回填中 ${backfillProgress.toFixed(1)}%`
+        : status === 'empty'
+          ? '已查询 · 暂无真实转发样本'
         : runtimeWarning
           ? '指标写入异常，当前统计可能滞后'
         : timestamp
@@ -496,6 +550,10 @@
       ? 'status-dot--loading'
       : status === 'error'
         ? 'status-dot--warning'
+        : backfillRunning
+          ? 'status-dot--loading'
+        : status === 'empty'
+          ? 'status-dot--idle'
         : runtimeWarning
           ? 'status-dot--warning'
         : 'status-dot--ok'
@@ -534,15 +592,16 @@
   function updateFilterScopeHint() {
     const messages = {
       overview: '状态码筛选只在“状态码与失败”视图生效。',
+      operations: '矩阵固定比较多个重叠时间窗；上方时间选择决定观察截止时间，状态码筛选不参与矩阵。历史日志指标会明确按推导口径展示。',
       channels: '状态码筛选不适用于渠道尝试聚合；展开模型时按所选模型口径统计。',
-      failures: '响应方式只影响状态码分布，近期失败明细首期不支持该筛选。',
+      failures: '响应方式只影响状态码分布，失败明细暂不支持该筛选；历史明细来自脱敏日志推导，重试链和原始上游状态码可能不完整。',
       probe: '主动探测只应用渠道、渠道类型和请求模型；时间、粒度及其他业务筛选不参与探测。',
     }
     $('filterScopeHint').textContent = messages[state.view] || ''
   }
 
   function activateView(view, shouldLoad = true) {
-    if (!['overview', 'channels', 'failures', 'probe'].includes(view)) return
+    if (!['overview', 'operations', 'channels', 'failures', 'probe'].includes(view)) return
     state.view = view
     $$('.view-tab').forEach((tab) => {
       const active = tab.dataset.view === view
@@ -636,7 +695,7 @@
       metricCard('客户端成功率', formatPercent(metrics.clientSuccessRate), '最终返回给客户端的结果', 'green', '✓'),
       metricCard('渠道质量成功率', formatPercent(metrics.qualitySuccessRate), '只统计可归因的渠道样本', 'green', '◇'),
       metricCard('失败尝试', formatInteger(metrics.failures), `重试率 ${formatPercent(metrics.retryRate)}`, 'red', '×'),
-      metricCard('已结算 Token', formatCompact(metrics.totalTokens), '最终成功且已完成结算', 'cyan', 'T'),
+      metricCard('已记录 Token', formatCompact(metrics.totalTokens), '来自具有可用量记录的渠道尝试', 'cyan', 'T'),
       metricCard('输入 Token', formatCompact(metrics.input), `缓存 Token 占比 ${formatPercent(metrics.cacheTokenHitRate)}`, '', '↓'),
       metricCard('输出 Token', formatCompact(metrics.output), '模型生成用量', 'purple', '↑'),
       metricCard('缓存读取', formatCompact(metrics.cacheRead), `缓存写入 ${formatCompact(metrics.cacheWrite)}`, 'cyan', 'C'),
@@ -695,7 +754,7 @@
     const series = [
       { key: 'requests', label: '客户端请求', color: '#3987f6' },
       { key: 'failures', label: '失败尝试', color: '#e6525e' },
-      { key: 'tokens', label: '已结算 Token', color: '#12b8a6' },
+      { key: 'tokens', label: '已记录 Token', color: '#12b8a6' },
     ]
     $('trendLegend').innerHTML = series.map((item) => `
       <span class="legend-item"><span class="legend-dot" style="background:${item.color}"></span>${escapeHtml(item.label)}</span>`).join('')
@@ -815,6 +874,209 @@
     return { empty, meta: extractMeta(summary, trend, statusResult) }
   }
 
+  function stabilityWindowLabel(seconds) {
+    const labels = {
+      900: '15 分钟',
+      3600: '1 小时',
+      21600: '6 小时',
+      86400: '24 小时',
+      604800: '7 天',
+    }
+    return labels[Number(seconds)] || `${formatCompact(seconds)} 秒`
+  }
+
+  function stabilityWindowMap(item) {
+    const result = new Map()
+    arrayValue(item, ['windows']).forEach((window) => {
+      const seconds = numberValue(window, ['window_seconds'])
+      if (seconds > 0) result.set(seconds, window)
+    })
+    return result
+  }
+
+  function stabilityRateTone(rate, sufficient) {
+    if (!sufficient) return 'stability-rate--insufficient'
+    const percent = percentNumber(rate)
+    if (percent === null) return 'stability-rate--insufficient'
+    if (percent < 95) return 'stability-rate--danger'
+    if (percent < 99) return 'stability-rate--warning'
+    return 'stability-rate--healthy'
+  }
+
+  function renderStabilityWindow(window, seconds) {
+    if (!window) {
+      return '<div class="stability-rate stability-rate--insufficient"><strong>-</strong><span>无样本</span></div>'
+    }
+    const sampleCount = numberValue(window, ['quality_eligible_count'])
+    const calls = numberValue(window, ['channel_attempt_count'])
+    const minimumSamples = numberValue(window, ['minimum_sample_count'], 10)
+    const sufficient = booleanValue(window, ['sample_sufficient'], sampleCount >= minimumSamples)
+    const rate = firstDefined(window, ['quality_success_rate', 'attempt_success_rate'], null)
+    const tone = stabilityRateTone(rate, sufficient)
+    const failures = numberValue(window, ['failure_count'])
+    const hint = !sufficient && calls > 0
+      ? `样本不足 ${formatInteger(sampleCount)}/${formatInteger(minimumSamples)} · 调用 ${formatInteger(calls)} · 失败 ${formatInteger(failures)}`
+      : `样本 ${formatInteger(sampleCount)} · 调用 ${formatInteger(calls)} · 失败 ${formatInteger(failures)}`
+    const title = `${stabilityWindowLabel(seconds)}：质量成功率 ${formatPercent(rate)}，可归因样本 ${formatInteger(sampleCount)}，渠道尝试 ${formatInteger(calls)}`
+    return `<div class="stability-rate ${tone}" title="${escapeHtml(title)}"><strong>${escapeHtml(formatPercent(rate))}</strong><span>${escapeHtml(hint)}</span></div>`
+  }
+
+  function stabilityIdentity(item) {
+    const group = String(firstDefined(item, ['group'], ''))
+    const groupName = String(firstDefined(item, ['group_name'], group))
+    const channelId = numberValue(item, ['channel_id'])
+    const channelName = String(firstDefined(item, ['channel_name'], channelId ? `渠道 #${channelId}` : ''))
+    const model = String(firstDefined(item, ['requested_model', 'upstream_model'], ''))
+    const parts = []
+    if (group) parts.push(`<span class="identity-part"><small>分组</small><strong>${escapeHtml(groupName || group)}</strong>${groupName && groupName !== group ? `<em>${escapeHtml(group)}</em>` : ''}</span>`)
+    if (model) parts.push(`<span class="identity-part"><small>模型</small><strong title="${escapeHtml(model)}">${escapeHtml(model)}</strong></span>`)
+    if (channelId) parts.push(`<span class="identity-part"><small>渠道</small><strong>${escapeHtml(channelName)}</strong><em>#${channelId}</em></span>`)
+    return parts.length ? parts.join('') : '<span class="cell-sub">未标记维度</span>'
+  }
+
+  function stabilityDrillAction(item) {
+    const group = String(firstDefined(item, ['group'], ''))
+    const model = String(firstDefined(item, ['requested_model', 'upstream_model'], ''))
+    const modelHash = String(firstDefined(item, ['model_hash'], ''))
+    const channelId = numberValue(item, ['channel_id'])
+    if (!group || !model || channelId) return ''
+    return `<button class="text-button stability-drill" type="button"
+      data-stability-drill="true"
+      data-stability-group="${escapeHtml(group)}"
+      data-stability-model="${escapeHtml(model)}"
+      data-stability-model-hash="${escapeHtml(modelHash)}">下钻渠道</button>`
+  }
+
+  function stabilityDetailWindow(windows) {
+    const values = Array.from(windows.values())
+    return windows.get(86400) || windows.get(604800) || values[values.length - 1] || null
+  }
+
+  function stabilityDetailWindowSeconds() {
+    if (state.stabilityWindows.includes(86400)) return 86400
+    if (state.stabilityWindows.includes(604800)) return 604800
+    return state.stabilityWindows[state.stabilityWindows.length - 1] || 0
+  }
+
+  function renderStabilityTable() {
+    $('stabilityHead').innerHTML = `<tr>
+      <th scope="col">分析对象</th>
+      ${state.stabilityWindows.map((seconds) => `<th scope="col">${escapeHtml(stabilityWindowLabel(seconds))}</th>`).join('')}
+      <th scope="col">${escapeHtml(stabilityWindowLabel(stabilityDetailWindowSeconds()))}运维详情</th>
+      <th scope="col">用量与缓存</th>
+    </tr>`
+
+    $('stabilityRows').innerHTML = state.stabilityItems.length ? state.stabilityItems.map((item) => {
+      const windows = stabilityWindowMap(item)
+      const detail = stabilityDetailWindow(windows)
+      const failures = numberValue(detail, ['failure_count'])
+      const retries = numberValue(detail, ['retry_count'])
+      const retryRate = firstDefined(detail, ['retry_rate'], null)
+      const p95 = numberValue(detail, ['p95_latency_ms'], NaN)
+      const p95Ttft = numberValue(detail, ['p95_ttft_ms'], NaN)
+      const upstream429 = numberValue(detail, ['upstream_429_count'])
+      const upstream5xx = numberValue(detail, ['upstream_5xx_count'])
+      const transportErrors = numberValue(detail, ['transport_error_count'])
+      const streamErrors = numberValue(detail, ['stream_error_count'])
+      const statusSamples = numberValue(detail, ['upstream_status_sample_count'])
+      const statusCoverage = firstDefined(detail, ['upstream_status_coverage_rate'], null)
+      const liveRate = firstDefined(detail, ['live_event_rate'], null)
+      const legacyRate = firstDefined(detail, ['legacy_event_rate'], null)
+      const lastFailure = normalizeTimestamp(firstDefined(detail, ['last_failure_bucket_ts'], 0))
+      const totalTokens = numberValue(detail, ['total_tokens'])
+      const cacheRead = numberValue(detail, ['cache_read_tokens'])
+      const cacheRate = firstDefined(detail, ['cache_token_hit_rate'], null)
+      const usageCoverage = firstDefined(detail, ['usage_success_coverage_rate'], null)
+      return `<tr>
+        <td><div class="stability-identity">${stabilityIdentity(item)}${stabilityDrillAction(item)}</div></td>
+        ${state.stabilityWindows.map((seconds) => `<td>${renderStabilityWindow(windows.get(seconds), seconds)}</td>`).join('')}
+        <td><div class="stability-detail">
+          <strong>失败 ${escapeHtml(formatInteger(failures))} · 重试 ${escapeHtml(formatInteger(retries))}</strong>
+          <span>重试率 ${escapeHtml(formatPercent(retryRate))}</span>
+          ${statusSamples > 0
+            ? `<span>429 ${escapeHtml(formatInteger(upstream429))} · 5xx ${escapeHtml(formatInteger(upstream5xx))} · 状态覆盖 ${escapeHtml(formatPercent(statusCoverage))}</span>`
+            : '<span>上游状态码暂无可用样本</span>'}
+          <span>连接 ${escapeHtml(formatInteger(transportErrors))} · 流中断 ${escapeHtml(formatInteger(streamErrors))}</span>
+          <span>P95 ${escapeHtml(formatDuration(p95))} · TTFT ${escapeHtml(formatDuration(p95Ttft))}</span>
+          <span>${lastFailure ? `最近失败 ${escapeHtml(formatRelativeTime(lastFailure))}` : '暂无失败记录'}</span>
+        </div></td>
+        <td><div class="stability-detail">
+          <strong>Token ${escapeHtml(formatCompact(totalTokens))}</strong>
+          <span>缓存读取 ${escapeHtml(formatCompact(cacheRead))}</span>
+          <span>Token 命中 ${escapeHtml(formatPercent(cacheRate))}</span>
+          <span>用量覆盖 ${escapeHtml(formatPercent(usageCoverage))}</span>
+          <span>实时 ${escapeHtml(formatPercent(liveRate))} · 历史 ${escapeHtml(formatPercent(legacyRate))}</span>
+        </div></td>
+      </tr>`
+    }).join('') : `<tr><td class="table-empty" colspan="${state.stabilityWindows.length + 3}">当前筛选没有可比较的运维样本</td></tr>`
+    renderStabilityPagination()
+  }
+
+  function renderStabilityPagination() {
+    const totalPages = Math.max(1, Math.ceil(state.stabilityTotal / DEFAULT_PAGE_SIZE))
+    $('stabilityPagination').innerHTML = `
+      <span>共 ${escapeHtml(formatInteger(state.stabilityTotal))} 个分析对象 · 第 ${state.stabilityPage} / ${totalPages} 页</span>
+      <button type="button" data-stability-page="${state.stabilityPage - 1}" ${state.stabilityPage <= 1 ? 'disabled' : ''}>上一页</button>
+      <button type="button" data-stability-page="${state.stabilityPage + 1}" ${state.stabilityPage >= totalPages ? 'disabled' : ''}>下一页</button>`
+  }
+
+  async function loadStability(signal) {
+    const maxSeconds = Math.max(0, state.retentionDays * 86400)
+    const windows = STABILITY_WINDOWS.filter((seconds) => seconds <= maxSeconds)
+    state.stabilityWindows = windows.length ? windows : [Math.max(300, maxSeconds)]
+    const sortBy = $('stabilitySort').value
+    const params = buildQuery({
+      dimension: $('stabilityDimension').value,
+      model_dimension: $('stabilityModelDimension').value,
+      windows: state.stabilityWindows.join(','),
+      page: state.stabilityPage,
+      page_size: DEFAULT_PAGE_SIZE,
+      sort_by: sortBy,
+      sort_order: sortBy === 'quality_success_rate' ? 'asc' : 'desc',
+    }, { includeStatus: false })
+    const payload = await requestJson(`${API_ROOT}/stability?${params}`, { signal })
+    state.stabilityItems = arrayValue(payload, ['items', 'data'])
+    state.stabilityTotal = numberValue(payload, ['total', 'total_count'], state.stabilityItems.length)
+    renderStabilityTable()
+    renderDataQuality(payload)
+    return { empty: state.stabilityItems.length === 0, meta: extractMeta(payload) }
+  }
+
+  function selectModelFilterByIdentity(select, modelHash, modelName) {
+    let option = Array.from(select.options).find((candidate) =>
+      (modelHash && candidate.dataset.modelHash === modelHash) ||
+      (modelName && candidate.dataset.model === modelName)
+    )
+    if (!option && modelHash) {
+      option = document.createElement('option')
+      option.value = modelHash
+      option.textContent = modelName || modelHash
+      option.dataset.model = modelName
+      option.dataset.modelHash = modelHash
+      select.appendChild(option)
+    }
+    if (option) select.value = option.value
+  }
+
+  function drillStabilityChannels(button) {
+    const group = button.dataset.stabilityGroup || ''
+    const model = button.dataset.stabilityModel || ''
+    const modelHash = button.dataset.stabilityModelHash || ''
+    if (group && !Array.from($('groupFilter').options).some((option) => option.value === group)) {
+      const option = document.createElement('option')
+      option.value = group
+      option.textContent = group
+      $('groupFilter').appendChild(option)
+    }
+    $('groupFilter').value = group
+    const upstream = $('stabilityModelDimension').value === 'upstream'
+    const modelFilter = upstream ? $('upstreamModelFilter') : $('requestedModelFilter')
+    selectModelFilterByIdentity(modelFilter, modelHash, model)
+    $('stabilityDimension').value = 'group_channel_model'
+    state.stabilityPage = 1
+    loadCurrentView()
+  }
+
   function normalizeChannel(row) {
     const id = Number(firstDefined(row, ['channel_id', 'id'], 0))
     const type = Number(firstDefined(row, ['channel_type', 'type'], 0))
@@ -892,7 +1154,7 @@
           <button class="expand-button" type="button" data-expand-channel="${channel.id}" aria-expanded="${expanded}" aria-label="${expanded ? '收起' : '展开'} ${escapeHtml(channel.name)}">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
           </button>
-          <div><div class="channel-name" title="${escapeHtml(channel.name)}">${escapeHtml(channel.name)}</div><div class="channel-sub">#${channel.id} · ${escapeHtml(channel.typeName)}${channel.group ? ` · ${escapeHtml(channel.group)}` : ''}</div></div>
+          <div><div class="channel-name" title="${escapeHtml(channel.name)}">${escapeHtml(channel.name)}</div><div class="channel-sub">#${channel.id} · ${escapeHtml(channel.typeName)}${channel.group ? ` · 配置分组 ${escapeHtml(channel.group)}` : ''}</div></div>
         </div></td>
         <td><strong>${escapeHtml(formatInteger(channel.calls))}</strong><div class="cell-sub">重试 ${escapeHtml(formatInteger(channel.retries))}</div></td>
         <td><span class="rate-value ${rateClass(channel.successRate)}">${escapeHtml(formatPercent(channel.successRate))}</span><div class="cell-sub">可归因渠道样本</div></td>
@@ -1096,6 +1358,7 @@
       retryPlanned: booleanValue(row, ['retry_planned']),
       retryReason: String(firstDefined(row, ['retry_reason'], '')),
       outcome: String(firstDefined(row, ['outcome'], 'unknown')),
+      dataOrigin: String(firstDefined(row, ['data_origin'], 'live')),
       failureOwner: String(firstDefined(row, ['failure_owner'], 'unknown')),
       partialResponse: booleanValue(row, ['partial_response']),
       errorStage: String(firstDefined(row, ['error_stage'], 'unknown')),
@@ -1135,6 +1398,7 @@
         <div class="failure-meta">
           ${failure.requestId ? `<span>请求 ID <code>${escapeHtml(failure.requestId)}</code></span>` : ''}
           <span>${escapeHtml(outcomeLabels[failure.outcome] || failure.outcome)}</span>
+          <span>数据 ${failure.dataOrigin === 'legacy' ? '历史日志推导' : '实时精确采集'}</span>
           <span>${escapeHtml(stageLabels[failure.errorStage] || failure.errorStage)}</span>
           <span>尝试 #${failure.attemptSeq || '-'}</span>
           <span>${failure.retryPlanned ? '已计划重试' : '未继续重试'}</span>
@@ -1241,7 +1505,7 @@
       const result = state.probeResults.get(channel.id)
       const testing = state.testingChannels.has(channel.id)
       const resultHtml = result
-        ? `<span class="probe-result probe-result--${result.success ? 'success' : 'error'}">${result.success ? '✓' : '×'} ${escapeHtml(result.success ? formatDuration(result.duration) : result.message)}</span>`
+        ? `<span class="probe-result probe-result--${result.success ? 'success' : 'error'}">${result.success ? '✓' : '×'} ${escapeHtml(result.success ? formatDuration(result.duration) : formatProbeError(result.message))}</span>`
         : Number.isFinite(channel.responseTime)
           ? escapeHtml(formatDuration(channel.responseTime))
           : '<span class="cell-sub">未测试</span>'
@@ -1304,7 +1568,7 @@
       showToast(`渠道 #${channelId} 探测成功，耗时 ${formatDuration(duration)}`)
     } catch (error) {
       state.probeResults.set(channelId, { success: false, message: error?.message || '探测失败' })
-      showToast(`渠道 #${channelId} 探测失败：${error?.message || '未知错误'}`)
+      showToast(`渠道 #${channelId} 探测失败：${formatProbeError(error?.message || '未知错误')}`)
     } finally {
       state.testingChannels.delete(channelId)
       renderProbeRows()
@@ -1321,6 +1585,7 @@
     try {
       let result
       if (state.view === 'overview') result = await loadOverview(signal)
+      else if (state.view === 'operations') result = await loadStability(signal)
       else if (state.view === 'channels') result = await loadChannels(signal)
       else if (state.view === 'failures') result = await loadFailures(signal)
       else result = await loadProbeChannels(signal)
@@ -1328,7 +1593,7 @@
       setLoading(false)
       $('errorState').classList.add('is-hidden')
       showEmpty(result.empty)
-      updateFreshness('ok', result.meta)
+      updateFreshness(result.empty ? 'empty' : 'ok', result.meta)
     } catch (error) {
       if (error?.name === 'AbortError' || loadId !== state.loadingId) return
       setLoading(false)
@@ -1338,6 +1603,15 @@
 
   function replaceSelectOptions(select, placeholder, items, valueKey = 'value', labelKey = 'label') {
     const selected = select.value
+    const selectedOption = select.selectedOptions[0]
+    const selectedSnapshot = selected
+      ? {
+          value: selected,
+          label: selectedOption?.textContent || selected,
+          model: selectedOption?.dataset.model || '',
+          modelHash: selectedOption?.dataset.modelHash || '',
+        }
+      : null
     const fragment = document.createDocumentFragment()
     const empty = document.createElement('option')
     empty.value = ''
@@ -1360,6 +1634,17 @@
       }
       fragment.appendChild(option)
     })
+    // 远程搜索或刷新可能只返回部分选项，保留当前选中项，
+    // 避免控件显示“全部”但页面仍是上一个筛选结果。
+    if (selectedSnapshot && !seen.has(selectedSnapshot.value)) {
+      const option = document.createElement('option')
+      option.value = selectedSnapshot.value
+      option.textContent = selectedSnapshot.label
+      if (selectedSnapshot.model) option.dataset.model = selectedSnapshot.model
+      if (selectedSnapshot.modelHash) option.dataset.modelHash = selectedSnapshot.modelHash
+      fragment.appendChild(option)
+      seen.add(selectedSnapshot.value)
+    }
     select.replaceChildren(fragment)
     if (seen.has(selected)) select.value = selected
   }
@@ -1382,6 +1667,7 @@
       const payload = await requestJson(`${API_ROOT}/filters`)
       const channels = arrayValue(payload, ['channels', 'channel_options'])
       const types = firstDefined(payload, ['channel_types', 'channel_type_options'], null)
+      const groups = arrayValue(payload, ['groups', 'group_options'])
       const requestedModels = arrayValue(payload, ['requested_model_options', 'requested_models', 'models.requested'])
       const upstreamModels = arrayValue(payload, ['upstream_model_options', 'upstream_models', 'models.upstream'])
       const meta = extractMeta(payload)
@@ -1389,6 +1675,7 @@
       if (retentionDays > 0) state.retentionDays = retentionDays
       replaceSelectOptions($('channelFilter'), '全部渠道', channels, 'channel_id', 'channel_name')
       replaceSelectOptions($('channelTypeFilter'), '全部类型', channelTypeOptions(types))
+      replaceSelectOptions($('groupFilter'), '全部分组', groups, 'code', 'name')
       replaceSelectOptions($('requestedModelFilter'), '全部请求模型', requestedModels)
       replaceSelectOptions($('upstreamModelFilter'), '全部上游模型', upstreamModels)
       state.filtersLoaded = true
@@ -1398,20 +1685,65 @@
     }
   }
 
+  async function searchModelFilterOptions(dimension, query) {
+    const upstream = dimension === 'upstream'
+    const select = upstream ? $('upstreamModelFilter') : $('requestedModelFilter')
+    const placeholder = upstream ? '全部上游模型' : '全部请求模型'
+    const key = upstream ? 'upstream' : 'requested'
+    if (!searchModelFilterOptions.controllers) searchModelFilterOptions.controllers = new Map()
+    searchModelFilterOptions.controllers.get(key)?.abort()
+    const controller = new AbortController()
+    searchModelFilterOptions.controllers.set(key, controller)
+    try {
+      const params = new URLSearchParams({
+        model_dimension: key,
+        q: query,
+        page: '1',
+        page_size: '100',
+      })
+      const payload = await requestJson(`${API_ROOT}/filters/models?${params}`, { signal: controller.signal })
+      replaceSelectOptions(select, placeholder, arrayValue(payload, ['items', 'data']))
+    } catch (error) {
+      if (error?.name !== 'AbortError') showToast(`模型搜索失败：${error?.message || '未知错误'}`)
+    }
+  }
+
+  function bindModelSearch(inputId, dimension) {
+    $(inputId).addEventListener('input', (event) => {
+      const query = event.target.value.trim()
+      window.clearTimeout(bindModelSearch[dimension])
+      bindModelSearch[dimension] = window.setTimeout(() => {
+        if (query) searchModelFilterOptions(dimension, query)
+        else {
+          searchModelFilterOptions.controllers?.get(dimension)?.abort()
+          loadFilterOptions()
+        }
+      }, 260)
+    })
+  }
+
   function resetFilters(reload = true) {
     state.range = 'today'
     state.granularity = 'auto'
+    state.stabilityPage = 1
     state.channelPage = 1
     state.failurePage = 1
     $('granularity').value = 'auto'
     $('channelFilter').value = ''
     $('channelTypeFilter').value = ''
+    $('groupFilter').value = ''
     $('requestedModelFilter').value = ''
     $('upstreamModelFilter').value = ''
+    $('requestedModelSearch').value = ''
+    $('upstreamModelSearch').value = ''
     $('outcomeFilter').value = ''
     $('statusCodeFilter').value = ''
     $('streamFilter').value = ''
     $('trafficSourceFilter').value = 'relay'
+    $('dataOriginFilter').value = 'live,legacy'
+    $('stabilityDimension').value = 'group_model'
+    $('stabilityModelDimension').value = 'requested'
+    $('stabilitySort').value = 'failure_count'
     $('customRange').classList.add('is-hidden')
     $$('.range-button').forEach((button) => button.classList.toggle('is-active', button.dataset.range === 'today'))
     if (reload) loadCurrentView()
@@ -1434,6 +1766,7 @@
     }
     state.channelPage = 1
     state.failurePage = 1
+    state.stabilityPage = 1
     loadCurrentView()
   }
 
@@ -1452,17 +1785,23 @@
     state.customEnd = end
     state.channelPage = 1
     state.failurePage = 1
+    state.stabilityPage = 1
     loadCurrentView()
   }
 
   function bindEvents() {
     $$('.view-tab').forEach((button) => button.addEventListener('click', () => activateView(button.dataset.view)))
     $$('.range-button').forEach((button) => button.addEventListener('click', () => selectRange(button.dataset.range)))
-    $('refreshButton').addEventListener('click', loadCurrentView)
+    $('refreshButton').addEventListener('click', () => {
+      loadFilterOptions()
+      loadCurrentView()
+    })
     $('retryButton').addEventListener('click', loadCurrentView)
     $('emptyResetButton').addEventListener('click', () => resetFilters(true))
     $('resetFilters').addEventListener('click', () => resetFilters(true))
     $('applyCustomRange').addEventListener('click', applyCustomRange)
+    bindModelSearch('requestedModelSearch', 'requested')
+    bindModelSearch('upstreamModelSearch', 'upstream')
 
     $('advancedToggle').addEventListener('click', () => {
       const button = $('advancedToggle')
@@ -1478,8 +1817,9 @@
 
     ;[
       'channelFilter', 'channelTypeFilter', 'requestedModelFilter', 'upstreamModelFilter',
-      'outcomeFilter', 'streamFilter', 'trafficSourceFilter',
+      'groupFilter', 'outcomeFilter', 'streamFilter', 'trafficSourceFilter', 'dataOriginFilter',
     ].forEach((id) => $(id).addEventListener('change', () => {
+      state.stabilityPage = 1
       state.channelPage = 1
       state.failurePage = 1
       loadCurrentView()
@@ -1499,6 +1839,13 @@
     $('channelSort').addEventListener('change', () => {
       state.channelPage = 1
       loadCurrentView()
+    })
+
+    ;['stabilityDimension', 'stabilityModelDimension', 'stabilitySort'].forEach((id) => {
+      $(id).addEventListener('change', () => {
+        state.stabilityPage = 1
+        loadCurrentView()
+      })
     })
 
     $('modelDimension').addEventListener('change', (event) => {
@@ -1541,6 +1888,15 @@
         state.channelPage = Math.max(1, Number(channelPage.dataset.channelPage))
         loadCurrentView()
       }
+
+      const stabilityPage = event.target.closest('[data-stability-page]')
+      if (stabilityPage && !stabilityPage.disabled) {
+        state.stabilityPage = Math.max(1, Number(stabilityPage.dataset.stabilityPage))
+        loadCurrentView()
+      }
+
+      const stabilityDrill = event.target.closest('[data-stability-drill]')
+      if (stabilityDrill) drillStabilityChannels(stabilityDrill)
 
       const failurePage = event.target.closest('[data-failure-page]')
       if (failurePage && !failurePage.disabled) {

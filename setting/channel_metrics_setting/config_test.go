@@ -20,6 +20,9 @@ func TestDefaultSettingBuildsCollectorConfig(t *testing.T) {
 	if config.SnapshotLimits.ModelBytes != 128 || config.SnapshotLimits.GroupBytes != 64 {
 		t.Fatalf("默认展示快照限制异常：%+v", config.SnapshotLimits)
 	}
+	if !setting.BackfillEnabled || setting.BackfillBatchSize != 500 || setting.BackfillPauseMilliseconds != 25 {
+		t.Fatalf("默认历史回填边界异常：%+v", setting)
+	}
 }
 
 func TestCollectorConfigPreservesDisabledAndNormalizesBounds(t *testing.T) {
@@ -39,6 +42,7 @@ func TestCollectorConfigClampsSnapshotsToDatabaseColumns(t *testing.T) {
 	setting.GroupSnapshotMaxBytes = 10_000
 	setting.ErrorStageMaxBytes = 10_000
 	setting.CollectorShards = 10_000
+	setting.BackfillBatchSize = 10_000
 
 	config := setting.CollectorConfig()
 	if config.SnapshotLimits.ModelBytes != 191 || config.SnapshotLimits.ChannelNameBytes != 191 {
@@ -49,5 +53,8 @@ func TestCollectorConfigClampsSnapshotsToDatabaseColumns(t *testing.T) {
 	}
 	if config.ShardCount != 256 {
 		t.Fatalf("分片数未限制到采集器支持的上限：%d", config.ShardCount)
+	}
+	if normalized := setting.Normalized(); normalized.BackfillBatchSize != 500 {
+		t.Fatalf("回填批量没有限制 SQLite 绑定变量：%d", normalized.BackfillBatchSize)
 	}
 }

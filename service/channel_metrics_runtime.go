@@ -14,13 +14,15 @@ import (
 )
 
 type channelMetricsRuntime struct {
-	collector   *channelmetrics.Collector
-	setting     channel_metrics_setting.ChannelMetricsSetting
-	cancel      context.CancelFunc
-	done        chan struct{}
-	failureCh   chan []model.ChannelFailureEvent
-	failureDone chan struct{}
-	cleanupDone chan struct{}
+	collector    *channelmetrics.Collector
+	setting      channel_metrics_setting.ChannelMetricsSetting
+	startedAt    int64
+	cancel       context.CancelFunc
+	done         chan struct{}
+	failureCh    chan []model.ChannelFailureEvent
+	failureDone  chan struct{}
+	cleanupDone  chan struct{}
+	backfillDone chan struct{}
 }
 
 const (
@@ -54,13 +56,15 @@ func InitChannelMetrics() error {
 	collector := channelmetrics.NewCollector(config, channelmetrics.SinkFunc(flushChannelMetricBatch))
 	ctx, cancel := context.WithCancel(context.Background())
 	runtime := &channelMetricsRuntime{
-		collector:   collector,
-		setting:     settingSnapshot,
-		cancel:      cancel,
-		done:        make(chan struct{}),
-		failureCh:   make(chan []model.ChannelFailureEvent, 1024),
-		failureDone: make(chan struct{}),
-		cleanupDone: make(chan struct{}),
+		collector:    collector,
+		setting:      settingSnapshot,
+		startedAt:    time.Now().Unix(),
+		cancel:       cancel,
+		done:         make(chan struct{}),
+		failureCh:    make(chan []model.ChannelFailureEvent, 1024),
+		failureDone:  make(chan struct{}),
+		cleanupDone:  make(chan struct{}),
+		backfillDone: make(chan struct{}),
 	}
 	channelMetricsCurrent = runtime
 
@@ -72,6 +76,7 @@ func InitChannelMetrics() error {
 	}()
 	go runChannelFailureWriter(ctx, runtime)
 	go runChannelMetricCleanup(ctx, runtime)
+	go runChannelMetricBackfill(ctx, runtime)
 	return nil
 }
 
@@ -114,6 +119,11 @@ func ShutdownChannelMetrics() {
 	case <-runtime.cleanupDone:
 	case <-time.After(timeout):
 		common.SysError("channel metrics cleanup loop shutdown timed out")
+	}
+	select {
+	case <-runtime.backfillDone:
+	case <-time.After(timeout):
+		common.SysError("channel metrics legacy backfill shutdown timed out")
 	}
 }
 

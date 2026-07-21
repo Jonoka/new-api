@@ -52,6 +52,16 @@ func GetChannelAnalyticsModels(c *gin.Context) {
 	writeChannelAnalyticsResponse(c, response, err)
 }
 
+func GetChannelAnalyticsStability(c *gin.Context) {
+	query, err := service.ParseChannelAnalyticsStabilityQuery(c.Request.URL.Query())
+	if err != nil {
+		writeChannelAnalyticsError(c, http.StatusBadRequest, err)
+		return
+	}
+	response, err := service.GetChannelAnalyticsStability(query)
+	writeChannelAnalyticsResponse(c, response, err)
+}
+
 func GetChannelAnalyticsStatusCodes(c *gin.Context) {
 	query, ok := parseChannelAnalyticsQuery(c)
 	if !ok {
@@ -73,6 +83,16 @@ func GetChannelAnalyticsFailures(c *gin.Context) {
 
 func GetChannelAnalyticsFilters(c *gin.Context) {
 	response, err := service.GetChannelAnalyticsFilters()
+	writeChannelAnalyticsResponse(c, response, err)
+}
+
+func GetChannelAnalyticsFilterModels(c *gin.Context) {
+	query, err := service.ParseChannelAnalyticsFilterModelsQuery(c.Request.URL.Query())
+	if err != nil {
+		writeChannelAnalyticsError(c, http.StatusBadRequest, err)
+		return
+	}
+	response, err := service.GetChannelAnalyticsFilterModels(query)
 	writeChannelAnalyticsResponse(c, response, err)
 }
 

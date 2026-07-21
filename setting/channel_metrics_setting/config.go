@@ -23,6 +23,9 @@ type ChannelMetricsSetting struct {
 	FinalFlushTimeoutSeconds     int    `json:"final_flush_timeout_seconds"`
 	RetentionDays                int    `json:"retention_days"`
 	FailureRetentionDays         int    `json:"failure_retention_days"`
+	BackfillEnabled              bool   `json:"backfill_enabled"`
+	BackfillBatchSize            int    `json:"backfill_batch_size"`
+	BackfillPauseMilliseconds    int    `json:"backfill_pause_milliseconds"`
 	MaxActiveDimensionsPerBucket int    `json:"max_active_dimensions_per_bucket"`
 	MaxHotBuckets                int    `json:"max_hot_buckets"`
 	CollectorShards              int    `json:"collector_shards"`
@@ -43,6 +46,9 @@ func DefaultSetting() ChannelMetricsSetting {
 		FinalFlushTimeoutSeconds:     5,
 		RetentionDays:                7,
 		FailureRetentionDays:         14,
+		BackfillEnabled:              true,
+		BackfillBatchSize:            500,
+		BackfillPauseMilliseconds:    25,
 		MaxActiveDimensionsPerBucket: 10_000,
 		MaxHotBuckets:                50_000,
 		CollectorShards:              32,
@@ -83,6 +89,17 @@ func (s ChannelMetricsSetting) Normalized() ChannelMetricsSetting {
 	}
 	if s.FailureRetentionDays <= 0 {
 		s.FailureRetentionDays = defaults.FailureRetentionDays
+	}
+	if s.BackfillBatchSize <= 0 {
+		s.BackfillBatchSize = defaults.BackfillBatchSize
+	}
+	// 单批还会按 request_id / channel_id 构造 IN 查询；限制到 500，
+	// 为 SQLite 的绑定变量上限保留过滤参数空间。
+	if s.BackfillBatchSize > 500 {
+		s.BackfillBatchSize = 500
+	}
+	if s.BackfillPauseMilliseconds < 0 {
+		s.BackfillPauseMilliseconds = defaults.BackfillPauseMilliseconds
 	}
 	if s.MaxActiveDimensionsPerBucket <= 0 {
 		s.MaxActiveDimensionsPerBucket = defaults.MaxActiveDimensionsPerBucket

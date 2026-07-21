@@ -20,6 +20,7 @@ type ChannelMetricBucketFilter struct {
 	ChannelIds            []int
 	ChannelTypes          []int
 	Groups                []string
+	GroupHashes           []string
 	RequestedModels       []string
 	RequestedModelHashes  []string
 	UpstreamModels        []string
@@ -85,6 +86,7 @@ func applyChannelMetricBucketFilter(query *gorm.DB, filter ChannelMetricBucketFi
 	query = whereIntsIn(query, "channel_id", filter.ChannelIds)
 	query = whereIntsIn(query, "channel_type", filter.ChannelTypes)
 	query = whereStringsIn(query, "group", filter.Groups)
+	query = whereStringsIn(query, "group_hash", filter.GroupHashes)
 	query = whereStringsIn(query, "requested_model", filter.RequestedModels)
 	query = whereStringsIn(query, "requested_model_hash", filter.RequestedModelHashes)
 	query = whereStringsIn(query, "upstream_model", filter.UpstreamModels)
@@ -127,6 +129,7 @@ type ChannelFailureEventFilter struct {
 	ChannelIds            []int
 	ChannelTypes          []int
 	TrafficSources        []string
+	DataOrigins           []string
 	Groups                []string
 	RequestedModels       []string
 	RequestedModelHashes  []string
@@ -192,6 +195,7 @@ func applyChannelFailureEventFilter(query *gorm.DB, filter ChannelFailureEventFi
 	query = whereIntsIn(query, "channel_id", filter.ChannelIds)
 	query = whereIntsIn(query, "channel_type", filter.ChannelTypes)
 	query = whereStringsIn(query, "traffic_source", filter.TrafficSources)
+	query = whereStringsIn(query, "data_origin", filter.DataOrigins)
 	query = whereStringsIn(query, "group", filter.Groups)
 	query = whereStringsIn(query, "requested_model", filter.RequestedModels)
 	query = whereStringsIn(query, "requested_model_hash", filter.RequestedModelHashes)

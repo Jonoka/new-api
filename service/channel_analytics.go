@@ -13,13 +13,16 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	channelmetrics "github.com/QuantumNous/new-api/pkg/channel_metrics"
+	"gorm.io/gorm"
 )
 
 var ErrInvalidChannelAnalyticsQuery = errors.New("渠道统计查询参数无效")
 
 const (
-	channelAnalyticsMaxListItems = 100
-	channelAnalyticsMaxPage      = 1_000_000
+	channelAnalyticsMaxListItems              = 100
+	channelAnalyticsMaxPage                   = 1_000_000
+	channelAnalyticsFailureModelSnapshotBytes = 191
+	channelAnalyticsFailureGroupSnapshotBytes = 64
 )
 
 var allChannelAnalyticsOutcomes = []string{
@@ -70,6 +73,39 @@ func ParseChannelAnalyticsQuery(values url.Values) (dto.ChannelAnalyticsQuery, e
 // 的失败事件被 5 分钟聚合桶的较短保留期误拒绝。
 func ParseChannelAnalyticsFailureQuery(values url.Values) (dto.ChannelAnalyticsQuery, error) {
 	return parseChannelAnalyticsQuery(values, channelMetricsEffectiveSetting().FailureRetentionDays)
+}
+
+// ParseChannelAnalyticsFilterModelsQuery 解析大规模模型筛选项查询。
+func ParseChannelAnalyticsFilterModelsQuery(values url.Values) (dto.ChannelAnalyticsFilterModelsQuery, error) {
+	query := dto.ChannelAnalyticsFilterModelsQuery{
+		ModelDimension: strings.ToLower(strings.TrimSpace(values.Get("model_dimension"))),
+		Query:          strings.TrimSpace(values.Get("q")),
+		Page:           1,
+		PageSize:       50,
+	}
+	if query.ModelDimension == "" {
+		query.ModelDimension = "requested"
+	}
+	if query.ModelDimension != "requested" && query.ModelDimension != "upstream" {
+		return dto.ChannelAnalyticsFilterModelsQuery{}, invalidChannelAnalyticsQuery("model_dimension 仅支持 requested 或 upstream")
+	}
+	if len(query.Query) > 191 {
+		return dto.ChannelAnalyticsFilterModelsQuery{}, invalidChannelAnalyticsQuery("q 不能超过 191 字节")
+	}
+	var err error
+	if rawPage := strings.TrimSpace(values.Get("page")); rawPage != "" {
+		query.Page, err = strconv.Atoi(rawPage)
+		if err != nil || query.Page < 1 || query.Page > channelAnalyticsMaxPage {
+			return dto.ChannelAnalyticsFilterModelsQuery{}, invalidChannelAnalyticsQuery("page 必须在 1 到 %d 之间", channelAnalyticsMaxPage)
+		}
+	}
+	if rawPageSize := strings.TrimSpace(values.Get("page_size")); rawPageSize != "" {
+		query.PageSize, err = strconv.Atoi(rawPageSize)
+		if err != nil || query.PageSize < 1 || query.PageSize > 100 {
+			return dto.ChannelAnalyticsFilterModelsQuery{}, invalidChannelAnalyticsQuery("page_size 必须在 1 到 100 之间")
+		}
+	}
+	return query, nil
 }
 
 func parseChannelAnalyticsQuery(values url.Values, retentionDays int) (dto.ChannelAnalyticsQuery, error) {
@@ -664,6 +700,7 @@ func GetChannelAnalyticsFailures(query dto.ChannelAnalyticsQuery) (dto.ChannelAn
 			UpstreamModelHash:       row.UpstreamModelHash,
 			Group:                   row.Group,
 			TrafficSource:           row.TrafficSource,
+			DataOrigin:              row.DataOrigin,
 			Outcome:                 row.Outcome,
 			FailureOwner:            row.FailureOwner,
 			QualityEligible:         row.QualityEligible,
@@ -710,6 +747,22 @@ func GetChannelAnalyticsFilters() (dto.ChannelAnalyticsFiltersResponse, error) {
 		types = append(types, dto.ChannelAnalyticsFilterType{Value: channelType, Label: constant.GetChannelTypeName(channelType)})
 	}
 	sort.Slice(types, func(i, j int) bool { return types[i].Value < types[j].Value })
+	groupRows, err := model.GetChannelMetricGroupOptions(model.LOG_DB, setting.BucketLevel, 1000)
+	if err != nil {
+		return dto.ChannelAnalyticsFiltersResponse{}, err
+	}
+	groupNames, err := model.GetGroupDisplayNameMap()
+	if err != nil {
+		return dto.ChannelAnalyticsFiltersResponse{}, err
+	}
+	groups := make([]dto.ChannelAnalyticsFilterGroup, 0, len(groupRows))
+	for _, row := range groupRows {
+		name := groupNames[row.Group]
+		if name == "" {
+			name = row.Group
+		}
+		groups = append(groups, dto.ChannelAnalyticsFilterGroup{Code: row.Group, Name: name})
+	}
 	requestedRows, err := model.GetChannelMetricModelOptions(model.LOG_DB, setting.BucketLevel, false, 1000)
 	if err != nil {
 		return dto.ChannelAnalyticsFiltersResponse{}, err
@@ -755,6 +808,7 @@ func GetChannelAnalyticsFilters() (dto.ChannelAnalyticsFiltersResponse, error) {
 	return dto.ChannelAnalyticsFiltersResponse{
 		Channels:              channelOptions,
 		ChannelTypes:          types,
+		Groups:                groups,
 		RequestedModels:       requestedModels,
 		UpstreamModels:        upstreamModels,
 		RequestedModelOptions: requestedModelOptions,
@@ -766,6 +820,42 @@ func GetChannelAnalyticsFilters() (dto.ChannelAnalyticsFiltersResponse, error) {
 		},
 		DataOrigins: []string{string(channelmetrics.DataOriginLive), string(channelmetrics.DataOriginLegacy)},
 		Meta:        meta,
+	}, nil
+}
+
+// GetChannelAnalyticsFilterModels 返回不会因模型数量超过 1000 而静默截断的筛选项。
+func GetChannelAnalyticsFilterModels(query dto.ChannelAnalyticsFilterModelsQuery) (dto.ChannelAnalyticsFilterModelsResponse, error) {
+	if query.ModelDimension != "requested" && query.ModelDimension != "upstream" {
+		return dto.ChannelAnalyticsFilterModelsResponse{}, ErrInvalidChannelAnalyticsQuery
+	}
+	if query.Page < 1 || query.PageSize < 1 || query.PageSize > 100 {
+		return dto.ChannelAnalyticsFilterModelsResponse{}, ErrInvalidChannelAnalyticsQuery
+	}
+	offset := (query.Page - 1) * query.PageSize
+	rows, total, err := model.SearchChannelMetricModelOptions(
+		model.LOG_DB,
+		channelMetricsEffectiveSetting().BucketLevel,
+		query.ModelDimension == "upstream",
+		query.Query,
+		offset,
+		query.PageSize,
+	)
+	if err != nil {
+		return dto.ChannelAnalyticsFilterModelsResponse{}, err
+	}
+	items := make([]dto.ChannelAnalyticsFilterModel, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, dto.ChannelAnalyticsFilterModel{
+			Value: row.ModelHash, Label: row.Model, Model: row.Model, ModelHash: row.ModelHash,
+		})
+	}
+	return dto.ChannelAnalyticsFilterModelsResponse{
+		ModelDimension: query.ModelDimension,
+		Query:          query.Query,
+		Items:          items,
+		Total:          total,
+		Page:           query.Page,
+		PageSize:       query.PageSize,
 	}, nil
 }
 
@@ -799,6 +889,9 @@ func channelAnalyticsMetricFilter(query dto.ChannelAnalyticsQuery, scope string)
 		UpstreamStatusCodes:  append([]int(nil), query.UpstreamStatusCodes...),
 		Stream:               query.Stream,
 	}
+	for _, group := range query.Groups {
+		filter.GroupHashes = append(filter.GroupHashes, channelmetrics.SHA256String(group))
+	}
 	if scope != "" {
 		filter.MetricScopes = []string{scope}
 	}
@@ -806,16 +899,29 @@ func channelAnalyticsMetricFilter(query dto.ChannelAnalyticsQuery, scope string)
 }
 
 func channelAnalyticsFailureFilter(query dto.ChannelAnalyticsQuery) model.ChannelFailureEventFilter {
+	requestedModelSnapshots := make([]string, 0, len(query.RequestedModels))
+	for _, requestedModel := range query.RequestedModels {
+		requestedModelSnapshots = append(requestedModelSnapshots, channelmetrics.TruncateUTF8(requestedModel, channelAnalyticsFailureModelSnapshotBytes))
+	}
+	upstreamModelSnapshots := make([]string, 0, len(query.UpstreamModels))
+	for _, upstreamModel := range query.UpstreamModels {
+		upstreamModelSnapshots = append(upstreamModelSnapshots, channelmetrics.TruncateUTF8(upstreamModel, channelAnalyticsFailureModelSnapshotBytes))
+	}
+	groupSnapshots := make([]string, 0, len(query.Groups))
+	for _, group := range query.Groups {
+		groupSnapshots = append(groupSnapshots, channelmetrics.TruncateUTF8(group, channelAnalyticsFailureGroupSnapshotBytes))
+	}
 	return model.ChannelFailureEventFilter{
 		StartTs:              query.StartTimestamp,
 		EndTs:                query.EndTimestamp,
 		ChannelIds:           append([]int(nil), query.ChannelIds...),
 		ChannelTypes:         append([]int(nil), query.ChannelTypes...),
 		TrafficSources:       append([]string(nil), query.TrafficSources...),
-		Groups:               append([]string(nil), query.Groups...),
-		RequestedModels:      append([]string(nil), query.RequestedModels...),
+		DataOrigins:          append([]string(nil), query.DataOrigins...),
+		Groups:               groupSnapshots,
+		RequestedModels:      requestedModelSnapshots,
 		RequestedModelHashes: append([]string(nil), query.RequestedModelHash...),
-		UpstreamModels:       append([]string(nil), query.UpstreamModels...),
+		UpstreamModels:       upstreamModelSnapshots,
 		UpstreamModelHashes:  append([]string(nil), query.UpstreamModelHash...),
 		Outcomes:             append([]string(nil), query.Outcomes...),
 		FailureOwners:        append([]string(nil), query.FailureOwners...),
@@ -884,7 +990,27 @@ func channelAnalyticsMeta(query dto.ChannelAnalyticsQuery, filter model.ChannelM
 		DroppedFailureEventCount:    quality.DroppedFailureEventCount,
 		DimensionHashCollisionCount: quality.DimensionHashCollisionCount,
 	}
+	backfillJob, backfillErr := model.GetChannelMetricBackfillJob(model.LOG_DB, channelMetricLegacyBackfillJobId)
+	if backfillErr == nil {
+		meta.Backfill = &dto.ChannelAnalyticsBackfillMeta{
+			Status: backfillJob.Status, BackfillStartTs: backfillJob.BackfillStartTs, LiveCutoverTs: backfillJob.LiveCutoverTs,
+			TotalRows: backfillJob.TotalRows, ScannedRows: backfillJob.ScannedRows, ConvertedRows: backfillJob.ConvertedRows,
+			SkippedRows: backfillJob.SkippedRows, MetricBucketCount: backfillJob.MetricBucketCount,
+			FailureEventCount: backfillJob.FailureEventCount, LastError: backfillJob.LastError,
+			UpdatedAt: backfillJob.UpdatedAt, CompletedAt: backfillJob.CompletedAt,
+		}
+	} else if !errors.Is(backfillErr, gorm.ErrRecordNotFound) {
+		return dto.ChannelAnalyticsMeta{}, backfillErr
+	}
+	backfillAffectsQuery := false
+	for _, origin := range query.DataOrigins {
+		if origin == string(channelmetrics.DataOriginLegacy) {
+			backfillAffectsQuery = true
+			break
+		}
+	}
 	meta.Partial = len(uncovered) > 0 ||
+		(backfillAffectsQuery && (meta.Backfill == nil || meta.Backfill.Status != model.ChannelMetricBackfillStatusCompleted)) ||
 		meta.RuntimePendingBatchCount > 0 ||
 		meta.RuntimeLastFlushErrorAt > runtimeQuality.LastFlushedAtUnix ||
 		meta.InvalidSampleCount > 0 ||
@@ -1056,6 +1182,9 @@ func mergeModelAggregateRows(rows []model.ChannelMetricAggregateRow, upstream bo
 }
 
 func mergeChannelMetricAggregate(target *model.ChannelMetricAggregateRow, source model.ChannelMetricAggregateRow) {
+	if source.LastFailureBucketTs > target.LastFailureBucketTs {
+		target.LastFailureBucketTs = source.LastFailureBucketTs
+	}
 	target.EventCount += source.EventCount
 	target.SuccessCount += source.SuccessCount
 	target.NonFirstAttemptCount += source.NonFirstAttemptCount
@@ -1076,6 +1205,20 @@ func mergeChannelMetricAggregate(target *model.ChannelMetricAggregateRow, source
 	target.LatencyCount += source.LatencyCount
 	target.TtftSumMs += source.TtftSumMs
 	target.TtftCount += source.TtftCount
+	target.UpstreamStatusSampleCount += source.UpstreamStatusSampleCount
+	target.Upstream429Count += source.Upstream429Count
+	target.Upstream4xxCount += source.Upstream4xxCount
+	target.Upstream5xxCount += source.Upstream5xxCount
+	target.HTTPErrorCount += source.HTTPErrorCount
+	target.TransportErrorCount += source.TransportErrorCount
+	target.ProtocolErrorCount += source.ProtocolErrorCount
+	target.StreamErrorCount += source.StreamErrorCount
+	target.LocalErrorCount += source.LocalErrorCount
+	target.DispatchErrorCount += source.DispatchErrorCount
+	target.ClientCancelledCount += source.ClientCancelledCount
+	target.LiveEventCount += source.LiveEventCount
+	target.LegacyEventCount += source.LegacyEventCount
+	target.SuccessUsageSampleCount += source.SuccessUsageSampleCount
 	target.LatencyBucket100Ms += source.LatencyBucket100Ms
 	target.LatencyBucket250Ms += source.LatencyBucket250Ms
 	target.LatencyBucket500Ms += source.LatencyBucket500Ms
@@ -1165,11 +1308,6 @@ func validateFailureChannelAnalyticsQuery(query dto.ChannelAnalyticsQuery) error
 	}
 	if query.Stream != nil {
 		return invalidChannelAnalyticsQuery("失败明细当前不支持 stream 过滤")
-	}
-	for _, origin := range query.DataOrigins {
-		if origin != string(channelmetrics.DataOriginLive) {
-			return invalidChannelAnalyticsQuery("失败明细仅支持 live 数据")
-		}
 	}
 	if query.SortBy != "" && query.SortBy != "created_at" {
 		return invalidChannelAnalyticsQuery("failures 的 sort_by 仅支持 created_at")

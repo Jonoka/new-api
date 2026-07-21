@@ -37,12 +37,12 @@ var (
 // 模型及渠道名仅是展示快照，维度身份以 dimension_hash 为准。
 type ChannelMetricBucket struct {
 	Id               int64  `json:"id" gorm:"primaryKey"`
-	BucketLevel      string `json:"bucket_level" gorm:"size:16;not null;uniqueIndex:ux_cmb_identity,priority:1;index:idx_cmb_scope_time,priority:1;index:idx_cmb_channel_time,priority:1;index:idx_cmb_reqmodel_time,priority:1;index:idx_cmb_upstatus_time,priority:1"`
-	BucketTs         int64  `json:"bucket_ts" gorm:"not null;uniqueIndex:ux_cmb_identity,priority:2;index:idx_cmb_scope_time,priority:5;index:idx_cmb_channel_time,priority:6;index:idx_cmb_reqmodel_time,priority:6;index:idx_cmb_upstatus_time,priority:7"`
+	BucketLevel      string `json:"bucket_level" gorm:"size:16;not null;uniqueIndex:ux_cmb_identity,priority:1;index:idx_cmb_scope_time,priority:1;index:idx_cmb_channel_time,priority:1;index:idx_cmb_reqmodel_time,priority:1;index:idx_cmb_upmodel_time,priority:1;index:idx_cmb_group_time,priority:1;index:idx_cmb_upstatus_time,priority:1"`
+	BucketTs         int64  `json:"bucket_ts" gorm:"not null;uniqueIndex:ux_cmb_identity,priority:2;index:idx_cmb_scope_time,priority:5;index:idx_cmb_channel_time,priority:6;index:idx_cmb_reqmodel_time,priority:6;index:idx_cmb_upmodel_time,priority:6;index:idx_cmb_group_time,priority:6;index:idx_cmb_upstatus_time,priority:7"`
 	DimensionHash    string `json:"dimension_hash" gorm:"size:64;not null;uniqueIndex:ux_cmb_identity,priority:3"`
 	DimensionVersion int    `json:"dimension_version" gorm:"not null;default:1"`
 
-	MetricScope         string `json:"metric_scope" gorm:"size:24;not null;index:idx_cmb_scope_time,priority:2;index:idx_cmb_channel_time,priority:2;index:idx_cmb_reqmodel_time,priority:2;index:idx_cmb_upstatus_time,priority:2"`
+	MetricScope         string `json:"metric_scope" gorm:"size:24;not null;index:idx_cmb_scope_time,priority:2;index:idx_cmb_channel_time,priority:2;index:idx_cmb_reqmodel_time,priority:2;index:idx_cmb_upmodel_time,priority:2;index:idx_cmb_group_time,priority:2;index:idx_cmb_upstatus_time,priority:2"`
 	ChannelPresent      bool   `json:"channel_present" gorm:"not null;default:false"`
 	ChannelId           int    `json:"channel_id" gorm:"not null;default:0;index:idx_cmb_channel_time,priority:5"`
 	ChannelNameSnapshot string `json:"channel_name_snapshot" gorm:"size:191;not null;default:''"`
@@ -54,12 +54,12 @@ type ChannelMetricBucket struct {
 	RequestedModelHash    string `json:"requested_model_hash" gorm:"size:64;not null;default:'';index:idx_cmb_reqmodel_time,priority:5"`
 	UpstreamModelPresent  bool   `json:"upstream_model_present" gorm:"not null;default:false"`
 	UpstreamModel         string `json:"upstream_model" gorm:"size:191;not null;default:''"`
-	UpstreamModelHash     string `json:"upstream_model_hash" gorm:"size:64;not null;default:''"`
+	UpstreamModelHash     string `json:"upstream_model_hash" gorm:"size:64;not null;default:'';index:idx_cmb_upmodel_time,priority:5"`
 	Group                 string `json:"group" gorm:"column:group;size:64;not null;default:''"`
-	GroupHash             string `json:"group_hash" gorm:"size:64;not null;default:''"`
+	GroupHash             string `json:"group_hash" gorm:"size:64;not null;default:'';index:idx_cmb_group_time,priority:5"`
 
-	TrafficSource   string `json:"traffic_source" gorm:"size:16;not null;index:idx_cmb_scope_time,priority:3;index:idx_cmb_channel_time,priority:3;index:idx_cmb_reqmodel_time,priority:3;index:idx_cmb_upstatus_time,priority:3"`
-	DataOrigin      string `json:"data_origin" gorm:"size:16;not null;index:idx_cmb_scope_time,priority:4;index:idx_cmb_channel_time,priority:4;index:idx_cmb_reqmodel_time,priority:4;index:idx_cmb_upstatus_time,priority:4"`
+	TrafficSource   string `json:"traffic_source" gorm:"size:16;not null;index:idx_cmb_scope_time,priority:3;index:idx_cmb_channel_time,priority:3;index:idx_cmb_reqmodel_time,priority:3;index:idx_cmb_upmodel_time,priority:3;index:idx_cmb_group_time,priority:3;index:idx_cmb_upstatus_time,priority:3"`
+	DataOrigin      string `json:"data_origin" gorm:"size:16;not null;index:idx_cmb_scope_time,priority:4;index:idx_cmb_channel_time,priority:4;index:idx_cmb_reqmodel_time,priority:4;index:idx_cmb_upmodel_time,priority:4;index:idx_cmb_group_time,priority:4;index:idx_cmb_upstatus_time,priority:4"`
 	Stream          bool   `json:"stream" gorm:"not null;default:false"`
 	Outcome         string `json:"outcome" gorm:"size:24;not null;default:''"`
 	ErrorStage      string `json:"error_stage" gorm:"size:32;not null;default:''"`
@@ -190,7 +190,7 @@ func (bucket *ChannelMetricBucket) SetTtftHistogram(values [ChannelMetricHistogr
 // ChannelFailureEvent 是与完整业务日志解耦的最小化失败明细。
 type ChannelFailureEvent struct {
 	EventId                 string `json:"event_id" gorm:"column:event_id;size:64;primaryKey"`
-	CreatedAt               int64  `json:"created_at" gorm:"not null;index:idx_cfe_created;index:idx_cfe_channel_time,priority:2;index:idx_cfe_outcome_time,priority:2;index:idx_cfe_upstatus_time,priority:3;index:idx_cfe_reqmodel_time,priority:2;index:idx_cfe_upmodel_time,priority:2"`
+	CreatedAt               int64  `json:"created_at" gorm:"not null;index:idx_cfe_created;index:idx_cfe_channel_time,priority:2;index:idx_cfe_outcome_time,priority:2;index:idx_cfe_upstatus_time,priority:3;index:idx_cfe_reqmodel_time,priority:2;index:idx_cfe_upmodel_time,priority:2;index:idx_cfe_origin_time,priority:2"`
 	RequestId               string `json:"request_id" gorm:"size:128;not null;default:''"`
 	AttemptSeq              int    `json:"attempt_seq" gorm:"not null;default:0"`
 	RetryPlanned            bool   `json:"retry_planned" gorm:"not null;default:false"`
@@ -206,6 +206,7 @@ type ChannelFailureEvent struct {
 	UpstreamModelHash       string `json:"upstream_model_hash" gorm:"size:64;not null;default:'';index:idx_cfe_upmodel_time,priority:1"`
 	Group                   string `json:"group" gorm:"column:group;size:64;not null;default:''"`
 	TrafficSource           string `json:"traffic_source" gorm:"size:16;not null;default:''"`
+	DataOrigin              string `json:"data_origin" gorm:"size:16;not null;default:'live';index:idx_cfe_origin_time,priority:1"`
 	Outcome                 string `json:"outcome" gorm:"size:24;not null;default:'';index:idx_cfe_outcome_time,priority:1"`
 	FailureOwner            string `json:"failure_owner" gorm:"size:16;not null;default:''"`
 	QualityEligible         bool   `json:"quality_eligible" gorm:"not null;default:false"`
@@ -264,15 +265,22 @@ func (ChannelMetricFlush) TableName() string { return "channel_metric_flushes" }
 
 // ChannelMetricBackfillJob 保存历史回填的可恢复检查点。
 type ChannelMetricBackfillJob struct {
-	JobId         string `json:"job_id" gorm:"column:job_id;size:64;primaryKey"`
-	Status        string `json:"status" gorm:"size:24;not null;index:idx_cmbj_status_updated,priority:1"`
-	LiveCutoverTs int64  `json:"live_cutover_ts" gorm:"not null;default:0"`
-	MaxLogId      int64  `json:"max_log_id" gorm:"not null;default:0"`
-	CurrentCursor int64  `json:"current_cursor" gorm:"not null;default:0"`
-	LastError     string `json:"last_error" gorm:"type:text"`
-	CreatedAt     int64  `json:"created_at" gorm:"not null"`
-	UpdatedAt     int64  `json:"updated_at" gorm:"not null;index:idx_cmbj_status_updated,priority:2"`
-	CompletedAt   int64  `json:"completed_at" gorm:"not null;default:0"`
+	JobId             string `json:"job_id" gorm:"column:job_id;size:64;primaryKey"`
+	Status            string `json:"status" gorm:"size:24;not null;index:idx_cmbj_status_updated,priority:1"`
+	BackfillStartTs   int64  `json:"backfill_start_ts" gorm:"not null;default:0"`
+	LiveCutoverTs     int64  `json:"live_cutover_ts" gorm:"not null;default:0"`
+	MaxLogId          int64  `json:"max_log_id" gorm:"not null;default:0"`
+	TotalRows         int64  `json:"total_rows" gorm:"not null;default:0"`
+	CurrentCursor     int64  `json:"current_cursor" gorm:"not null;default:0"`
+	ScannedRows       int64  `json:"scanned_rows" gorm:"not null;default:0"`
+	ConvertedRows     int64  `json:"converted_rows" gorm:"not null;default:0"`
+	SkippedRows       int64  `json:"skipped_rows" gorm:"not null;default:0"`
+	MetricBucketCount int64  `json:"metric_bucket_count" gorm:"not null;default:0"`
+	FailureEventCount int64  `json:"failure_event_count" gorm:"not null;default:0"`
+	LastError         string `json:"last_error" gorm:"type:text"`
+	CreatedAt         int64  `json:"created_at" gorm:"not null"`
+	UpdatedAt         int64  `json:"updated_at" gorm:"not null;index:idx_cmbj_status_updated,priority:2"`
+	CompletedAt       int64  `json:"completed_at" gorm:"not null;default:0"`
 }
 
 func (ChannelMetricBackfillJob) TableName() string { return "channel_metric_backfill_jobs" }
@@ -574,7 +582,9 @@ func SaveChannelMetricBackfillJob(db *gorm.DB, job *ChannelMetricBackfillJob) er
 	return db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "job_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"status", "live_cutover_ts", "max_log_id", "current_cursor", "last_error", "updated_at", "completed_at",
+			"status", "backfill_start_ts", "live_cutover_ts", "max_log_id", "total_rows", "current_cursor",
+			"scanned_rows", "converted_rows", "skipped_rows", "metric_bucket_count", "failure_event_count",
+			"last_error", "updated_at", "completed_at",
 		}),
 	}).Create(&copyJob).Error
 }
@@ -584,8 +594,12 @@ func GetChannelMetricBackfillJob(db *gorm.DB, jobId string) (*ChannelMetricBackf
 		return nil, ErrChannelMetricInvalidBatch
 	}
 	var job ChannelMetricBackfillJob
-	if err := db.Where("job_id = ?", jobId).Take(&job).Error; err != nil {
-		return nil, err
+	result := db.Where("job_id = ?", jobId).Limit(1).Find(&job)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, gorm.ErrRecordNotFound
 	}
 	return &job, nil
 }

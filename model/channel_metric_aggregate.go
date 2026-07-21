@@ -10,10 +10,15 @@ import (
 // 只使用 SUM、MIN、MAX 和 GROUP BY，保证 SQLite、MySQL 和 PostgreSQL 行为一致。
 type ChannelMetricAggregateRow struct {
 	BucketTs int64 `json:"bucket_ts"`
+	// LastFailureBucketTs 是聚合范围内最后一个失败桶的起始时间。
+	// 指标桶只能提供桶级精度，因此调用方不应把它展示成精确的失败事件时间。
+	LastFailureBucketTs int64 `json:"last_failure_bucket_ts"`
 
 	ChannelId           int    `json:"channel_id"`
 	ChannelNameSnapshot string `json:"channel_name_snapshot"`
 	ChannelType         int    `json:"channel_type"`
+	Group               string `json:"group" gorm:"column:metric_group"`
+	GroupHash           string `json:"group_hash"`
 	RequestedModel      string `json:"requested_model"`
 	RequestedModelHash  string `json:"requested_model_hash"`
 	UpstreamModel       string `json:"upstream_model"`
@@ -46,6 +51,23 @@ type ChannelMetricAggregateRow struct {
 	DimensionOverflowCount   int64 `json:"dimension_overflow_count"`
 	DroppedMetricEventCount  int64 `json:"dropped_metric_event_count"`
 	DroppedFailureEventCount int64 `json:"dropped_failure_event_count"`
+
+	// 以下字段只在运维矩阵查询中由条件聚合填充。它们不增加事实表列，
+	// 用于一次扫描同时回答常见状态码、错误类型和数据来源覆盖情况。
+	UpstreamStatusSampleCount int64 `json:"upstream_status_sample_count" gorm:"column:upstream_status_sample_count"`
+	Upstream429Count          int64 `json:"upstream_429_count" gorm:"column:upstream_429_count"`
+	Upstream4xxCount          int64 `json:"upstream_4xx_count" gorm:"column:upstream_4xx_count"`
+	Upstream5xxCount          int64 `json:"upstream_5xx_count" gorm:"column:upstream_5xx_count"`
+	HTTPErrorCount            int64 `json:"http_error_count" gorm:"column:http_error_count"`
+	TransportErrorCount       int64 `json:"transport_error_count" gorm:"column:transport_error_count"`
+	ProtocolErrorCount        int64 `json:"protocol_error_count" gorm:"column:protocol_error_count"`
+	StreamErrorCount          int64 `json:"stream_error_count" gorm:"column:stream_error_count"`
+	LocalErrorCount           int64 `json:"local_error_count" gorm:"column:local_error_count"`
+	DispatchErrorCount        int64 `json:"dispatch_error_count" gorm:"column:dispatch_error_count"`
+	ClientCancelledCount      int64 `json:"client_cancelled_count" gorm:"column:client_cancelled_count"`
+	LiveEventCount            int64 `json:"live_event_count" gorm:"column:live_event_count"`
+	LegacyEventCount          int64 `json:"legacy_event_count" gorm:"column:legacy_event_count"`
+	SuccessUsageSampleCount   int64 `json:"success_usage_sample_count" gorm:"column:success_usage_sample_count"`
 
 	LatencyBucket100Ms int64 `json:"latency_bucket_100_ms" gorm:"column:latency_bucket_100_ms"`
 	LatencyBucket250Ms int64 `json:"latency_bucket_250_ms" gorm:"column:latency_bucket_250_ms"`
@@ -117,6 +139,7 @@ var channelMetricCounterAggregateColumns = []string{
 	"COALESCE(SUM(dimension_overflow_count), 0) AS dimension_overflow_count",
 	"COALESCE(SUM(dropped_metric_event_count), 0) AS dropped_metric_event_count",
 	"COALESCE(SUM(dropped_failure_event_count), 0) AS dropped_failure_event_count",
+	"COALESCE(MAX(CASE WHEN outcome <> 'success' AND outcome <> 'client_cancelled' AND event_count > 0 THEN bucket_ts ELSE 0 END), 0) AS last_failure_bucket_ts",
 	"COALESCE(SUM(latency_bucket_100_ms), 0) AS latency_bucket_100_ms",
 	"COALESCE(SUM(latency_bucket_250_ms), 0) AS latency_bucket_250_ms",
 	"COALESCE(SUM(latency_bucket_500_ms), 0) AS latency_bucket_500_ms",
@@ -145,7 +168,30 @@ var channelMetricCounterAggregateColumns = []string{
 	"COALESCE(SUM(ttft_bucket_inf), 0) AS ttft_bucket_inf",
 }
 
+// channelMetricOperationsAggregateColumns 仅用于运维矩阵。使用标准 CASE、SUM
+// 和字符串/整数比较，保持 SQLite、MySQL 与 PostgreSQL 一致。
+var channelMetricOperationsAggregateColumns = []string{
+	"COALESCE(SUM(CASE WHEN upstream_status_present THEN event_count ELSE 0 END), 0) AS upstream_status_sample_count",
+	"COALESCE(SUM(CASE WHEN upstream_status_present AND upstream_status_code = 429 THEN event_count ELSE 0 END), 0) AS upstream_429_count",
+	"COALESCE(SUM(CASE WHEN upstream_status_present AND upstream_status_code >= 400 AND upstream_status_code < 500 THEN event_count ELSE 0 END), 0) AS upstream_4xx_count",
+	"COALESCE(SUM(CASE WHEN upstream_status_present AND upstream_status_code >= 500 AND upstream_status_code < 600 THEN event_count ELSE 0 END), 0) AS upstream_5xx_count",
+	"COALESCE(SUM(CASE WHEN outcome = 'http_error' THEN event_count ELSE 0 END), 0) AS http_error_count",
+	"COALESCE(SUM(CASE WHEN outcome = 'transport_error' THEN event_count ELSE 0 END), 0) AS transport_error_count",
+	"COALESCE(SUM(CASE WHEN outcome = 'protocol_error' THEN event_count ELSE 0 END), 0) AS protocol_error_count",
+	"COALESCE(SUM(CASE WHEN outcome = 'stream_error' THEN event_count ELSE 0 END), 0) AS stream_error_count",
+	"COALESCE(SUM(CASE WHEN outcome = 'local_error' THEN event_count ELSE 0 END), 0) AS local_error_count",
+	"COALESCE(SUM(CASE WHEN outcome = 'dispatch_error' THEN event_count ELSE 0 END), 0) AS dispatch_error_count",
+	"COALESCE(SUM(CASE WHEN outcome = 'client_cancelled' THEN event_count ELSE 0 END), 0) AS client_cancelled_count",
+	"COALESCE(SUM(CASE WHEN data_origin = 'live' THEN event_count ELSE 0 END), 0) AS live_event_count",
+	"COALESCE(SUM(CASE WHEN data_origin = 'legacy' THEN event_count ELSE 0 END), 0) AS legacy_event_count",
+	"COALESCE(SUM(CASE WHEN outcome = 'success' THEN usage_sample_count ELSE 0 END), 0) AS success_usage_sample_count",
+}
+
 func queryChannelMetricAggregate(db *gorm.DB, filter ChannelMetricBucketFilter, dimensions []string) ([]ChannelMetricAggregateRow, error) {
+	return queryChannelMetricAggregateWithExtraColumns(db, filter, dimensions, nil)
+}
+
+func queryChannelMetricAggregateWithExtraColumns(db *gorm.DB, filter ChannelMetricBucketFilter, dimensions []string, extraColumns []string) ([]ChannelMetricAggregateRow, error) {
 	if db == nil {
 		return nil, ErrChannelMetricInvalidBatch
 	}
@@ -154,11 +200,16 @@ func queryChannelMetricAggregate(db *gorm.DB, filter ChannelMetricBucketFilter, 
 		return nil, err
 	}
 	selectColumns := append(append([]string(nil), dimensions...), channelMetricCounterAggregateColumns...)
+	selectColumns = append(selectColumns, extraColumns...)
 	query = query.Select(strings.Join(selectColumns, ", "))
 	for _, dimension := range dimensions {
 		groupColumn := dimension
 		if aliasAt := strings.Index(strings.ToUpper(groupColumn), " AS "); aliasAt >= 0 {
 			groupColumn = groupColumn[:aliasAt]
+		}
+		// GORM 的 Group 会自行引用普通列名；传入已引用标识会被再次引用。
+		if groupColumn == "`group`" || groupColumn == `"group"` {
+			groupColumn = "group"
 		}
 		query = query.Group(groupColumn)
 	}
@@ -201,6 +252,42 @@ func AggregateChannelMetricsByModel(db *gorm.DB, filter ChannelMetricBucketFilte
 		return queryChannelMetricAggregate(db, filter, []string{"channel_name_snapshot", "channel_type", "upstream_model_hash", "upstream_model"})
 	}
 	return queryChannelMetricAggregate(db, filter, []string{"channel_name_snapshot", "channel_type", "requested_model_hash", "requested_model"})
+}
+
+// ChannelMetricDimensionSelection 是运维矩阵允许的维度白名单。
+// 使用结构化选择而不是接受任意列名，避免把查询参数拼入 SQL。
+type ChannelMetricDimensionSelection struct {
+	Group          bool
+	Channel        bool
+	RequestedModel bool
+	UpstreamModel  bool
+}
+
+// AggregateChannelMetricsByDimensions 按分组、渠道和一种模型口径聚合。
+// 模型快照和渠道名称可能随时间变化，因此服务层仍需按稳定身份
+// （分组、渠道 ID、模型哈希）合并返回行。
+func AggregateChannelMetricsByDimensions(db *gorm.DB, filter ChannelMetricBucketFilter, selection ChannelMetricDimensionSelection) ([]ChannelMetricAggregateRow, error) {
+	if selection.RequestedModel && selection.UpstreamModel {
+		return nil, ErrChannelMetricInvalidBatch
+	}
+	dimensions := make([]string, 0, 7)
+	if selection.Group {
+		// 同时按哈希分组，避免 MySQL 默认大小写不敏感排序规则把两个分组合并。
+		dimensions = append(dimensions, "group_hash", channelMetricQuotedGroupColumn(db)+" AS metric_group")
+	}
+	if selection.Channel {
+		dimensions = append(dimensions, "channel_id", "channel_name_snapshot", "channel_type")
+	}
+	if selection.RequestedModel {
+		dimensions = append(dimensions, "requested_model_hash", "requested_model")
+	}
+	if selection.UpstreamModel {
+		dimensions = append(dimensions, "upstream_model_hash", "upstream_model")
+	}
+	if len(dimensions) == 0 {
+		return nil, ErrChannelMetricInvalidBatch
+	}
+	return queryChannelMetricAggregateWithExtraColumns(db, filter, dimensions, channelMetricOperationsAggregateColumns)
 }
 
 func AggregateChannelMetricStatusCodes(db *gorm.DB, filter ChannelMetricBucketFilter, client bool) ([]ChannelMetricAggregateRow, error) {
@@ -274,6 +361,40 @@ type ChannelMetricModelOption struct {
 	ModelHash string `json:"model_hash"`
 }
 
+type ChannelMetricGroupOption struct {
+	Group     string `json:"group" gorm:"column:metric_group"`
+	GroupHash string `json:"group_hash"`
+}
+
+// GetChannelMetricGroupOptions 返回指标事实中真实出现过的分组，而不是渠道当前配置分组。
+func GetChannelMetricGroupOptions(db *gorm.DB, bucketLevel string, limit int) ([]ChannelMetricGroupOption, error) {
+	if db == nil {
+		return nil, ErrChannelMetricInvalidBatch
+	}
+	if limit <= 0 || limit > 1000 {
+		limit = 1000
+	}
+	groupColumn := channelMetricQuotedGroupColumn(db)
+	var rows []ChannelMetricGroupOption
+	err := db.Model(&ChannelMetricBucket{}).
+		Select(groupColumn+" AS metric_group, group_hash AS group_hash").
+		Where("bucket_level = ?", bucketLevel).
+		Where(groupColumn+" <> ?", "").
+		Group("group_hash").
+		Group("group").
+		Order(groupColumn + " ASC").
+		Limit(limit).
+		Scan(&rows).Error
+	return rows, err
+}
+
+func channelMetricQuotedGroupColumn(db *gorm.DB) string {
+	if db != nil && db.Dialector != nil && db.Dialector.Name() == "postgres" {
+		return `"group"`
+	}
+	return "`group`"
+}
+
 func GetChannelMetricModelOptions(db *gorm.DB, bucketLevel string, upstream bool, limit int) ([]ChannelMetricModelOption, error) {
 	if db == nil {
 		return nil, ErrChannelMetricInvalidBatch
@@ -297,6 +418,40 @@ func GetChannelMetricModelOptions(db *gorm.DB, bucketLevel string, upstream bool
 		Limit(limit).
 		Scan(&rows).Error
 	return rows, err
+}
+
+// SearchChannelMetricModelOptions 对去重后的模型身份做服务端搜索和分页。
+// 查询列由 upstream 布尔值白名单选择，用户输入只作为绑定参数参与 LIKE。
+func SearchChannelMetricModelOptions(db *gorm.DB, bucketLevel string, upstream bool, search string, offset int, limit int) ([]ChannelMetricModelOption, int64, error) {
+	if db == nil {
+		return nil, 0, ErrChannelMetricInvalidBatch
+	}
+	if offset < 0 || limit <= 0 || limit > 100 {
+		return nil, 0, ErrChannelMetricInvalidBatch
+	}
+	presentColumn, modelColumn, hashColumn := "requested_model_present", "requested_model", "requested_model_hash"
+	if upstream {
+		presentColumn, modelColumn, hashColumn = "upstream_model_present", "upstream_model", "upstream_model_hash"
+	}
+	grouped := db.Model(&ChannelMetricBucket{}).
+		Select(modelColumn+" AS model, "+hashColumn+" AS model_hash").
+		Where("bucket_level = ?", bucketLevel).
+		Where(presentColumn+" = ?", true).
+		Where(modelColumn+" <> ?", "")
+	if trimmed := strings.TrimSpace(search); trimmed != "" {
+		// 使用 SQL 标准单字符 ESCAPE，避免 % 和 _ 被解释为用户未请求的通配符。
+		escaped := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(strings.ToLower(trimmed))
+		grouped = grouped.Where("LOWER("+modelColumn+") LIKE ? ESCAPE '!'", "%"+escaped+"%")
+	}
+	grouped = grouped.Group(hashColumn).Group(modelColumn)
+
+	var total int64
+	if err := db.Table("(?) AS channel_metric_model_options", grouped).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var rows []ChannelMetricModelOption
+	err := grouped.Order(modelColumn + " ASC").Offset(offset).Limit(limit).Scan(&rows).Error
+	return rows, total, err
 }
 
 type ChannelFailureLatestRow struct {

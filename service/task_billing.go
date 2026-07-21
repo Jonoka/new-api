@@ -190,6 +190,9 @@ func taskAdjustTokenQuota(ctx context.Context, task *model.Task, delta int) {
 // taskBillingOther 从 task 的 BillingContext 构建日志 Other 字段。
 func taskBillingOther(task *model.Task) map[string]interface{} {
 	other := make(map[string]interface{})
+	// 差额结算会额外写入消费日志；明确标记为任务流量，避免历史指标回填时
+	// 将这类账单调整误算成一次新的同步转发请求。
+	other["is_task"] = true
 	if bc := task.PrivateData.BillingContext; bc != nil {
 		other["model_price"] = bc.ModelPrice
 		if bc.ModelPriceUnit != "" {

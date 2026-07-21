@@ -25,7 +25,7 @@ func setupChannelAnalyticsTestDB(t *testing.T) *gorm.DB {
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", channelmetrics.SHA256String(t.Name())[:16])
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.Channel{}))
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Group{}))
 	require.NoError(t, model.MigrateChannelAnalyticsLogDB(db))
 
 	oldDB, oldLogDB := model.DB, model.LOG_DB
@@ -209,6 +209,60 @@ func TestChannelAnalyticsChannelStatusAndFailureDrilldown(t *testing.T) {
 	assert.Equal(t, int64(1), failures.Total)
 }
 
+func TestChannelAnalyticsFailuresIncludeLegacyBackfillEvents(t *testing.T) {
+	db := setupChannelAnalyticsTestDB(t)
+	bucketTs := time.Now().Unix() / 300 * 300
+	legacy := model.ChannelFailureEvent{
+		EventId: "legacy-failure", CreatedAt: bucketTs + 10, RequestId: "legacy-request", AttemptSeq: 1,
+		ChannelId: 51, ChannelNameSnapshot: "历史渠道", ChannelType: constant.ChannelTypeOpenAI,
+		RequestedModel: "legacy-model", RequestedModelHash: channelmetrics.SHA256String("legacy-model"),
+		TrafficSource: string(channelmetrics.TrafficSourceRelay), DataOrigin: string(channelmetrics.DataOriginLegacy),
+		Outcome: string(channelmetrics.OutcomeHTTPError), ErrorStage: string(channelmetrics.ErrorStageUpstream),
+		UpstreamStatusPresent: true, UpstreamStatusCode: 503,
+	}
+	live := legacy
+	live.EventId, live.RequestId, live.DataOrigin = "live-failure", "live-request", string(channelmetrics.DataOriginLive)
+	require.NoError(t, db.Create(&[]model.ChannelFailureEvent{legacy, live}).Error)
+
+	query := channelAnalyticsTestQuery(bucketTs)
+	query.DataOrigins = []string{string(channelmetrics.DataOriginLegacy)}
+	response, err := GetChannelAnalyticsFailures(query)
+	require.NoError(t, err)
+	require.Len(t, response.Items, 1)
+	assert.Equal(t, "legacy-failure", response.Items[0].EventId)
+	assert.Equal(t, string(channelmetrics.DataOriginLegacy), response.Items[0].DataOrigin)
+
+	query.DataOrigins = []string{string(channelmetrics.DataOriginLive)}
+	response, err = GetChannelAnalyticsFailures(query)
+	require.NoError(t, err)
+	require.Len(t, response.Items, 1)
+	assert.Equal(t, "live-failure", response.Items[0].EventId)
+	assert.Equal(t, string(channelmetrics.DataOriginLive), response.Items[0].DataOrigin)
+}
+
+func TestChannelAnalyticsFailuresMatchLongModelByFullHashAndSnapshot(t *testing.T) {
+	db := setupChannelAnalyticsTestDB(t)
+	bucketTs := time.Now().Unix() / 300 * 300
+	requestedModel := strings.Repeat("长模型-", 50)
+	require.Greater(t, len(requestedModel), channelAnalyticsFailureModelSnapshotBytes)
+	require.NoError(t, db.Create(&model.ChannelFailureEvent{
+		EventId: "long-model-failure", CreatedAt: bucketTs + 10, RequestId: "long-model-request", AttemptSeq: 1,
+		ChannelId: 52, ChannelNameSnapshot: "长模型渠道", ChannelType: constant.ChannelTypeOpenAI,
+		RequestedModel:     channelmetrics.TruncateUTF8(requestedModel, channelAnalyticsFailureModelSnapshotBytes),
+		RequestedModelHash: channelmetrics.SHA256String(requestedModel),
+		TrafficSource:      string(channelmetrics.TrafficSourceRelay), DataOrigin: string(channelmetrics.DataOriginLive),
+		Outcome: string(channelmetrics.OutcomeHTTPError), ErrorStage: string(channelmetrics.ErrorStageUpstream),
+	}).Error)
+
+	query := channelAnalyticsTestQuery(bucketTs)
+	query.RequestedModels = []string{requestedModel}
+	query.RequestedModelHash = []string{channelmetrics.SHA256String(requestedModel)}
+	response, err := GetChannelAnalyticsFailures(query)
+	require.NoError(t, err)
+	require.Len(t, response.Items, 1)
+	assert.Equal(t, "long-model-failure", response.Items[0].EventId)
+}
+
 func TestChannelAnalyticsModelsKeepDeletedChannelSnapshotAndUpstreamFailureTime(t *testing.T) {
 	db := setupChannelAnalyticsTestDB(t)
 	bucketTs := time.Now().Unix() / 300 * 300
@@ -331,6 +385,30 @@ func TestChannelAnalyticsMetaSeparatesRuntimeFlushHealthFromWindowQuality(t *tes
 	assert.Zero(t, meta.InvalidSampleCount, "进程累计质量值不应灌入任意查询窗口")
 }
 
+func TestChannelAnalyticsMetaMarksLegacyQueryPartialUntilBackfillCompletes(t *testing.T) {
+	db := setupChannelAnalyticsTestDB(t)
+	now := time.Now().Unix()
+	query := dto.ChannelAnalyticsQuery{
+		StartTimestamp: now - 3600, EndTimestamp: now,
+		BucketLevel: "5m", BucketSeconds: 300,
+		TrafficSources: []string{string(channelmetrics.TrafficSourceRelay)},
+		DataOrigins:    []string{string(channelmetrics.DataOriginLive), string(channelmetrics.DataOriginLegacy)},
+	}
+	meta, err := channelAnalyticsMeta(query, channelAnalyticsMetricFilter(query, ""), false)
+	require.NoError(t, err)
+	assert.True(t, meta.Partial, "请求历史数据但回填任务尚未建立时不能宣称数据完整")
+
+	require.NoError(t, model.SaveChannelMetricBackfillJob(db, &model.ChannelMetricBackfillJob{
+		JobId: channelMetricLegacyBackfillJobId, Status: model.ChannelMetricBackfillStatusCompleted,
+		CreatedAt: now, UpdatedAt: now, CompletedAt: now,
+	}))
+	meta, err = channelAnalyticsMeta(query, channelAnalyticsMetricFilter(query, ""), false)
+	require.NoError(t, err)
+	assert.False(t, meta.Partial)
+	require.NotNil(t, meta.Backfill)
+	assert.Equal(t, model.ChannelMetricBackfillStatusCompleted, meta.Backfill.Status)
+}
+
 func TestSortChannelAnalyticsItemsByFailureCount(t *testing.T) {
 	items := []dto.ChannelAnalyticsChannelItem{
 		{ChannelId: 1, FailureCount: 2},
@@ -341,6 +419,254 @@ func TestSortChannelAnalyticsItemsByFailureCount(t *testing.T) {
 	sortChannelAnalyticsItems(items, "failure_count", "desc")
 
 	assert.Equal(t, []int{2, 1, 3}, []int{items[0].ChannelId, items[1].ChannelId, items[2].ChannelId})
+}
+
+func TestParseChannelAnalyticsStabilityQueryUsesBoundedWindowsAndHistoricalOrigin(t *testing.T) {
+	query, err := ParseChannelAnalyticsStabilityQuery(url.Values{
+		"dimension": {"group_channel_model"},
+		"windows":   {"15m,1h", "6h"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []int64{900, 3600, 21600}, query.WindowSeconds)
+	assert.Equal(t, "group_channel_model", query.Dimension)
+	assert.Equal(t, []string{"live", "legacy"}, query.DataOrigins)
+	assert.Equal(t, int64(21600), query.EndTimestamp-query.StartTimestamp)
+
+	_, err = ParseChannelAnalyticsStabilityQuery(url.Values{"dimension": {"unsafe_sql"}})
+	require.ErrorIs(t, err, ErrInvalidChannelAnalyticsQuery)
+	_, err = ParseChannelAnalyticsStabilityQuery(url.Values{"windows": {"1m"}})
+	require.ErrorIs(t, err, ErrInvalidChannelAnalyticsQuery)
+
+	query, err = ParseChannelAnalyticsStabilityQuery(url.Values{"data_origin": {"  , "}})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"live", "legacy"}, query.DataOrigins)
+}
+
+func TestChannelAnalyticsFilterModelsSupportsSearchPaginationAndLiteralWildcards(t *testing.T) {
+	db := setupChannelAnalyticsTestDB(t)
+	bucketTs := time.Now().Unix() / 300 * 300
+	models := []string{"alpha-model", "alpha%literal", "beta_model"}
+	rows := make([]model.ChannelMetricBucket, 0, len(models)+1)
+	for index, modelName := range models {
+		row := channelAnalyticsTestBucket(bucketTs, fmt.Sprintf("filter-model-%d", index), string(channelmetrics.ScopeChannelAttempt), string(channelmetrics.OutcomeSuccess), 1, 1)
+		row.RequestedModelPresent = true
+		row.RequestedModel = modelName
+		row.RequestedModelHash = channelmetrics.SHA256String(modelName)
+		rows = append(rows, row)
+	}
+	duplicate := rows[0]
+	duplicate.DimensionHash = channelmetrics.SHA256String("filter-model-alpha-duplicate")
+	duplicate.Outcome = string(channelmetrics.OutcomeHTTPError)
+	rows = append(rows, duplicate)
+	require.NoError(t, db.Create(&rows).Error)
+
+	query, err := ParseChannelAnalyticsFilterModelsQuery(url.Values{
+		"model_dimension": {"requested"},
+		"page":            {"1"},
+		"page_size":       {"2"},
+	})
+	require.NoError(t, err)
+	response, err := GetChannelAnalyticsFilterModels(query)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), response.Total)
+	require.Len(t, response.Items, 2)
+	assert.Equal(t, "alpha%literal", response.Items[0].Model)
+	assert.Equal(t, "alpha-model", response.Items[1].Model)
+
+	query.Page = 2
+	response, err = GetChannelAnalyticsFilterModels(query)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), response.Total)
+	require.Len(t, response.Items, 1)
+	assert.Equal(t, "beta_model", response.Items[0].Model)
+
+	query.Page, query.PageSize, query.Query = 1, 50, "%"
+	response, err = GetChannelAnalyticsFilterModels(query)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), response.Total, "百分号必须按普通字符搜索，不能扩大为 SQL 通配符")
+	require.Len(t, response.Items, 1)
+	assert.Equal(t, "alpha%literal", response.Items[0].Model)
+
+	_, err = ParseChannelAnalyticsFilterModelsQuery(url.Values{"model_dimension": {"unsafe"}})
+	assert.ErrorIs(t, err, ErrInvalidChannelAnalyticsQuery)
+}
+
+func TestChannelAnalyticsStabilitySeparatesActualGroupChannelAndModel(t *testing.T) {
+	db := setupChannelAnalyticsTestDB(t)
+	bucketTs := time.Now().Unix() / 300 * 300
+	require.NoError(t, db.Create(&model.Group{Id: 1, Code: "vip", Name: "VIP 用户", Status: model.GroupStatusActive}).Error)
+	require.NoError(t, db.Create(&model.Channel{
+		Id: 31, Name: "当前渠道", Type: constant.ChannelTypeOpenAI, Key: "test-key", Group: "default,vip",
+	}).Error)
+
+	success := channelAnalyticsTestBucket(bucketTs, "ops-success", string(channelmetrics.ScopeChannelAttempt), string(channelmetrics.OutcomeSuccess), 8, 8)
+	failure := channelAnalyticsTestBucket(bucketTs, "ops-failure", string(channelmetrics.ScopeChannelAttempt), string(channelmetrics.OutcomeHTTPError), 2, 0)
+	for _, row := range []*model.ChannelMetricBucket{&success, &failure} {
+		row.ChannelPresent = true
+		row.ChannelId, row.ChannelNameSnapshot, row.ChannelType = 31, "历史渠道", constant.ChannelTypeOpenAI
+		row.Group, row.GroupHash = "vip", channelmetrics.SHA256String("vip")
+		row.RequestedModelPresent = true
+		row.RequestedModel, row.RequestedModelHash = "gpt-ops", channelmetrics.SHA256String("gpt-ops")
+		row.QualityEligibleCount = row.EventCount
+		row.QualitySuccessCount = row.SuccessCount
+		row.LatencyCount = row.EventCount
+		row.LatencySumMs = row.EventCount * 500
+		row.LatencyBucket500Ms = row.EventCount
+	}
+	success.UsageSampleCount = 8
+	success.InputTokensTotal = 1000
+	success.OutputTokens = 200
+	success.CacheHitRequestCount = 4
+	success.CacheReadTokens = 400
+	require.NoError(t, db.Create(&[]model.ChannelMetricBucket{success, failure}).Error)
+
+	base := channelAnalyticsTestQuery(bucketTs)
+	base.EndTimestamp = bucketTs + 300
+	base.DataOrigins = []string{string(channelmetrics.DataOriginLive), string(channelmetrics.DataOriginLegacy)}
+	query := dto.ChannelAnalyticsStabilityQuery{
+		ChannelAnalyticsQuery: base,
+		Dimension:             "group_channel_model",
+		WindowSeconds:         []int64{300},
+	}
+	response, err := GetChannelAnalyticsStability(query)
+	require.NoError(t, err)
+	require.Len(t, response.Items, 1)
+	item := response.Items[0]
+	assert.Equal(t, "vip", item.Group)
+	assert.Equal(t, "VIP 用户", item.GroupName)
+	assert.Equal(t, 31, item.ChannelId)
+	assert.Equal(t, "当前渠道", item.ChannelName)
+	assert.Equal(t, "gpt-ops", item.RequestedModel)
+	require.Len(t, item.Windows, 1)
+	window := item.Windows[0]
+	assert.Equal(t, int64(10), window.ChannelAttemptCount)
+	assert.Equal(t, int64(2), window.FailureCount)
+	require.NotNil(t, window.QualitySuccessRate)
+	assert.InDelta(t, 0.8, *window.QualitySuccessRate, 0.0001)
+	assert.Equal(t, int64(1200), window.TotalTokens)
+	assert.Equal(t, bucketTs, window.LastFailureBucketTs)
+
+	filters, err := GetChannelAnalyticsFilters()
+	require.NoError(t, err)
+	require.Len(t, filters.Groups, 1)
+	assert.Equal(t, dto.ChannelAnalyticsFilterGroup{Code: "vip", Name: "VIP 用户"}, filters.Groups[0])
+}
+
+func TestChannelAnalyticsStabilityReturnsOperationalBreakdownAndCoverage(t *testing.T) {
+	db := setupChannelAnalyticsTestDB(t)
+	bucketTs := time.Now().Unix() / 300 * 300
+
+	makeRow := func(name string, outcome channelmetrics.Outcome, count int64) model.ChannelMetricBucket {
+		row := channelAnalyticsTestBucket(bucketTs, name, string(channelmetrics.ScopeChannelAttempt), string(outcome), count, 0)
+		if outcome == channelmetrics.OutcomeSuccess {
+			row.SuccessCount = count
+			row.UsageSampleCount = count
+		}
+		row.ChannelPresent = true
+		row.ChannelId, row.ChannelNameSnapshot, row.ChannelType = 41, "运维渠道", constant.ChannelTypeOpenAI
+		row.Group, row.GroupHash = "ops", channelmetrics.SHA256String("ops")
+		row.RequestedModelPresent = true
+		row.RequestedModel, row.RequestedModelHash = "gpt-ops-breakdown", channelmetrics.SHA256String("gpt-ops-breakdown")
+		if outcome != channelmetrics.OutcomeClientCancelled {
+			row.QualityEligibleCount = count
+		}
+		if outcome == channelmetrics.OutcomeSuccess {
+			row.QualitySuccessCount = count
+		}
+		row.LatencyCount = count
+		row.LatencySumMs = count * 500
+		row.LatencyBucket500Ms = count
+		return row
+	}
+	makeUpstreamRow := func(name string, outcome channelmetrics.Outcome, count int64, statusCode int, origin channelmetrics.DataOrigin) model.ChannelMetricBucket {
+		row := makeRow(name, outcome, count)
+		row.MetricScope = string(channelmetrics.ScopeUpstreamCall)
+		row.DataOrigin = string(origin)
+		if statusCode > 0 {
+			row.UpstreamStatusPresent = true
+			row.UpstreamStatusCode = statusCode
+		}
+		return row
+	}
+
+	success := makeRow("ops-breakdown-success", channelmetrics.OutcomeSuccess, 12)
+	success.TtftCount, success.TtftSumMs, success.TtftBucket250Ms = 12, 2400, 12
+	rateLimited := makeRow("ops-breakdown-429", channelmetrics.OutcomeHTTPError, 2)
+	rateLimited.DataOrigin = string(channelmetrics.DataOriginLegacy)
+	rateLimited.UsageSampleCount = 2
+	rateLimited.InputTokensTotal = 100
+	serverError := makeRow("ops-breakdown-503", channelmetrics.OutcomeHTTPError, 3)
+	transport := makeRow("ops-breakdown-transport", channelmetrics.OutcomeTransportError, 4)
+	protocol := makeRow("ops-breakdown-protocol", channelmetrics.OutcomeProtocolError, 5)
+	protocol.DataOrigin = string(channelmetrics.DataOriginLegacy)
+	stream := makeRow("ops-breakdown-stream", channelmetrics.OutcomeStreamError, 6)
+	stream.PartialResponseCount = 6
+	cancelled := makeRow("ops-breakdown-cancelled", channelmetrics.OutcomeClientCancelled, 3)
+	upstreamSuccess := makeUpstreamRow("ops-upstream-success", channelmetrics.OutcomeSuccess, 12, 200, channelmetrics.DataOriginLive)
+	upstreamRateLimited := makeUpstreamRow("ops-upstream-429", channelmetrics.OutcomeHTTPError, 2, 429, channelmetrics.DataOriginLegacy)
+	upstreamServerError := makeUpstreamRow("ops-upstream-503", channelmetrics.OutcomeHTTPError, 3, 503, channelmetrics.DataOriginLive)
+	upstreamTransport := makeUpstreamRow("ops-upstream-transport", channelmetrics.OutcomeTransportError, 4, 0, channelmetrics.DataOriginLive)
+	upstreamProtocol := makeUpstreamRow("ops-upstream-protocol", channelmetrics.OutcomeProtocolError, 5, 0, channelmetrics.DataOriginLegacy)
+	upstreamStream := makeUpstreamRow("ops-upstream-stream", channelmetrics.OutcomeStreamError, 6, 0, channelmetrics.DataOriginLive)
+	require.NoError(t, db.Create(&[]model.ChannelMetricBucket{
+		success, rateLimited, serverError, transport, protocol, stream, cancelled,
+		upstreamSuccess, upstreamRateLimited, upstreamServerError, upstreamTransport, upstreamProtocol, upstreamStream,
+	}).Error)
+
+	base := channelAnalyticsTestQuery(bucketTs)
+	base.EndTimestamp = bucketTs + 300
+	base.DataOrigins = []string{string(channelmetrics.DataOriginLive), string(channelmetrics.DataOriginLegacy)}
+	response, err := GetChannelAnalyticsStability(dto.ChannelAnalyticsStabilityQuery{
+		ChannelAnalyticsQuery: base,
+		Dimension:             "group_channel_model",
+		WindowSeconds:         []int64{300},
+	})
+	require.NoError(t, err)
+	require.Len(t, response.Items, 1)
+	require.Len(t, response.Items[0].Windows, 1)
+	window := response.Items[0].Windows[0]
+
+	assert.Equal(t, int64(35), window.ChannelAttemptCount)
+	assert.Equal(t, int64(32), window.UpstreamCallCount)
+	assert.Equal(t, int64(20), window.FailureCount)
+	assert.Equal(t, int64(32), window.AttemptEligibleCount)
+	assert.Equal(t, int64(3), window.ClientCancelledCount)
+	assert.Equal(t, int64(17), window.UpstreamStatusSampleCount)
+	assert.Equal(t, int64(2), window.Upstream429Count)
+	assert.Equal(t, int64(2), window.Upstream4xxCount)
+	assert.Equal(t, int64(3), window.Upstream5xxCount)
+	assert.Equal(t, int64(5), window.HTTPErrorCount)
+	assert.Equal(t, int64(4), window.TransportErrorCount)
+	assert.Equal(t, int64(5), window.ProtocolErrorCount)
+	assert.Equal(t, int64(6), window.StreamErrorCount)
+	assert.Equal(t, int64(28), window.LiveEventCount)
+	assert.Equal(t, int64(7), window.LegacyEventCount)
+	assert.True(t, window.SampleSufficient)
+	assert.Equal(t, channelAnalyticsMinimumStabilitySamples, window.MinimumSampleCount)
+	require.NotNil(t, window.UpstreamStatusCoverageRate)
+	assert.InDelta(t, float64(17)/32, *window.UpstreamStatusCoverageRate, 0.0001)
+	require.NotNil(t, window.LiveEventRate)
+	assert.InDelta(t, float64(28)/35, *window.LiveEventRate, 0.0001)
+	require.NotNil(t, window.LegacyEventRate)
+	assert.InDelta(t, float64(7)/35, *window.LegacyEventRate, 0.0001)
+	require.NotNil(t, window.UsageSuccessCoverageRate)
+	assert.InDelta(t, 1, *window.UsageSuccessCoverageRate, 0.0001)
+	require.NotNil(t, window.LatencyCoverageRate)
+	assert.InDelta(t, 1, *window.LatencyCoverageRate, 0.0001)
+	require.NotNil(t, window.TtftCoverageRate)
+	assert.InDelta(t, float64(12)/35, *window.TtftCoverageRate, 0.0001)
+}
+
+func TestChannelAnalyticsStabilityAscendingRateKeepsMissingSamplesLast(t *testing.T) {
+	lowRate := 0.8
+	highRate := 0.99
+	items := []dto.ChannelAnalyticsStabilityItem{
+		{Key: "missing", Windows: []dto.ChannelAnalyticsStabilityWindow{{}}},
+		{Key: "high", Windows: []dto.ChannelAnalyticsStabilityWindow{{QualitySuccessRate: &highRate}}},
+		{Key: "low", Windows: []dto.ChannelAnalyticsStabilityWindow{{QualitySuccessRate: &lowRate}}},
+	}
+	sortChannelAnalyticsStabilityItems(items, "quality_success_rate", "asc")
+	assert.Equal(t, []string{"low", "high", "missing"}, []string{items[0].Key, items[1].Key, items[2].Key})
 }
 
 func channelAnalyticsTestBucket(bucketTs int64, hash string, scope string, outcome string, events int64, successes int64) model.ChannelMetricBucket {

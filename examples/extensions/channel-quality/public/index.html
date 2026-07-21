@@ -20,7 +20,7 @@
           </div>
           <div>
             <h1>渠道可观测性中心</h1>
-            <p>基于真实转发流量，观察渠道、模型、缓存和失败链路</p>
+            <p>面向运维的大数据分析，按分组、模型和渠道观察多时间窗稳定性</p>
           </div>
         </div>
         <div class="header-actions">
@@ -40,6 +40,9 @@
       <nav class="view-tabs" aria-label="统计视图">
         <button class="view-tab is-active" type="button" data-view="overview" aria-selected="true">
           总览
+        </button>
+        <button class="view-tab" type="button" data-view="operations" aria-selected="false">
+          运维矩阵
         </button>
         <button class="view-tab" type="button" data-view="channels" aria-selected="false">
           渠道与模型
@@ -95,6 +98,12 @@
 
         <div id="advancedFilters" class="advanced-filters is-hidden">
           <label>
+            <span>请求分组</span>
+            <select id="groupFilter">
+              <option value="">全部分组</option>
+            </select>
+          </label>
+          <label>
             <span>渠道</span>
             <select id="channelFilter">
               <option value="">全部渠道</option>
@@ -108,12 +117,14 @@
           </label>
           <label>
             <span>请求模型</span>
+            <input id="requestedModelSearch" type="search" autocomplete="off" placeholder="输入关键字搜索" />
             <select id="requestedModelFilter">
               <option value="">全部请求模型</option>
             </select>
           </label>
           <label>
             <span>上游模型</span>
+            <input id="upstreamModelSearch" type="search" autocomplete="off" placeholder="输入关键字搜索" />
             <select id="upstreamModelFilter">
               <option value="">全部上游模型</option>
             </select>
@@ -142,6 +153,14 @@
               <option value="">全部</option>
               <option value="true">流式</option>
               <option value="false">非流式</option>
+            </select>
+          </label>
+          <label>
+            <span>数据来源</span>
+            <select id="dataOriginFilter">
+              <option value="live,legacy">实时 + 历史</option>
+              <option value="live">仅实时精确采集</option>
+              <option value="legacy">仅历史日志推导</option>
             </select>
           </label>
           <label>
@@ -178,8 +197,8 @@
       <section id="emptyState" class="state-panel is-hidden">
         <div class="state-icon state-icon--empty" aria-hidden="true">○</div>
         <div class="state-copy">
-          <strong>当前范围暂无数据</strong>
-          <p>可以扩大时间范围、清除筛选条件，或先产生一笔真实转发请求。</p>
+          <strong>当前筛选暂无调用数据</strong>
+          <p>可以扩大时间范围、清除筛选条件，或等待历史日志回填和实时指标刷新。主动探测始终独立统计。</p>
         </div>
         <button id="emptyResetButton" class="button button--secondary" type="button">清除筛选</button>
       </section>
@@ -192,7 +211,7 @@
             <div class="panel-header">
               <div>
                 <h2>流量与质量趋势</h2>
-                <p>客户端请求、失败尝试与已成功结算 Token</p>
+                <p>客户端请求、失败尝试与具有用量样本的 Token</p>
               </div>
               <div id="trendLegend" class="chart-legend" aria-label="图例"></div>
             </div>
@@ -203,7 +222,7 @@
             <div class="panel-header">
               <div>
                 <h2>Token 构成</h2>
-                <p>仅统计最终成功且已完成结算的用量</p>
+                <p>统计具有可用量记录的渠道尝试，计费额度仅在结算成功时产生</p>
               </div>
             </div>
             <div id="tokenComposition" class="composition-list"></div>
@@ -232,6 +251,67 @@
             <div id="overviewStatuses" class="status-bars"></div>
           </article>
         </div>
+      </section>
+
+      <section id="operationsView" class="view-panel is-hidden" data-panel="operations">
+        <div class="operations-guide">
+          <div>
+            <strong>多时间窗稳定性矩阵</strong>
+            <p>同一行同时比较 15 分钟、1 小时、6 小时、24 小时和 7 天，快速定位短时抖动与长期劣化。</p>
+          </div>
+          <div class="origin-legend" aria-label="数据来源说明">
+            <span><i class="origin-dot origin-dot--live"></i>实时精确</span>
+            <span><i class="origin-dot origin-dot--legacy"></i>历史日志推导</span>
+          </div>
+        </div>
+
+        <article class="panel panel--table">
+          <div class="panel-header panel-header--table">
+            <div>
+              <h2>分组、模型与渠道稳定性</h2>
+              <p>质量成功率只使用可归因样本；每个百分比下方同时展示样本量，避免低样本误判。</p>
+            </div>
+            <div class="table-actions operations-actions">
+              <label class="compact-field" for="stabilityDimension">
+                <span>分析维度</span>
+                <select id="stabilityDimension">
+                  <option value="group_model">分组 × 模型</option>
+                  <option value="group_channel_model">分组 × 渠道 × 模型</option>
+                  <option value="channel_model">渠道 × 模型</option>
+                  <option value="group_channel">分组 × 渠道</option>
+                  <option value="model">仅模型</option>
+                  <option value="channel">仅渠道</option>
+                  <option value="group">仅分组</option>
+                </select>
+              </label>
+              <label class="compact-field" for="stabilityModelDimension">
+                <span>模型口径</span>
+                <select id="stabilityModelDimension">
+                  <option value="requested">请求模型</option>
+                  <option value="upstream">上游模型</option>
+                </select>
+              </label>
+              <label class="compact-field" for="stabilitySort">
+                <span>排序</span>
+                <select id="stabilitySort">
+                  <option value="failure_count">15 分钟失败数</option>
+                  <option value="quality_success_rate">15 分钟质量率</option>
+                  <option value="request_count">15 分钟调用量</option>
+                  <option value="p95_latency_ms">15 分钟 P95</option>
+                  <option value="retry_rate">15 分钟重试率</option>
+                  <option value="total_tokens">15 分钟 Token</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table stability-table">
+              <thead id="stabilityHead"></thead>
+              <tbody id="stabilityRows"></tbody>
+            </table>
+          </div>
+          <div id="stabilityPagination" class="pagination"></div>
+        </article>
       </section>
 
       <section id="channelsView" class="view-panel is-hidden" data-panel="channels">

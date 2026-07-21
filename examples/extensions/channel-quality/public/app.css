@@ -121,6 +121,170 @@ svg {
   box-shadow: var(--shadow);
 }
 
+.operations-guide {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border: 1px solid #b9d6fb;
+  border-radius: var(--radius);
+  background: var(--primary-soft);
+  color: var(--text-soft);
+}
+
+.operations-guide strong {
+  color: var(--text);
+}
+
+.operations-guide p {
+  margin: 3px 0 0;
+  font-size: 12px;
+}
+
+.origin-legend {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 14px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.origin-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.origin-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.origin-dot--live {
+  background: var(--green);
+}
+
+.origin-dot--legacy {
+  background: var(--purple);
+}
+
+.operations-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.stability-table {
+  min-width: 1700px;
+  table-layout: fixed;
+}
+
+.stability-table th:first-child,
+.stability-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: 285px;
+  background: var(--surface);
+  box-shadow: 8px 0 14px rgb(42 74 109 / 5%);
+  white-space: normal;
+}
+
+.stability-table th:first-child {
+  z-index: 2;
+  background: var(--surface-muted);
+}
+
+.stability-table th:nth-child(n + 2):nth-child(-n + 6),
+.stability-table td:nth-child(n + 2):nth-child(-n + 6) {
+  width: 145px;
+}
+
+.stability-table th:nth-child(7),
+.stability-table td:nth-child(7) {
+  width: 300px;
+}
+
+.stability-table th:nth-child(8),
+.stability-table td:nth-child(8) {
+  width: 200px;
+}
+
+.stability-identity {
+  display: grid;
+  gap: 7px;
+}
+
+.identity-part {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.identity-part small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.identity-part strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.identity-part em {
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.stability-drill {
+  width: max-content;
+  margin: 1px 0 0 48px;
+}
+
+.stability-rate,
+.stability-detail {
+  display: grid;
+  gap: 3px;
+}
+
+.stability-rate strong {
+  color: var(--text-soft);
+  font-size: 14px;
+}
+
+.stability-rate span,
+.stability-detail span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.stability-rate--healthy strong {
+  color: var(--green);
+}
+
+.stability-rate--warning strong {
+  color: var(--amber);
+}
+
+.stability-rate--danger strong {
+  color: var(--red);
+}
+
+.stability-rate--insufficient strong {
+  color: var(--muted);
+}
+
+.stability-detail {
+  line-height: 1.45;
+}
+
 .page-header {
   display: flex;
   align-items: center;
@@ -1205,7 +1369,36 @@ input {
 }
 
 .probe-table {
-  min-width: 900px;
+  min-width: 1100px;
+  table-layout: fixed;
+}
+
+.probe-table th:nth-child(1) {
+  width: 150px;
+}
+
+.probe-table th:nth-child(2) {
+  width: 90px;
+}
+
+.probe-table th:nth-child(3) {
+  width: 110px;
+}
+
+.probe-table th:nth-child(4) {
+  width: 240px;
+}
+
+.probe-table th:nth-child(5) {
+  width: 105px;
+}
+
+.probe-table th:nth-child(7) {
+  width: 105px;
+}
+
+.probe-table td:nth-child(6) {
+  white-space: normal;
 }
 
 .probe-table select {
@@ -1217,10 +1410,11 @@ input {
 }
 
 .probe-result {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+  display: inline;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   font-size: 11px;
+  line-height: 1.45;
 }
 
 .probe-result--success {
@@ -1384,6 +1578,20 @@ input {
     flex-direction: column;
   }
 
+  .operations-guide {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .origin-legend {
+    flex-wrap: wrap;
+  }
+
+  .operations-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
   .search-field,
   .search-field input {
     width: 100%;
@@ -1467,6 +1675,11 @@ input {
   }
 
   .probe-explainer {
+    border-color: #315a88;
+    background: #162a42;
+  }
+
+  .operations-guide {
     border-color: #315a88;
     background: #162a42;
   }

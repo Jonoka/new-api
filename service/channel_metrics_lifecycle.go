@@ -620,7 +620,7 @@ func buildChannelFailureEvents(drafts []channelMetricFailureDraft, requestID str
 			RequestedModel: channelmetrics.TruncateUTF8(draft.requestedModel, 191), RequestedModelHash: channelMetricOptionalHash(draft.requestedModel),
 			UpstreamModel: channelmetrics.TruncateUTF8(draft.upstreamModel, 191), UpstreamModelHash: channelMetricOptionalHash(draft.upstreamModel),
 			Group:         channelmetrics.TruncateUTF8(draft.group, 64),
-			TrafficSource: string(draft.trafficSource), Outcome: string(draft.outcome),
+			TrafficSource: string(draft.trafficSource), DataOrigin: string(channelmetrics.DataOriginLive), Outcome: string(draft.outcome),
 			FailureOwner: string(draft.failureOwner), QualityEligible: draft.qualityEligible,
 			PartialResponse: draft.partialResponse, ErrorStage: channelmetrics.TruncateUTF8(string(draft.errorStage), 32),
 			StreamEndReason: channelmetrics.TruncateUTF8(draft.streamEndReason, 64), LatencyMs: draft.latencyMs,
