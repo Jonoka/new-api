@@ -10,6 +10,9 @@ var (
 		"o4-mini-deep-research",
 	}
 	ImageGenerationModels = []string{
+		// IsImageGenerationModel 使用子串匹配，因此该项也覆盖 grok-imagine-image-pro。
+		"grok-imagine-image",
+		"grok-2-image-1212",
 		"dall-e-3",
 		"dall-e-2",
 		"gpt-image-1",
