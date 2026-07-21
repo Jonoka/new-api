@@ -294,10 +294,27 @@ func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*
 }
 
 func GetTimedOutUnfinishedTasks(cutoffUnix int64, limit int) []*Task {
+	return getTimedOutUnfinishedTasks(cutoffUnix, limit, nil)
+}
+
+// GetTimedOutUnfinishedTasksByPlatforms 查询指定平台中超过截止时间的未完成任务。
+// 主要用于本地异步图片包装任务，使其可以使用比全局任务更短的超时阈值。
+func GetTimedOutUnfinishedTasksByPlatforms(cutoffUnix int64, limit int, platforms []constant.TaskPlatform) []*Task {
+	if len(platforms) == 0 {
+		return nil
+	}
+	return getTimedOutUnfinishedTasks(cutoffUnix, limit, platforms)
+}
+
+func getTimedOutUnfinishedTasks(cutoffUnix int64, limit int, platforms []constant.TaskPlatform) []*Task {
 	var tasks []*Task
-	err := DB.Where("progress != ?", "100%").
+	query := DB.Where("progress != ?", "100%").
 		Where("status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
-		Where("submit_time < ?", cutoffUnix).
+		Where("submit_time < ?", cutoffUnix)
+	if len(platforms) > 0 {
+		query = query.Where("platform IN ?", platforms)
+	}
+	err := query.
 		Order("submit_time").
 		Limit(limit).
 		Find(&tasks).Error

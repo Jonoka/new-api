@@ -1,10 +1,33 @@
 package relay
 
 import (
+	"bytes"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestPrepareImagePassthroughBodyPreservesPayloadSize(t *testing.T) {
+	payload := []byte("multipart-image-payload")
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(payload))
+	t.Cleanup(func() { common.CleanupBodyStorage(c) })
+	info := &relaycommon.RelayInfo{}
+
+	reader, err := prepareImagePassthroughBody(c, info)
+	require.NoError(t, err)
+	forwarded, err := io.ReadAll(reader)
+	require.NoError(t, err)
+
+	require.Equal(t, payload, forwarded)
+	require.Equal(t, int64(len(payload)), info.UpstreamRequestBodySize)
+}
 
 func TestResolveImageSettlementCount(t *testing.T) {
 	tests := []struct {

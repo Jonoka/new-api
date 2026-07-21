@@ -26,6 +26,14 @@ func TestIsImageGenerationModelXAI(t *testing.T) {
 	}
 }
 
+func TestIsImageGenerationModelGPTImage(t *testing.T) {
+	for _, modelName := range []string{"gpt-image-1", "gpt-image-2"} {
+		t.Run(modelName, func(t *testing.T) {
+			require.True(t, IsImageGenerationModel(modelName))
+		})
+	}
+}
+
 func TestGetEndpointTypesByChannelTypeXAIImageModels(t *testing.T) {
 	want := []constant.EndpointType{
 		constant.EndpointTypeImageGeneration,

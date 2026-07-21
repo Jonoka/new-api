@@ -2,8 +2,10 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -36,6 +38,7 @@ type canvasImageTaskRelayRequest struct {
 	Header      http.Header
 	RawQuery    string
 	Keys        map[string]any
+	Context     context.Context
 }
 
 func CanvasImageTaskSubmit(c *gin.Context) {
@@ -207,6 +210,15 @@ func cloneCanvasImageTaskKeys(keys map[string]any) map[string]any {
 }
 
 func runCanvasImageTaskRelay(relayReq canvasImageTaskRelayRequest) {
+	timeout := time.Duration(constant.ImageTaskTimeoutMinutes) * time.Minute
+	runCanvasImageTaskRelayWithExecutor(relayReq, timeout, executeCanvasImageRelay)
+}
+
+func runCanvasImageTaskRelayWithExecutor(
+	relayReq canvasImageTaskRelayRequest,
+	timeout time.Duration,
+	execute func(canvasImageTaskRelayRequest) (*httptest.ResponseRecorder, int),
+) {
 	task, exists, err := model.GetByTaskId(canvasImageTaskUserID(relayReq.Keys), relayReq.TaskID)
 	if err != nil || !exists {
 		return
@@ -219,14 +231,41 @@ func runCanvasImageTaskRelay(relayReq canvasImageTaskRelayRequest) {
 	}()
 
 	now := time.Now().Unix()
+	expectedStatus := task.Status
 	task.Status = model.TaskStatusInProgress
 	task.StartTime = now
 	task.UpdatedAt = now
 	task.Progress = "10%"
-	_ = task.Update()
+	won, err := task.UpdateWithStatus(expectedStatus)
+	if err != nil {
+		common.SysError(fmt.Sprintf("failed to start image task %s: %v", task.TaskID, err))
+		return
+	}
+	if !won {
+		return
+	}
 
-	recorder, channelID := executeCanvasImageRelay(relayReq)
+	if timeout > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		relayReq.Context = ctx
+	} else {
+		relayReq.Context = context.Background()
+	}
+
+	recorder, channelID := execute(relayReq)
+	if errors.Is(relayReq.Context.Err(), context.DeadlineExceeded) {
+		failCanvasImageTask(task, imageTaskTimeoutReason(timeout), nil)
+		return
+	}
 	finishCanvasImageTask(task, channelID, recorder)
+}
+
+func imageTaskTimeoutReason(timeout time.Duration) string {
+	if timeout >= time.Minute && timeout%time.Minute == 0 {
+		return fmt.Sprintf("image generation timed out after %d minutes", int(timeout/time.Minute))
+	}
+	return "image generation timed out"
 }
 
 func executeCanvasImageRelay(relayReq canvasImageTaskRelayRequest) (*httptest.ResponseRecorder, int) {
@@ -267,7 +306,11 @@ func executeCanvasImageRelayWithHandler(relayReq canvasImageTaskRelayRequest, ha
 	if relayReq.RawQuery != "" {
 		targetURL += "?" + relayReq.RawQuery
 	}
-	request := httptest.NewRequest(http.MethodPost, targetURL, bytes.NewReader(relayReq.Body))
+	requestContext := relayReq.Context
+	if requestContext == nil {
+		requestContext = context.Background()
+	}
+	request := httptest.NewRequest(http.MethodPost, targetURL, bytes.NewReader(relayReq.Body)).WithContext(requestContext)
 	request.Header = relayReq.Header.Clone()
 	request.ContentLength = int64(len(relayReq.Body))
 	engine.ServeHTTP(recorder, request)
@@ -295,6 +338,7 @@ func parseImageTaskAction(action string) (string, bool) {
 }
 
 func finishCanvasImageTask(task *model.Task, channelID int, recorder *httptest.ResponseRecorder) {
+	expectedStatus := task.Status
 	now := time.Now().Unix()
 	task.FinishTime = now
 	task.UpdatedAt = now
@@ -308,7 +352,7 @@ func finishCanvasImageTask(task *model.Task, channelID int, recorder *httptest.R
 		task.Status = model.TaskStatusSuccess
 		task.Data = json.RawMessage(append([]byte(nil), body...))
 		task.FailReason = ""
-		_ = task.Update()
+		_, _ = task.UpdateWithStatus(expectedStatus)
 		return
 	}
 
@@ -316,6 +360,7 @@ func finishCanvasImageTask(task *model.Task, channelID int, recorder *httptest.R
 }
 
 func failCanvasImageTask(task *model.Task, reason string, body []byte) {
+	expectedStatus := task.Status
 	task.Status = model.TaskStatusFailure
 	task.Progress = "100%"
 	task.FinishTime = time.Now().Unix()
@@ -324,7 +369,7 @@ func failCanvasImageTask(task *model.Task, reason string, body []byte) {
 	if len(body) > 0 {
 		task.Data = json.RawMessage(append([]byte(nil), body...))
 	}
-	_ = task.Update()
+	_, _ = task.UpdateWithStatus(expectedStatus)
 }
 
 func extractCanvasImageRelayError(body []byte) string {

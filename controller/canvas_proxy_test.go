@@ -2,8 +2,10 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -283,6 +285,34 @@ func TestFinishCanvasImageTaskStoresSuccessfulRelayResponse(t *testing.T) {
 	require.Empty(t, reloaded.FailReason)
 }
 
+func TestFinishCanvasImageTaskDoesNotOverwriteTimedOutTask(t *testing.T) {
+	setupCanvasImageTaskTestDB(t)
+	task := &model.Task{TaskID: "task_timeout_race", UserId: 1, Status: model.TaskStatusInProgress, Progress: "10%"}
+	require.NoError(t, task.Insert())
+
+	timedOut, exists, err := model.GetByTaskId(1, task.TaskID)
+	require.NoError(t, err)
+	require.True(t, exists)
+	timedOut.Status = model.TaskStatusFailure
+	timedOut.Progress = "100%"
+	timedOut.FailReason = "image generation timed out"
+	won, err := timedOut.UpdateWithStatus(model.TaskStatusInProgress)
+	require.NoError(t, err)
+	require.True(t, won)
+
+	recorder := httptest.NewRecorder()
+	recorder.WriteHeader(http.StatusOK)
+	_, err = recorder.WriteString(`{"data":[{"url":"https://example.com/late.png"}]}`)
+	require.NoError(t, err)
+	finishCanvasImageTask(task, 12, recorder)
+
+	reloaded, exists, err := model.GetByTaskId(1, task.TaskID)
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.EqualValues(t, model.TaskStatusFailure, reloaded.Status)
+	require.Equal(t, "image generation timed out", reloaded.FailReason)
+}
+
 func TestExecuteCanvasImageRelayRoutesEditTasks(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	var body bytes.Buffer
@@ -327,6 +357,58 @@ func TestExecuteAPIImageRelayUsesRegularRequestPath(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.JSONEq(t, `{"path":"/v1/images/generations"}`, recorder.Body.String())
+}
+
+func TestExecuteCanvasImageRelayPropagatesTaskCancellation(t *testing.T) {
+	requestContext, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	relayReq := canvasImageTaskRelayRequest{
+		Action:  canvasImageTaskActionGenerations,
+		Body:    []byte(`{"model":"grok-imagine-image","prompt":"test"}`),
+		Context: requestContext,
+	}
+	contextCanceled := false
+
+	executeCanvasImageRelayWithHandler(relayReq, func(c *gin.Context) {
+		contextCanceled = errors.Is(c.Request.Context().Err(), context.Canceled)
+		c.Status(http.StatusGatewayTimeout)
+	})
+
+	require.True(t, contextCanceled)
+}
+
+func TestRunCanvasImageTaskRelayMarksBlockedTaskFailedAfterTimeout(t *testing.T) {
+	setupCanvasImageTaskTestDB(t)
+	task := &model.Task{
+		TaskID:   "task_blocked_timeout",
+		UserId:   1,
+		Platform: constant.TaskPlatformImage,
+		Status:   model.TaskStatusQueued,
+		Progress: "0%",
+	}
+	require.NoError(t, task.Insert())
+
+	relayReq := canvasImageTaskRelayRequest{
+		TaskID: task.TaskID,
+		Keys: map[string]any{
+			string(constant.ContextKeyUserId): 1,
+		},
+	}
+	runCanvasImageTaskRelayWithExecutor(relayReq, 20*time.Millisecond, func(req canvasImageTaskRelayRequest) (*httptest.ResponseRecorder, int) {
+		<-req.Context.Done()
+		recorder := httptest.NewRecorder()
+		recorder.WriteHeader(http.StatusGatewayTimeout)
+		return recorder, 0
+	})
+
+	reloaded, exists, err := model.GetByTaskId(1, task.TaskID)
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.EqualValues(t, model.TaskStatusFailure, reloaded.Status)
+	require.Equal(t, "100%", reloaded.Progress)
+	require.Equal(t, "image generation timed out", reloaded.FailReason)
+	require.NotZero(t, reloaded.FinishTime)
 }
 
 func TestNormalizeCanvasImageTaskActionAcceptsShortEditAction(t *testing.T) {

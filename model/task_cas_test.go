@@ -294,3 +294,23 @@ func TestGetAllUnFinishSyncTasksSkipsLocalImageWrapperTasks(t *testing.T) {
 	require.Len(t, tasks, 1)
 	assert.Equal(t, "task_upstream", tasks[0].TaskID)
 }
+
+func TestGetTimedOutUnfinishedTasksByPlatformsOnlyReturnsImageWrappers(t *testing.T) {
+	truncateTables(t)
+	cutoff := time.Now().Unix() - 1800
+
+	for _, task := range []*Task{
+		{TaskID: "task_canvas_timeout", Platform: constant.TaskPlatformCanvasImage, Status: TaskStatusInProgress, Progress: "10%", SubmitTime: cutoff - 10},
+		{TaskID: "task_image_timeout", Platform: constant.TaskPlatformImage, Status: TaskStatusQueued, Progress: "0%", SubmitTime: cutoff - 5},
+		{TaskID: "task_video_timeout", Platform: constant.TaskPlatform("video"), Status: TaskStatusInProgress, Progress: "10%", SubmitTime: cutoff - 20},
+		{TaskID: "task_image_recent", Platform: constant.TaskPlatformImage, Status: TaskStatusInProgress, Progress: "10%", SubmitTime: cutoff + 10},
+		{TaskID: "task_image_success", Platform: constant.TaskPlatformImage, Status: TaskStatusSuccess, Progress: "100%", SubmitTime: cutoff - 30},
+	} {
+		insertTask(t, task)
+	}
+
+	tasks := GetTimedOutUnfinishedTasksByPlatforms(cutoff, 100, constant.ImageTaskPlatforms())
+	require.Len(t, tasks, 2)
+	assert.Equal(t, "task_canvas_timeout", tasks[0].TaskID)
+	assert.Equal(t, "task_image_timeout", tasks[1].TaskID)
+}

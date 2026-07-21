@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
@@ -105,6 +106,27 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM top_ups")
 		model.DB.Exec("DELETE FROM user_subscriptions")
 	})
+}
+
+func TestSweepTimedOutTaskBatchMarksImageTaskFailed(t *testing.T) {
+	truncate(t)
+	task := &model.Task{
+		TaskID:     "task_stale_image",
+		Platform:   constant.TaskPlatformImage,
+		Status:     model.TaskStatusInProgress,
+		Progress:   "10%",
+		SubmitTime: time.Now().Add(-time.Hour).Unix(),
+	}
+	require.NoError(t, task.Insert())
+
+	sweepTimedOutTaskBatch(context.Background(), []*model.Task{task}, "图片生成任务超时（30分钟）")
+
+	var reloaded model.Task
+	require.NoError(t, model.DB.First(&reloaded, task.ID).Error)
+	require.Equal(t, model.TaskStatus(model.TaskStatusFailure), reloaded.Status)
+	require.Equal(t, "100%", reloaded.Progress)
+	require.Equal(t, "图片生成任务超时（30分钟）", reloaded.FailReason)
+	require.NotZero(t, reloaded.FinishTime)
 }
 
 func seedUser(t *testing.T, id int, quota int) {
