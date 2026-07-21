@@ -34,7 +34,13 @@ function ExtensionModulePage() {
 
   const module = data?.modules.find((item) => item.id === moduleId)
   const page = module?.ui?.pages?.find((item) => item.key === pageKey)
-  const src = page ? getExtensionPageUrl(moduleId, page.path) : ''
+  const src = page
+    ? getExtensionPageUrl(
+        moduleId,
+        page.path,
+        module?.runtime?.type === 'static' ? module.version : ''
+      )
+    : ''
   const healthSrc = useMemo(() => {
     const healthPath = module?.runtime?.health_path || page?.path || ''
     if (!healthPath) return ''

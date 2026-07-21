@@ -58,7 +58,14 @@ export async function uninstallExtension(id: string) {
   return res.data
 }
 
-export function getExtensionPageUrl(moduleId: string, pagePath: string) {
+export function getExtensionPageUrl(
+  moduleId: string,
+  pagePath: string,
+  moduleVersion = ''
+) {
   const normalizedPath = pagePath.startsWith('/') ? pagePath : `/${pagePath}`
-  return `/api/extensions/${encodeURIComponent(moduleId)}/proxy${normalizedPath}`
+  const baseUrl = `/api/extensions/${encodeURIComponent(moduleId)}/proxy${normalizedPath}`
+  if (!moduleVersion || /[?&]module_version=/.test(baseUrl)) return baseUrl
+  const separator = baseUrl.includes('?') ? '&' : '?'
+  return `${baseUrl}${separator}module_version=${encodeURIComponent(moduleVersion)}`
 }

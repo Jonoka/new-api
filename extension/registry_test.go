@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 )
@@ -240,9 +241,20 @@ func TestStaticProxyServesIndexAndRejectsTraversal(t *testing.T) {
 	}
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/extensions/static-demo/proxy/../secret.txt", nil)
+	request.Header.Set("If-Modified-Since", time.Now().Add(24*time.Hour).UTC().Format(http.TimeFormat))
+	request.Header.Set("If-None-Match", `"stale-module"`)
 	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected stale conditional request to return current file, got %d", recorder.Code)
+	}
 	if body := recorder.Body.String(); body != "static index" {
 		t.Fatalf("expected traversal to fall back to index, got %q", body)
+	}
+	if cacheControl := recorder.Header().Get("Cache-Control"); cacheControl != "no-store, no-cache, must-revalidate, private, max-age=0" {
+		t.Fatalf("expected static module response to disable caching, got %q", cacheControl)
+	}
+	if moduleVersion := recorder.Header().Get("X-NewAPI-Module-Version"); moduleVersion != "0.1.0" {
+		t.Fatalf("expected static module version header, got %q", moduleVersion)
 	}
 }
 

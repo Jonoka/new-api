@@ -23,11 +23,14 @@ const notifyClassicSidebar = () => {
   window.dispatchEvent(new Event(CLASSIC_EXTENSION_REFRESH_EVENT));
 };
 
-const extensionPageUrl = (moduleId, pagePath) => {
+const extensionPageUrl = (moduleId, pagePath, moduleVersion = '') => {
   const normalizedPath = String(pagePath || '/').startsWith('/')
     ? pagePath
     : `/${pagePath}`;
-  return `/api/extensions/${encodeURIComponent(moduleId)}/proxy${normalizedPath}`;
+  const baseUrl = `/api/extensions/${encodeURIComponent(moduleId)}/proxy${normalizedPath}`;
+  if (!moduleVersion || /[?&]module_version=/.test(baseUrl)) return baseUrl;
+  const separator = baseUrl.includes('?') ? '&' : '?';
+  return `${baseUrl}${separator}module_version=${encodeURIComponent(moduleVersion)}`;
 };
 
 const readModules = (res) => res?.data?.data?.modules || [];
@@ -439,7 +442,11 @@ export function ExtensionModulePage() {
     );
   }
 
-  const src = extensionPageUrl(module.id, page.path);
+  const src = extensionPageUrl(
+    module.id,
+    page.path,
+    module.runtime?.type === 'static' ? module.version : '',
+  );
 
   if (page.embed === false) {
     return (

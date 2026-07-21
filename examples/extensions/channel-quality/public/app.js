@@ -2,6 +2,24 @@
   'use strict'
 
   const API_ROOT = '/api/channel-analytics'
+  const HOST_CONTEXT_API = '/api/extensions/host/me'
+  const REQUIRED_HOST_VERSION = 'v1.0.0-rc.10.1.10.197'
+  const REQUIRED_CAPABILITY_API = `${API_ROOT}/filters/models?model_dimension=requested&page=1&page_size=1`
+  const MODULE_VERSION = '0.3.1'
+  const UI_ASSET_VERSION = MODULE_VERSION
+  const REQUIRED_UI_ELEMENT_IDS = [
+    'dataOriginFilter',
+    'groupFilter',
+    'operationsView',
+    'requestedModelSearch',
+    'upstreamModelSearch',
+    'stabilityDimension',
+    'stabilityModelDimension',
+    'stabilitySort',
+    'stabilityHead',
+    'stabilityRows',
+    'stabilityPagination',
+  ]
   const DEFAULT_PAGE_SIZE = 30
   const MODEL_PAGE_SIZE = 30
   const STABILITY_WINDOWS = [900, 3600, 21600, 86400, 604800]
@@ -118,6 +136,8 @@
     loadingId: 0,
     controller: null,
     initialized: false,
+    hostCompatible: false,
+    hostVersion: '',
     filtersLoaded: false,
     channels: [],
     expandedChannels: new Set(),
@@ -135,6 +155,52 @@
 
   const $ = (id) => document.getElementById(id)
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector))
+
+  function verifyUIAssetCompatibility() {
+    const documentVersion = String(document.documentElement.dataset.channelQualityUiVersion || '').trim()
+    const missingElements = REQUIRED_UI_ELEMENT_IDS.filter((id) => !$(id))
+    if (documentVersion === UI_ASSET_VERSION && !missingElements.length) return true
+
+    const message =
+      `检测到渠道可观测性静态资源版本不一致（页面：${documentVersion || '旧版或未知'}，` +
+      `脚本：${UI_ASSET_VERSION}）。请先强制刷新页面；若问题仍存在，请确认负载均衡后的所有节点` +
+      '都安装了同一版本扩展。'
+    const loadingState = $('loadingState')
+    const emptyState = $('emptyState')
+    const errorState = $('errorState')
+    const errorMessage = $('errorMessage')
+
+    loadingState?.classList.add('is-hidden')
+    emptyState?.classList.add('is-hidden')
+    $$('.view-panel').forEach((panel) => panel.classList.add('is-hidden'))
+
+    if (errorState && errorMessage) {
+      errorMessage.textContent = message
+      errorState.classList.remove('is-hidden')
+      const retryButton = $('retryButton')
+      if (retryButton) {
+        retryButton.textContent = '重新加载最新版本'
+        retryButton.addEventListener('click', () => {
+          const url = new URL(window.location.href)
+          url.searchParams.set('_module_reload', String(Date.now()))
+          window.location.replace(url.toString())
+        }, { once: true })
+      }
+    } else {
+      const fallback = document.createElement('section')
+      fallback.setAttribute('role', 'alert')
+      fallback.style.cssText =
+        'margin:24px;padding:18px;border:1px solid #fca5a5;border-radius:12px;background:#fff7f7;color:#991b1b;'
+      const title = document.createElement('strong')
+      title.textContent = '扩展静态资源加载不完整'
+      const detail = document.createElement('p')
+      detail.style.margin = '8px 0 0'
+      detail.textContent = message
+      fallback.append(title, detail)
+      document.body.prepend(fallback)
+    }
+    return false
+  }
 
   function escapeHtml(value) {
     return String(value ?? '')
@@ -218,7 +284,11 @@
       try {
         body = JSON.parse(text)
       } catch (_error) {
-        if (!response.ok) throw new Error(`接口返回 HTTP ${response.status}`)
+        if (!response.ok) {
+          const error = new Error(`接口返回 HTTP ${response.status}`)
+          error.status = response.status
+          throw error
+        }
         throw new Error('接口返回了无法解析的数据')
       }
     }
@@ -232,6 +302,38 @@
 
     if (body && Object.prototype.hasOwnProperty.call(body, 'data')) return body.data
     return body ?? {}
+  }
+
+  async function verifyHostCompatibility(signal) {
+    if (state.hostCompatible) return
+
+    // 旧版宿主只会读取 manifest.host，不会真正执行最低版本约束。
+    // 因此必须在任何统计查询前探测当前模块依赖的新接口，避免把
+    // 404 或旧版查询参数错误误报成统计数据故障。
+    const [hostResult, capabilityResult] = await Promise.allSettled([
+      requestJson(HOST_CONTEXT_API, { signal }),
+      requestJson(REQUIRED_CAPABILITY_API, { signal }),
+    ])
+
+    if (hostResult.status === 'fulfilled') {
+      state.hostVersion = String(firstDefined(hostResult.value, ['version'], '')).trim()
+    }
+    if (capabilityResult.status === 'fulfilled') {
+      state.hostCompatible = true
+      return
+    }
+
+    const capabilityError = capabilityResult.reason
+    if (capabilityError?.name === 'AbortError') throw capabilityError
+    if (capabilityError?.status !== 404) throw capabilityError
+
+    const currentVersion = state.hostVersion || '未知版本'
+    const error = new Error(
+      `当前宿主为 ${currentVersion}，未提供渠道运维统计所需接口。` +
+      `渠道可观测性 ${MODULE_VERSION} 要求至少 ${REQUIRED_HOST_VERSION}，请先升级所有后端节点后再使用。`,
+    )
+    error.hostCompatibility = true
+    throw error
   }
 
   function showToast(message) {
@@ -572,7 +674,9 @@
   }
 
   function showError(error) {
-    const message = error?.status === 404
+    const message = error?.hostCompatibility
+      ? error.message
+      : error?.status === 404
       ? '宿主程序尚未提供渠道统计接口，请先升级后端并确认指标采集已启用。'
       : error?.message || '请稍后重试。'
     $('errorMessage').textContent = message
@@ -1583,6 +1687,8 @@
     setLoading(true)
 
     try {
+      await verifyHostCompatibility(signal)
+      if (!state.filtersLoaded) await loadFilterOptions()
       let result
       if (state.view === 'overview') result = await loadOverview(signal)
       else if (state.view === 'operations') result = await loadStability(signal)
@@ -1793,7 +1899,7 @@
     $$('.view-tab').forEach((button) => button.addEventListener('click', () => activateView(button.dataset.view)))
     $$('.range-button').forEach((button) => button.addEventListener('click', () => selectRange(button.dataset.range)))
     $('refreshButton').addEventListener('click', () => {
-      loadFilterOptions()
+      state.filtersLoaded = false
       loadCurrentView()
     })
     $('retryButton').addEventListener('click', loadCurrentView)
@@ -1940,9 +2046,11 @@
   function init() {
     if (state.initialized) return
     state.initialized = true
+    // 必须先验证 HTML 与脚本属于同一 UI 结构版本；否则旧页面会在
+    // bindEvents/readFilterState 中以 null.value 等无意义错误中断。
+    if (!verifyUIAssetCompatibility()) return
     bindEvents()
     updateFilterScopeHint()
-    loadFilterOptions()
     loadCurrentView()
   }
 

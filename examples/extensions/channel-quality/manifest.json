@@ -1,7 +1,7 @@
 {
   "id": "channel-quality",
   "name": "渠道可观测性中心",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "面向运维的分组、模型、渠道多时间窗稳定性与失败链路分析中心。",
   "host": {
     "min": "v1.0.0-rc.10.1.10.197"
@@ -25,7 +25,7 @@
       {
         "key": "index",
         "title": "渠道可观测性中心",
-        "path": "/",
+        "path": "/?module_version=0.3.1",
         "embed": true
       }
     ]

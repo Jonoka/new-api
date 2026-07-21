@@ -105,6 +105,16 @@ func staticHandler(module Module, proxyPath string, ctx ProxyContext) (http.Hand
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = cleanPath
 		r.URL.RawPath = ""
+		// 静态模块允许在同一 URL 上热更新或回滚。若浏览器继续复用旧的
+		// index.html、app.js 或 app.css，跨版本资源混用会直接破坏页面。
+		// 因此这里既禁止存储，也忽略旧文件留下的条件请求，确保每次打开
+		// 模块都读取当前已安装版本的完整文件。
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, private, max-age=0")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+		w.Header().Set("X-NewAPI-Module-Version", module.Version)
+		r.Header.Del("If-Modified-Since")
+		r.Header.Del("If-None-Match")
 		for _, header := range hopByHopHeaders {
 			r.Header.Del(header)
 		}
