@@ -71,6 +71,7 @@ func main() {
 			common.FatalLog("failed to close database: " + err.Error())
 		}
 	}()
+	defer service.ShutdownChannelMetrics()
 
 	if common.RedisEnabled {
 		// for compatibility with old versions
@@ -313,6 +314,9 @@ func InitResources() error {
 	// Initialize SQL Database
 	err = model.InitLogDB()
 	if err != nil {
+		return err
+	}
+	if err = service.InitChannelMetrics(); err != nil {
 		return err
 	}
 

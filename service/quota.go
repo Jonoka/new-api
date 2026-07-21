@@ -228,8 +228,17 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
 
-	if err := SettleBilling(ctx, relayInfo, quota); err != nil {
-		logger.LogError(ctx, "error settling billing: "+err.Error())
+	settleErr := SettleBilling(ctx, relayInfo, quota)
+	if settleErr != nil {
+		logger.LogError(ctx, "error settling billing: "+settleErr.Error())
+	}
+	if totalTokens > 0 {
+		AttachChannelMetricUsageAfterSettlement(ctx, ChannelMetricUsage{
+			InputTokensTotal: int64(usage.InputTokens),
+			OutputTokens:     int64(usage.OutputTokens),
+			CacheReadTokens:  int64(usage.InputTokenDetails.CachedTokens),
+			CacheWriteTokens: int64(usage.InputTokenDetails.GetCacheCreationTokens()),
+		}, quota, settleErr)
 	}
 
 	logModel := modelName
@@ -351,8 +360,17 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
 
-	if err := SettleBilling(ctx, relayInfo, quota); err != nil {
-		logger.LogError(ctx, "error settling billing: "+err.Error())
+	settleErr := SettleBilling(ctx, relayInfo, quota)
+	if settleErr != nil {
+		logger.LogError(ctx, "error settling billing: "+settleErr.Error())
+	}
+	if totalTokens > 0 {
+		AttachChannelMetricUsageAfterSettlement(ctx, ChannelMetricUsage{
+			InputTokensTotal: int64(usage.PromptTokens),
+			OutputTokens:     int64(usage.CompletionTokens),
+			CacheReadTokens:  int64(usage.PromptTokensDetails.CachedTokens),
+			CacheWriteTokens: int64(usage.GetCacheCreationTokens()),
+		}, quota, settleErr)
 	}
 
 	logModel := relayInfo.OriginModelName

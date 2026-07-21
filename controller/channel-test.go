@@ -74,7 +74,7 @@ func resolveChannelTestUserID(c *gin.Context) (int, error) {
 	return rootUser.Id, nil
 }
 
-func testChannel(channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool) testResult {
+func testChannel(channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool) (result testResult) {
 	tik := time.Now()
 	var unsupportedTestChannelTypes = []int{
 		constant.ChannelTypeMidjourney,
@@ -187,6 +187,24 @@ func testChannel(channel *model.Channel, testUserID int, testModel string, endpo
 	}
 	defer model.ReleaseChannelConcurrency(channel.Id)
 
+	service.BeginChannelMetricRequest(c)
+	service.MarkChannelMetricProbeRequest(c)
+	var metricInfo *relaycommon.RelayInfo
+	metricAttemptStarted := false
+	defer func() {
+		if result.newAPIError != nil && !c.Writer.Written() {
+			statusCode := result.newAPIError.StatusCode
+			if statusCode < 100 || statusCode > 999 {
+				statusCode = http.StatusInternalServerError
+			}
+			c.Status(statusCode)
+		}
+		if metricAttemptStarted {
+			service.FinishChannelMetricAttempt(c, metricInfo, result.newAPIError, false, "probe")
+		}
+		service.FinishChannelMetricRequest(c, metricInfo, result.newAPIError)
+	}()
+
 	// Determine relay format based on endpoint type or request path
 	var relayFormat types.RelayFormat
 	if endpointType != "" {
@@ -250,6 +268,9 @@ func testChannel(channel *model.Channel, testUserID int, testModel string, endpo
 	}
 
 	info.IsChannelTest = true
+	common.SetContextKey(c, constant.ContextKeyRelayInfo, info)
+	service.BindChannelMetricRelayInfo(c, info)
+	metricInfo = info
 	info.InitChannelMeta(c)
 
 	err = attachTestBillingRequestInput(info, request)
@@ -433,6 +454,9 @@ func testChannel(channel *model.Channel, testUserID int, testModel string, endpo
 
 	requestBody := bytes.NewBuffer(jsonData)
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(jsonData))
+	info.ResetAttemptState(time.Now())
+	service.BeginChannelMetricAttempt(c, info, channel.Id, channel.Name, channel.Type)
+	metricAttemptStarted = true
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
 		return testResult{
@@ -480,8 +504,8 @@ func testChannel(channel *model.Channel, testUserID int, testModel string, endpo
 			newAPIError: types.NewOpenAIError(usageErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError),
 		}
 	}
-	result := w.Result()
-	respBody, err := readTestResponseBody(result.Body, validateAsStream)
+	recordedResponse := w.Result()
+	respBody, err := readTestResponseBody(recordedResponse.Body, validateAsStream)
 	if err != nil {
 		return testResult{
 			context:     c,

@@ -138,7 +138,8 @@ func GetChannelWithExclusions(group string, model string, retry int, excludedCha
 }
 
 func getChannelWithPriorityFallback(group string, model string, priorities []int, retry int, excludedChannelIDs map[int]struct{}) (*Channel, error) {
-	for priorityIndex := retry; priorityIndex < len(priorities); priorityIndex++ {
+	priorityIndexes := buildPrioritySearchOrder(len(priorities), retry, true, len(excludedChannelIDs) > 0)
+	for _, priorityIndex := range priorityIndexes {
 		abilities, err := getAvailableAbilitiesForPriority(group, model, priorities[priorityIndex], excludedChannelIDs)
 		if err != nil {
 			return nil, err

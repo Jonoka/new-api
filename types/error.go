@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 )
@@ -95,7 +96,11 @@ type NewAPIError struct {
 	errorType      ErrorType
 	errorCode      ErrorCode
 	StatusCode     int
-	Metadata       json.RawMessage
+	// OriginalStatusCode 记录状态码映射前的值，供重试等内部决策使用。
+	// 对外响应仍只使用 StatusCode。
+	OriginalStatusCode int
+	RetryAfter         time.Duration
+	Metadata           json.RawMessage
 }
 
 // Unwrap enables errors.Is / errors.As to work with NewAPIError by exposing the underlying error.

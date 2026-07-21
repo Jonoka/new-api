@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -24,18 +25,21 @@ func TestResetStatusCode(t *testing.T) {
 		statusCode       int
 		statusCodeConfig string
 		expectedCode     int
+		expectedOriginal int
 	}{
 		{
 			name:             "map string value",
 			statusCode:       429,
 			statusCodeConfig: `{"429":"503"}`,
 			expectedCode:     503,
+			expectedOriginal: 429,
 		},
 		{
 			name:             "map int value",
 			statusCode:       429,
 			statusCodeConfig: `{"429":503}`,
 			expectedCode:     503,
+			expectedOriginal: 429,
 		},
 		{
 			name:             "skip invalid string value",
@@ -61,6 +65,7 @@ func TestResetStatusCode(t *testing.T) {
 			}
 			ResetStatusCode(newAPIError, tc.statusCodeConfig)
 			require.Equal(t, tc.expectedCode, newAPIError.StatusCode)
+			require.Equal(t, tc.expectedOriginal, newAPIError.OriginalStatusCode)
 		})
 	}
 }
@@ -107,6 +112,21 @@ func TestRelayErrorHandlerKeepsStructuredErrorMessage(t *testing.T) {
 
 	require.NotNil(t, newAPIError)
 	require.Equal(t, message, newAPIError.Error())
+}
+
+func TestRelayErrorHandlerCapturesRetryAfter(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header: http.Header{
+			"Retry-After": []string{"3"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{"error":{"message":"rate limited","type":"rate_limit_error","code":"rate_limit_exceeded"}}`)),
+	}
+
+	newAPIError := RelayErrorHandler(context.Background(), resp, false)
+
+	require.NotNil(t, newAPIError)
+	require.Equal(t, 3*time.Second, newAPIError.RetryAfter)
 }
 
 func TestRelayErrorHandlerKeepsOpenAIErrorMessage(t *testing.T) {

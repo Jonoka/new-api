@@ -1,8 +1,11 @@
 {
   "id": "channel-quality",
-  "name": "渠道质量看板",
-  "version": "0.1.1",
-  "description": "上传即用的静态渠道质量看板，复用主程序渠道列表与测试接口。",
+  "name": "渠道可观测性中心",
+  "version": "0.2.0",
+  "description": "面向管理员的渠道、模型、缓存、状态码与失败链路可观测性中心。",
+  "host": {
+    "min": "v1.0.0-rc.10.1.10.196"
+  },
   "runtime": {
     "type": "static",
     "static_dir": "public",
@@ -11,7 +14,7 @@
   "ui": {
     "nav": [
       {
-        "title": "渠道质量看板",
+        "title": "渠道可观测性",
         "page": "index",
         "icon": "Activity",
         "section": "admin",
@@ -21,7 +24,7 @@
     "pages": [
       {
         "key": "index",
-        "title": "渠道质量看板",
+        "title": "渠道可观测性中心",
         "path": "/",
         "embed": true
       }

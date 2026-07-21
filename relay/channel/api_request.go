@@ -508,10 +508,17 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	sanitizeClaudeCodeHeadersForCompatibleClient(c, targetReq, info)
 	targetHeader = targetReq.Header
 	targetHeader.Set("Content-Type", c.Request.Header.Get("Content-Type"))
-	targetConn, _, err := websocket.DefaultDialer.Dial(fullRequestURL, targetHeader)
+	callIndex := service.BeginChannelMetricUpstreamCall(c)
+	targetConn, dialResp, err := websocket.DefaultDialer.Dial(fullRequestURL, targetHeader)
 	if err != nil {
+		statusCode := 0
+		if dialResp != nil {
+			statusCode = dialResp.StatusCode
+		}
+		service.CompleteChannelMetricUpstreamHeader(c, callIndex, statusCode, err)
 		return nil, fmt.Errorf("dial failed to %s: %w", fullRequestURL, err)
 	}
+	service.CompleteChannelMetricUpstreamHeader(c, callIndex, http.StatusSwitchingProtocols, nil)
 	// send request body
 	//all, err := io.ReadAll(requestBody)
 	//err = service.WssString(c, targetConn, string(all))
@@ -686,14 +693,23 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 			req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
 		}
 	}
+	callIndex := service.BeginChannelMetricUpstreamCall(c)
 	resp, err := client.Do(req)
 	if err != nil {
+		statusCode := 0
+		if resp != nil {
+			statusCode = resp.StatusCode
+		}
+		service.CompleteChannelMetricUpstreamHeader(c, callIndex, statusCode, err)
 		logger.LogError(c, "do request failed: "+err.Error())
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 	}
 	if resp == nil {
-		return nil, errors.New("resp is nil")
+		err = errors.New("resp is nil")
+		service.CompleteChannelMetricUpstreamHeader(c, callIndex, 0, err)
+		return nil, err
 	}
+	service.CompleteChannelMetricUpstreamHeader(c, callIndex, resp.StatusCode, nil)
 	if info != nil {
 		info.MarkTimingClientDoReturn()
 	}

@@ -388,6 +388,17 @@ func SetApiRouter(router *gin.Engine) {
 			channelRoute.POST("/upstream_updates/detect", controller.DetectChannelUpstreamModelUpdates)
 			channelRoute.POST("/upstream_updates/detect_all", controller.DetectAllChannelUpstreamModelUpdates)
 		}
+		channelAnalyticsRoute := apiRouter.Group("/channel-analytics")
+		channelAnalyticsRoute.Use(middleware.AdminAuth())
+		{
+			channelAnalyticsRoute.GET("/summary", controller.GetChannelAnalyticsSummary)
+			channelAnalyticsRoute.GET("/trend", controller.GetChannelAnalyticsTrend)
+			channelAnalyticsRoute.GET("/channels", controller.GetChannelAnalyticsChannels)
+			channelAnalyticsRoute.GET("/channels/:id/models", controller.GetChannelAnalyticsModels)
+			channelAnalyticsRoute.GET("/status-codes", controller.GetChannelAnalyticsStatusCodes)
+			channelAnalyticsRoute.GET("/failures", controller.GetChannelAnalyticsFailures)
+			channelAnalyticsRoute.GET("/filters", controller.GetChannelAnalyticsFilters)
+		}
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())
 		{

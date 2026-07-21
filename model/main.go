@@ -215,7 +215,11 @@ func InitDB() (err error) {
 func InitLogDB() (err error) {
 	if os.Getenv("LOG_SQL_DSN") == "" {
 		LOG_DB = DB
-		return
+		if !common.IsMasterNode {
+			return nil
+		}
+		// 日志库复用主库时，也必须在最终 LOG_DB 句柄确定后迁移日志事实表。
+		return MigrateChannelAnalyticsLogDB(LOG_DB)
 	}
 	db, err := chooseDB("LOG_SQL_DSN", true)
 	if err == nil {
@@ -458,7 +462,7 @@ func migrateLOGDB() error {
 	if err = LOG_DB.AutoMigrate(&Log{}); err != nil {
 		return err
 	}
-	return nil
+	return MigrateChannelAnalyticsLogDB(LOG_DB)
 }
 
 type sqliteColumnDef struct {

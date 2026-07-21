@@ -696,6 +696,22 @@ func (info *RelayInfo) ResetFirstResponseTiming(start time.Time) {
 	info.isFirstResponse = true
 }
 
+// ResetAttemptState 为每次重新选渠创建独立的流与首字状态，避免重试间相互污染。
+func (info *RelayInfo) ResetAttemptState(start time.Time) {
+	if info == nil {
+		return
+	}
+	info.ResetFirstResponseTiming(start)
+	info.SendResponseCount = 0
+	info.ReceivedResponseCount = 0
+	info.TimingDiagnostics = nil
+	if info.IsStream {
+		info.StreamStatus = NewStreamStatus()
+	} else {
+		info.StreamStatus = nil
+	}
+}
+
 func (info *RelayInfo) EnableTimingDiagnostics(start time.Time) {
 	if info == nil {
 		return

@@ -392,8 +392,28 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, summary.Quota)
 	}
 
-	if err := SettleBilling(ctx, relayInfo, summary.Quota); err != nil {
-		logger.LogError(ctx, "error settling billing: "+err.Error())
+	settleErr := SettleBilling(ctx, relayInfo, summary.Quota)
+	if settleErr != nil {
+		logger.LogError(ctx, "error settling billing: "+settleErr.Error())
+	}
+	if originUsage != nil && summary.TotalTokens > 0 {
+		cacheWriteTokens := cacheWriteTokensTotal(summary)
+		uncachedInputTokens := summary.PromptTokens
+		// OpenAI 语义下 prompt_tokens 通常包含缓存命中；Anthropic 语义及
+		// 旧 Claude 转换则把 input_tokens 作为未缓存输入上报。
+		if !summary.IsClaudeUsageSemantic && !isLegacyClaudeDerivedOpenAIUsage(relayInfo, originUsage) {
+			uncachedInputTokens -= summary.CacheTokens + cacheWriteTokens
+		}
+		if uncachedInputTokens < 0 {
+			uncachedInputTokens = 0
+		}
+		AttachChannelMetricUsageAfterSettlement(ctx, ChannelMetricUsage{
+			InputTokensTotal:    int64(uncachedInputTokens + summary.CacheTokens + cacheWriteTokens),
+			UncachedInputTokens: int64(uncachedInputTokens),
+			OutputTokens:        int64(summary.CompletionTokens),
+			CacheReadTokens:     int64(summary.CacheTokens),
+			CacheWriteTokens:    int64(cacheWriteTokens),
+		}, summary.Quota, settleErr)
 	}
 
 	logModel := summary.ModelName

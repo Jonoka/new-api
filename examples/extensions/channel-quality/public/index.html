@@ -3,815 +3,375 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>渠道质量看板</title>
-    <style>
-      :root {
-        color-scheme: light;
-        --bg: #f7f8fb;
-        --panel: #ffffff;
-        --border: #dfe3ea;
-        --text: #1f2937;
-        --muted: #6b7280;
-        --soft: #f1f5f9;
-        --primary: #2563eb;
-        --success: #15803d;
-        --warning: #b45309;
-        --danger: #b91c1c;
-      }
-      * {
-        box-sizing: border-box;
-      }
-      body {
-        margin: 0;
-        background: var(--bg);
-        color: var(--text);
-        font-family:
-          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-          "Segoe UI", sans-serif;
-      }
-      main {
-        min-height: 100vh;
-        padding: 20px;
-      }
-      .toolbar {
-        display: flex;
-        justify-content: space-between;
-        gap: 12px;
-        align-items: flex-start;
-        flex-wrap: wrap;
-        margin-bottom: 16px;
-      }
-      h1 {
-        margin: 0 0 6px;
-        font-size: 22px;
-        line-height: 1.25;
-      }
-      .muted {
-        color: var(--muted);
-        font-size: 13px;
-      }
-      .controls {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-        flex-wrap: wrap;
-      }
-      input,
-      select,
-      button {
-        height: 34px;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        background: #fff;
-        color: var(--text);
-        font: inherit;
-        font-size: 13px;
-      }
-      input {
-        width: 220px;
-        padding: 0 10px;
-      }
-      select {
-        padding: 0 8px;
-      }
-      button {
-        padding: 0 12px;
-        cursor: pointer;
-      }
-      button.primary {
-        border-color: var(--primary);
-        background: var(--primary);
-        color: #fff;
-      }
-      button:disabled {
-        cursor: not-allowed;
-        opacity: 0.6;
-      }
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 12px;
-        margin-bottom: 12px;
-      }
-      .card {
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        background: var(--panel);
-      }
-      .stat {
-        padding: 14px;
-      }
-      .stat-label {
-        color: var(--muted);
-        font-size: 12px;
-      }
-      .stat-value {
-        margin-top: 8px;
-        font-size: 24px;
-        font-weight: 700;
-      }
-      .panel {
-        padding: 14px;
-      }
-      .panel-title {
-        display: flex;
-        justify-content: space-between;
-        gap: 10px;
-        align-items: center;
-        margin-bottom: 10px;
-        font-weight: 650;
-      }
-      .split {
-        display: grid;
-        grid-template-columns: 1.1fr 0.9fr;
-        gap: 12px;
-        margin-bottom: 12px;
-      }
-      .bars {
-        display: grid;
-        gap: 8px;
-      }
-      .bar-row {
-        display: grid;
-        grid-template-columns: 96px 1fr 44px;
-        gap: 10px;
-        align-items: center;
-        font-size: 13px;
-      }
-      .bar-track {
-        height: 8px;
-        overflow: hidden;
-        border-radius: 999px;
-        background: var(--soft);
-      }
-      .bar-fill {
-        height: 100%;
-        border-radius: inherit;
-        background: var(--primary);
-      }
-      .table-wrap {
-        overflow: auto;
-      }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 13px;
-      }
-      th,
-      td {
-        padding: 10px 12px;
-        border-top: 1px solid var(--border);
-        text-align: left;
-        white-space: nowrap;
-      }
-      th {
-        color: var(--muted);
-        font-weight: 600;
-        background: #fafafa;
-      }
-      .name-cell {
-        min-width: 220px;
-        white-space: normal;
-      }
-      .name-main {
-        font-weight: 650;
-      }
-      .name-sub {
-        margin-top: 3px;
-        color: var(--muted);
-        font-size: 12px;
-      }
-      .badge {
-        display: inline-flex;
-        align-items: center;
-        min-height: 22px;
-        padding: 2px 8px;
-        border-radius: 999px;
-        background: var(--soft);
-        color: var(--muted);
-        font-size: 12px;
-        font-weight: 600;
-      }
-      .badge.success {
-        background: #dcfce7;
-        color: var(--success);
-      }
-      .badge.warning {
-        background: #fef3c7;
-        color: var(--warning);
-      }
-      .badge.danger {
-        background: #fee2e2;
-        color: var(--danger);
-      }
-      .notice {
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        background: #fff;
-        padding: 14px;
-        color: var(--muted);
-        margin-bottom: 12px;
-      }
-      .notice.error {
-        border-color: #fecaca;
-        background: #fef2f2;
-        color: #991b1b;
-      }
-      .toast {
-        position: fixed;
-        right: 18px;
-        bottom: 18px;
-        z-index: 10;
-        max-width: 420px;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        background: #111827;
-        color: #fff;
-        padding: 10px 12px;
-        font-size: 13px;
-        box-shadow: 0 10px 30px rgb(15 23 42 / 22%);
-      }
-      .hidden {
-        display: none;
-      }
-      @media (max-width: 1000px) {
-        .grid,
-        .split {
-          grid-template-columns: 1fr 1fr;
-        }
-      }
-      @media (max-width: 700px) {
-        main {
-          padding: 14px;
-        }
-        .grid,
-        .split {
-          grid-template-columns: 1fr;
-        }
-        input,
-        .controls {
-          width: 100%;
-        }
-        .controls > * {
-          flex: 1;
-        }
-      }
-    </style>
+    <meta name="color-scheme" content="light dark" />
+    <title>渠道可观测性中心</title>
+    <link rel="stylesheet" href="./app.css" />
   </head>
   <body>
-    <main>
-      <div class="toolbar">
-        <div>
-          <h1>渠道质量看板</h1>
-          <div class="muted" id="hostInfo">正在读取宿主上下文...</div>
-        </div>
-        <div class="controls">
-          <input id="keyword" placeholder="搜索渠道名称、ID、Base URL" />
-          <input id="model" placeholder="按模型过滤" />
-          <select id="status">
-            <option value="all">全部状态</option>
-            <option value="enabled">已启用</option>
-            <option value="disabled">已禁用</option>
-          </select>
-          <button id="refresh" class="primary">刷新</button>
-        </div>
-      </div>
+    <a class="skip-link" href="#mainContent">跳到主要内容</a>
 
-      <div id="errorBox" class="notice error hidden">
-        <strong>加载失败</strong>
-        <div id="errorText" style="margin: 6px 0 10px"></div>
-        <button id="retry">重试</button>
-      </div>
+    <main id="mainContent" class="app-shell">
+      <header class="page-header">
+        <div class="title-wrap">
+          <div class="title-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" role="img">
+              <path d="M4 18V9m5 9V5m6 13v-7m5 7V3" />
+            </svg>
+          </div>
+          <div>
+            <h1>渠道可观测性中心</h1>
+            <p>基于真实转发流量，观察渠道、模型、缓存和失败链路</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <div id="freshness" class="freshness" aria-live="polite">
+            <span class="status-dot status-dot--idle"></span>
+            <span>等待首次刷新</span>
+          </div>
+          <button id="refreshButton" class="button button--primary" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6" />
+            </svg>
+            <span>刷新</span>
+          </button>
+        </div>
+      </header>
 
-      <section class="grid" id="stats">
-        <div class="card stat">
-          <div class="stat-label">渠道总数</div>
-          <div class="stat-value">-</div>
-          <div class="muted">等待加载</div>
+      <nav class="view-tabs" aria-label="统计视图">
+        <button class="view-tab is-active" type="button" data-view="overview" aria-selected="true">
+          总览
+        </button>
+        <button class="view-tab" type="button" data-view="channels" aria-selected="false">
+          渠道与模型
+        </button>
+        <button class="view-tab" type="button" data-view="failures" aria-selected="false">
+          状态码与失败
+        </button>
+        <button class="view-tab" type="button" data-view="probe" aria-selected="false">
+          主动探测
+        </button>
+      </nav>
+
+      <section class="filter-panel" aria-label="共享筛选">
+        <div class="filter-toolbar">
+          <div class="range-group" role="group" aria-label="时间范围">
+            <button class="range-button" type="button" data-range="1h">最近 1 小时</button>
+            <button class="range-button is-active" type="button" data-range="today">今天</button>
+            <button class="range-button" type="button" data-range="yesterday">昨天</button>
+            <button class="range-button" type="button" data-range="7d">最近 7 天</button>
+            <button class="range-button" type="button" data-range="custom">自定义</button>
+          </div>
+
+          <div class="filter-toolbar__right">
+            <label class="inline-field" for="granularity">
+              <span>统计粒度</span>
+              <select id="granularity">
+                <option value="auto">自动</option>
+                <option value="5m">5 分钟</option>
+              </select>
+            </label>
+            <button id="advancedToggle" class="button button--secondary" type="button" aria-expanded="false">
+              高级筛选
+              <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m7 10 5 5 5-5" />
+              </svg>
+            </button>
+            <button id="resetFilters" class="button button--ghost" type="button">重置</button>
+          </div>
         </div>
-        <div class="card stat">
-          <div class="stat-label">启用渠道</div>
-          <div class="stat-value">-</div>
-          <div class="muted">等待加载</div>
+
+        <div id="customRange" class="custom-range is-hidden">
+          <label>
+            <span>开始时间</span>
+            <input id="customStart" type="datetime-local" />
+          </label>
+          <span class="range-separator">至</span>
+          <label>
+            <span>结束时间</span>
+            <input id="customEnd" type="datetime-local" />
+          </label>
+          <button id="applyCustomRange" class="button button--primary" type="button">应用</button>
         </div>
-        <div class="card stat">
-          <div class="stat-label">平均响应</div>
-          <div class="stat-value">-</div>
-          <div class="muted">等待加载</div>
+
+        <div id="advancedFilters" class="advanced-filters is-hidden">
+          <label>
+            <span>渠道</span>
+            <select id="channelFilter">
+              <option value="">全部渠道</option>
+            </select>
+          </label>
+          <label>
+            <span>渠道类型</span>
+            <select id="channelTypeFilter">
+              <option value="">全部类型</option>
+            </select>
+          </label>
+          <label>
+            <span>请求模型</span>
+            <select id="requestedModelFilter">
+              <option value="">全部请求模型</option>
+            </select>
+          </label>
+          <label>
+            <span>上游模型</span>
+            <select id="upstreamModelFilter">
+              <option value="">全部上游模型</option>
+            </select>
+          </label>
+          <label>
+            <span>结果</span>
+            <select id="outcomeFilter">
+              <option value="">全部结果</option>
+              <option value="success">成功</option>
+              <option value="http_error">HTTP 错误</option>
+              <option value="transport_error">连接错误</option>
+              <option value="protocol_error">协议错误</option>
+              <option value="stream_error">流式错误</option>
+              <option value="local_error">本地错误</option>
+              <option value="dispatch_error">派发错误</option>
+              <option value="client_cancelled">客户端取消</option>
+            </select>
+          </label>
+          <label>
+            <span>状态码</span>
+            <input id="statusCodeFilter" inputmode="text" placeholder="如 429 或 5xx" />
+          </label>
+          <label>
+            <span>响应方式</span>
+            <select id="streamFilter">
+              <option value="">全部</option>
+              <option value="true">流式</option>
+              <option value="false">非流式</option>
+            </select>
+          </label>
+          <label>
+            <span>流量来源</span>
+            <select id="trafficSourceFilter">
+              <option value="relay">真实转发</option>
+              <option value="playground">后台调试</option>
+              <option value="task">异步任务</option>
+            </select>
+          </label>
         </div>
-        <div class="card stat">
-          <div class="stat-label">低余额/异常</div>
-          <div class="stat-value">-</div>
-          <div class="muted">等待加载</div>
+        <p id="filterScopeHint" class="filter-scope-hint" aria-live="polite"></p>
+      </section>
+
+      <section id="qualityNotice" class="quality-notice is-hidden" aria-live="polite"></section>
+
+      <section id="errorState" class="state-panel state-panel--error is-hidden" role="alert">
+        <div class="state-icon" aria-hidden="true">!</div>
+        <div class="state-copy">
+          <strong>统计数据加载失败</strong>
+          <p id="errorMessage">请稍后重试。</p>
+        </div>
+        <button id="retryButton" class="button button--secondary" type="button">重新加载</button>
+      </section>
+
+      <section id="loadingState" class="loading-layout" aria-label="正在加载">
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+        <div class="skeleton-panel"></div>
+      </section>
+
+      <section id="emptyState" class="state-panel is-hidden">
+        <div class="state-icon state-icon--empty" aria-hidden="true">○</div>
+        <div class="state-copy">
+          <strong>当前范围暂无数据</strong>
+          <p>可以扩大时间范围、清除筛选条件，或先产生一笔真实转发请求。</p>
+        </div>
+        <button id="emptyResetButton" class="button button--secondary" type="button">清除筛选</button>
+      </section>
+
+      <section id="overviewView" class="view-panel is-hidden" data-panel="overview">
+        <div id="summaryCards" class="metric-grid"></div>
+
+        <div class="dashboard-grid dashboard-grid--wide">
+          <article class="panel trend-panel">
+            <div class="panel-header">
+              <div>
+                <h2>流量与质量趋势</h2>
+                <p>客户端请求、失败尝试与已成功结算 Token</p>
+              </div>
+              <div id="trendLegend" class="chart-legend" aria-label="图例"></div>
+            </div>
+            <div id="trendChart" class="chart" role="img" aria-label="流量与质量趋势图"></div>
+          </article>
+
+          <article class="panel token-panel">
+            <div class="panel-header">
+              <div>
+                <h2>Token 构成</h2>
+                <p>仅统计最终成功且已完成结算的用量</p>
+              </div>
+            </div>
+            <div id="tokenComposition" class="composition-list"></div>
+          </article>
+        </div>
+
+        <div class="dashboard-grid dashboard-grid--equal">
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>成功率口径</h2>
+                <p>客户端结果与渠道质量独立计算</p>
+              </div>
+            </div>
+            <div id="successScopes" class="scope-list"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>上游状态概览</h2>
+                <p>按底层上游调用统计，不与渠道尝试混算</p>
+              </div>
+              <button class="text-button" type="button" data-go-view="failures">查看全部</button>
+            </div>
+            <div id="overviewStatuses" class="status-bars"></div>
+          </article>
         </div>
       </section>
 
-      <section class="split">
-        <div class="card panel">
-          <div class="panel-title">
-            <span>质量分布</span>
-            <span class="muted" id="summaryText">等待加载</span>
+      <section id="channelsView" class="view-panel is-hidden" data-panel="channels">
+        <article class="panel panel--table">
+          <div class="panel-header panel-header--table">
+            <div>
+              <h2>渠道与模型</h2>
+              <p>展开渠道可查看请求模型或上游模型的同口径统计</p>
+            </div>
+            <div class="table-actions">
+              <label class="compact-field" for="modelDimension">
+                <span>模型口径</span>
+                <select id="modelDimension">
+                  <option value="requested">请求模型</option>
+                  <option value="upstream">上游模型</option>
+                </select>
+              </label>
+              <label class="compact-field" for="channelSort">
+                <span>排序</span>
+                <select id="channelSort">
+                  <option value="request_count">调用量</option>
+                  <option value="quality_success_rate">渠道质量成功率</option>
+                  <option value="p95_latency_ms">P95 延迟</option>
+                  <option value="charged_quota">计费额度</option>
+                  <option value="failure_count">失败数</option>
+                </select>
+              </label>
+            </div>
           </div>
-          <div class="bars" id="qualityBars">
-            <div class="muted">等待渠道数据...</div>
+          <div class="table-scroll">
+            <table class="data-table channel-table">
+              <thead>
+                <tr>
+                  <th scope="col">渠道</th>
+                  <th scope="col">调用 / 重试</th>
+                  <th scope="col">质量成功率</th>
+                  <th scope="col">状态码</th>
+                  <th scope="col">输入 / 输出</th>
+                  <th scope="col">缓存读 / 写</th>
+                  <th scope="col">缓存命中</th>
+                  <th scope="col">平均 / P95</th>
+                  <th scope="col">费用</th>
+                  <th scope="col">最近失败</th>
+                </tr>
+              </thead>
+              <tbody id="channelRows"></tbody>
+            </table>
           </div>
-        </div>
-        <div class="card panel">
-          <div class="panel-title">
-            <span>类型分布</span>
-            <span class="muted">按渠道数量</span>
-          </div>
-          <div class="bars" id="typeBars">
-            <div class="muted">等待渠道数据...</div>
-          </div>
-        </div>
+          <div id="channelPagination" class="pagination"></div>
+        </article>
       </section>
 
-      <section class="card">
-        <div class="panel-title panel">
-          <span>需要关注的渠道</span>
-          <span class="muted" id="tableHint">等待加载</span>
+      <section id="failuresView" class="view-panel is-hidden" data-panel="failures">
+        <div class="dashboard-grid dashboard-grid--status">
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>状态码分布</h2>
+                <p id="statusScopeHint">上游原始状态码，按底层调用统计</p>
+              </div>
+              <div class="segmented-control" role="group" aria-label="状态码口径">
+                <button type="button" data-status-scope="upstream" class="is-active" aria-pressed="true">上游</button>
+                <button type="button" data-status-scope="client" aria-pressed="false">客户端</button>
+              </div>
+            </div>
+            <div id="statusCodeSummary" class="status-summary"></div>
+            <div id="statusCodeBars" class="status-bars status-bars--large"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>错误阶段</h2>
+                <p>快速识别失败发生在请求链路的哪个环节</p>
+              </div>
+            </div>
+            <div id="errorStageBars" class="status-bars status-bars--large"></div>
+          </article>
         </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>渠道</th>
-                <th>状态</th>
-                <th>类型</th>
-                <th>响应</th>
-                <th>余额</th>
-                <th>已用额度</th>
-                <th>上次测试</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody id="channelRows">
-              <tr>
-                <td colspan="8" class="muted">正在加载渠道数据...</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+
+        <article class="panel panel--table failures-panel">
+          <div class="panel-header panel-header--table">
+            <div>
+              <h2>最近失败请求</h2>
+              <p>仅保留脱敏摘要；成功请求明细仍由现有用量日志承担</p>
+            </div>
+            <div id="failureCount" class="record-count"></div>
+          </div>
+          <div id="failureRows" class="failure-list"></div>
+          <div id="failurePagination" class="pagination"></div>
+        </article>
       </section>
 
-      <div id="empty" class="notice hidden">没有匹配的渠道。</div>
+      <section id="probeView" class="view-panel is-hidden" data-panel="probe">
+        <div class="probe-explainer">
+          <div class="probe-explainer__icon" aria-hidden="true">i</div>
+          <div>
+            <strong>主动探测与真实业务统计相互独立</strong>
+            <p>
+              探测只回答“当前是否能连通”。探测请求、Token 和费用不会进入上面的真实转发统计，
+              探测成功也不代表生产流量持续稳定。
+            </p>
+          </div>
+        </div>
+
+        <article class="panel panel--table">
+          <div class="panel-header panel-header--table">
+            <div>
+              <h2>渠道主动探测</h2>
+              <p>为每个渠道选择一个模型后执行单次测试</p>
+            </div>
+            <label class="search-field" for="probeKeyword">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" />
+                <path d="m20 20-4-4" />
+              </svg>
+              <input id="probeKeyword" placeholder="搜索渠道、ID 或类型" />
+            </label>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table probe-table">
+              <thead>
+                <tr>
+                  <th scope="col">渠道</th>
+                  <th scope="col">状态</th>
+                  <th scope="col">类型</th>
+                  <th scope="col">测试模型</th>
+                  <th scope="col">最近测试</th>
+                  <th scope="col">耗时</th>
+                  <th scope="col">操作</th>
+                </tr>
+              </thead>
+              <tbody id="probeRows"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
     </main>
-    <div id="toast" class="toast hidden"></div>
 
-    <script>
-      const channelTypes = {
-        0: 'Unknown',
-        1: 'OpenAI',
-        2: 'Midjourney',
-        3: 'Azure',
-        4: 'Ollama',
-        14: 'Anthropic',
-        15: 'Baidu',
-        16: 'Zhipu',
-        17: 'Ali',
-        18: 'Xunfei',
-        20: 'OpenRouter',
-        24: 'Gemini',
-        25: 'Moonshot',
-        27: 'Perplexity',
-        33: 'AWS',
-        34: 'Cohere',
-        35: 'MiniMax',
-        37: 'Dify',
-        38: 'Jina',
-        39: 'Cloudflare',
-        40: 'SiliconFlow',
-        41: 'VertexAI',
-        42: 'Mistral',
-        43: 'DeepSeek',
-        45: 'VolcEngine',
-        48: 'xAI',
-        49: 'Coze',
-        53: 'Submodel',
-        57: 'Codex',
-      }
-
-      const state = {
-        channels: [],
-        loading: false,
-        testing: new Set(),
-      }
-
-      const $ = (id) => document.getElementById(id)
-      const escapeText = (value) =>
-        String(value ?? '')
-          .replaceAll('&', '&amp;')
-          .replaceAll('<', '&lt;')
-          .replaceAll('>', '&gt;')
-          .replaceAll('"', '&quot;')
-          .replaceAll("'", '&#039;')
-
-      function showToast(message) {
-        const el = $('toast')
-        el.textContent = message
-        el.classList.remove('hidden')
-        clearTimeout(showToast.timer)
-        showToast.timer = setTimeout(() => el.classList.add('hidden'), 3600)
-      }
-
-      function showError(message) {
-        $('errorText').textContent = message || '未知错误'
-        $('errorBox').classList.remove('hidden')
-      }
-
-      function clearError() {
-        $('errorBox').classList.add('hidden')
-        $('errorText').textContent = ''
-      }
-
-      function getUserId() {
-        try {
-          const uid = window.localStorage.getItem('uid')
-          if (uid) return uid
-
-          const user = JSON.parse(window.localStorage.getItem('user') || 'null')
-          if (user && user.id) return String(user.id)
-        } catch (error) {
-          return ''
-        }
-        return ''
-      }
-
-      function commonHeaders(extra) {
-        const headers = Object.assign({ Accept: 'application/json' }, extra || {})
-        const uid = getUserId()
-        if (uid) headers['New-Api-User'] = uid
-        return headers
-      }
-
-      async function apiGet(path) {
-        const res = await fetch(path, {
-          credentials: 'include',
-          headers: commonHeaders(),
-        })
-        if (!res.ok) throw new Error('HTTP ' + res.status)
-        const body = await res.json()
-        if (!body.success) throw new Error(body.message || '请求失败')
-        return body.data
-      }
-
-      async function loadHostContext() {
-        try {
-          const data = await apiGet('/api/extensions/host/me')
-          $('hostInfo').textContent =
-            '当前用户：' +
-            (data.username || '-') +
-            ' · 分组：' +
-            (data.group || '-') +
-            ' · 版本：' +
-            (data.version || '-')
-        } catch (error) {
-          $('hostInfo').textContent =
-            '宿主上下文读取失败：' + (error.message || error)
-        }
-      }
-
-      function readFilters() {
-        return {
-          keyword: $('keyword').value.trim(),
-          model: $('model').value.trim(),
-          status: $('status').value,
-        }
-      }
-
-      async function loadChannels() {
-        const button = $('refresh')
-        const filters = readFilters()
-        const params = new URLSearchParams({
-          keyword: filters.keyword,
-          group: '',
-          model: filters.model,
-          id_sort: 'true',
-          tag_mode: 'false',
-          p: '1',
-          page_size: '100',
-          sort_by: 'response_time',
-          sort_order: 'desc',
-        })
-        if (filters.status !== 'all') params.set('status', filters.status)
-
-        clearError()
-        state.loading = true
-        button.disabled = true
-        button.textContent = '加载中'
-        try {
-          let page = 1
-          let total = 0
-          const items = []
-          do {
-            params.set('p', String(page))
-            const data = await apiGet('/api/channel/search?' + params.toString())
-            const pageItems = Array.isArray(data.items) ? data.items : []
-            total = Number(data.total || pageItems.length)
-            items.push(...pageItems)
-            if (pageItems.length === 0) break
-            page += 1
-          } while (items.length < total && page <= 200)
-
-          state.channels = items
-          render()
-        } catch (error) {
-          showError(error.message || '渠道加载失败')
-          $('channelRows').innerHTML =
-            '<tr><td colspan="8" class="muted">渠道加载失败，请点击上方重试。</td></tr>'
-        } finally {
-          state.loading = false
-          button.disabled = false
-          button.textContent = '刷新'
-        }
-      }
-
-      function getStatusInfo(status) {
-        if (status === 1) return { text: '启用', className: 'success' }
-        if (status === 2) return { text: '手动禁用', className: 'warning' }
-        if (status === 3) return { text: '自动禁用', className: 'danger' }
-        return { text: '禁用', className: 'warning' }
-      }
-
-      function getQuality(channel) {
-        if (channel.status !== 1) {
-          return { key: 'disabled', text: '禁用', className: 'warning', score: 4 }
-        }
-        if (channel.balance > 0 && channel.balance < 1) {
-          return { key: 'lowBalance', text: '低余额', className: 'danger', score: 3 }
-        }
-        if (!channel.response_time || channel.response_time <= 0) {
-          return { key: 'untested', text: '未测试', className: '', score: 2 }
-        }
-        if (channel.response_time > 8000) {
-          return { key: 'slow', text: '慢响应', className: 'warning', score: 1 }
-        }
-        return { key: 'healthy', text: '健康', className: 'success', score: 0 }
-      }
-
-      function formatResponseTime(ms) {
-        const value = Number(ms || 0)
-        if (!value) return '未测试'
-        if (value < 1000) return value + 'ms'
-        return (value / 1000).toFixed(2) + 's'
-      }
-
-      function formatBalance(value) {
-        const n = Number(value || 0)
-        if (!Number.isFinite(n)) return '-'
-        return '$' + n.toLocaleString(undefined, {
-          minimumFractionDigits: n < 10 && n > 0 ? 4 : 2,
-          maximumFractionDigits: n < 10 && n > 0 ? 4 : 2,
-        })
-      }
-
-      function formatQuota(value) {
-        const n = Number(value || 0)
-        if (!Number.isFinite(n) || n <= 0) return '0'
-        if (n >= 1000000000) return (n / 1000000000).toFixed(2) + 'B'
-        if (n >= 1000000) return (n / 1000000).toFixed(2) + 'M'
-        if (n >= 1000) return (n / 1000).toFixed(2) + 'K'
-        return String(n)
-      }
-
-      function formatTime(ts) {
-        const value = Number(ts || 0)
-        if (!value) return '从未'
-        const diff = Math.max(0, Date.now() - value * 1000)
-        const minutes = Math.floor(diff / 60000)
-        if (minutes < 1) return '刚刚'
-        if (minutes < 60) return minutes + '分钟前'
-        const hours = Math.floor(minutes / 60)
-        if (hours < 24) return hours + '小时前'
-        return Math.floor(hours / 24) + '天前'
-      }
-
-      function buildStats(channels) {
-        const stats = {
-          total: channels.length,
-          enabled: 0,
-          disabled: 0,
-          lowBalance: 0,
-          slow: 0,
-          avgMs: 0,
-        }
-        let timedCount = 0
-        for (const channel of channels) {
-          if (channel.status === 1) stats.enabled += 1
-          else stats.disabled += 1
-          if (channel.balance > 0 && channel.balance < 1) stats.lowBalance += 1
-          if (channel.response_time > 8000) stats.slow += 1
-          if (channel.response_time > 0) {
-            stats.avgMs += channel.response_time
-            timedCount += 1
-          }
-        }
-        stats.avgMs = timedCount ? Math.round(stats.avgMs / timedCount) : 0
-        return stats
-      }
-
-      function renderStats(stats) {
-        const items = [
-          ['渠道总数', stats.total, '当前筛选结果'],
-          ['启用渠道', stats.enabled, '可被路由使用'],
-          ['平均响应', formatResponseTime(stats.avgMs), '最近测试结果'],
-          ['低余额/异常', stats.lowBalance + stats.disabled + stats.slow, '建议优先处理'],
-        ]
-        $('stats').innerHTML = items
-          .map(
-            ([label, value, hint]) =>
-              '<div class="card stat"><div class="stat-label">' +
-              escapeText(label) +
-              '</div><div class="stat-value">' +
-              escapeText(value) +
-              '</div><div class="muted">' +
-              escapeText(hint) +
-              '</div></div>'
-          )
-          .join('')
-      }
-
-      function renderBars(id, entries, total) {
-        const max = Math.max(1, total)
-        $(id).innerHTML =
-          entries
-            .filter((entry) => entry.count > 0)
-            .slice(0, 8)
-            .map((entry) => {
-              const width = Math.max(4, Math.round((entry.count / max) * 100))
-              return (
-                '<div class="bar-row"><span>' +
-                escapeText(entry.label) +
-                '</span><div class="bar-track"><div class="bar-fill" style="width:' +
-                width +
-                '%"></div></div><span class="muted">' +
-                entry.count +
-                '</span></div>'
-              )
-            })
-            .join('') || '<div class="muted">暂无数据</div>'
-      }
-
-      function renderQuality(channels) {
-        const qualityMap = new Map([
-          ['healthy', { label: '健康', count: 0 }],
-          ['slow', { label: '慢响应', count: 0 }],
-          ['untested', { label: '未测试', count: 0 }],
-          ['lowBalance', { label: '低余额', count: 0 }],
-          ['disabled', { label: '禁用', count: 0 }],
-        ])
-        const typeMap = new Map()
-        for (const channel of channels) {
-          const quality = getQuality(channel)
-          qualityMap.get(quality.key).count += 1
-          const typeName = channelTypes[channel.type] || 'Unknown'
-          typeMap.set(typeName, (typeMap.get(typeName) || 0) + 1)
-        }
-        renderBars('qualityBars', Array.from(qualityMap.values()), channels.length)
-        renderBars(
-          'typeBars',
-          Array.from(typeMap.entries())
-            .map(([label, count]) => ({ label, count }))
-            .sort((a, b) => b.count - a.count),
-          channels.length
-        )
-        $('summaryText').textContent = channels.length
-          ? '覆盖 ' + channels.length + ' 个渠道'
-          : '-'
-      }
-
-      function pickAttentionRows(channels) {
-        return [...channels]
-          .sort((a, b) => {
-            const qa = getQuality(a)
-            const qb = getQuality(b)
-            if (qa.score !== qb.score) return qb.score - qa.score
-            return Number(b.response_time || 0) - Number(a.response_time || 0)
-          })
-          .filter((channel) => getQuality(channel).score > 0)
-          .slice(0, 30)
-      }
-
-      async function testChannel(id, model) {
-        state.testing.add(id)
-        render()
-        const params = new URLSearchParams()
-        if (model) params.set('model', model)
-        try {
-          const res = await fetch(
-            '/api/channel/test/' + encodeURIComponent(id) + '?' + params.toString(),
-            {
-              credentials: 'include',
-              headers: commonHeaders(),
-            }
-          )
-          const data = await res.json()
-          if (!data.success) throw new Error(data.message || '测试失败')
-          showToast(
-            '渠道 #' +
-              id +
-              ' 测试成功，耗时 ' +
-              Number(data.time || 0).toFixed(2) +
-              ' 秒'
-          )
-          await loadChannels()
-        } catch (error) {
-          showToast('渠道 #' + id + ' ' + (error.message || '测试失败'))
-        } finally {
-          state.testing.delete(id)
-          render()
-        }
-      }
-
-      function firstModel(channel) {
-        return (
-          String(channel.models || '')
-            .split(',')
-            .map((item) => item.trim())
-            .filter(Boolean)[0] || ''
-        )
-      }
-
-      function renderRows(channels) {
-        const rows = pickAttentionRows(channels)
-        $('tableHint').textContent = rows.length
-          ? '显示前 ' + rows.length + ' 个'
-          : '暂无需关注项'
-        $('empty').classList.toggle('hidden', channels.length > 0)
-        $('channelRows').innerHTML =
-          rows
-            .map((channel) => {
-              const status = getStatusInfo(channel.status)
-              const quality = getQuality(channel)
-              const testing = state.testing.has(channel.id)
-              const model = firstModel(channel)
-              return (
-                '<tr><td class="name-cell"><div class="name-main">' +
-                escapeText(channel.name || '-') +
-                '</div><div class="name-sub">#' +
-                escapeText(channel.id) +
-                ' · ' +
-                escapeText(channel.group || '-') +
-                (channel.tag ? ' · ' + escapeText(channel.tag) : '') +
-                '</div></td><td><span class="badge ' +
-                status.className +
-                '">' +
-                status.text +
-                '</span></td><td>' +
-                escapeText(channelTypes[channel.type] || 'Unknown') +
-                '</td><td><span class="badge ' +
-                quality.className +
-                '">' +
-                formatResponseTime(channel.response_time) +
-                '</span></td><td>' +
-                formatBalance(channel.balance) +
-                '</td><td>' +
-                formatQuota(channel.used_quota) +
-                '</td><td>' +
-                formatTime(channel.test_time) +
-                '</td><td><button data-test-id="' +
-                escapeText(channel.id) +
-                '" data-model="' +
-                escapeText(model) +
-                '" ' +
-                (testing ? 'disabled' : '') +
-                '>' +
-                (testing ? '测试中' : '测试') +
-                '</button></td></tr>'
-              )
-            })
-            .join('') || '<tr><td colspan="8" class="muted">暂无需关注的渠道。</td></tr>'
-      }
-
-      function render() {
-        const channels = state.channels
-        renderStats(buildStats(channels))
-        renderQuality(channels)
-        renderRows(channels)
-      }
-
-      $('refresh').addEventListener('click', loadChannels)
-      $('retry').addEventListener('click', loadChannels)
-      $('status').addEventListener('change', loadChannels)
-      $('keyword').addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') loadChannels()
-      })
-      $('model').addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') loadChannels()
-      })
-      $('channelRows').addEventListener('click', (event) => {
-        const button = event.target.closest('button[data-test-id]')
-        if (!button) return
-        testChannel(button.dataset.testId, button.dataset.model || '')
-      })
-
-      try {
-        loadHostContext()
-        loadChannels()
-      } catch (error) {
-        showError(error.message || String(error))
-      }
-    </script>
+    <div id="toast" class="toast is-hidden" role="status" aria-live="polite"></div>
+    <script src="./app.js" defer></script>
   </body>
 </html>

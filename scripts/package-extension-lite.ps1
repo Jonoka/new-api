@@ -45,11 +45,19 @@ function Test-ExcludedPath {
 
 function Test-StaticRuntimeExcludedPath {
     param(
-        [Parameter(Mandatory = $true)][string]$RelativePath
+        [Parameter(Mandatory = $true)][string]$RelativePath,
+        [Parameter(Mandatory = $true)][string]$StaticDir
     )
 
     $path = $RelativePath.Replace('\', '/').Trim('/')
     if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+
+    # static 模块的静态资源目录可以合法包含 app.js 等浏览器脚本。
+    # 静态目录之外仍需排除同名服务端入口，避免将后端代码误打进模块包。
+    $normalizedStaticDir = $StaticDir.Replace('\', '/').Trim('/')
+    if ($path.StartsWith($normalizedStaticDir + '/', [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $false
+    }
 
     $fileName = [System.IO.Path]::GetFileName($path)
     $staticRuntimeServerEntries = @(
@@ -142,7 +150,7 @@ try {
     $files = Get-ChildItem -Path $modulePath -Recurse -File | Where-Object {
         $relative = Get-RelativePath -Base $modulePath -Target $_.FullName
         -not (Test-ExcludedPath -RelativePath $relative) -and
-        -not ($runtimeType -eq "static" -and (Test-StaticRuntimeExcludedPath -RelativePath $relative))
+        -not ($runtimeType -eq "static" -and (Test-StaticRuntimeExcludedPath -RelativePath $relative -StaticDir $normalizedStaticDir))
     }
 
     if ($files.Count -eq 0) {

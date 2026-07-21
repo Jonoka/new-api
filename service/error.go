@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -89,6 +90,37 @@ var embeddedStatusCodePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\bstatus\s*[:=]\s*([1-5][0-9]{2})\b`),
 }
 
+const maxParsedRetryAfter = 24 * time.Hour
+
+func parseRetryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		if seconds > int64(maxParsedRetryAfter/time.Second) {
+			return maxParsedRetryAfter
+		}
+		return time.Duration(seconds) * time.Second
+	}
+
+	retryAt, err := http.ParseTime(value)
+	if err != nil {
+		return 0
+	}
+	delay := retryAt.Sub(now)
+	if delay <= 0 {
+		return 0
+	}
+	if delay > maxParsedRetryAfter {
+		return maxParsedRetryAfter
+	}
+	return delay
+}
+
 func normalizeUpstreamStatusCode(statusCode int, candidates ...string) int {
 	if statusCode < http.StatusInternalServerError || statusCode > 599 {
 		return statusCode
@@ -124,6 +156,13 @@ func extractEmbeddedClientStatusCode(text string) (int, bool) {
 }
 
 func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFail bool) (newApiErr *types.NewAPIError) {
+	retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+	defer func() {
+		if newApiErr != nil {
+			newApiErr.RetryAfter = retryAfter
+		}
+	}()
+
 	newApiErr = types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
 
 	responseBody, err := io.ReadAll(resp.Body)
@@ -194,6 +233,9 @@ func ResetStatusCode(newApiErr *types.NewAPIError, statusCodeMappingStr string) 
 		intCode, ok := parseStatusCodeMappingValue(value)
 		if !ok {
 			return
+		}
+		if newApiErr.OriginalStatusCode == 0 {
+			newApiErr.OriginalStatusCode = newApiErr.StatusCode
 		}
 		newApiErr.StatusCode = intCode
 	}
