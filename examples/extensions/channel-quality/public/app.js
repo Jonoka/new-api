@@ -3,9 +3,9 @@
 
   const API_ROOT = '/api/channel-analytics'
   const HOST_CONTEXT_API = '/api/extensions/host/me'
-  const REQUIRED_HOST_VERSION = 'v1.0.0-rc.10.1.10.197'
+  const REQUIRED_HOST_VERSION = 'v1.0.0-rc.10.1.10.200'
   const REQUIRED_CAPABILITY_API = `${API_ROOT}/filters/models?model_dimension=requested&page=1&page_size=1`
-  const MODULE_VERSION = '0.3.1'
+  const MODULE_VERSION = '0.3.6'
   const UI_ASSET_VERSION = MODULE_VERSION
   const REQUIRED_UI_ELEMENT_IDS = [
     'dataOriginFilter',
@@ -19,10 +19,28 @@
     'stabilityHead',
     'stabilityRows',
     'stabilityPagination',
+    'groupChannelsButton',
+    'channelSort',
+    'modelDimension',
   ]
   const DEFAULT_PAGE_SIZE = 30
   const MODEL_PAGE_SIZE = 30
+  const STABILITY_CHILD_PAGE_SIZE = 30
   const STABILITY_WINDOWS = [900, 3600, 21600, 86400, 604800]
+  const STABILITY_NODE_LABELS = Object.freeze({
+    group: '分组',
+    channel: '渠道',
+    model: '模型',
+  })
+  const STABILITY_TREE_PLANS = Object.freeze({
+    group_model: Object.freeze({ dimension: 'group_model', levels: Object.freeze(['group', 'model']) }),
+    group_channel: Object.freeze({ dimension: 'group_channel', levels: Object.freeze(['group', 'channel']) }),
+    channel_model: Object.freeze({ dimension: 'channel_model', levels: Object.freeze(['channel', 'model']) }),
+    group_channel_model: Object.freeze({
+      dimension: 'group_channel_model',
+      levels: Object.freeze(['group', 'channel', 'model']),
+    }),
+  })
 
   const channelTypes = {
     0: '未知',
@@ -129,6 +147,13 @@
     stabilityTotal: 0,
     stabilityItems: [],
     stabilityWindows: [...STABILITY_WINDOWS],
+    stabilityTreeMode: false,
+    stabilityTreePlan: null,
+    stabilityTreeGeneration: 0,
+    stabilityTreeQueryParams: null,
+    stabilityExpandedNodes: new Set(),
+    stabilityTreeEntries: new Map(),
+    stabilityTreeNodes: new Map(),
     channelPage: 1,
     channelTotal: 0,
     failurePage: 1,
@@ -304,6 +329,29 @@
     return body ?? {}
   }
 
+  function hostVersionAtLeast(current, required) {
+    // 宿主版本包含 rc 段，按全部数字片段逐段比较。
+    const currentParts = String(current || '').match(/\d+/g)?.map(Number) || []
+    const requiredParts = String(required || '').match(/\d+/g)?.map(Number) || []
+    if (!currentParts.length || !requiredParts.length) return true
+    const length = Math.max(currentParts.length, requiredParts.length)
+    for (let index = 0; index < length; index += 1) {
+      const currentPart = currentParts[index] || 0
+      const requiredPart = requiredParts[index] || 0
+      if (currentPart !== requiredPart) return currentPart > requiredPart
+    }
+    return true
+  }
+
+  function hostCompatibilityError(currentVersion) {
+    const error = new Error(
+      `当前宿主为 ${currentVersion || '未知版本'}，` +
+      `渠道可观测性 ${MODULE_VERSION} 要求至少 ${REQUIRED_HOST_VERSION}，请先升级所有后端节点后再使用。`,
+    )
+    error.hostCompatibility = true
+    return error
+  }
+
   async function verifyHostCompatibility(signal) {
     if (state.hostCompatible) return
 
@@ -318,6 +366,9 @@
     if (hostResult.status === 'fulfilled') {
       state.hostVersion = String(firstDefined(hostResult.value, ['version'], '')).trim()
     }
+    if (state.hostVersion && !hostVersionAtLeast(state.hostVersion, REQUIRED_HOST_VERSION)) {
+      throw hostCompatibilityError(state.hostVersion)
+    }
     if (capabilityResult.status === 'fulfilled') {
       state.hostCompatible = true
       return
@@ -327,13 +378,7 @@
     if (capabilityError?.name === 'AbortError') throw capabilityError
     if (capabilityError?.status !== 404) throw capabilityError
 
-    const currentVersion = state.hostVersion || '未知版本'
-    const error = new Error(
-      `当前宿主为 ${currentVersion}，未提供渠道运维统计所需接口。` +
-      `渠道可观测性 ${MODULE_VERSION} 要求至少 ${REQUIRED_HOST_VERSION}，请先升级所有后端节点后再使用。`,
-    )
-    error.hostCompatibility = true
-    throw error
+    throw hostCompatibilityError(state.hostVersion)
   }
 
   function showToast(message) {
@@ -474,8 +519,10 @@
         return [todayTimestamp - 86400, todayTimestamp]
       case '7d':
         return [end - 7 * 86400, end]
-      case 'custom':
-        return [state.customStart || end - 3600, state.customEnd || end]
+      case 'custom': {
+        const customEnd = Math.min(state.customEnd || end, end)
+        return [state.customStart || customEnd - 3600, customEnd]
+      }
       case 'today':
       default:
         return [todayTimestamp, end]
@@ -696,7 +743,7 @@
   function updateFilterScopeHint() {
     const messages = {
       overview: '状态码筛选只在“状态码与失败”视图生效。',
-      operations: '矩阵固定比较多个重叠时间窗；上方时间选择决定观察截止时间，状态码筛选不参与矩阵。历史日志指标会明确按推导口径展示。',
+      operations: '矩阵固定比较多个重叠时间窗；复合维度按层级逐级展开并懒加载子项。状态码筛选不参与矩阵。',
       channels: '状态码筛选不适用于渠道尝试聚合；展开模型时按所选模型口径统计。',
       failures: '响应方式只影响状态码分布，失败明细暂不支持该筛选；历史明细来自脱敏日志推导，重试链和原始上游状态码可能不完整。',
       probe: '主动探测只应用渠道、渠道类型和请求模型；时间、粒度及其他业务筛选不参与探测。',
@@ -704,8 +751,18 @@
     $('filterScopeHint').textContent = messages[state.view] || ''
   }
 
+  function updateStabilityDimensionControls() {
+    const dimension = $('stabilityDimension').value
+    const usesModel = dimension === 'model' || dimension.endsWith('_model')
+    const modelDimension = $('stabilityModelDimension')
+    modelDimension.disabled = !usesModel
+    modelDimension.closest('.compact-field')?.classList.toggle('is-disabled', !usesModel)
+    modelDimension.title = usesModel ? '' : '当前分析维度不包含模型'
+  }
+
   function activateView(view, shouldLoad = true) {
     if (!['overview', 'operations', 'channels', 'failures', 'probe'].includes(view)) return
+    if (state.view === 'operations' && view !== 'operations') resetStabilityTree()
     state.view = view
     $$('.view-tab').forEach((tab) => {
       const active = tab.dataset.view === view
@@ -1025,30 +1082,20 @@
     return `<div class="stability-rate ${tone}" title="${escapeHtml(title)}"><strong>${escapeHtml(formatPercent(rate))}</strong><span>${escapeHtml(hint)}</span></div>`
   }
 
-  function stabilityIdentity(item) {
+  function stabilityIdentity(item, { onlyTypes = null } = {}) {
+    const includedTypes = onlyTypes ? new Set(onlyTypes) : null
+    const includes = (type) => !includedTypes || includedTypes.has(type)
     const group = String(firstDefined(item, ['group'], ''))
     const groupName = String(firstDefined(item, ['group_name'], group))
     const channelId = numberValue(item, ['channel_id'])
     const channelName = String(firstDefined(item, ['channel_name'], channelId ? `渠道 #${channelId}` : ''))
     const model = String(firstDefined(item, ['requested_model', 'upstream_model'], ''))
     const parts = []
-    if (group) parts.push(`<span class="identity-part"><small>分组</small><strong>${escapeHtml(groupName || group)}</strong>${groupName && groupName !== group ? `<em>${escapeHtml(group)}</em>` : ''}</span>`)
-    if (model) parts.push(`<span class="identity-part"><small>模型</small><strong title="${escapeHtml(model)}">${escapeHtml(model)}</strong></span>`)
-    if (channelId) parts.push(`<span class="identity-part"><small>渠道</small><strong>${escapeHtml(channelName)}</strong><em>#${channelId}</em></span>`)
-    return parts.length ? parts.join('') : '<span class="cell-sub">未标记维度</span>'
-  }
-
-  function stabilityDrillAction(item) {
-    const group = String(firstDefined(item, ['group'], ''))
-    const model = String(firstDefined(item, ['requested_model', 'upstream_model'], ''))
-    const modelHash = String(firstDefined(item, ['model_hash'], ''))
-    const channelId = numberValue(item, ['channel_id'])
-    if (!group || !model || channelId) return ''
-    return `<button class="text-button stability-drill" type="button"
-      data-stability-drill="true"
-      data-stability-group="${escapeHtml(group)}"
-      data-stability-model="${escapeHtml(model)}"
-      data-stability-model-hash="${escapeHtml(modelHash)}">下钻渠道</button>`
+    if (group && includes('group')) parts.push(`<span class="identity-part"><small>分组</small><strong>${escapeHtml(groupName || group)}</strong>${groupName && groupName !== group ? `<em>${escapeHtml(group)}</em>` : ''}</span>`)
+    if (channelId && includes('channel')) parts.push(`<span class="identity-part"><small>渠道</small><strong>${escapeHtml(channelName)}</strong><em>#${channelId}</em></span>`)
+    if (model && includes('model')) parts.push(`<span class="identity-part"><small>模型</small><strong title="${escapeHtml(model)}">${escapeHtml(model)}</strong></span>`)
+    const missingLabel = onlyTypes?.length === 1 ? STABILITY_NODE_LABELS[onlyTypes[0]] : '维度'
+    return parts.length ? parts.join('') : `<span class="cell-sub">未标记${escapeHtml(missingLabel || '维度')}</span>`
   }
 
   function stabilityDetailWindow(windows) {
@@ -1062,37 +1109,40 @@
     return state.stabilityWindows[state.stabilityWindows.length - 1] || 0
   }
 
-  function renderStabilityTable() {
-    $('stabilityHead').innerHTML = `<tr>
-      <th scope="col">分析对象</th>
-      ${state.stabilityWindows.map((seconds) => `<th scope="col">${escapeHtml(stabilityWindowLabel(seconds))}</th>`).join('')}
-      <th scope="col">${escapeHtml(stabilityWindowLabel(stabilityDetailWindowSeconds()))}运维详情</th>
-      <th scope="col">用量与缓存</th>
-    </tr>`
+  function resetStabilityTree() {
+    state.stabilityTreeGeneration += 1
+    state.stabilityTreeEntries.forEach((entry) => entry.controller?.abort())
+    state.stabilityExpandedNodes.clear()
+    state.stabilityTreeEntries.clear()
+    state.stabilityTreeNodes.clear()
+    state.stabilityTreeQueryParams = null
+    state.stabilityTreePlan = null
+    state.stabilityTreeMode = false
+  }
 
-    $('stabilityRows').innerHTML = state.stabilityItems.length ? state.stabilityItems.map((item) => {
-      const windows = stabilityWindowMap(item)
-      const detail = stabilityDetailWindow(windows)
-      const failures = numberValue(detail, ['failure_count'])
-      const retries = numberValue(detail, ['retry_count'])
-      const retryRate = firstDefined(detail, ['retry_rate'], null)
-      const p95 = numberValue(detail, ['p95_latency_ms'], NaN)
-      const p95Ttft = numberValue(detail, ['p95_ttft_ms'], NaN)
-      const upstream429 = numberValue(detail, ['upstream_429_count'])
-      const upstream5xx = numberValue(detail, ['upstream_5xx_count'])
-      const transportErrors = numberValue(detail, ['transport_error_count'])
-      const streamErrors = numberValue(detail, ['stream_error_count'])
-      const statusSamples = numberValue(detail, ['upstream_status_sample_count'])
-      const statusCoverage = firstDefined(detail, ['upstream_status_coverage_rate'], null)
-      const liveRate = firstDefined(detail, ['live_event_rate'], null)
-      const legacyRate = firstDefined(detail, ['legacy_event_rate'], null)
-      const lastFailure = normalizeTimestamp(firstDefined(detail, ['last_failure_bucket_ts'], 0))
-      const totalTokens = numberValue(detail, ['total_tokens'])
-      const cacheRead = numberValue(detail, ['cache_read_tokens'])
-      const cacheRate = firstDefined(detail, ['cache_token_hit_rate'], null)
-      const usageCoverage = firstDefined(detail, ['usage_success_coverage_rate'], null)
-      return `<tr>
-        <td><div class="stability-identity">${stabilityIdentity(item)}${stabilityDrillAction(item)}</div></td>
+  function renderStabilityMetricRow(item, identity, rowClass = '') {
+    const windows = stabilityWindowMap(item)
+    const detail = stabilityDetailWindow(windows)
+    const failures = numberValue(detail, ['failure_count'])
+    const retries = numberValue(detail, ['retry_count'])
+    const retryRate = firstDefined(detail, ['retry_rate'], null)
+    const p95 = numberValue(detail, ['p95_latency_ms'], NaN)
+    const p95Ttft = numberValue(detail, ['p95_ttft_ms'], NaN)
+    const upstream429 = numberValue(detail, ['upstream_429_count'])
+    const upstream5xx = numberValue(detail, ['upstream_5xx_count'])
+    const transportErrors = numberValue(detail, ['transport_error_count'])
+    const streamErrors = numberValue(detail, ['stream_error_count'])
+    const statusSamples = numberValue(detail, ['upstream_status_sample_count'])
+    const statusCoverage = firstDefined(detail, ['upstream_status_coverage_rate'], null)
+    const liveRate = firstDefined(detail, ['live_event_rate'], null)
+    const legacyRate = firstDefined(detail, ['legacy_event_rate'], null)
+    const lastFailure = normalizeTimestamp(firstDefined(detail, ['last_failure_bucket_ts'], 0))
+    const totalTokens = numberValue(detail, ['total_tokens'])
+    const cacheRead = numberValue(detail, ['cache_read_tokens'])
+    const cacheRate = firstDefined(detail, ['cache_token_hit_rate'], null)
+    const usageCoverage = firstDefined(detail, ['usage_success_coverage_rate'], null)
+    return `<tr${rowClass ? ` class="${rowClass}"` : ''}>
+        <td>${identity}</td>
         ${state.stabilityWindows.map((seconds) => `<td>${renderStabilityWindow(windows.get(seconds), seconds)}</td>`).join('')}
         <td><div class="stability-detail">
           <strong>失败 ${escapeHtml(formatInteger(failures))} · 重试 ${escapeHtml(formatInteger(retries))}</strong>
@@ -1112,16 +1162,367 @@
           <span>实时 ${escapeHtml(formatPercent(liveRate))} · 历史 ${escapeHtml(formatPercent(legacyRate))}</span>
         </div></td>
       </tr>`
-    }).join('') : `<tr><td class="table-empty" colspan="${state.stabilityWindows.length + 3}">当前筛选没有可比较的运维样本</td></tr>`
+  }
+
+  function stabilityGroupCode(item) {
+    return String(firstDefined(item, ['group'], '')).trim()
+  }
+
+  function stabilityGroupDisplayName(item) {
+    const group = stabilityGroupCode(item)
+    return String(firstDefined(item, ['group_name'], group)).trim() || group
+  }
+
+  function stabilityChannelId(item) {
+    const channelId = numberValue(item, ['channel_id'])
+    return Number.isInteger(channelId) && channelId > 0 ? channelId : 0
+  }
+
+  function stabilityModelName(item) {
+    return String(firstDefined(item, ['requested_model', 'upstream_model'], '')).trim()
+  }
+
+  function stabilityNodeValue(item, type) {
+    if (type === 'group') return stabilityGroupCode(item)
+    if (type === 'channel') return stabilityChannelId(item) ? String(stabilityChannelId(item)) : ''
+    if (type === 'model') {
+      return String(firstDefined(item, ['model_hash'], '')).trim() || stabilityModelName(item)
+    }
+    return ''
+  }
+
+  function stabilityNodeDisplayName(item, type) {
+    if (type === 'group') return stabilityGroupDisplayName(item) || '未标记分组'
+    if (type === 'channel') {
+      const channelId = stabilityChannelId(item)
+      return String(firstDefined(item, ['channel_name'], channelId ? `渠道 #${channelId}` : '未标记渠道'))
+    }
+    if (type === 'model') return stabilityModelName(item) || '未标记模型'
+    return '未标记维度'
+  }
+
+  function stabilityNodeKey(item, levelIndex, plan = state.stabilityTreePlan) {
+    if (!plan || levelIndex < 0 || levelIndex >= plan.levels.length) return ''
+    const values = plan.levels.slice(0, levelIndex + 1).map((type) => stabilityNodeValue(item, type))
+    return `${plan.dimension}:${levelIndex}:${JSON.stringify(values)}`
+  }
+
+  function stabilityNodeDescriptor(item, levelIndex, ancestorKeys = []) {
+    const plan = state.stabilityTreePlan
+    if (!plan || levelIndex < 0 || levelIndex >= plan.levels.length) return null
+    const type = plan.levels[levelIndex]
+    const key = stabilityNodeKey(item, levelIndex, plan)
+    return {
+      key,
+      item,
+      levelIndex,
+      type,
+      ancestorKeys,
+      filterable: Boolean(stabilityNodeValue(item, type)),
+      expandable: levelIndex < plan.levels.length - 1,
+    }
+  }
+
+  function stabilityTreeEntry(descriptor) {
+    let entry = state.stabilityTreeEntries.get(descriptor.key)
+    if (!entry) {
+      entry = {
+        items: [],
+        total: 0,
+        page: 0,
+        loaded: false,
+        loading: false,
+        error: '',
+        controller: null,
+        descriptor,
+        ancestorKeys: [...descriptor.ancestorKeys],
+      }
+      state.stabilityTreeEntries.set(descriptor.key, entry)
+    } else {
+      entry.descriptor = descriptor
+      entry.ancestorKeys = [...descriptor.ancestorKeys]
+    }
+    return entry
+  }
+
+  function renderStabilityTreeIdentity(descriptor) {
+    const { item, key, levelIndex, type } = descriptor
+    const canExpand = descriptor.expandable && descriptor.filterable
+    const style = `--stability-tree-level:${levelIndex}`
+    if (!canExpand) {
+      return `<div class="stability-tree-leaf${levelIndex === 0 ? ' is-root' : ''}" style="${style}">
+        ${levelIndex > 0 ? '<span class="stability-tree-branch" aria-hidden="true">└</span>' : ''}
+        <div class="stability-tree-identity stability-identity">${stabilityIdentity(item, { onlyTypes: [type] })}</div>
+      </div>`
+    }
+
+    const expanded = state.stabilityExpandedNodes.has(key)
+    const entry = state.stabilityTreeEntries.get(key)
+    const childType = state.stabilityTreePlan.levels[levelIndex + 1]
+    const childLabel = STABILITY_NODE_LABELS[childType]
+    let meta = `点击展开${childLabel}`
+    if (entry?.loading) {
+      meta = entry.items.length ? `正在加载更多${childLabel}…` : `正在加载${childLabel}…`
+    } else if (entry?.error) {
+      meta = entry.items.length
+        ? `已加载 ${formatInteger(entry.items.length)} 个${childLabel}，继续加载失败`
+        : `${childLabel}加载失败`
+    } else if (entry?.loaded) {
+      meta = `已加载 ${formatInteger(entry.items.length)} / ${formatInteger(entry.total)} 个${childLabel}`
+    }
+    const displayName = stabilityNodeDisplayName(item, type)
+    return `<div class="stability-tree-parent" style="${style}">
+      <button class="stability-tree-toggle" type="button"
+        data-stability-node-toggle="${escapeHtml(key)}"
+        aria-expanded="${expanded}"
+        aria-busy="${Boolean(entry?.loading)}"
+        aria-label="${expanded ? '收起' : '展开'}${STABILITY_NODE_LABELS[type]} ${escapeHtml(displayName)} 的${childLabel}">
+        <span class="stability-tree-chevron" aria-hidden="true">›</span>
+        <span class="stability-tree-identity stability-identity">${stabilityIdentity(item, { onlyTypes: [type] })}</span>
+      </button>
+      <span class="stability-tree-meta">${escapeHtml(meta)}</span>
+    </div>`
+  }
+
+  function renderStabilityChildState(descriptor, content, { error = false } = {}) {
+    const childLevel = descriptor.levelIndex + 1
+    return `<tr class="stability-child-state stability-tree-row--level-${childLevel}${error ? ' stability-child-state--error' : ''}" data-stability-child-state="${escapeHtml(descriptor.key)}">
+      <td colspan="${state.stabilityWindows.length + 3}">
+        <div class="stability-child-actions" style="--stability-tree-level:${childLevel}" role="${error ? 'alert' : 'status'}" aria-live="polite">${content}</div>
+      </td>
+    </tr>`
+  }
+
+  function restoreStabilityNodeFocus(nodeKey) {
+    if (!nodeKey) return
+    const button = $$('[data-stability-node-toggle]').find((candidate) =>
+      candidate.dataset.stabilityNodeToggle === nodeKey
+    )
+    if (!button) return
+    try {
+      button.focus({ preventScroll: true })
+    } catch (_error) {
+      button.focus()
+    }
+  }
+
+  function renderStabilityNodeChildren(descriptor) {
+    if (!descriptor?.expandable || !state.stabilityExpandedNodes.has(descriptor.key)) return ''
+    const entry = state.stabilityTreeEntries.get(descriptor.key)
+    const childType = state.stabilityTreePlan.levels[descriptor.levelIndex + 1]
+    const childLabel = STABILITY_NODE_LABELS[childType]
+    const parentLabel = STABILITY_NODE_LABELS[descriptor.type]
+    if (!entry) {
+      return renderStabilityChildState(descriptor, `<span>正在准备${childLabel}数据…</span>`)
+    }
+
+    const childAncestorKeys = [...descriptor.ancestorKeys, descriptor.key]
+    const rows = entry.items.map((item) => renderStabilityTreeNode(
+      item,
+      descriptor.levelIndex + 1,
+      childAncestorKeys,
+    ))
+    if (entry.loading) {
+      rows.push(renderStabilityChildState(
+        descriptor,
+        `<span>${entry.items.length ? `正在加载更多${childLabel}…` : `正在加载该${parentLabel}的${childLabel}…`}</span>`,
+      ))
+    } else if (entry.error) {
+      rows.push(renderStabilityChildState(
+        descriptor,
+        `<span>${escapeHtml(entry.error)}</span><button class="text-button" type="button" data-stability-node-retry="${escapeHtml(descriptor.key)}">重试</button>`,
+        { error: true },
+      ))
+    } else if (entry.loaded && !entry.items.length) {
+      rows.push(renderStabilityChildState(descriptor, `<span>该${parentLabel}在当前筛选条件下没有${childLabel}样本</span>`))
+    } else if (entry.loaded && entry.items.length < entry.total) {
+      rows.push(renderStabilityChildState(
+        descriptor,
+        `<span>已加载 ${escapeHtml(formatInteger(entry.items.length))} / ${escapeHtml(formatInteger(entry.total))} 个${childLabel}</span><button class="text-button" type="button" data-stability-node-more="${escapeHtml(descriptor.key)}">加载更多</button>`,
+      ))
+    }
+    return rows.join('')
+  }
+
+  function renderStabilityTreeNode(item, levelIndex, ancestorKeys = []) {
+    const descriptor = stabilityNodeDescriptor(item, levelIndex, ancestorKeys)
+    if (!descriptor) return ''
+    state.stabilityTreeNodes.set(descriptor.key, descriptor)
+    const expanded = descriptor.expandable && state.stabilityExpandedNodes.has(descriptor.key)
+    const rowClass = [
+      'stability-tree-row',
+      `stability-tree-row--level-${levelIndex}`,
+      `stability-tree-row--${descriptor.type}`,
+      expanded ? 'is-expanded' : '',
+    ].filter(Boolean).join(' ')
+    return renderStabilityMetricRow(item, renderStabilityTreeIdentity(descriptor), rowClass) +
+      (expanded ? renderStabilityNodeChildren(descriptor) : '')
+  }
+
+  function renderStabilityTable() {
+    const activeDataset = document.activeElement?.dataset
+    const focusedNode = activeDataset?.stabilityNodeToggle ||
+      activeDataset?.stabilityNodeRetry ||
+      activeDataset?.stabilityNodeMore || ''
+    state.stabilityTreeNodes.clear()
+    $('stabilityHead').innerHTML = `<tr>
+      <th scope="col">分析对象</th>
+      ${state.stabilityWindows.map((seconds) => `<th scope="col">${escapeHtml(stabilityWindowLabel(seconds))}</th>`).join('')}
+      <th scope="col">${escapeHtml(stabilityWindowLabel(stabilityDetailWindowSeconds()))}运维详情</th>
+      <th scope="col">用量与缓存</th>
+    </tr>`
+
+    if (!state.stabilityItems.length) {
+      $('stabilityRows').innerHTML = `<tr><td class="table-empty" colspan="${state.stabilityWindows.length + 3}">当前筛选没有可比较的运维样本</td></tr>`
+      renderStabilityPagination()
+      restoreStabilityNodeFocus(focusedNode)
+      return
+    }
+    if (state.stabilityTreeMode) {
+      $('stabilityRows').innerHTML = state.stabilityItems.map((item) => renderStabilityTreeNode(item, 0)).join('')
+    } else {
+      $('stabilityRows').innerHTML = state.stabilityItems.map((item) => renderStabilityMetricRow(
+        item,
+        `<div class="stability-identity">${stabilityIdentity(item)}</div>`,
+      )).join('')
+    }
     renderStabilityPagination()
+    restoreStabilityNodeFocus(focusedNode)
   }
 
   function renderStabilityPagination() {
     const totalPages = Math.max(1, Math.ceil(state.stabilityTotal / DEFAULT_PAGE_SIZE))
+    const rootType = state.stabilityTreePlan?.levels[0]
+    const objectLabel = state.stabilityTreeMode && rootType ? `个${STABILITY_NODE_LABELS[rootType]}` : '个分析对象'
     $('stabilityPagination').innerHTML = `
-      <span>共 ${escapeHtml(formatInteger(state.stabilityTotal))} 个分析对象 · 第 ${state.stabilityPage} / ${totalPages} 页</span>
+      <span>共 ${escapeHtml(formatInteger(state.stabilityTotal))} ${objectLabel} · 第 ${state.stabilityPage} / ${totalPages} 页</span>
       <button type="button" data-stability-page="${state.stabilityPage - 1}" ${state.stabilityPage <= 1 ? 'disabled' : ''}>上一页</button>
       <button type="button" data-stability-page="${state.stabilityPage + 1}" ${state.stabilityPage >= totalPages ? 'disabled' : ''}>下一页</button>`
+  }
+
+  function applyStabilityNodeFilters(params, descriptor) {
+    const plan = state.stabilityTreePlan
+    if (!plan) return false
+    for (let levelIndex = 0; levelIndex <= descriptor.levelIndex; levelIndex += 1) {
+      const type = plan.levels[levelIndex]
+      if (type === 'group') {
+        const group = stabilityGroupCode(descriptor.item)
+        if (!group) return false
+        params.set('groups', group)
+      } else if (type === 'channel') {
+        const channelId = stabilityChannelId(descriptor.item)
+        if (!channelId) return false
+        params.set('channel_ids', String(channelId))
+      }
+    }
+    return true
+  }
+
+  async function loadStabilityNodeChildren(nodeKey, { append = false } = {}) {
+    const descriptor = state.stabilityTreeNodes.get(nodeKey) || state.stabilityTreeEntries.get(nodeKey)?.descriptor
+    const plan = state.stabilityTreePlan
+    if (
+      !state.stabilityTreeMode ||
+      !plan ||
+      !descriptor?.expandable ||
+      !state.stabilityTreeQueryParams ||
+      !state.stabilityExpandedNodes.has(nodeKey)
+    ) return
+    const entry = stabilityTreeEntry(descriptor)
+    if (entry.loading || (!append && entry.loaded)) return
+
+    const generation = state.stabilityTreeGeneration
+    const planDimension = plan.dimension
+    const page = append ? entry.page + 1 : 1
+    const controller = new AbortController()
+    entry.controller?.abort()
+    entry.controller = controller
+    entry.loading = true
+    entry.error = ''
+    if (!append) {
+      entry.items = []
+      entry.total = 0
+      entry.page = 0
+      entry.loaded = false
+    }
+    renderStabilityTable()
+
+    const requestIsCurrent = () =>
+      generation === state.stabilityTreeGeneration &&
+      state.stabilityTreePlan?.dimension === planDimension &&
+      state.stabilityTreeEntries.get(nodeKey) === entry &&
+      entry.controller === controller
+
+    try {
+      // 展开、重试和加载更多必须复用根节点请求的完整查询快照，
+      // 避免停留跨桶后父子行使用不同的 end_timestamp。
+      const params = new URLSearchParams(state.stabilityTreeQueryParams)
+      params.set('dimension', plan.levels.slice(0, descriptor.levelIndex + 2).join('_'))
+      if (!applyStabilityNodeFilters(params, descriptor)) {
+        throw new Error('当前节点缺少可用于下钻的稳定标识')
+      }
+      params.set('page', String(page))
+      params.set('page_size', String(STABILITY_CHILD_PAGE_SIZE))
+      const payload = await requestJson(`${API_ROOT}/stability?${params}`, { signal: controller.signal })
+      if (!requestIsCurrent()) return
+      const items = arrayValue(payload, ['items', 'data'])
+      if (append) {
+        const childLevel = descriptor.levelIndex + 1
+        const existing = new Set(entry.items.map((item) => stabilityNodeKey(item, childLevel, plan)))
+        entry.items.push(...items.filter((item) => {
+          const key = stabilityNodeKey(item, childLevel, plan)
+          if (key && existing.has(key)) return false
+          if (key) existing.add(key)
+          return true
+        }))
+      } else {
+        entry.items = items
+      }
+      entry.total = numberValue(payload, ['total', 'total_count'], entry.items.length)
+      entry.page = page
+      entry.loaded = true
+    } catch (error) {
+      if (error?.name === 'AbortError' || !requestIsCurrent()) return
+      const childType = plan.levels[descriptor.levelIndex + 1]
+      entry.error = error?.message || `${STABILITY_NODE_LABELS[childType]}数据加载失败`
+    } finally {
+      if (requestIsCurrent()) {
+        entry.loading = false
+        entry.controller = null
+        renderStabilityTable()
+      }
+    }
+  }
+
+  function abortStabilityTreeEntry(entry) {
+    if (!entry?.loading) return
+    entry.controller?.abort()
+    entry.controller = null
+    entry.loading = false
+  }
+
+  function collapseStabilityNode(nodeKey) {
+    state.stabilityExpandedNodes.delete(nodeKey)
+    state.stabilityTreeEntries.forEach((entry, entryKey) => {
+      if (entryKey !== nodeKey && !entry.ancestorKeys.includes(nodeKey)) return
+      abortStabilityTreeEntry(entry)
+      if (entryKey !== nodeKey) state.stabilityExpandedNodes.delete(entryKey)
+    })
+  }
+
+  function toggleStabilityNode(nodeKey) {
+    const descriptor = state.stabilityTreeNodes.get(nodeKey) || state.stabilityTreeEntries.get(nodeKey)?.descriptor
+    if (!state.stabilityTreeMode || !descriptor?.expandable || !descriptor.filterable) return
+    if (state.stabilityExpandedNodes.has(nodeKey)) {
+      collapseStabilityNode(nodeKey)
+      renderStabilityTable()
+      return
+    }
+
+    state.stabilityExpandedNodes.add(nodeKey)
+    const entry = state.stabilityTreeEntries.get(nodeKey)
+    if (entry?.loaded || entry?.error) renderStabilityTable()
+    else loadStabilityNodeChildren(nodeKey)
   }
 
   async function loadStability(signal) {
@@ -1129,8 +1530,12 @@
     const windows = STABILITY_WINDOWS.filter((seconds) => seconds <= maxSeconds)
     state.stabilityWindows = windows.length ? windows : [Math.max(300, maxSeconds)]
     const sortBy = $('stabilitySort').value
+    const selectedDimension = $('stabilityDimension').value
+    updateStabilityDimensionControls()
+    state.stabilityTreePlan = STABILITY_TREE_PLANS[selectedDimension] || null
+    state.stabilityTreeMode = Boolean(state.stabilityTreePlan)
     const params = buildQuery({
-      dimension: $('stabilityDimension').value,
+      dimension: state.stabilityTreePlan?.levels[0] || selectedDimension,
       model_dimension: $('stabilityModelDimension').value,
       windows: state.stabilityWindows.join(','),
       page: state.stabilityPage,
@@ -1138,47 +1543,13 @@
       sort_by: sortBy,
       sort_order: sortBy === 'quality_success_rate' ? 'asc' : 'desc',
     }, { includeStatus: false })
+    state.stabilityTreeQueryParams = state.stabilityTreeMode ? new URLSearchParams(params) : null
     const payload = await requestJson(`${API_ROOT}/stability?${params}`, { signal })
     state.stabilityItems = arrayValue(payload, ['items', 'data'])
     state.stabilityTotal = numberValue(payload, ['total', 'total_count'], state.stabilityItems.length)
     renderStabilityTable()
     renderDataQuality(payload)
     return { empty: state.stabilityItems.length === 0, meta: extractMeta(payload) }
-  }
-
-  function selectModelFilterByIdentity(select, modelHash, modelName) {
-    let option = Array.from(select.options).find((candidate) =>
-      (modelHash && candidate.dataset.modelHash === modelHash) ||
-      (modelName && candidate.dataset.model === modelName)
-    )
-    if (!option && modelHash) {
-      option = document.createElement('option')
-      option.value = modelHash
-      option.textContent = modelName || modelHash
-      option.dataset.model = modelName
-      option.dataset.modelHash = modelHash
-      select.appendChild(option)
-    }
-    if (option) select.value = option.value
-  }
-
-  function drillStabilityChannels(button) {
-    const group = button.dataset.stabilityGroup || ''
-    const model = button.dataset.stabilityModel || ''
-    const modelHash = button.dataset.stabilityModelHash || ''
-    if (group && !Array.from($('groupFilter').options).some((option) => option.value === group)) {
-      const option = document.createElement('option')
-      option.value = group
-      option.textContent = group
-      $('groupFilter').appendChild(option)
-    }
-    $('groupFilter').value = group
-    const upstream = $('stabilityModelDimension').value === 'upstream'
-    const modelFilter = upstream ? $('upstreamModelFilter') : $('requestedModelFilter')
-    selectModelFilterByIdentity(modelFilter, modelHash, model)
-    $('stabilityDimension').value = 'group_channel_model'
-    state.stabilityPage = 1
-    loadCurrentView()
   }
 
   function normalizeChannel(row) {
@@ -1338,11 +1709,12 @@
   }
 
   async function loadChannels(signal) {
+    const sortBy = $('channelSort').value
     const params = buildQuery({
       page: state.channelPage,
       page_size: DEFAULT_PAGE_SIZE,
-      sort_by: $('channelSort').value,
-      sort_order: 'desc',
+      sort_by: sortBy,
+      sort_order: sortBy === 'channel_name' ? 'asc' : 'desc',
     }, { includeStatus: false })
     const payload = await requestJson(`${API_ROOT}/channels?${params}`, { signal })
     const items = arrayValue(payload, ['items', 'channels', 'data'])
@@ -1681,6 +2053,7 @@
 
   async function loadCurrentView() {
     if (state.controller) state.controller.abort()
+    if (state.view === 'operations') resetStabilityTree()
     state.controller = new AbortController()
     const signal = state.controller.signal
     const loadId = ++state.loadingId
@@ -1850,6 +2223,10 @@
     $('stabilityDimension').value = 'group_model'
     $('stabilityModelDimension').value = 'requested'
     $('stabilitySort').value = 'failure_count'
+    $('channelSort').value = 'channel_name'
+    $('modelDimension').value = 'requested'
+    state.modelDimension = 'requested'
+    updateStabilityDimensionControls()
     $('customRange').classList.add('is-hidden')
     $$('.range-button').forEach((button) => button.classList.toggle('is-active', button.dataset.range === 'today'))
     if (reload) loadCurrentView()
@@ -1879,8 +2256,13 @@
   function applyCustomRange() {
     const start = Math.floor(new Date($('customStart').value).getTime() / 1000)
     const end = Math.floor(new Date($('customEnd').value).getTime() / 1000)
+    const now = Math.floor(Date.now() / 1000)
     if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= start) {
       showToast('请选择有效的开始和结束时间')
+      return
+    }
+    if (end > now) {
+      showToast('结束时间不能晚于当前时间')
       return
     }
     if (end - start > state.retentionDays * 86400) {
@@ -1947,8 +2329,19 @@
       loadCurrentView()
     })
 
+    $('groupChannelsButton').addEventListener('click', () => {
+      const modelDimension = $('modelDimension').value === 'upstream' ? 'upstream' : 'requested'
+      state.modelDimension = modelDimension
+      $('stabilityDimension').value = 'group_channel_model'
+      $('stabilityModelDimension').value = modelDimension
+      updateStabilityDimensionControls()
+      state.stabilityPage = 1
+      activateView('operations')
+    })
+
     ;['stabilityDimension', 'stabilityModelDimension', 'stabilitySort'].forEach((id) => {
       $(id).addEventListener('change', () => {
+        if (id === 'stabilityDimension') updateStabilityDimensionControls()
         state.stabilityPage = 1
         loadCurrentView()
       })
@@ -2001,8 +2394,22 @@
         loadCurrentView()
       }
 
-      const stabilityDrill = event.target.closest('[data-stability-drill]')
-      if (stabilityDrill) drillStabilityChannels(stabilityDrill)
+      const stabilityNodeToggle = event.target.closest('[data-stability-node-toggle]')
+      if (stabilityNodeToggle) {
+        toggleStabilityNode(stabilityNodeToggle.dataset.stabilityNodeToggle || '')
+      }
+
+      const stabilityNodeRetry = event.target.closest('[data-stability-node-retry]')
+      if (stabilityNodeRetry) {
+        const nodeKey = stabilityNodeRetry.dataset.stabilityNodeRetry || ''
+        const entry = state.stabilityTreeEntries.get(nodeKey)
+        loadStabilityNodeChildren(nodeKey, { append: Boolean(entry?.items.length) })
+      }
+
+      const stabilityNodeMore = event.target.closest('[data-stability-node-more]')
+      if (stabilityNodeMore) {
+        loadStabilityNodeChildren(stabilityNodeMore.dataset.stabilityNodeMore || '', { append: true })
+      }
 
       const failurePage = event.target.closest('[data-failure-page]')
       if (failurePage && !failurePage.disabled) {

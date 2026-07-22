@@ -1,11 +1,11 @@
 <!doctype html>
-<html lang="zh-CN" data-channel-quality-ui-version="0.3.1">
+<html lang="zh-CN" data-channel-quality-ui-version="0.3.6">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
     <title>渠道可观测性中心</title>
-    <link rel="stylesheet" href="./app.css?v=0.3.1" />
+    <link rel="stylesheet" href="./app.css?v=0.3.6" />
   </head>
   <body>
     <a class="skip-link" href="#mainContent">跳到主要内容</a>
@@ -269,16 +269,16 @@
           <div class="panel-header panel-header--table">
             <div>
               <h2>分组、模型与渠道稳定性</h2>
-              <p>质量成功率只使用可归因样本；每个百分比下方同时展示样本量，避免低样本误判。</p>
+              <p>质量成功率只使用可归因样本；复合维度按分组、渠道、模型逐层展开并按需加载。</p>
             </div>
             <div class="table-actions operations-actions">
               <label class="compact-field" for="stabilityDimension">
                 <span>分析维度</span>
                 <select id="stabilityDimension">
-                  <option value="group_model">分组 × 模型</option>
-                  <option value="group_channel_model">分组 × 渠道 × 模型</option>
-                  <option value="channel_model">渠道 × 模型</option>
-                  <option value="group_channel">分组 × 渠道</option>
+                  <option value="group_model">分组 → 模型</option>
+                  <option value="group_channel_model">分组 → 渠道 → 模型</option>
+                  <option value="channel_model">渠道 → 模型</option>
+                  <option value="group_channel">分组 → 渠道</option>
                   <option value="model">仅模型</option>
                   <option value="channel">仅渠道</option>
                   <option value="group">仅分组</option>
@@ -321,7 +321,7 @@
               <h2>渠道与模型</h2>
               <p>展开渠道可查看请求模型或上游模型的同口径统计</p>
             </div>
-            <div class="table-actions">
+            <div class="table-actions channel-actions">
               <label class="compact-field" for="modelDimension">
                 <span>模型口径</span>
                 <select id="modelDimension">
@@ -330,8 +330,9 @@
                 </select>
               </label>
               <label class="compact-field" for="channelSort">
-                <span>排序</span>
+                <span>渠道排序</span>
                 <select id="channelSort">
+                  <option value="channel_name">渠道名称</option>
                   <option value="request_count">调用量</option>
                   <option value="quality_success_rate">渠道质量成功率</option>
                   <option value="p95_latency_ms">P95 延迟</option>
@@ -339,6 +340,12 @@
                   <option value="failure_count">失败数</option>
                 </select>
               </label>
+              <button
+                id="groupChannelsButton"
+                class="button button--secondary"
+                type="button"
+                title="在稳定性矩阵中按分组、渠道和模型查看"
+              >按请求分组</button>
             </div>
           </div>
           <div class="table-scroll">
@@ -452,6 +459,6 @@
     </main>
 
     <div id="toast" class="toast is-hidden" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=0.3.1" defer></script>
+    <script src="./app.js?v=0.3.6" defer></script>
   </body>
 </html>

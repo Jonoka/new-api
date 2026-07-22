@@ -1281,7 +1281,7 @@ func validateChannelTableAnalyticsQuery(query dto.ChannelAnalyticsQuery) error {
 		return invalidChannelAnalyticsQuery("渠道和模型接口不支持状态码过滤")
 	}
 	allowedSort := map[string]bool{
-		"": true, "request_count": true, "channel_attempt_count": true,
+		"": true, "request_count": true, "channel_attempt_count": true, "channel_name": true,
 		"quality_success_rate": true, "failure_count": true, "p95_latency_ms": true,
 		"input_tokens_total": true, "output_tokens": true,
 		"cache_read_tokens": true, "charged_quota": true, "charged_micro_usd": true,
@@ -1594,6 +1594,13 @@ func sortChannelAnalyticsItems(items []dto.ChannelAnalyticsChannelItem, sortBy s
 	}
 	descending := sortOrder != "asc"
 	sort.SliceStable(items, func(i, j int) bool {
+		if sortBy == "channel_name" {
+			leftEmpty := strings.TrimSpace(items[i].ChannelName) == ""
+			rightEmpty := strings.TrimSpace(items[j].ChannelName) == ""
+			if leftEmpty != rightEmpty {
+				return !leftEmpty
+			}
+		}
 		comparison := compareChannelAnalyticsItems(items[i], items[j], sortBy)
 		if comparison == 0 {
 			comparison = compareInt64(int64(items[i].ChannelId), int64(items[j].ChannelId))
@@ -1626,6 +1633,8 @@ func sortChannelAnalyticsModelItems(items []dto.ChannelAnalyticsModelItem, sortB
 
 func compareChannelAnalyticsItems(left dto.ChannelAnalyticsChannelItem, right dto.ChannelAnalyticsChannelItem, sortBy string) int {
 	switch sortBy {
+	case "channel_name":
+		return strings.Compare(normalizeChannelAnalyticsName(left.ChannelName), normalizeChannelAnalyticsName(right.ChannelName))
 	case "quality_success_rate":
 		return compareOptionalFloat(left.ChannelQualitySuccessRate, right.ChannelQualitySuccessRate)
 	case "failure_count":
@@ -1645,6 +1654,15 @@ func compareChannelAnalyticsItems(left dto.ChannelAnalyticsChannelItem, right dt
 	default:
 		return compareInt64(left.ChannelAttemptCount, right.ChannelAttemptCount)
 	}
+}
+
+func normalizeChannelAnalyticsName(name string) string {
+	return strings.Map(func(character rune) rune {
+		if character >= 'A' && character <= 'Z' {
+			return character + ('a' - 'A')
+		}
+		return character
+	}, strings.TrimSpace(name))
 }
 
 func compareInt64(left int64, right int64) int {

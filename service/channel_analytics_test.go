@@ -421,6 +421,76 @@ func TestSortChannelAnalyticsItemsByFailureCount(t *testing.T) {
 	assert.Equal(t, []int{2, 1, 3}, []int{items[0].ChannelId, items[1].ChannelId, items[2].ChannelId})
 }
 
+func TestValidateChannelTableAnalyticsQueryAllowsChannelNameSort(t *testing.T) {
+	assert.NoError(t, validateChannelTableAnalyticsQuery(dto.ChannelAnalyticsQuery{SortBy: "channel_name"}))
+}
+
+func TestSortChannelAnalyticsItemsByChannelName(t *testing.T) {
+	items := []dto.ChannelAnalyticsChannelItem{
+		{ChannelId: 6, ChannelName: "beta"},
+		{ChannelId: 9, ChannelName: " 天才程序员 / Codex-Plus "},
+		{ChannelId: 4, ChannelName: "Alpha"},
+		{ChannelId: 7, ChannelName: "天才程序员 / Codex-Pro"},
+		{ChannelId: 3, ChannelName: " alpha "},
+		{ChannelId: 8, ChannelName: "  "},
+	}
+
+	sortChannelAnalyticsItems(items, "channel_name", "asc")
+	assert.Equal(t, []int{3, 4, 6, 9, 7, 8}, channelAnalyticsItemIDs(items))
+
+	sortChannelAnalyticsItems(items, "channel_name", "desc")
+	assert.Equal(t, []int{7, 9, 6, 4, 3, 8}, channelAnalyticsItemIDs(items))
+}
+
+func TestChannelNameSortRunsBeforePagination(t *testing.T) {
+	db := setupChannelAnalyticsTestDB(t)
+	bucketTs := time.Now().Unix() / 300 * 300
+	channels := []model.Channel{
+		{Id: 4, Name: "天才程序员 / Codex-Pro", Type: constant.ChannelTypeOpenAI, Key: "key-4", Group: "default"},
+		{Id: 2, Name: "beta", Type: constant.ChannelTypeOpenAI, Key: "key-2", Group: "default"},
+		{Id: 3, Name: "天才程序员 / Codex-Plus", Type: constant.ChannelTypeOpenAI, Key: "key-3", Group: "default"},
+		{Id: 1, Name: "alpha", Type: constant.ChannelTypeOpenAI, Key: "key-1", Group: "default"},
+	}
+	require.NoError(t, db.Create(&channels).Error)
+
+	buckets := make([]model.ChannelMetricBucket, 0, len(channels))
+	for index, channel := range channels {
+		bucket := channelAnalyticsTestBucket(
+			bucketTs,
+			fmt.Sprintf("channel-name-page-%d", channel.Id),
+			string(channelmetrics.ScopeChannelAttempt),
+			string(channelmetrics.OutcomeSuccess),
+			int64((index+1)*10),
+			int64((index+1)*10),
+		)
+		bucket.ChannelPresent = true
+		bucket.ChannelId = channel.Id
+		bucket.ChannelNameSnapshot = fmt.Sprintf("历史名称 %d", channel.Id)
+		bucket.ChannelType = channel.Type
+		buckets = append(buckets, bucket)
+	}
+	require.NoError(t, db.Create(&buckets).Error)
+
+	query := channelAnalyticsTestQuery(bucketTs)
+	query.SortBy = "channel_name"
+	query.SortOrder = "asc"
+	query.Page = 2
+	query.PageSize = 2
+	response, err := GetChannelAnalyticsChannels(query)
+	require.NoError(t, err)
+
+	assert.Equal(t, 4, response.Total)
+	assert.Equal(t, []int{3, 4}, channelAnalyticsItemIDs(response.Items))
+}
+
+func channelAnalyticsItemIDs(items []dto.ChannelAnalyticsChannelItem) []int {
+	ids := make([]int, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.ChannelId)
+	}
+	return ids
+}
+
 func TestParseChannelAnalyticsStabilityQueryUsesBoundedWindowsAndHistoricalOrigin(t *testing.T) {
 	query, err := ParseChannelAnalyticsStabilityQuery(url.Values{
 		"dimension": {"group_channel_model"},
