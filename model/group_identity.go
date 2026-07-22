@@ -361,6 +361,38 @@ func groupLegacyIdentifiers(tx *gorm.DB, group *Group) ([]string, map[string]str
 	return identifiers, identifierSet, nil
 }
 
+// ResolveGroupLogIdentifiers 将日志筛选输入解析为可匹配的历史分组标识。
+// 解析顺序与正式字符串入口一致：当前 code 优先，其次是 alias，最后才按显示名称查找。
+// 返回值包含当前 code 和未被其他当前 code 覆盖的历史 alias；停用分组同样保留。
+func ResolveGroupLogIdentifiers(identifier string) ([]string, error) {
+	identifier = strings.TrimSpace(identifier)
+	if identifier == "" || isVirtualAutoCode(identifier) {
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	group, err := GetGroupByCodeOrAliasWithDB(DB, identifier)
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+
+		var namedGroup Group
+		if err = DB.Where("name = ?", identifier).First(&namedGroup).Error; err != nil {
+			return nil, err
+		}
+		group = &namedGroup
+	}
+	if group == nil || isVirtualAutoCode(group.Code) {
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	identifiers, _, err := groupLegacyIdentifiers(DB, group)
+	if err != nil {
+		return nil, err
+	}
+	return identifiers, nil
+}
+
 func legacyGroupSubstringPattern(group string) string {
 	group = strings.NewReplacer(
 		"!", "!!",

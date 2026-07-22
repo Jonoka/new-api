@@ -341,6 +341,9 @@ func migrateDB() error {
 			return err
 		}
 	}
+	if err := migratePromoCodeDeletionKey(DB); err != nil {
+		return fmt.Errorf("failed to migrate promo code deletion key: %w", err)
+	}
 	if err := migrateGroupIdentity(); err != nil {
 		return fmt.Errorf("failed to migrate group identity: %w", err)
 	}
@@ -435,6 +438,9 @@ func migrateDBFast() error {
 		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 			return err
 		}
+	}
+	if err := migratePromoCodeDeletionKey(DB); err != nil {
+		return fmt.Errorf("failed to migrate promo code deletion key: %w", err)
 	}
 	// 稳定分组表依赖业务表的新列。快速迁移先等待业务表迁移完成，
 	// 再串行建关系表，避免 SQLite 锁冲突和并发迁移下的回填竞态。

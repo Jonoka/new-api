@@ -86,6 +86,36 @@ func hydrateLogGroupNames(logs []*Log) {
 	applyLogGroupNames(logs, groupNames)
 }
 
+// resolveLogGroupFilterValues 将日志筛选输入解析为可命中的历史标识集合。
+// 日志表仍保存字符串 code/alias；无法解析的输入回退为原值，兼容旧数据和旧分组。
+func resolveLogGroupFilterValues(group string) ([]string, error) {
+	if group == "" {
+		return nil, nil
+	}
+	values, err := ResolveGroupLogIdentifiers(group)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return []string{group}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(values) == 0 {
+		return []string{group}, nil
+	}
+	return values, nil
+}
+
+func applyLogGroupFilter(tx *gorm.DB, column string, group string) (*gorm.DB, error) {
+	values, err := resolveLogGroupFilterValues(group)
+	if err != nil {
+		return nil, err
+	}
+	if len(values) == 0 {
+		return tx, nil
+	}
+	return tx.Where(column+" IN ?", values), nil
+}
+
 // don't use iota, avoid change log type value
 const (
 	LogTypeUnknown = 0
@@ -451,8 +481,8 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	if channel != 0 {
 		tx = tx.Where("logs.channel_id = ?", channel)
 	}
-	if group != "" {
-		tx = tx.Where("logs."+logGroupCol+" = ?", group)
+	if tx, err = applyLogGroupFilter(tx, "logs."+logGroupCol, group); err != nil {
+		return nil, 0, err
 	}
 	err = tx.Model(&Log{}).Count(&total).Error
 	if err != nil {
@@ -535,8 +565,8 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 	if endTimestamp != 0 {
 		tx = tx.Where("logs.created_at <= ?", endTimestamp)
 	}
-	if group != "" {
-		tx = tx.Where("logs."+logGroupCol+" = ?", group)
+	if tx, err = applyLogGroupFilter(tx, "logs."+logGroupCol, group); err != nil {
+		return nil, 0, err
 	}
 	err = tx.Model(&Log{}).Limit(logSearchCountLimit).Count(&total).Error
 	if err != nil {
@@ -591,9 +621,13 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 		tx = tx.Where("channel_id = ?", channel)
 		rpmTpmQuery = rpmTpmQuery.Where("channel_id = ?", channel)
 	}
-	if group != "" {
-		tx = tx.Where(logGroupCol+" = ?", group)
-		rpmTpmQuery = rpmTpmQuery.Where(logGroupCol+" = ?", group)
+	groupValues, groupErr := resolveLogGroupFilterValues(group)
+	if groupErr != nil {
+		return stat, groupErr
+	}
+	if len(groupValues) > 0 {
+		tx = tx.Where(logGroupCol+" IN ?", groupValues)
+		rpmTpmQuery = rpmTpmQuery.Where(logGroupCol+" IN ?", groupValues)
 	}
 
 	tx = tx.Where("type = ?", LogTypeConsume)
