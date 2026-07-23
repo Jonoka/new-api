@@ -29,9 +29,9 @@ type StreamErrorEntry struct {
 }
 
 type StreamStatus struct {
-	EndReason  StreamEndReason
-	EndError   error
-	endOnce    sync.Once
+	EndReason StreamEndReason
+	EndError  error
+	endOnce   sync.Once
 
 	mu         sync.Mutex
 	Errors     []StreamErrorEntry
@@ -42,14 +42,17 @@ func NewStreamStatus() *StreamStatus {
 	return &StreamStatus{}
 }
 
-func (s *StreamStatus) SetEndReason(reason StreamEndReason, err error) {
+func (s *StreamStatus) SetEndReason(reason StreamEndReason, err error) bool {
 	if s == nil {
-		return
+		return false
 	}
+	set := false
 	s.endOnce.Do(func() {
+		set = true
 		s.EndReason = reason
 		s.EndError = err
 	})
+	return set
 }
 
 func (s *StreamStatus) RecordError(msg string) {

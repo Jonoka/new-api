@@ -122,6 +122,9 @@ func GetRandomSatisfiedChannelWithExclusions(group string, model string, retry i
 
 	if len(channels) == 1 {
 		if channel, ok := channelsIDM[channels[0]]; ok {
+			if _, excluded := excludedChannelIDs[channel.Id]; len(excludedChannelIDs) > 0 && excluded {
+				return nil, nil
+			}
 			if !IsChannelConcurrencyAvailable(channel) {
 				return nil, nil
 			}
@@ -158,12 +161,9 @@ func GetRandomSatisfiedChannelWithExclusions(group string, model string, retry i
 		return nil, err
 	}
 	if len(targetChannels) == 0 {
-		targetChannels, sumWeight, targetPriority, err = getCachedTargetChannels(channels, sortedUniquePriorities, retry, nil, false)
-		if err != nil {
-			return nil, err
+		if len(excludedChannelIDs) > 0 {
+			return nil, nil
 		}
-	}
-	if len(targetChannels) == 0 {
 		return nil, errors.New(fmt.Sprintf("no channel found, group: %s, model: %s, priority: %d", group, model, targetPriority))
 	}
 

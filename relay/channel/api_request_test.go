@@ -2,6 +2,8 @@ package channel
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -28,6 +30,22 @@ func TestNewRelayHTTPRequestInheritsInboundCancellation(t *testing.T) {
 
 	cancel()
 	require.ErrorIs(t, request.Context().Err(), context.Canceled)
+}
+
+func TestIsInboundRequestContextErrorRequiresMatchingCause(t *testing.T) {
+	requestContext, cancel := context.WithCancel(context.Background())
+	cancel()
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(requestContext)
+
+	require.True(t, isInboundRequestContextError(ctx, fmt.Errorf("send failed: %w", context.Canceled)))
+	require.False(t, isInboundRequestContextError(ctx, errors.New("connection reset by peer")))
+
+	activeRecorder := httptest.NewRecorder()
+	activeCtx, _ := gin.CreateTestContext(activeRecorder)
+	activeCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	require.False(t, isInboundRequestContextError(activeCtx, context.Canceled))
 }
 
 func TestProcessHeaderOverride_ChannelTestSkipsPassthroughRules(t *testing.T) {

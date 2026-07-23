@@ -711,7 +711,11 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 			statusCode = resp.StatusCode
 		}
 		service.CompleteChannelMetricUpstreamHeader(c, callIndex, statusCode, err)
-		logger.LogError(c, "do request failed: "+err.Error())
+		if isInboundRequestContextError(c, err) {
+			logger.LogInfo(c, "do request stopped after request context ended: "+err.Error())
+		} else {
+			logger.LogError(c, "do request failed: "+err.Error())
+		}
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 	}
 	if resp == nil {
@@ -734,6 +738,14 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	_ = req.Body.Close()
 	_ = c.Request.Body.Close()
 	return resp, nil
+}
+
+func isInboundRequestContextError(c *gin.Context, err error) bool {
+	if err == nil || c == nil || c.Request == nil {
+		return false
+	}
+	contextErr := c.Request.Context().Err()
+	return contextErr != nil && errors.Is(err, contextErr)
 }
 
 func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {

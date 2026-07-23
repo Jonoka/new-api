@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -389,6 +390,43 @@ func TestChannelMetricLifecycleExcludesClientCancellationFromQuality(t *testing.
 	require.Equal(t, string(channelmetrics.OutcomeClientCancelled), events[0].Outcome)
 	require.False(t, events[0].QualityEligible)
 	require.Equal(t, string(channelmetrics.FailureOwnerClient), events[0].FailureOwner)
+}
+
+func TestClassifyChannelMetricAttemptPreservesCausalFailureDuringCancellation(t *testing.T) {
+	c := newChannelMetricTestContext(t, "request-causal-cancel")
+	requestContext, cancel := context.WithCancel(c.Request.Context())
+	c.Request = c.Request.WithContext(requestContext)
+	cancel()
+
+	t.Run("matching context error is client cancellation", func(t *testing.T) {
+		relayErr := types.NewError(fmt.Errorf("request stopped: %w", context.Canceled), types.ErrorCodeDoRequestFailed)
+		outcome, owner, stage, qualityEligible := classifyChannelMetricAttempt(c, newChannelMetricTestRelayInfo(), relayErr, false)
+		require.Equal(t, channelmetrics.OutcomeClientCancelled, outcome)
+		require.Equal(t, channelmetrics.FailureOwnerClient, owner)
+		require.Equal(t, channelmetrics.ErrorStageConnect, stage)
+		require.False(t, qualityEligible)
+	})
+
+	t.Run("real transport error is not hidden by later cancellation", func(t *testing.T) {
+		relayErr := types.NewError(errors.New("connection reset by peer"), types.ErrorCodeDoRequestFailed)
+		outcome, owner, stage, qualityEligible := classifyChannelMetricAttempt(c, newChannelMetricTestRelayInfo(), relayErr, false)
+		require.Equal(t, channelmetrics.OutcomeTransportError, outcome)
+		require.Equal(t, channelmetrics.FailureOwnerChannel, owner)
+		require.Equal(t, channelmetrics.ErrorStageConnect, stage)
+		require.False(t, qualityEligible)
+	})
+
+	t.Run("real scanner error wins over later cancellation", func(t *testing.T) {
+		info := newChannelMetricTestRelayInfo()
+		info.IsStream = true
+		info.StreamStatus = relaycommon.NewStreamStatus()
+		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, errors.New("connection reset by peer"))
+		outcome, owner, stage, qualityEligible := classifyChannelMetricAttempt(c, info, nil, true)
+		require.Equal(t, channelmetrics.OutcomeStreamError, outcome)
+		require.Equal(t, channelmetrics.FailureOwnerChannel, owner)
+		require.Equal(t, channelmetrics.ErrorStageStream, stage)
+		require.True(t, qualityEligible)
+	})
 }
 
 func TestChannelMetricLifecycleCountsMultipleUpstreamCallsInsideOneAttempt(t *testing.T) {

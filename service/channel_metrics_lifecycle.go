@@ -421,13 +421,19 @@ func channelMetricTrafficSource(info *relaycommon.RelayInfo) channelmetrics.Traf
 }
 
 func classifyChannelMetricAttempt(c *gin.Context, info *relaycommon.RelayInfo, relayErr *types.NewAPIError, upstreamStarted bool) (channelmetrics.Outcome, channelmetrics.FailureOwner, channelmetrics.ErrorStage, bool) {
-	if requestWasCancelled(c) || (info != nil && info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonClientGone) {
+	if info != nil && info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonClientGone {
 		return channelmetrics.OutcomeClientCancelled, channelmetrics.FailureOwnerClient, channelmetrics.ErrorStageStream, false
 	}
 	if info != nil && info.IsStream && info.StreamStatus != nil && (!info.StreamStatus.IsNormalEnd() || info.StreamStatus.HasErrors()) {
 		return channelmetrics.OutcomeStreamError, channelmetrics.FailureOwnerChannel, channelmetrics.ErrorStageStream, upstreamStarted
 	}
+	if relayErr != nil && requestErrorMatchesCancellation(c, relayErr) {
+		return channelmetrics.OutcomeClientCancelled, channelmetrics.FailureOwnerClient, channelmetrics.ErrorStageConnect, false
+	}
 	if relayErr == nil {
+		if requestWasCancelled(c) {
+			return channelmetrics.OutcomeClientCancelled, channelmetrics.FailureOwnerClient, channelmetrics.ErrorStageStream, false
+		}
 		return channelmetrics.OutcomeSuccess, channelmetrics.FailureOwnerNone, channelmetrics.ErrorStageNone, upstreamStarted
 	}
 
@@ -656,6 +662,14 @@ func requestWasCancelled(c *gin.Context) bool {
 	}
 	err := c.Request.Context().Err()
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+func requestErrorMatchesCancellation(c *gin.Context, err error) bool {
+	if err == nil || c == nil || c.Request == nil {
+		return false
+	}
+	contextErr := c.Request.Context().Err()
+	return contextErr != nil && errors.Is(err, contextErr)
 }
 
 func nonNegativeMilliseconds(duration time.Duration) int64 {

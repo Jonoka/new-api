@@ -137,6 +137,39 @@ func TestGetRandomSatisfiedChannelWithExclusionsPrefersUnusedChannel(t *testing.
 	}
 }
 
+func TestGetRandomSatisfiedChannelWithExclusionsReturnsNilWhenSingleChannelExcluded(t *testing.T) {
+	resetChannelConcurrencyForTest()
+
+	previousMemoryCacheEnabled := common.MemoryCacheEnabled
+	previousGroup2model2channels := group2model2channels
+	previousChannelsIDM := channelsIDM
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = previousMemoryCacheEnabled
+		group2model2channels = previousGroup2model2channels
+		channelsIDM = previousChannelsIDM
+		resetChannelConcurrencyForTest()
+	})
+
+	common.MemoryCacheEnabled = true
+	group2model2channels = map[string]map[string][]int{
+		"default": {
+			"gpt-test": {22},
+		},
+	}
+	channelsIDM = map[int]*Channel{
+		22: {Id: 22, Priority: common.GetPointer[int64](1), Weight: common.GetPointer[uint](0)},
+	}
+
+	channel, err := GetRandomSatisfiedChannelWithExclusions("default", "gpt-test", 0, map[int]struct{}{22: {}})
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if channel != nil {
+		t.Fatalf("expected no channel, got #%d", channel.Id)
+	}
+}
+
 func TestGetRandomSatisfiedChannelWithExclusionsFallsBackToLowerPriorityUnusedChannel(t *testing.T) {
 	resetChannelConcurrencyForTest()
 
@@ -213,7 +246,7 @@ func TestGetRandomSatisfiedChannelWithExclusionsWrapsToHigherPriorityUnusedChann
 	}
 }
 
-func TestGetRandomSatisfiedChannelWithExclusionsFallsBackToUsedChannelWhenAllExcluded(t *testing.T) {
+func TestGetRandomSatisfiedChannelWithExclusionsReturnsNilWhenAllExcluded(t *testing.T) {
 	resetChannelConcurrencyForTest()
 
 	previousMemoryCacheEnabled := common.MemoryCacheEnabled
@@ -242,11 +275,8 @@ func TestGetRandomSatisfiedChannelWithExclusionsFallsBackToUsedChannelWhenAllExc
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if channel == nil {
-		t.Fatal("expected a channel")
-	}
-	if channel.Id != 32 {
-		t.Fatalf("expected fallback to original priority channel #32, got #%d", channel.Id)
+	if channel != nil {
+		t.Fatalf("expected no channel, got #%d", channel.Id)
 	}
 }
 
@@ -334,7 +364,7 @@ func TestGetChannelWithExclusionsWrapsToHigherPriorityUnusedChannel(t *testing.T
 	}
 }
 
-func TestGetChannelWithExclusionsFallsBackToUsedChannelWhenAllExcluded(t *testing.T) {
+func TestGetChannelWithExclusionsReturnsNilWhenAllExcluded(t *testing.T) {
 	truncateTables(t)
 	resetChannelConcurrencyForTest()
 
@@ -368,11 +398,8 @@ func TestGetChannelWithExclusionsFallsBackToUsedChannelWhenAllExcluded(t *testin
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if channel == nil {
-		t.Fatal("expected a channel")
-	}
-	if channel.Id != 42 {
-		t.Fatalf("expected fallback to original priority channel #42, got #%d", channel.Id)
+	if channel != nil {
+		t.Fatalf("expected no channel, got #%d", channel.Id)
 	}
 }
 

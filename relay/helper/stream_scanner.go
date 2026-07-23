@@ -3,11 +3,15 @@ package helper
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -35,6 +39,47 @@ func getScannerBufferSize() int {
 		return constant.StreamScannerMaxBufferMB << 20
 	}
 	return DefaultMaxScannerBufferSize
+}
+
+func streamErrorMatchesRequestContext(c *gin.Context, err error) bool {
+	if err == nil || c == nil || c.Request == nil {
+		return false
+	}
+	contextErr := c.Request.Context().Err()
+	return contextErr != nil && errors.Is(err, contextErr)
+}
+
+func streamReadStoppedByClient(c *gin.Context, err error, bodyClosedForClient bool) bool {
+	if streamErrorMatchesRequestContext(c, err) {
+		return true
+	}
+	if isClosedResponseBodyError(err) {
+		return true
+	}
+	if !bodyClosedForClient {
+		return false
+	}
+	return errors.Is(err, http.ErrBodyReadAfterClose) ||
+		errors.Is(err, io.ErrClosedPipe) ||
+		errors.Is(err, net.ErrClosed)
+}
+
+func streamWriteStoppedByClient(c *gin.Context, err error) bool {
+	if streamErrorMatchesRequestContext(c, err) {
+		return true
+	}
+	return errors.Is(err, net.ErrClosed) ||
+		errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, syscall.ECONNRESET)
+}
+
+func isClosedResponseBodyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return message == "http: read on closed response body" ||
+		message == "http2: response body closed"
 }
 
 // ExtendWriteDeadline 在每次流写入前延长连接写截止时间。
@@ -73,6 +118,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		wg          sync.WaitGroup // 用于等待所有 goroutine 退出
 		cleanupOnce sync.Once
 		stopOnce    sync.Once
+		clientGone  atomic.Bool
 	)
 
 	stop := func() {
@@ -153,8 +199,15 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 						err = PingData(c)
 					}()
 					if err != nil {
-						logger.LogError(c, "ping data error: "+err.Error())
-						info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonPingFail, err)
+						if streamWriteStoppedByClient(c, err) {
+							if info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err()) {
+								logger.LogInfo(c, "ping stopped after client disconnected: "+err.Error())
+							}
+						} else if info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonPingFail, err) {
+							logger.LogError(c, "ping data error: "+err.Error())
+						} else {
+							logger.LogDebug(c, "ping stopped after stream end: %s", err.Error())
+						}
 						return
 					}
 					logger.LogDebug(c, "ping data sent")
@@ -260,11 +313,22 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 
 		if err := scanner.Err(); err != nil {
 			if err != io.EOF {
-				logger.LogError(c, "scanner error: "+err.Error())
-				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, err)
+				if streamReadStoppedByClient(c, err, clientGone.Load()) {
+					if info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err()) {
+						logger.LogInfo(c, "scanner stopped after client disconnected: "+err.Error())
+					}
+				} else if info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, err) {
+					logger.LogError(c, "scanner error: "+err.Error())
+				} else {
+					logger.LogDebug(c, "scanner stopped after stream end: %s", err.Error())
+				}
 			}
 		}
-		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonEOF, nil)
+		if clientGone.Load() {
+			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+		} else {
+			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonEOF, nil)
+		}
 	})
 
 	// 主循环等待完成或超时
@@ -274,13 +338,18 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	case <-stopChan:
 		// EndReason already set by the goroutine that triggered stopChan
 	case <-c.Request.Context().Done():
-		// 客户端断开后立即关闭上游响应体，解除扫描阻塞并停止上游继续生成。
-		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+		// 先标记关闭来源，再关闭上游响应体。扫描器会依据实际错误链完成最终归因。
+		clientGone.Store(true)
 	}
 
 	cleanup()
+	if clientGone.Load() {
+		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+	}
 	if info.StreamStatus.IsNormalEnd() && !info.StreamStatus.HasErrors() {
 		logger.LogInfo(c, fmt.Sprintf("stream ended: %s", info.StreamStatus.Summary()))
+	} else if info.StreamStatus.EndReason == relaycommon.StreamEndReasonClientGone {
+		logger.LogInfo(c, fmt.Sprintf("stream ended after client disconnected: %s, received=%d", info.StreamStatus.Summary(), info.ReceivedResponseCount))
 	} else {
 		logger.LogError(c, fmt.Sprintf("stream ended: %s, received=%d", info.StreamStatus.Summary(), info.ReceivedResponseCount))
 	}
