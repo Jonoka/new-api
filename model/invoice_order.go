@@ -586,6 +586,9 @@ func CreateCombinedInvoiceWithBalance(userId int, references []InvoiceOrderRefer
 		if err := tx.Create(&created).Error; err != nil {
 			return err
 		}
+		if err := enqueueInvoicePendingNotificationTx(tx, &created); err != nil {
+			return err
+		}
 		for _, order := range orders {
 			link := InvoiceOrderLink{
 				InvoiceId:     created.Id,

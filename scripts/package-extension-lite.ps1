@@ -23,7 +23,7 @@ function Test-ExcludedPath {
     $excludedDirs = @(
         ".git", ".idea", ".vscode", ".cache", ".turbo", ".next", ".vite",
         "node_modules", "dist", "build", "coverage", ".nyc_output", "logs",
-        "tmp", "temp", "__pycache__"
+        "tmp", "temp", "__pycache__", "native-src"
     )
     foreach ($segment in $segments) {
         if ($excludedDirs -contains $segment) { return $true }
@@ -34,7 +34,7 @@ function Test-ExcludedPath {
         "*.zip", "*.tpm", "*.tar", "*.tar.gz", "*.7z", "*.rar",
         "*.log", "*.tmp", "*.db", "*.db-shm", "*.db-wal", "*.sqlite",
         "*.sqlite3", "*.pem", "*.key", "*.pfx", "*.p12", ".env", ".env.*",
-        "secrets.json", "secret.json", ".DS_Store", "Thumbs.db"
+        "secrets.json", "secret.json", ".extensionignore", ".DS_Store", "Thumbs.db"
     )
     foreach ($pattern in $excludedPatterns) {
         if ($fileName -like $pattern) { return $true }
@@ -85,6 +85,58 @@ function Get-RelativePath {
     return [System.Uri]::UnescapeDataString($baseUri.MakeRelativeUri($targetUri).ToString()).Replace('\', '/')
 }
 
+function Assert-NativeResources {
+    param(
+        [Parameter(Mandatory = $true)][object]$Manifest,
+        [Parameter(Mandatory = $true)][string]$PackageRoot,
+        [Parameter(Mandatory = $true)][string]$StaticDir
+    )
+
+    $pages = @($Manifest.ui.pages)
+    foreach ($page in $pages) {
+        $render = $page.render
+        if ($null -eq $render -or [string]$render.type -ne "native") { continue }
+        if ([string]$Manifest.runtime.type -ne "static") {
+            throw "原生页面只能由 static 模块提供：$($page.key)"
+        }
+
+        $targets = $render.targets
+        if ($null -eq $targets) {
+            throw "原生页面缺少 render.targets：$($page.key)"
+        }
+
+        foreach ($targetName in @("default", "classic")) {
+            $target = $targets.$targetName
+            if ($null -eq $target) {
+                throw "原生页面缺少 $targetName 目标：$($page.key)"
+            }
+
+            $resources = @([string]$target.entry)
+            if ($null -ne $target.styles) {
+                $resources += @($target.styles | ForEach-Object { [string]$_ })
+            }
+
+            foreach ($resource in $resources) {
+                $candidate = $resource.Replace('\', '/')
+                $normalized = $candidate.Trim('/')
+                if ([string]::IsNullOrWhiteSpace($normalized) -or
+                    $candidate.StartsWith("//") -or
+                    $candidate -match '^[A-Za-z]:' -or
+                    $normalized -eq ".." -or
+                    $normalized.StartsWith("../") -or
+                    $normalized.Contains("/../")) {
+                    throw "原生资源路径不安全：$resource"
+                }
+
+                $resourcePath = Join-Path (Join-Path $PackageRoot $StaticDir) $normalized
+                if (-not (Test-Path -LiteralPath $resourcePath -PathType Leaf)) {
+                    throw "打包结果缺少原生资源：$resource"
+                }
+            }
+        }
+    }
+}
+
 $repoRoot = (Resolve-Path ".").Path
 $modulePath = (Resolve-Path $ModuleDir).Path
 $manifestPath = Join-Path $modulePath "manifest.json"
@@ -93,6 +145,18 @@ if (-not (Test-Path -Path $manifestPath)) {
 }
 
 $manifest = Get-Content -Path $manifestPath -Raw | ConvertFrom-Json
+$moduleIgnoreEntries = @()
+$moduleIgnorePath = Join-Path $modulePath ".extensionignore"
+if (Test-Path -LiteralPath $moduleIgnorePath -PathType Leaf) {
+    foreach ($line in Get-Content -LiteralPath $moduleIgnorePath) {
+        $entry = $line.Trim().Replace('\', '/').Trim('/')
+        if ([string]::IsNullOrWhiteSpace($entry) -or $entry.StartsWith('#')) { continue }
+        if ([System.IO.Path]::IsPathRooted($entry) -or $entry -eq ".." -or $entry.StartsWith("../") -or $entry.Contains("/../")) {
+            throw ".extensionignore 包含不安全路径：$line"
+        }
+        $moduleIgnoreEntries += $entry
+    }
+}
 if ($null -eq $manifest.id -or [string]::IsNullOrWhiteSpace([string]$manifest.id)) {
     throw "manifest.json 缺少 id"
 }
@@ -109,6 +173,7 @@ $runtimeType = [string]$manifest.runtime.type
 if ([string]::IsNullOrWhiteSpace($runtimeType)) {
     $runtimeType = "http"
 }
+$normalizedStaticDir = ""
 if ($runtimeType -eq "http" -and [string]::IsNullOrWhiteSpace([string]$manifest.runtime.base_url)) {
     throw "manifest.json 缺少 runtime.base_url"
 }
@@ -150,6 +215,7 @@ try {
     $files = Get-ChildItem -Path $modulePath -Recurse -File | Where-Object {
         $relative = Get-RelativePath -Base $modulePath -Target $_.FullName
         -not (Test-ExcludedPath -RelativePath $relative) -and
+        -not ($moduleIgnoreEntries -contains $relative.Replace('\', '/').Trim('/')) -and
         -not ($runtimeType -eq "static" -and (Test-StaticRuntimeExcludedPath -RelativePath $relative -StaticDir $normalizedStaticDir))
     }
 
@@ -168,6 +234,7 @@ try {
     if (-not (Test-Path -Path $packedManifest)) {
         throw "打包结果缺少 manifest.json"
     }
+    Assert-NativeResources -Manifest $manifest -PackageRoot $tempRoot -StaticDir $normalizedStaticDir
 
     $archivePath = Join-Path $outPath ("{0}-{1}.zip" -f $moduleId, $moduleVersion)
     if (Test-Path -Path $archivePath) {

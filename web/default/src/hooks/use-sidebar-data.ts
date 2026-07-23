@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQuery } from '@tanstack/react-query'
 import {
   Activity,
+  BellRing,
   Box,
   Brush,
   CreditCard,
@@ -111,7 +112,10 @@ export function useSidebarData(): SidebarData {
       title: navItem.title,
       url: `/extensions/${module.id}/${navItem.page}`,
       icon: getCustomNavIcon(navItem.icon) ?? Puzzle,
-      configUrls: [`extension:${module.id}:${navItem.page}`],
+      configUrls:
+        module.id === 'channel-quality' && navItem.page === 'index'
+          ? ['/channel-observability']
+          : [`extension:${module.id}:${navItem.page}`],
     })),
   ]
 
@@ -237,6 +241,15 @@ export function useSidebarData(): SidebarData {
             url: '/invoice-management',
             icon: ReceiptText,
           },
+          ...(user && user.role >= ROLE.SUPER_ADMIN
+            ? [
+                {
+                  title: t('Notification Center'),
+                  url: '/notification-center',
+                  icon: BellRing,
+                },
+              ]
+            : []),
           {
             title: t('Affiliate Commission'),
             url: '/system-settings/billing/affiliate',

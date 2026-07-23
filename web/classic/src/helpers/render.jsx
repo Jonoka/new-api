@@ -86,6 +86,8 @@ import {
   Trophy,
   ReceiptText,
   Puzzle,
+  BellRing,
+  Activity,
 } from 'lucide-react';
 import {
   SiAtlassian,
@@ -156,6 +158,8 @@ export function getLucideIcon(key, selected = false) {
       return <ReceiptText {...commonProps} color={iconColor} />;
     case 'channel':
       return <Layers {...commonProps} color={iconColor} />;
+    case 'channel_observability':
+      return <Activity {...commonProps} color={iconColor} />;
     case 'redemption':
       return <Gift {...commonProps} color={iconColor} />;
     case 'user':
@@ -169,6 +173,8 @@ export function getLucideIcon(key, selected = false) {
       return <CalendarClock {...commonProps} color={iconColor} />;
     case 'setting':
       return <Settings {...commonProps} color={iconColor} />;
+    case 'notification_center':
+      return <BellRing {...commonProps} color={iconColor} />;
     case 'extension_group':
     case 'extension_admin':
       return <Puzzle {...commonProps} color={iconColor} />;

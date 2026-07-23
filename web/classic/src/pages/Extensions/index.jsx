@@ -1,3 +1,22 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -15,6 +34,7 @@ import {
 } from '@douyinfe/semi-ui';
 import { ExternalLink, Puzzle, RefreshCw, Trash2, Upload } from 'lucide-react';
 import { API, isRoot, showError, showSuccess } from '../../helpers';
+import NativeExtensionHost from './NativeExtensionHost';
 
 const { Text, Title } = Typography;
 const CLASSIC_EXTENSION_REFRESH_EVENT = 'classic-extension-refresh';
@@ -38,6 +58,90 @@ const readRoot = (res) => res?.data?.data?.root || 'data/modules';
 
 const pageShellStyle = {
   padding: '64px 24px 24px',
+};
+
+const syncExtensionFrameTheme = (frame) => {
+  const frameRoot = frame?.contentDocument?.documentElement;
+  if (!frameRoot) return;
+
+  const hostRoot = document.documentElement;
+  const hostBody = document.body;
+  const rootStyle = getComputedStyle(hostRoot);
+  const bodyStyle = getComputedStyle(hostBody);
+  const read = (names, fallback) => {
+    for (const name of names) {
+      const value =
+        rootStyle.getPropertyValue(name).trim() ||
+        bodyStyle.getPropertyValue(name).trim();
+      if (value) return value;
+    }
+    return fallback;
+  };
+
+  const tokens = {
+    '--page-bg': read(['--semi-color-bg-0', '--background'], '#f5f6f8'),
+    '--surface': read(
+      ['--semi-color-bg-0', '--semi-color-bg-1', '--card'],
+      '#ffffff',
+    ),
+    '--surface-muted': read(
+      ['--semi-color-bg-1', '--semi-color-bg-2', '--muted'],
+      '#f6f7f9',
+    ),
+    '--surface-soft': read(
+      ['--semi-color-fill-0', '--semi-color-bg-3', '--accent'],
+      '#eef0f3',
+    ),
+    '--border': read(['--semi-color-border', '--border'], '#e1e4e8'),
+    '--border-strong': read(['--semi-color-border', '--input'], '#c9ced6'),
+    '--text': read(['--semi-color-text-0', '--foreground'], '#20242a'),
+    '--text-soft': read(
+      ['--semi-color-text-1', '--muted-foreground'],
+      '#4b535e',
+    ),
+    '--muted': read(['--semi-color-text-2', '--muted-foreground'], '#77808b'),
+    '--primary': read(['--semi-color-primary', '--primary'], '#3987f6'),
+    '--primary-strong': read(
+      ['--semi-color-primary-hover', '--primary'],
+      '#2670df',
+    ),
+    '--primary-soft': read(
+      ['--semi-color-primary-light-default', '--secondary'],
+      '#e8f2ff',
+    ),
+    '--green': read(['--semi-color-success', '--success'], '#16a36a'),
+    '--green-soft': read(
+      ['--semi-color-success-light-default', '--success-foreground'],
+      '#e3f8ef',
+    ),
+    '--amber': read(['--semi-color-warning', '--warning'], '#e99818'),
+    '--amber-soft': read(
+      ['--semi-color-warning-light-default', '--warning-foreground'],
+      '#fff5df',
+    ),
+    '--red': read(['--semi-color-danger', '--destructive'], '#e6525e'),
+    '--red-soft': read(
+      ['--semi-color-danger-light-default', '--destructive-foreground'],
+      '#ffebed',
+    ),
+    '--radius': read(['--semi-border-radius-medium', '--radius'], '8px'),
+    '--host-font-family': bodyStyle.fontFamily,
+  };
+  Object.entries(tokens).forEach(([name, value]) => {
+    frameRoot.style.setProperty(name, value);
+  });
+
+  const dark = hostRoot.classList.contains('dark');
+  frameRoot.dataset.hostTheme = dark ? 'dark' : 'light';
+  frameRoot.style.colorScheme = dark ? 'dark' : 'light';
+  frame.contentWindow?.postMessage(
+    {
+      type: 'new-api-host-theme',
+      themeMode: dark ? 'dark' : 'light',
+      embedded: true,
+    },
+    window.location.origin,
+  );
 };
 
 export default function Extensions() {
@@ -224,7 +328,9 @@ export default function Extensions() {
         dataIndex: 'permissions',
         width: 180,
         render: (permissions) => {
-          const roles = permissions?.roles?.length ? permissions.roles : ['user'];
+          const roles = permissions?.roles?.length
+            ? permissions.roles
+            : ['user'];
           return (
             <Space spacing={4} wrap>
               {roles.map((role) => (
@@ -329,7 +435,9 @@ export default function Extensions() {
             {t('模块管理')}
           </Title>
           <Text type='secondary'>
-            {t('上传 zip 模块包，或把模块放入模块目录，刷新后即可启用，无需重启主程序。')}
+            {t(
+              '上传 zip 模块包，或把模块放入模块目录，刷新后即可启用，无需重启主程序。',
+            )}
           </Text>
         </div>
         <Space wrap>
@@ -390,6 +498,7 @@ export function ExtensionModulePage() {
   const [loading, setLoading] = useState(true);
   const [module, setModule] = useState(null);
   const [page, setPage] = useState(null);
+  const iframeRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -424,6 +533,20 @@ export function ExtensionModulePage() {
     };
   }, [moduleId, pageKey, t]);
 
+  useEffect(() => {
+    if (!page || page.embed === false || page.render?.type === 'native') {
+      return undefined;
+    }
+    const sync = () => syncExtensionFrameTheme(iframeRef.current);
+    const observer = new MutationObserver(sync);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class', 'data-theme-mode'],
+    });
+    sync();
+    return () => observer.disconnect();
+  }, [page, module]);
+
   if (loading) {
     return (
       <div style={{ padding: 24 }}>
@@ -436,10 +559,16 @@ export function ExtensionModulePage() {
     return (
       <div style={{ padding: 24 }}>
         <Card>
-          <Empty description={t('扩展页面不存在，请刷新扩展模块或检查 manifest')} />
+          <Empty
+            description={t('扩展页面不存在，请刷新扩展模块或检查 manifest')}
+          />
         </Card>
       </div>
     );
+  }
+
+  if (page.render?.type === 'native') {
+    return <NativeExtensionHost module={module} page={page} />;
   }
 
   const src = extensionPageUrl(
@@ -510,6 +639,7 @@ export function ExtensionModulePage() {
         </Button>
       </div>
       <iframe
+        ref={iframeRef}
         src={src}
         title={page.title || module.name}
         style={{
@@ -519,6 +649,7 @@ export function ExtensionModulePage() {
           border: 0,
           background: 'var(--semi-color-bg-0)',
         }}
+        onLoad={() => syncExtensionFrameTheme(iframeRef.current)}
       />
     </div>
   );

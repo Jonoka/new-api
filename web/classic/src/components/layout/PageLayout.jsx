@@ -63,14 +63,17 @@ const PageLayout = () => {
   ];
 
   const shouldHideFooter = cardProPages.includes(location.pathname);
+  const isNotificationCenterRoute =
+    location.pathname === '/notification-center';
 
   const shouldInnerPadding =
-    location.pathname.includes('/console') &&
+    (location.pathname.includes('/console') || isNotificationCenterRoute) &&
     !location.pathname.startsWith('/console/chat') &&
     location.pathname !== '/console/playground' &&
     location.pathname !== '/console/canvas';
 
-  const isConsoleRoute = location.pathname.startsWith('/console');
+  const isConsoleRoute =
+    location.pathname.startsWith('/console') || isNotificationCenterRoute;
   const showSider = isConsoleRoute && (!isMobile || drawerOpen);
 
   useEffect(() => {

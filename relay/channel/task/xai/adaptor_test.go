@@ -6,6 +6,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -106,7 +107,9 @@ func TestExplicitResolutionWinsOverConflictingSizeForBilling(t *testing.T) {
 		"model":"grok-imagine-video",
 		"prompt":"竖屏视频",
 		"resolution":"480p",
+		"resolution_name":"720p",
 		"size":"720x1280",
+		"metadata":{"resolution":"720p"},
 		"duration":10
 	}`)
 	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "grok-imagine-video"}}
@@ -125,6 +128,47 @@ func TestExplicitResolutionWinsOverConflictingSizeForBilling(t *testing.T) {
 	body := mustBuildRequestBody(t, adaptor, c, info)
 	if body.Resolution != "480p" || body.AspectRatio != "9:16" {
 		t.Fatalf("upstream format = %q/%q, want 9:16/480p", body.AspectRatio, body.Resolution)
+	}
+}
+
+func TestVideoResolutionPriority(t *testing.T) {
+	tests := []struct {
+		name           string
+		body           string
+		wantResolution string
+	}{
+		{
+			name:           "resolution name wins metadata and size",
+			body:           `{"model":"grok-imagine-video","prompt":"测试","resolution_name":"480p","metadata":{"resolution":"720p"},"size":"1280x720"}`,
+			wantResolution: "480p",
+		},
+		{
+			name:           "metadata wins size",
+			body:           `{"model":"grok-imagine-video","prompt":"测试","metadata":{"resolution":"480p"},"size":"1280x720"}`,
+			wantResolution: "480p",
+		},
+		{
+			name:           "size is final fallback",
+			body:           `{"model":"grok-imagine-video","prompt":"测试","size":"1280x720"}`,
+			wantResolution: "720p",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := newJSONContext(t, tt.body)
+			adaptor := &TaskAdaptor{}
+			if taskErr := adaptor.ValidateRequestAndSetAction(c, &relaycommon.RelayInfo{}); taskErr != nil {
+				t.Fatalf("ValidateRequestAndSetAction() error = %v", taskErr)
+			}
+			request, err := getVideoGenerationRequest(c)
+			if err != nil {
+				t.Fatalf("getVideoGenerationRequest() error = %v", err)
+			}
+			if request.Resolution != tt.wantResolution {
+				t.Fatalf("resolution = %q, want %q", request.Resolution, tt.wantResolution)
+			}
+		})
 	}
 }
 
@@ -184,6 +228,139 @@ func TestBuildRequestBodyConvertsMultipartImageToDataURL(t *testing.T) {
 	body := mustBuildRequestBody(t, adaptor, c, info)
 	if body.Image == nil || !strings.HasPrefix(body.Image.URL, "data:image/png;base64,") {
 		t.Fatalf("multipart image = %#v", body.Image)
+	}
+}
+
+func TestInputReferenceAliasesSupportJSONAndFormValues(t *testing.T) {
+	t.Run("json singular", func(t *testing.T) {
+		c, _ := newJSONContext(t, `{
+			"model":"grok-imagine-video-1.5",
+			"prompt":"测试",
+			"input_reference":"https://example.com/a.png"
+		}`)
+		adaptor := &TaskAdaptor{}
+		if taskErr := adaptor.ValidateRequestAndSetAction(c, &relaycommon.RelayInfo{}); taskErr != nil {
+			t.Fatalf("ValidateRequestAndSetAction() error = %v", taskErr)
+		}
+		request, err := getVideoGenerationRequest(c)
+		if err != nil {
+			t.Fatalf("getVideoGenerationRequest() error = %v", err)
+		}
+		if request.Image == nil || request.Image.URL != "https://example.com/a.png" || len(request.ReferenceImages) != 0 {
+			t.Fatalf("single input_reference = image %#v, references %#v", request.Image, request.ReferenceImages)
+		}
+	})
+
+	t.Run("json array alias", func(t *testing.T) {
+		c, _ := newJSONContext(t, `{
+			"model":"grok-imagine-video-1.5",
+			"prompt":"测试",
+			"input_reference[]":["https://example.com/a.png","https://example.com/b.png"]
+		}`)
+		adaptor := &TaskAdaptor{}
+		if taskErr := adaptor.ValidateRequestAndSetAction(c, &relaycommon.RelayInfo{}); taskErr != nil {
+			t.Fatalf("ValidateRequestAndSetAction() error = %v", taskErr)
+		}
+		request, err := getVideoGenerationRequest(c)
+		if err != nil {
+			t.Fatalf("getVideoGenerationRequest() error = %v", err)
+		}
+		if request.Image != nil || len(request.ReferenceImages) != 2 {
+			t.Fatalf("array input_reference = image %#v, references %#v", request.Image, request.ReferenceImages)
+		}
+	})
+
+	t.Run("form array alias", func(t *testing.T) {
+		values := url.Values{
+			"model":  {"grok-imagine-video-1.5"},
+			"prompt": {"测试"},
+		}
+		values.Add("input_reference[]", "https://example.com/a.png")
+		values.Add("input_reference[]", "https://example.com/b.png")
+		c := newRequestContext(t, http.MethodPost, "/v1/videos", "application/x-www-form-urlencoded", strings.NewReader(values.Encode()))
+		adaptor := &TaskAdaptor{}
+		if taskErr := adaptor.ValidateRequestAndSetAction(c, &relaycommon.RelayInfo{}); taskErr != nil {
+			t.Fatalf("ValidateRequestAndSetAction() error = %v", taskErr)
+		}
+		request, err := getVideoGenerationRequest(c)
+		if err != nil {
+			t.Fatalf("getVideoGenerationRequest() error = %v", err)
+		}
+		if request.Image != nil || len(request.ReferenceImages) != 2 {
+			t.Fatalf("form input_reference = image %#v, references %#v", request.Image, request.ReferenceImages)
+		}
+	})
+}
+
+func TestCanvasMultipartVideoRequestCompatibility(t *testing.T) {
+	var requestBody bytes.Buffer
+	writer := multipart.NewWriter(&requestBody)
+	for name, value := range map[string]string{
+		"model":           imageVideoModel,
+		"prompt":          "保持两张参考图中的主体一致",
+		"seconds":         "10",
+		"size":            "1280x720",
+		"resolution_name": "480p",
+		"preset":          "normal",
+	} {
+		if err := writer.WriteField(name, value); err != nil {
+			t.Fatalf("write field %s: %v", name, err)
+		}
+	}
+	for _, filename := range []string{"first.png", "second.png"} {
+		part, err := writer.CreateFormFile("input_reference[]", filename)
+		if err != nil {
+			t.Fatalf("create input_reference[] %s: %v", filename, err)
+		}
+		if _, err := part.Write([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}); err != nil {
+			t.Fatalf("write input_reference[] %s: %v", filename, err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	c := newRequestContext(t, http.MethodPost, "/v1/videos", writer.FormDataContentType(), bytes.NewReader(requestBody.Bytes()))
+	info := &relaycommon.RelayInfo{
+		OriginModelName: imageVideoModel,
+		ChannelMeta:     &relaycommon.ChannelMeta{UpstreamModelName: imageVideoModel},
+	}
+	adaptor := &TaskAdaptor{}
+	if taskErr := adaptor.ValidateRequestAndSetAction(c, info); taskErr != nil {
+		t.Fatalf("ValidateRequestAndSetAction() error = %v", taskErr)
+	}
+	if info.OriginModelName != imageVideoModel || info.Action != constant.TaskActionReferenceGenerate {
+		t.Fatalf("model/action = %q/%q, want %q/%q", info.OriginModelName, info.Action, imageVideoModel, constant.TaskActionReferenceGenerate)
+	}
+
+	request, err := getVideoGenerationRequest(c)
+	if err != nil {
+		t.Fatalf("getVideoGenerationRequest() error = %v", err)
+	}
+	if request.Model != imageVideoModel || request.Duration == nil || *request.Duration != 10 || request.Resolution != "480p" {
+		t.Fatalf("request model/duration/resolution = %q/%v/%q", request.Model, request.Duration, request.Resolution)
+	}
+	if request.Image != nil || len(request.ReferenceImages) != 2 {
+		t.Fatalf("request references = image %#v, references %#v", request.Image, request.ReferenceImages)
+	}
+	for index, reference := range request.ReferenceImages {
+		if !strings.HasPrefix(reference.URL, "data:image/png;base64,") {
+			t.Fatalf("reference %d URL = %q, want PNG data URL", index, reference.URL)
+		}
+	}
+
+	ratios := adaptor.EstimateBilling(c, info)
+	if ratios["seconds"] != 10 || ratios["resolution"] != 1 {
+		t.Fatalf("billing ratios = %#v, want seconds=10 resolution=1", ratios)
+	}
+	dimensions := adaptor.EstimateTaskBillingSpec(c, info).Dimensions
+	if dimensions["resolution"] != "480p" {
+		t.Fatalf("billing resolution = %q, want 480p", dimensions["resolution"])
+	}
+
+	body := mustBuildRequestBody(t, adaptor, c, info)
+	if body.Model != imageVideoModel || body.Duration == nil || *body.Duration != 10 || body.Resolution != "480p" || len(body.ReferenceImages) != 2 {
+		t.Fatalf("upstream request = model %q, duration %v, resolution %q, references %d", body.Model, body.Duration, body.Resolution, len(body.ReferenceImages))
 	}
 }
 
@@ -482,13 +659,24 @@ func TestConvertToOpenAIVideoIncludesResultMetadata(t *testing.T) {
 
 func newJSONContext(t *testing.T, body string) (*gin.Context, *httptest.ResponseRecorder) {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
-	t.Cleanup(func() { common.CleanupBodyStorage(c) })
+	c := newRequestContextWithRecorder(t, recorder, http.MethodPost, "/v1/videos", "application/json", strings.NewReader(body))
 	return c, recorder
+}
+
+func newRequestContext(t *testing.T, method, target, contentType string, body io.Reader) *gin.Context {
+	t.Helper()
+	return newRequestContextWithRecorder(t, httptest.NewRecorder(), method, target, contentType, body)
+}
+
+func newRequestContextWithRecorder(t *testing.T, recorder *httptest.ResponseRecorder, method, target, contentType string, body io.Reader) *gin.Context {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(method, target, body)
+	c.Request.Header.Set("Content-Type", contentType)
+	t.Cleanup(func() { common.CleanupBodyStorage(c) })
+	return c
 }
 
 func mustBuildRequestBody(t *testing.T, adaptor *TaskAdaptor, c *gin.Context, info *relaycommon.RelayInfo) videoGenerationRequest {

@@ -1,4 +1,22 @@
-import { useEffect, useMemo, useState } from 'react'
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { ExternalLink, Puzzle, RefreshCw, ServerOff } from 'lucide-react'
@@ -12,6 +30,91 @@ import {
   EmptyTitle,
 } from '@/components/ui/empty'
 import { getExtensions, getExtensionPageUrl } from '@/features/extensions/api'
+import { NativeExtensionPage } from '@/features/extensions/native-page'
+
+function syncExtensionFrameTheme(frame: HTMLIFrameElement | null) {
+  const frameRoot = frame?.contentDocument?.documentElement
+  if (!frameRoot) return
+
+  const hostRoot = document.documentElement
+  const hostBody = document.body
+  const rootStyle = getComputedStyle(hostRoot)
+  const bodyStyle = getComputedStyle(hostBody)
+  const read = (names: string[], fallback: string) => {
+    for (const name of names) {
+      const value =
+        rootStyle.getPropertyValue(name).trim() ||
+        bodyStyle.getPropertyValue(name).trim()
+      if (value) return value
+    }
+    return fallback
+  }
+
+  const tokens: Record<string, string> = {
+    '--page-bg': read(['--background', '--semi-color-bg-0'], '#f5f6f8'),
+    '--surface': read(
+      ['--card', '--semi-color-bg-1', '--semi-color-bg-0'],
+      '#ffffff'
+    ),
+    '--surface-muted': read(
+      ['--muted', '--semi-color-bg-2', '--semi-color-bg-1'],
+      '#f6f7f9'
+    ),
+    '--surface-soft': read(
+      ['--accent', '--semi-color-fill-0', '--semi-color-bg-3'],
+      '#eef0f3'
+    ),
+    '--border': read(['--border', '--semi-color-border'], '#e1e4e8'),
+    '--border-strong': read(['--input', '--semi-color-border'], '#c9ced6'),
+    '--text': read(['--foreground', '--semi-color-text-0'], '#20242a'),
+    '--text-soft': read(
+      ['--muted-foreground', '--semi-color-text-1'],
+      '#4b535e'
+    ),
+    '--muted': read(['--muted-foreground', '--semi-color-text-2'], '#77808b'),
+    '--primary': read(['--primary', '--semi-color-primary'], '#3987f6'),
+    '--primary-strong': read(
+      ['--primary', '--semi-color-primary-hover'],
+      '#2670df'
+    ),
+    '--primary-soft': read(
+      ['--secondary', '--semi-color-primary-light-default'],
+      '#e8f2ff'
+    ),
+    '--green': read(['--success', '--semi-color-success'], '#16a36a'),
+    '--green-soft': read(
+      ['--success-foreground', '--semi-color-success-light-default'],
+      '#e3f8ef'
+    ),
+    '--amber': read(['--warning', '--semi-color-warning'], '#e99818'),
+    '--amber-soft': read(
+      ['--warning-foreground', '--semi-color-warning-light-default'],
+      '#fff5df'
+    ),
+    '--red': read(['--destructive', '--semi-color-danger'], '#e6525e'),
+    '--red-soft': read(
+      ['--destructive-foreground', '--semi-color-danger-light-default'],
+      '#ffebed'
+    ),
+    '--radius': read(['--radius', '--semi-border-radius-medium'], '8px'),
+    '--host-font-family': bodyStyle.fontFamily,
+  }
+  Object.entries(tokens).forEach(([name, value]) =>
+    frameRoot.style.setProperty(name, value)
+  )
+
+  const dark = hostRoot.classList.contains('dark')
+  frameRoot.dataset.hostTheme = dark ? 'dark' : 'light'
+  frameRoot.style.colorScheme = dark ? 'dark' : 'light'
+  frame.contentWindow?.postMessage(
+    {
+      type: 'new-api-host-theme',
+      themeMode: dark ? 'dark' : 'light',
+      embedded: true,
+    },
+    window.location.origin
+  )
+}
 
 export const Route = createFileRoute(
   '/_authenticated/extensions/$moduleId/$pageKey/'
@@ -34,7 +137,7 @@ function ExtensionModulePage() {
 
   const module = data?.modules.find((item) => item.id === moduleId)
   const page = module?.ui?.pages?.find((item) => item.key === pageKey)
-  const src = page
+  const src = page?.path
     ? getExtensionPageUrl(
         moduleId,
         page.path,
@@ -50,11 +153,31 @@ function ExtensionModulePage() {
     status: 'idle' | 'checking' | 'ready' | 'offline'
     message?: string
   }>({ status: 'idle' })
+  const iframeRef = useRef<HTMLIFrameElement | null>(null)
+
+  useEffect(() => {
+    if (!page || page.embed === false || page.render?.type === 'native') return
+    const sync = () => syncExtensionFrameTheme(iframeRef.current)
+    const observer = new MutationObserver(sync)
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: [
+        'class',
+        'data-theme-preset',
+        'data-theme-radius',
+        'data-theme-scale',
+        'data-theme-font',
+      ],
+    })
+    sync()
+    return () => observer.disconnect()
+  }, [page, src])
 
   useEffect(() => {
     if (
       !module ||
       !page ||
+      page.render?.type === 'native' ||
       page.embed === false ||
       module.runtime?.type === 'static' ||
       !healthSrc
@@ -153,6 +276,10 @@ function ExtensionModulePage() {
     )
   }
 
+  if (page.render?.type === 'native') {
+    return <NativeExtensionPage module={module} page={page} />
+  }
+
   if (page.embed === false) {
     return (
       <div className='flex min-h-[60vh] items-center justify-center p-6'>
@@ -201,7 +328,9 @@ function ExtensionModulePage() {
             </EmptyMedia>
             <EmptyTitle>{t('Extension service is not reachable')}</EmptyTitle>
             <EmptyDescription>
-              {t('The module is installed and enabled, but its HTTP service is not responding through the host proxy. Start the module service or update runtime.base_url in manifest.json.')}
+              {t(
+                'The module is installed and enabled, but its HTTP service is not responding through the host proxy. Start the module service or update runtime.base_url in manifest.json.'
+              )}
             </EmptyDescription>
             <EmptyContent className='max-w-none'>
               <div className='bg-muted text-muted-foreground w-full rounded-lg px-3 py-2 text-left font-mono text-xs break-all'>
@@ -236,9 +365,11 @@ function ExtensionModulePage() {
         </div>
       ) : (
         <iframe
+          ref={iframeRef}
           src={src}
           title={page.title || module.name}
           className='bg-background h-full min-h-0 flex-1 border-0'
+          onLoad={() => syncExtensionFrameTheme(iframeRef.current)}
         />
       )}
     </div>

@@ -59,7 +59,8 @@ function patchAPIInstance(instance) {
   };
 
   instance.get = (url, config = {}) => {
-    if (config?.disableDuplicate) {
+    // 每个可取消请求都拥有独立生命周期，不能与其他调用共享 Promise。
+    if (config?.disableDuplicate || config?.signal) {
       return originalGet(url, config);
     }
 

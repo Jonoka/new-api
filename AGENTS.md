@@ -42,10 +42,12 @@ web/             — Frontend themes container
 ## Internationalization (i18n)
 
 ### Backend (`i18n/`)
+
 - Library: `nicksnyder/go-i18n/v2`
 - Languages: en, zh
 
 ### Frontend (`web/default/src/i18n/`)
+
 - Library: `i18next` + `react-i18next` + `i18next-browser-languagedetector`
 - Languages: en (base), zh (fallback), fr, ru, ja, vi
 - Translation files: `web/default/src/i18n/locales/{lang}.json` — flat JSON, keys are English source strings
@@ -73,28 +75,33 @@ Note: `json.RawMessage`, `json.Number`, and other type definitions from `encodin
 All database code MUST be fully compatible with all three databases simultaneously.
 
 **Use GORM abstractions:**
+
 - Prefer GORM methods (`Create`, `Find`, `Where`, `Updates`, etc.) over raw SQL.
 - Let GORM handle primary key generation — do not use `AUTO_INCREMENT` or `SERIAL` directly.
 
 **When raw SQL is unavoidable:**
+
 - Column quoting differs: PostgreSQL uses `"column"`, MySQL/SQLite uses `` `column` ``.
 - Use `commonGroupCol`, `commonKeyCol` variables from `model/main.go` for reserved-word columns like `group` and `key`.
 - Boolean values differ: PostgreSQL uses `true`/`false`, MySQL/SQLite uses `1`/`0`. Use `commonTrueVal`/`commonFalseVal`.
 - Use `common.UsingPostgreSQL`, `common.UsingSQLite`, `common.UsingMySQL` flags to branch DB-specific logic.
 
 **Forbidden without cross-DB fallback:**
+
 - MySQL-only functions (e.g., `GROUP_CONCAT` without PostgreSQL `STRING_AGG` equivalent)
 - PostgreSQL-only operators (e.g., `@>`, `?`, `JSONB` operators)
 - `ALTER COLUMN` in SQLite (unsupported — use column-add workaround)
 - Database-specific column types without fallback — use `TEXT` instead of `JSONB` for JSON storage
 
 **Migrations:**
+
 - Ensure all migrations work on all three databases.
 - For SQLite, use `ALTER TABLE ... ADD COLUMN` instead of `ALTER COLUMN` (see `model/main.go` for patterns).
 
 ### Rule 3: Frontend — Prefer Bun
 
 Use `bun` as the preferred package manager and script runner for the frontend (`web/default/` directory):
+
 - `bun install` for dependency installation
 - `bun run dev` for development server
 - `bun run build` for production build
@@ -122,6 +129,7 @@ Use `bun` as the preferred package manager and script runner for the frontend (`
 ### Rule 4: New Channel StreamOptions Support
 
 When implementing a new channel:
+
 - Confirm whether the provider supports `StreamOptions`.
 - If supported, add the channel to `streamSupportedChannels`.
 
@@ -133,6 +141,7 @@ The following project-related information is **strictly protected** and MUST NOT
 - Any references, mentions, branding, metadata, or attributions related to **QuаntumΝоuѕ** (the organization/author identity)
 
 This includes but is not limited to:
+
 - README files, license headers, copyright notices, package metadata
 - HTML titles, meta tags, footer text, about pages
 - Go module paths, package names, import paths
@@ -154,3 +163,26 @@ For request structs that are parsed from client JSON and then re-marshaled to up
 ### Rule 7: Billing Expression System — Read `pkg/billingexpr/expr.md`
 
 When working on tiered/dynamic billing (expression-based pricing), you MUST read `pkg/billingexpr/expr.md` first. It documents the design philosophy, expression language (variables, functions, examples), full system architecture (editor → storage → pre-consume → settlement → log display), token normalization rules (`p`/`c` auto-exclusion), quota conversion, and expression versioning. All code changes to the billing expression system must follow the patterns described in that document.
+
+### Rule 8: Documentation-First Development — 开发文档优先
+
+任何程序变更都必须把开发文档视为同一项交付内容。程序变更包括代码、接口、数据模型、配置、权限、安全边界、后台任务、页面流程、扩展契约和部署流程；不得只修改实现而不留下可供后续开发复用的准确文档。
+
+**开始编码前：**
+
+1. 先阅读 `docs/developer/README.md` 和与本次变更相关的专题文档。
+2. 涉及二开能力总览时阅读并更新 `docs/developer/custom-development.md`；涉及扩展模块时阅读并更新 `docs/developer/extensions.md`；涉及通知中心或通知事件时阅读并更新 `docs/developer/notifications.md`。
+3. 如果没有对应文档，先创建专题文档或对应的工作记录，至少记录变更目标、范围、方案、接口或数据契约、安全边界、兼容性和测试计划，再开始实现。
+
+**实现过程中：**
+
+- 文档和代码必须在同一工作项中同步演进；接口、字段、状态、默认值、权限或行为改变时，立即修正文档，禁止保留已经失效的示例。
+- 新增模块、通知事件、支付、发票、订阅、返利、计费、异步任务或其他二开能力时，必须更新对应专题文档，并在 `docs/developer/custom-development.md` 登记能力、稳定性和已知限制。
+- 纯内部修复如果不改变长期专题文档，仍需在 `docs/workflows/YYYY-MM/` 下记录问题、根因、修改范围和验证结果，保证变更可追溯。
+- 新增开发文档时，必须同步更新 `docs/developer/README.md`；如果变更影响可复用的代理工作流，还必须同步更新对应的 `.agents/skills/*/SKILL.md`。
+
+**交付前：**
+
+- 检查 Git 差异，确认每项程序变更都有对应文档变更；缺少文档时，该工作项不得视为完成。
+- 核对文档中的 API 路径、请求示例、配置名、权限、数据生命周期、迁移或回滚注意事项、测试方法和已知限制与当前实现一致。
+- 使用仓库现有格式化工具格式化修改过的 Markdown，并执行链接、示例和 `git diff --check` 检查；无法执行的检查必须在交付说明中明确记录。

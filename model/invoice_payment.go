@@ -139,6 +139,9 @@ func CreateCombinedInvoiceExternalPayment(userId int, references []InvoiceOrderR
 		if err := tx.Create(&created).Error; err != nil {
 			return err
 		}
+		if err := enqueueInvoicePendingNotificationTx(tx, &created); err != nil {
+			return err
+		}
 		for _, order := range orders {
 			link := InvoiceOrderLink{
 				InvoiceId:     created.Id,
@@ -368,6 +371,9 @@ func CompleteInvoiceExternalPayment(tradeNo string, callback InvoicePaymentCallb
 			return err
 		}
 		if err := syncInvoiceSourceStatusTx(tx, &completed); err != nil {
+			return err
+		}
+		if err := enqueueInvoicePendingNotificationTx(tx, &completed); err != nil {
 			return err
 		}
 		completedNow = true

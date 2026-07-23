@@ -71,23 +71,25 @@ type videoGenerationRequest struct {
 // rawVideoGenerationRequest 同时接收 New API 通用字段和 xAI 原生字段。
 // any 字段用于兼容数字/字符串时长、URL 字符串和对象式媒体输入。
 type rawVideoGenerationRequest struct {
-	Model           string `json:"model"`
-	Prompt          string `json:"prompt"`
-	Image           any    `json:"image,omitempty"`
-	Images          any    `json:"images,omitempty"`
-	ReferenceImages any    `json:"reference_images,omitempty"`
-	InputReference  any    `json:"input_reference,omitempty"`
-	Duration        any    `json:"duration,omitempty"`
-	Seconds         any    `json:"seconds,omitempty"`
-	AspectRatio     string `json:"aspect_ratio,omitempty"`
-	Resolution      string `json:"resolution,omitempty"`
-	Size            string `json:"size,omitempty"`
-	Width           any    `json:"width,omitempty"`
-	Height          any    `json:"height,omitempty"`
-	Metadata        any    `json:"metadata,omitempty"`
-	Output          any    `json:"output,omitempty"`
-	StorageOptions  any    `json:"storage_options,omitempty"`
-	User            string `json:"user,omitempty"`
+	Model               string `json:"model"`
+	Prompt              string `json:"prompt"`
+	Image               any    `json:"image,omitempty"`
+	Images              any    `json:"images,omitempty"`
+	ReferenceImages     any    `json:"reference_images,omitempty"`
+	InputReference      any    `json:"input_reference,omitempty"`
+	InputReferenceArray any    `json:"input_reference[],omitempty"`
+	Duration            any    `json:"duration,omitempty"`
+	Seconds             any    `json:"seconds,omitempty"`
+	AspectRatio         string `json:"aspect_ratio,omitempty"`
+	Resolution          string `json:"resolution,omitempty"`
+	ResolutionName      string `json:"resolution_name,omitempty"`
+	Size                string `json:"size,omitempty"`
+	Width               any    `json:"width,omitempty"`
+	Height              any    `json:"height,omitempty"`
+	Metadata            any    `json:"metadata,omitempty"`
+	Output              any    `json:"output,omitempty"`
+	StorageOptions      any    `json:"storage_options,omitempty"`
+	User                string `json:"user,omitempty"`
 }
 
 type submitResponse struct {
@@ -502,7 +504,13 @@ func parseVideoGenerationRequest(c *gin.Context) (videoGenerationRequest, error)
 		request.AspectRatio = stringFromMap(metadata, "aspect_ratio")
 	}
 	if request.Resolution == "" {
-		request.Resolution = strings.ToLower(stringFromMap(metadata, "resolution"))
+		request.Resolution = strings.ToLower(strings.TrimSpace(raw.ResolutionName))
+	}
+	if request.Resolution == "" {
+		request.Resolution = strings.ToLower(firstNonEmpty(
+			stringFromMap(metadata, "resolution"),
+			stringFromMap(metadata, "resolution_name"),
+		))
 	}
 	if request.User == "" {
 		request.User = stringFromMap(metadata, "user")
@@ -527,6 +535,7 @@ func parseVideoGenerationRequest(c *gin.Context) (videoGenerationRequest, error)
 	imagesValue := firstPresent(raw.Images, metadata["images"])
 	referenceValue := firstPresent(raw.ReferenceImages, metadata["reference_images"])
 	inputReferenceValue := firstPresent(raw.InputReference, metadata["input_reference"])
+	inputReferenceArrayValue := firstPresent(raw.InputReferenceArray, metadata["input_reference[]"])
 
 	images, err := mediaInputsFromAny(imageValue)
 	if err != nil {
@@ -564,11 +573,20 @@ func parseVideoGenerationRequest(c *gin.Context) (videoGenerationRequest, error)
 	if err != nil {
 		return videoGenerationRequest{}, fmt.Errorf("invalid input_reference: %w", err)
 	}
+	inputReferenceArray, err := mediaInputsFromAny(inputReferenceArrayValue)
+	if err != nil {
+		return videoGenerationRequest{}, fmt.Errorf("invalid input_reference[]: %w", err)
+	}
+	inputReferences = append(inputReferences, inputReferenceArray...)
 	if len(inputReferences) > 0 {
-		if request.Image != nil || len(request.ReferenceImages) > 0 || len(inputReferences) != 1 {
+		if request.Image != nil || len(request.ReferenceImages) > 0 {
 			return videoGenerationRequest{}, fmt.Errorf("input_reference cannot be combined with other image inputs")
 		}
-		request.Image = &inputReferences[0]
+		if len(inputReferences) == 1 {
+			request.Image = &inputReferences[0]
+		} else {
+			request.ReferenceImages = inputReferences
+		}
 	}
 
 	if strings.Contains(strings.ToLower(c.GetHeader("Content-Type")), "multipart/form-data") {
@@ -624,15 +642,9 @@ func addMultipartImages(c *gin.Context, request *videoGenerationRequest) error {
 	}
 	defer form.RemoveAll()
 
-	var singleFiles []mediaInput
-	for _, field := range []string{"input_reference", "image"} {
-		for _, fileHeader := range form.File[field] {
-			input, readErr := mediaInputFromUpload(fileHeader)
-			if readErr != nil {
-				return readErr
-			}
-			singleFiles = append(singleFiles, input)
-		}
+	singleFiles, err := mediaInputsFromUploads(form, "image")
+	if err != nil {
+		return err
 	}
 	if len(singleFiles) > 1 {
 		return fmt.Errorf("only one input image is allowed")
@@ -644,21 +656,28 @@ func addMultipartImages(c *gin.Context, request *videoGenerationRequest) error {
 		request.Image = &singleFiles[0]
 	}
 
-	var genericFiles []mediaInput
-	for _, fileHeader := range form.File["images"] {
-		input, readErr := mediaInputFromUpload(fileHeader)
-		if readErr != nil {
-			return readErr
-		}
-		genericFiles = append(genericFiles, input)
+	inputReferenceFiles, err := mediaInputsFromUploads(form, "input_reference", "input_reference[]")
+	if err != nil {
+		return err
 	}
-	var referenceFiles []mediaInput
-	for _, fileHeader := range form.File["reference_images"] {
-		input, readErr := mediaInputFromUpload(fileHeader)
-		if readErr != nil {
-			return readErr
+	if len(inputReferenceFiles) > 0 {
+		if request.Image != nil || len(request.ReferenceImages) > 0 {
+			return fmt.Errorf("uploaded input_reference cannot be combined with other image inputs")
 		}
-		referenceFiles = append(referenceFiles, input)
+		if len(inputReferenceFiles) == 1 {
+			request.Image = &inputReferenceFiles[0]
+		} else {
+			request.ReferenceImages = inputReferenceFiles
+		}
+	}
+
+	genericFiles, err := mediaInputsFromUploads(form, "images")
+	if err != nil {
+		return err
+	}
+	referenceFiles, err := mediaInputsFromUploads(form, "reference_images")
+	if err != nil {
+		return err
 	}
 	if len(genericFiles)+len(referenceFiles) > 0 {
 		if request.Image != nil || len(request.ReferenceImages) > 0 {
@@ -673,6 +692,20 @@ func addMultipartImages(c *gin.Context, request *videoGenerationRequest) error {
 		}
 	}
 	return nil
+}
+
+func mediaInputsFromUploads(form *multipart.Form, fields ...string) ([]mediaInput, error) {
+	var inputs []mediaInput
+	for _, field := range fields {
+		for _, fileHeader := range form.File[field] {
+			input, err := mediaInputFromUpload(fileHeader)
+			if err != nil {
+				return nil, err
+			}
+			inputs = append(inputs, input)
+		}
+	}
+	return inputs, nil
 }
 
 func mediaInputFromUpload(fileHeader *multipart.FileHeader) (mediaInput, error) {

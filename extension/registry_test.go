@@ -201,7 +201,7 @@ func TestInstallBuiltinModulesRefreshesOlderBuiltinVersion(t *testing.T) {
 	}
 }
 
-func TestStaticProxyServesIndexAndRejectsTraversal(t *testing.T) {
+func TestStaticProxyServesIndexFallbackAndRejectsTraversal(t *testing.T) {
 	rootDir := t.TempDir()
 	moduleDir := writeManifest(t, rootDir, "static-demo", Manifest{
 		ID:      "static-demo",
@@ -235,12 +235,16 @@ func TestStaticProxyServesIndexAndRejectsTraversal(t *testing.T) {
 		t.Fatalf("enable static module: %v", err)
 	}
 
-	handler, err := manager.ProxyHandler("static-demo", `..\secret.txt`, common.RoleRootUser, ProxyContext{})
+	if _, err := manager.ProxyHandler("static-demo", `..\secret.txt`, common.RoleRootUser, ProxyContext{}); err == nil {
+		t.Fatal("static traversal path should be rejected")
+	}
+
+	handler, err := manager.ProxyHandler("static-demo", "/missing-route", common.RoleRootUser, ProxyContext{})
 	if err != nil {
 		t.Fatalf("create static proxy handler: %v", err)
 	}
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/api/extensions/static-demo/proxy/../secret.txt", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/extensions/static-demo/proxy/missing-route", nil)
 	request.Header.Set("If-Modified-Since", time.Now().Add(24*time.Hour).UTC().Format(http.TimeFormat))
 	request.Header.Set("If-None-Match", `"stale-module"`)
 	handler.ServeHTTP(recorder, request)
@@ -248,7 +252,7 @@ func TestStaticProxyServesIndexAndRejectsTraversal(t *testing.T) {
 		t.Fatalf("expected stale conditional request to return current file, got %d", recorder.Code)
 	}
 	if body := recorder.Body.String(); body != "static index" {
-		t.Fatalf("expected traversal to fall back to index, got %q", body)
+		t.Fatalf("expected missing SPA route to fall back to index, got %q", body)
 	}
 	if cacheControl := recorder.Header().Get("Cache-Control"); cacheControl != "no-store, no-cache, must-revalidate, private, max-age=0" {
 		t.Fatalf("expected static module response to disable caching, got %q", cacheControl)

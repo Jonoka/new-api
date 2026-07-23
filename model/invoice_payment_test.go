@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -38,6 +39,9 @@ func TestCreateCombinedInvoiceExternalPaymentDoesNotChargeBalanceAndFreezesOrder
 	assert.Equal(t, "7.00", record.ProviderAmount)
 	assert.Equal(t, "CNY", record.ProviderCurrency)
 	assert.Len(t, record.Orders, 1)
+	var eventCount int64
+	require.NoError(t, db.Model(&NotificationEvent{}).Where("event_type = ?", NotificationEventTypeInvoicePending).Count(&eventCount).Error)
+	assert.Zero(t, eventCount, "服务费尚未支付时不得创建待开票通知")
 
 	var user User
 	require.NoError(t, db.First(&user, 1301).Error)
@@ -58,8 +62,37 @@ func TestCreateCombinedInvoiceExternalPaymentDoesNotChargeBalanceAndFreezesOrder
 	require.ErrorContains(t, err, "已经申请过发票")
 }
 
+func TestCreateCombinedInvoiceExternalPaymentEnqueuesZeroFeeInvoiceImmediately(t *testing.T) {
+	db := setupInvoiceOrderTestDB(t)
+	createNotificationFixture(t)
+	InvoiceFeeRules = `[{"min":0,"type":"fixed","value":0}]`
+	createInvoiceOrderTestUser(t, db, 1307, 2_000_000)
+	topUp := recentInvoiceTopUp(1307, "TOP-EXTERNAL-ZERO-FEE", 70)
+	require.NoError(t, db.Create(&topUp).Error)
+
+	record, err := CreateCombinedInvoiceExternalPayment(
+		1307,
+		[]InvoiceOrderReference{{SourceType: InvoiceSourceTopUp, SourceId: topUp.TradeNo}},
+		validCombinedInvoiceRequest(),
+		InvoiceExternalPaymentOptions{
+			PaymentProvider: PaymentProviderEpay,
+			PaymentMethod:   "alipay",
+			RequestIP:       "127.0.0.1",
+		},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, InvoiceStatusPending, record.Status)
+	assert.Equal(t, InvoicePaymentStatusSuccess, record.PaymentStatus)
+	assert.Zero(t, record.PaymentAmountMinor)
+
+	var eventCount int64
+	require.NoError(t, db.Model(&NotificationEvent{}).Where("event_type = ? AND event_key = ?", NotificationEventTypeInvoicePending, fmt.Sprintf("invoice:%d", record.Id)).Count(&eventCount).Error)
+	assert.EqualValues(t, 1, eventCount)
+}
+
 func TestCompleteInvoiceExternalPaymentTransitionsAndIsIdempotent(t *testing.T) {
 	db := setupInvoiceOrderTestDB(t)
+	createNotificationFixture(t)
 	record, topUp := createExternalInvoicePaymentForTest(t, 1302, "TOP-EXTERNAL-COMPLETE", PaymentProviderEpay, "alipay")
 	require.NoError(t, UpdateInvoiceExternalPaymentStatus(record.SourceId, PaymentProviderEpay, InvoicePaymentStatusExpired, "expired"))
 
@@ -78,11 +111,16 @@ func TestCompleteInvoiceExternalPaymentTransitionsAndIsIdempotent(t *testing.T) 
 	assert.Equal(t, InvoicePaymentStatusSuccess, completed.PaymentStatus)
 	assert.Equal(t, InvoiceStatusPending, completed.Status)
 	assert.NotZero(t, completed.PaidTime)
+	var eventCount int64
+	require.NoError(t, db.Model(&NotificationEvent{}).Where("event_type = ?", NotificationEventTypeInvoicePending).Count(&eventCount).Error)
+	assert.EqualValues(t, 1, eventCount)
 
 	completed, completedNow, err = CompleteInvoiceExternalPayment(record.SourceId, callback)
 	require.NoError(t, err)
 	assert.False(t, completedNow)
 	assert.Equal(t, InvoicePaymentStatusSuccess, completed.PaymentStatus)
+	require.NoError(t, db.Model(&NotificationEvent{}).Where("event_type = ?", NotificationEventTypeInvoicePending).Count(&eventCount).Error)
+	assert.EqualValues(t, 1, eventCount, "重复支付回调不得重复入队")
 
 	require.NoError(t, db.Where("id = ?", topUp.Id).First(topUp).Error)
 	assert.Equal(t, InvoiceStatusPending, topUp.InvoiceStatus)

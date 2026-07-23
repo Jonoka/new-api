@@ -58,6 +58,7 @@ export const DEFAULT_ADMIN_CONFIG = {
   admin: {
     enabled: true,
     channel: true,
+    channel_observability: true,
     models: true,
     deployment: true,
     redemption: true,
@@ -66,6 +67,7 @@ export const DEFAULT_ADMIN_CONFIG = {
     game_management: true,
     invoice_admin: true,
     affiliate_admin: true,
+    notification_center: true,
     extension_admin: true,
     setting: true,
   },

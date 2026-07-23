@@ -155,15 +155,25 @@ func (m *Manager) Scan() error {
 			}
 			continue
 		}
+		assetRevision, err := nativeAssetRevision(moduleDir, manifest)
+		if err != nil {
+			nextModules[manifest.ID] = Module{
+				Manifest: manifest,
+				Path:     moduleDir,
+				Error:    fmt.Sprintf("native module resources are invalid: %v", err),
+			}
+			continue
+		}
 
 		enabled := false
 		if saved, ok := state.Modules[manifest.ID]; ok {
 			enabled = saved.Enabled
 		}
 		nextModules[manifest.ID] = Module{
-			Manifest: manifest,
-			Enabled:  enabled,
-			Path:     moduleDir,
+			Manifest:      manifest,
+			Enabled:       enabled,
+			AssetRevision: assetRevision,
+			Path:          moduleDir,
 		}
 	}
 
@@ -293,6 +303,9 @@ func (m *Manager) InstallArchive(readerAt io.ReaderAt, size int64) (Module, erro
 	}
 	if err := manifest.Validate(); err != nil {
 		return Module{}, err
+	}
+	if _, err := nativeAssetRevision(sourceDir, manifest); err != nil {
+		return Module{}, fmt.Errorf("native module resources are invalid: %w", err)
 	}
 
 	targetDir, err := safeModuleTargetDir(m.rootDir, manifest.ID)

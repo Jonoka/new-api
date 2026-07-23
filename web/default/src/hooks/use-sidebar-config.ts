@@ -74,6 +74,7 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
   admin: {
     enabled: true,
     channel: true,
+    channel_observability: true,
     models: true,
     redemption: true,
     user: true,
@@ -81,6 +82,7 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     setting: true,
     subscription: true,
     invoice_admin: true,
+    notification_center: true,
     extension_admin: true,
     game: true,
   },
@@ -132,6 +134,10 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/affiliate': { section: 'personal', module: 'affiliate' },
   '/profile': { section: 'personal', module: 'personal' },
   '/channels': { section: 'admin', module: 'channel' },
+  '/channel-observability': {
+    section: 'admin',
+    module: 'channel_observability',
+  },
   '/models': { section: 'admin', module: 'models' },
   '/models/metadata': { section: 'admin', module: 'models' },
   '/models/deployments': { section: 'admin', module: 'models' },
@@ -139,6 +145,10 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/redemption-codes': { section: 'admin', module: 'redemption' },
   '/subscriptions': { section: 'admin', module: 'subscription' },
   '/invoice-management': { section: 'admin', module: 'invoice_admin' },
+  '/notification-center': {
+    section: 'admin',
+    module: 'notification_center',
+  },
   '/extensions': { section: 'admin', module: 'extension_admin' },
   '/system-settings/billing/affiliate': {
     section: 'admin',

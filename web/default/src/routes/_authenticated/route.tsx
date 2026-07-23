@@ -28,6 +28,7 @@ let sessionVerifiedAt = 0
 const AUTH_SESSION_REFRESH_TTL_MS = 30_000
 const ADMIN_ROUTE_PREFIXES = [
   '/channels',
+  '/channel-observability',
   '/models',
   '/system-settings',
   '/users',
@@ -35,6 +36,7 @@ const ADMIN_ROUTE_PREFIXES = [
   '/subscriptions',
   '/game-management',
   '/invoice-management',
+  '/notification-center',
   '/extensions',
 ]
 

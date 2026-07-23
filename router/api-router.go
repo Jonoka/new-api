@@ -40,10 +40,12 @@ func SetApiRouter(router *gin.Engine) {
 			perfMetricsRoute.GET("", controller.GetPerfMetrics)
 		}
 		extensionRoute := apiRouter.Group("/extensions")
+		apiRouter.POST("/extensions/:id/notification-events", middleware.RootAuth(), controller.PublishExtensionNotificationEvent)
 		extensionRoute.Use(middleware.UserSessionAuth())
 		{
 			extensionRoute.GET("/", controller.ListExtensions)
 			extensionRoute.GET("/host/me", controller.GetExtensionHostContext)
+			extensionRoute.GET("/:id/native/:pageKey/:target/:asset", controller.GetExtensionNativeAsset)
 			extensionRoute.Any("/:id/proxy/*path", controller.ProxyExtension)
 		}
 		extensionAdminRoute := apiRouter.Group("/extension-admin")
@@ -316,6 +318,22 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.POST("/waffo-pancake/save", controller.SaveWaffoPancake)
 			optionRoute.POST("/waffo-pancake/subscription-product", controller.CreateWaffoPancakeSubscriptionProduct)
 			optionRoute.POST("/waffo-pancake/subscription-product-options", controller.ListWaffoPancakeSubscriptionProductOptions)
+		}
+
+		notificationRoute := apiRouter.Group("/notification")
+		notificationRoute.Use(middleware.RootAuth())
+		{
+			notificationRoute.GET("/event-types", controller.ListNotificationEventTypes)
+			notificationRoute.GET("/bots", controller.ListNotificationBots)
+			notificationRoute.POST("/bots", controller.CreateNotificationBot)
+			notificationRoute.PUT("/bots/:id", controller.UpdateNotificationBot)
+			notificationRoute.DELETE("/bots/:id", controller.DisableNotificationBot)
+			notificationRoute.POST("/bots/:id/test", controller.TestNotificationBot)
+			notificationRoute.GET("/tasks", controller.ListNotificationTasks)
+			notificationRoute.POST("/tasks", controller.CreateNotificationTask)
+			notificationRoute.PUT("/tasks/:id", controller.UpdateNotificationTask)
+			notificationRoute.DELETE("/tasks/:id", controller.DisableNotificationTask)
+			notificationRoute.GET("/deliveries", controller.ListNotificationDeliveries)
 		}
 
 		// Custom OAuth provider management (root only)

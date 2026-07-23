@@ -12,6 +12,17 @@ import (
 	"strings"
 )
 
+var sensitiveForwardHeaders = []string{
+	"Authorization",
+	"Cookie",
+	"Proxy-Authorization",
+}
+
+var (
+	errStaticAssetNotFound = errors.New("static extension asset not found")
+	errStaticAssetUnsafe   = errors.New("static extension asset path is unsafe")
+)
+
 var hopByHopHeaders = []string{
 	"Connection",
 	"Keep-Alive",
@@ -67,6 +78,9 @@ func (m *Manager) ProxyHandler(moduleID string, proxyPath string, role int, ctx 
 		for _, header := range hopByHopHeaders {
 			req.Header.Del(header)
 		}
+		for _, header := range sensitiveForwardHeaders {
+			req.Header.Del(header)
+		}
 		req.Header.Set("X-NewAPI-Module-ID", module.ID)
 		req.Header.Set("X-NewAPI-User-ID", ctx.UserID)
 		req.Header.Set("X-NewAPI-Username", ctx.Username)
@@ -84,27 +98,24 @@ func (m *Manager) ProxyHandler(moduleID string, proxyPath string, role int, ctx 
 }
 
 func staticHandler(module Module, proxyPath string, ctx ProxyContext) (http.Handler, error) {
-	staticDir := strings.TrimSpace(module.Runtime.StaticDir)
-	if staticDir == "" {
-		staticDir = DefaultStaticDir
+	root, err := secureStaticRoot(module)
+	if err != nil {
+		return nil, err
 	}
-	root := filepath.Join(module.Path, filepath.FromSlash(staticDir))
-	if info, err := os.Stat(root); err != nil || !info.IsDir() {
-		if err == nil {
-			err = fmt.Errorf("not a directory")
+	cleanPath, err := validateStaticProxyPath(proxyPath)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := secureStaticAssetPath(root, cleanPath); err != nil {
+		if !errors.Is(err, errStaticAssetNotFound) {
+			return nil, err
 		}
-		return nil, fmt.Errorf("static module directory is unavailable: %w", err)
-	}
-
-	fileServer := http.FileServer(http.Dir(root))
-	cleanPath := cleanProxyPath(proxyPath)
-	targetPath, err := staticTargetPath(root, cleanPath)
-	if err != nil || !regularFileExists(targetPath) {
-		cleanPath = "/"
+		cleanPath = "/index.html"
+		if _, err := secureStaticAssetPath(root, cleanPath); err != nil {
+			return nil, errors.New("static module entry is unavailable")
+		}
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.URL.Path = cleanPath
-		r.URL.RawPath = ""
 		// 静态模块允许在同一 URL 上热更新或回滚。若浏览器继续复用旧的
 		// index.html、app.js 或 app.css，跨版本资源混用会直接破坏页面。
 		// 因此这里既禁止存储，也忽略旧文件留下的条件请求，确保每次打开
@@ -124,8 +135,169 @@ func staticHandler(module Module, proxyPath string, ctx ProxyContext) (http.Hand
 		r.Header.Set("X-NewAPI-User-Role", ctx.Role)
 		r.Header.Set("X-NewAPI-User-Group", ctx.Group)
 		r.Header.Set("X-NewAPI-Use-Access-Token", ctx.UseAccessToken)
-		fileServer.ServeHTTP(w, r)
+
+		targetPath, err := secureStaticAssetPath(root, cleanPath)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		file, err := os.Open(targetPath)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		defer file.Close()
+		info, err := file.Stat()
+		if err != nil || !info.Mode().IsRegular() {
+			http.NotFound(w, r)
+			return
+		}
+		http.ServeContent(w, r, filepath.Base(targetPath), info.ModTime(), file)
 	}), nil
+}
+
+func secureStaticRoot(module Module) (string, error) {
+	if strings.TrimSpace(module.Path) == "" {
+		return "", errors.New("static module directory is unavailable")
+	}
+	modulePath, err := filepath.Abs(module.Path)
+	if err != nil {
+		return "", errors.New("static module directory is unavailable")
+	}
+	staticDir := strings.TrimSpace(module.Runtime.StaticDir)
+	if staticDir == "" {
+		staticDir = DefaultStaticDir
+	}
+	staticDir = filepath.Clean(filepath.FromSlash(staticDir))
+	if filepath.IsAbs(staticDir) || staticDir == "." || staticDir == ".." || strings.HasPrefix(staticDir, ".."+string(filepath.Separator)) || hasDotPathSegment(filepath.ToSlash(staticDir)) {
+		return "", errors.New("static module directory is invalid")
+	}
+	root := filepath.Join(modulePath, staticDir)
+	if err := ensurePathInside(modulePath, root); err != nil {
+		return "", errors.New("static module directory escapes module path")
+	}
+	if err := rejectSymlinkComponents(modulePath, root); err != nil {
+		if errors.Is(err, errStaticAssetUnsafe) {
+			return "", errors.New("static module directory must not contain symbolic links")
+		}
+		return "", errors.New("static module directory is unavailable")
+	}
+	rootInfo, err := os.Lstat(root)
+	if err != nil || !rootInfo.IsDir() {
+		return "", errors.New("static module directory is unavailable")
+	}
+	resolvedModulePath, err := filepath.EvalSymlinks(modulePath)
+	if err != nil {
+		return "", errors.New("static module directory is unavailable")
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", errors.New("static module directory is unavailable")
+	}
+	if err := ensurePathInside(resolvedModulePath, resolvedRoot); err != nil {
+		return "", errors.New("static module directory escapes module path")
+	}
+	return resolvedRoot, nil
+}
+
+func validateStaticProxyPath(value string) (string, error) {
+	if value == "" {
+		return "/", nil
+	}
+	if !strings.HasPrefix(value, "/") {
+		value = "/" + value
+	}
+	if hasDotPathSegment(value) {
+		return "", errors.New("static module request path must not contain dot-prefixed segments")
+	}
+	if err := validatePagePath(value); err != nil {
+		return "", fmt.Errorf("static module request path is invalid: %w", err)
+	}
+	return value, nil
+}
+
+func secureStaticAssetPath(root, requestPath string) (string, error) {
+	if hasDotPathSegment(requestPath) {
+		return "", fmt.Errorf("%w: dot-prefixed segments are not allowed", errStaticAssetUnsafe)
+	}
+	if err := validatePagePath(requestPath); err != nil {
+		return "", fmt.Errorf("%w: %v", errStaticAssetUnsafe, err)
+	}
+	if requestPath == "/" {
+		requestPath = "/index.html"
+	}
+	target := filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(requestPath, "/")))
+	if err := ensurePathInside(root, target); err != nil {
+		return "", errStaticAssetUnsafe
+	}
+	if err := rejectSymlinkComponents(root, target); err != nil {
+		return "", err
+	}
+	targetInfo, err := os.Lstat(target)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", errStaticAssetNotFound
+		}
+		return "", errors.New("static extension asset is unavailable")
+	}
+	if !targetInfo.Mode().IsRegular() {
+		return "", errStaticAssetUnsafe
+	}
+	resolvedTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		return "", errors.New("static extension asset is unavailable")
+	}
+	if err := ensurePathInside(root, resolvedTarget); err != nil {
+		return "", errStaticAssetUnsafe
+	}
+	return resolvedTarget, nil
+}
+
+func rejectSymlinkComponents(base, target string) error {
+	if err := ensurePathInside(base, target); err != nil {
+		return errStaticAssetUnsafe
+	}
+	baseInfo, err := os.Lstat(base)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return errStaticAssetNotFound
+		}
+		return errors.New("static extension asset is unavailable")
+	}
+	if baseInfo.Mode()&os.ModeSymlink != 0 {
+		return errStaticAssetUnsafe
+	}
+	relative, err := filepath.Rel(base, target)
+	if err != nil {
+		return errStaticAssetUnsafe
+	}
+	current := base
+	if relative == "." {
+		return nil
+	}
+	for _, segment := range strings.Split(relative, string(filepath.Separator)) {
+		current = filepath.Join(current, segment)
+		info, err := os.Lstat(current)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return errStaticAssetNotFound
+			}
+			return errors.New("static extension asset is unavailable")
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return errStaticAssetUnsafe
+		}
+	}
+	return nil
+}
+
+func hasDotPathSegment(value string) bool {
+	for _, segment := range strings.Split(value, "/") {
+		if strings.HasPrefix(segment, ".") {
+			return true
+		}
+	}
+	return false
 }
 
 func cleanProxyPath(value string) string {
@@ -141,19 +313,4 @@ func cleanProxyPath(value string) string {
 		return "/"
 	}
 	return cleaned
-}
-
-func staticTargetPath(root string, cleanPath string) (string, error) {
-	rootAbs, err := filepath.Abs(root)
-	if err != nil {
-		return "", err
-	}
-	if cleanPath == "/" {
-		cleanPath = "/index.html"
-	}
-	target := filepath.Join(rootAbs, filepath.FromSlash(strings.TrimPrefix(cleanPath, "/")))
-	if err := ensurePathInside(rootAbs, target); err != nil {
-		return "", err
-	}
-	return target, nil
 }

@@ -251,6 +251,11 @@ export default function SettingsSidebarModulesAdmin(props) {
       description: t('系统管理功能'),
       modules: [
         { key: 'channel', title: t('渠道管理'), description: t('API渠道配置') },
+        {
+          key: 'channel_observability',
+          title: t('渠道可观测性'),
+          description: t('渠道、模型与分组稳定性分析'),
+        },
         { key: 'models', title: t('模型管理'), description: t('AI模型配置') },
         {
           key: 'deployment',
@@ -277,6 +282,11 @@ export default function SettingsSidebarModulesAdmin(props) {
           key: 'invoice_admin',
           title: t('发票管理'),
           description: t('审核和处理发票工单'),
+        },
+        {
+          key: 'notification_center',
+          title: t('通知中心'),
+          description: t('配置通知任务与 Telegram Bot'),
         },
         {
           key: 'affiliate_admin',

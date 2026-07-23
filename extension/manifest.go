@@ -2,28 +2,35 @@ package extension
 
 import (
 	"errors"
+	"fmt"
 	"net/url"
+	"path"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 const (
-	RuntimeTypeHTTP   = "http"
-	RuntimeTypeStatic = "static"
-	DefaultRootDir    = "data/modules"
-	DefaultStaticDir  = "public"
+	RuntimeTypeHTTP    = "http"
+	RuntimeTypeStatic  = "static"
+	DefaultRootDir     = "data/modules"
+	DefaultStaticDir   = "public"
+	RenderTypeNative   = "native"
+	NativeSDKV1        = "v1"
+	CapabilityUINative = "ui.native"
 )
 
 type Manifest struct {
-	ID          string           `json:"id"`
-	Name        string           `json:"name"`
-	Version     string           `json:"version"`
-	Description string           `json:"description,omitempty"`
-	Author      string           `json:"author,omitempty"`
-	Host        HostCompat       `json:"host,omitempty"`
-	Runtime     Runtime          `json:"runtime"`
-	UI          UIContribution   `json:"ui,omitempty"`
-	Permissions PermissionConfig `json:"permissions,omitempty"`
+	ID            string                   `json:"id"`
+	Name          string                   `json:"name"`
+	Version       string                   `json:"version"`
+	Description   string                   `json:"description,omitempty"`
+	Author        string                   `json:"author,omitempty"`
+	Host          HostCompat               `json:"host,omitempty"`
+	Runtime       Runtime                  `json:"runtime"`
+	UI            UIContribution           `json:"ui,omitempty"`
+	Permissions   PermissionConfig         `json:"permissions,omitempty"`
+	Notifications NotificationContribution `json:"notifications,omitempty"`
 }
 
 type HostCompat struct {
@@ -52,35 +59,56 @@ type NavItem struct {
 }
 
 type Page struct {
-	Key   string `json:"key"`
-	Title string `json:"title,omitempty"`
-	Path  string `json:"path"`
-	Embed bool   `json:"embed"`
+	Key    string      `json:"key"`
+	Title  string      `json:"title,omitempty"`
+	Path   string      `json:"path"`
+	Embed  bool        `json:"embed"`
+	Render *PageRender `json:"render,omitempty"`
+}
+
+type PageRender struct {
+	Type    string              `json:"type"`
+	SDK     string              `json:"sdk"`
+	Targets NativeRenderTargets `json:"targets"`
+}
+
+type NativeRenderTargets struct {
+	Default NativeRenderTarget `json:"default"`
+	Classic NativeRenderTarget `json:"classic"`
+}
+
+type NativeRenderTarget struct {
+	Entry  string   `json:"entry"`
+	Styles []string `json:"styles,omitempty"`
 }
 
 type PermissionConfig struct {
-	Roles []string `json:"roles,omitempty"`
+	Roles        []string `json:"roles,omitempty"`
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 type Module struct {
 	Manifest
-	Enabled bool   `json:"enabled"`
-	Path    string `json:"path,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Enabled       bool   `json:"enabled"`
+	AssetRevision string `json:"asset_revision,omitempty"`
+	Path          string `json:"path,omitempty"`
+	Error         string `json:"error,omitempty"`
 }
 
 type PublicModule struct {
-	ID          string           `json:"id"`
-	Name        string           `json:"name"`
-	Version     string           `json:"version"`
-	Description string           `json:"description,omitempty"`
-	Author      string           `json:"author,omitempty"`
-	Host        HostCompat       `json:"host,omitempty"`
-	Runtime     PublicRuntime    `json:"runtime,omitempty"`
-	UI          UIContribution   `json:"ui,omitempty"`
-	Permissions PermissionConfig `json:"permissions,omitempty"`
-	Enabled     bool             `json:"enabled"`
-	Error       string           `json:"error,omitempty"`
+	ID            string                   `json:"id"`
+	Name          string                   `json:"name"`
+	Version       string                   `json:"version"`
+	Description   string                   `json:"description,omitempty"`
+	Author        string                   `json:"author,omitempty"`
+	Host          HostCompat               `json:"host,omitempty"`
+	Runtime       PublicRuntime            `json:"runtime,omitempty"`
+	UI            UIContribution           `json:"ui,omitempty"`
+	Permissions   PermissionConfig         `json:"permissions,omitempty"`
+	Notifications NotificationContribution `json:"notifications,omitempty"`
+	Enabled       bool                     `json:"enabled"`
+	AssetRevision string                   `json:"asset_revision,omitempty"`
+	Error         string                   `json:"error,omitempty"`
 }
 
 type PublicRuntime struct {
@@ -120,19 +148,30 @@ func (m *Manifest) Validate() error {
 			staticDir = DefaultStaticDir
 		}
 		staticDir = filepath.Clean(filepath.FromSlash(staticDir))
-		if filepath.IsAbs(staticDir) || staticDir == "." || staticDir == ".." || strings.HasPrefix(staticDir, ".."+string(filepath.Separator)) {
+		if filepath.IsAbs(staticDir) || staticDir == "." || staticDir == ".." || strings.HasPrefix(staticDir, ".."+string(filepath.Separator)) || hasDotPathSegment(filepath.ToSlash(staticDir)) {
 			return errors.New("runtime.static_dir is invalid")
 		}
 		m.Runtime.StaticDir = filepath.ToSlash(staticDir)
 	default:
 		return errors.New("only http and static runtimes are supported")
 	}
+	pageKeys := make(map[string]struct{}, len(m.UI.Pages))
 	for _, page := range m.UI.Pages {
-		if strings.TrimSpace(page.Key) == "" {
-			return errors.New("ui.pages.key is required")
+		if !isValidPageKey(page.Key) {
+			return errors.New("ui.pages.key must contain only letters, numbers, - or _")
 		}
-		if !strings.HasPrefix(page.Path, "/") {
-			return errors.New("ui.pages.path must start with /")
+		if _, exists := pageKeys[page.Key]; exists {
+			return errors.New("ui.pages.key must be unique")
+		}
+		pageKeys[page.Key] = struct{}{}
+		if err := validatePagePath(page.Path); err != nil {
+			return fmt.Errorf("ui.pages[%s].path is invalid: %w", page.Key, err)
+		}
+		if m.Runtime.Type == RuntimeTypeStatic && hasDotPathSegment(page.Path) {
+			return fmt.Errorf("ui.pages[%s].path is invalid: static paths must not contain dot-prefixed segments", page.Key)
+		}
+		if err := m.validatePageRender(page); err != nil {
+			return err
 		}
 	}
 	for _, nav := range m.UI.Nav {
@@ -142,8 +181,150 @@ func (m *Manifest) Validate() error {
 		if strings.TrimSpace(nav.Page) == "" {
 			return errors.New("ui.nav.page is required")
 		}
+		if _, exists := pageKeys[nav.Page]; !exists {
+			return errors.New("ui.nav.page must reference ui.pages.key")
+		}
+	}
+	if err := m.validateContributions(); err != nil {
+		return err
 	}
 	return nil
+}
+
+func isValidPageKey(value string) bool {
+	if value == "" || value != strings.TrimSpace(value) {
+		return false
+	}
+	for _, character := range value {
+		if (character >= 'a' && character <= 'z') ||
+			(character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') ||
+			character == '-' || character == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validatePagePath(value string) error {
+	if value == "" || value != strings.TrimSpace(value) || !strings.HasPrefix(value, "/") || strings.HasPrefix(value, "//") {
+		return errors.New("path must be an absolute module path")
+	}
+	if strings.ContainsAny(value, `\?#%`) {
+		return errors.New("path must not contain backslashes, percent encoding, query or fragment components")
+	}
+	for _, character := range value {
+		if unicode.IsControl(character) {
+			return errors.New("path must not contain control characters")
+		}
+	}
+	if path.Clean(value) != value {
+		return errors.New("path must be canonical and must not contain dot segments, duplicate separators or a trailing separator")
+	}
+	if value == "/" {
+		return nil
+	}
+	for _, segment := range strings.Split(strings.TrimPrefix(value, "/"), "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return errors.New("path must not contain empty or dot segments")
+		}
+	}
+	return nil
+}
+
+func (m *Manifest) validatePageRender(page Page) error {
+	if page.Render == nil {
+		return nil
+	}
+	render := page.Render
+	if render.Type != RenderTypeNative {
+		return fmt.Errorf("ui.pages[%s].render.type only supports native", page.Key)
+	}
+	if m.Runtime.Type != RuntimeTypeStatic {
+		return fmt.Errorf("ui.pages[%s].render native requires static runtime", page.Key)
+	}
+	if render.SDK != NativeSDKV1 {
+		return fmt.Errorf("ui.pages[%s].render.sdk must be v1", page.Key)
+	}
+	if !hasPermissionCapability(m.Permissions.Capabilities, CapabilityUINative) {
+		return fmt.Errorf("ui.pages[%s].render native requires ui.native capability", page.Key)
+	}
+	if err := validateNativeRenderTarget(page.Key, "default", render.Targets.Default); err != nil {
+		return err
+	}
+	return validateNativeRenderTarget(page.Key, "classic", render.Targets.Classic)
+}
+
+func validateNativeRenderTarget(pageKey, targetName string, target NativeRenderTarget) error {
+	if err := validateNativeAssetPath(target.Entry, ".js", ".mjs"); err != nil {
+		return fmt.Errorf("ui.pages[%s].render.targets.%s.entry is invalid: %w", pageKey, targetName, err)
+	}
+	for index, style := range target.Styles {
+		if err := validateNativeAssetPath(style, ".css"); err != nil {
+			return fmt.Errorf("ui.pages[%s].render.targets.%s.styles[%d] is invalid: %w", pageKey, targetName, index, err)
+		}
+	}
+	return nil
+}
+
+func validateNativeAssetPath(value string, extensions ...string) error {
+	if value == "" || value != strings.TrimSpace(value) || !strings.HasPrefix(value, "/") || strings.HasPrefix(value, "//") {
+		return errors.New("path must be an absolute module path")
+	}
+	if strings.ContainsAny(value, "\\:?#\x00") || path.Clean(value) != value {
+		return errors.New("path must not contain traversal, query or fragment components")
+	}
+	for _, segment := range strings.Split(strings.TrimPrefix(value, "/"), "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return errors.New("path must not contain traversal components")
+		}
+	}
+	extension := path.Ext(value)
+	for _, allowed := range extensions {
+		if extension == allowed {
+			return nil
+		}
+	}
+	return fmt.Errorf("path extension must be %s", strings.Join(extensions, " or "))
+}
+
+func (m *Manifest) validateContributions() error {
+	seen := make(map[string]struct{}, len(m.Permissions.Capabilities))
+	notificationCapabilities := make([]string, 0, 1)
+	for index, capability := range m.Permissions.Capabilities {
+		capability = strings.TrimSpace(capability)
+		if capability == "" {
+			return errors.New("permissions.capabilities cannot contain an empty value")
+		}
+		if _, exists := seen[capability]; exists {
+			return fmt.Errorf("duplicate permission capability: %s", capability)
+		}
+		seen[capability] = struct{}{}
+		m.Permissions.Capabilities[index] = capability
+		switch capability {
+		case CapabilityUINative:
+		case CapabilityNotificationEventsPublish:
+			notificationCapabilities = append(notificationCapabilities, capability)
+		default:
+			return fmt.Errorf("unsupported permission capability: %s", capability)
+		}
+	}
+
+	capabilities := m.Permissions.Capabilities
+	m.Permissions.Capabilities = notificationCapabilities
+	err := m.validateNotificationContribution()
+	m.Permissions.Capabilities = capabilities
+	return err
+}
+
+func hasPermissionCapability(capabilities []string, expected string) bool {
+	for _, capability := range capabilities {
+		if strings.TrimSpace(capability) == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func (m Module) Public(includeAdminFields bool) PublicModule {
@@ -159,9 +340,11 @@ func (m Module) Public(includeAdminFields bool) PublicModule {
 			HealthPath: m.Runtime.HealthPath,
 			StaticDir:  m.Runtime.StaticDir,
 		},
-		UI:          m.UI,
-		Permissions: m.Permissions,
-		Enabled:     m.Enabled,
+		UI:            m.UI,
+		Permissions:   m.Permissions,
+		Notifications: m.Notifications,
+		Enabled:       m.Enabled,
+		AssetRevision: m.AssetRevision,
 	}
 	if includeAdminFields {
 		result.Error = m.Error

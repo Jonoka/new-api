@@ -52,6 +52,12 @@ func setupInvoiceOrderTestDB(t *testing.T) *gorm.DB {
 		&SubscriptionOrder{},
 		&InvoiceRecord{},
 		&InvoiceOrderLink{},
+		&NotificationBot{},
+		&NotificationTask{},
+		&NotificationTarget{},
+		&NotificationEventReceipt{},
+		&NotificationEvent{},
+		&NotificationDelivery{},
 	))
 
 	t.Cleanup(func() {
@@ -136,6 +142,66 @@ func TestUpsertSubscriptionTopUpTxCopiesInvoiceKind(t *testing.T) {
 	assert.Equal(t, InvoiceKindNormal, updated.InvoiceKind)
 }
 
+func TestDirectInvoiceRecordCreationEnqueuesPendingNotificationOnce(t *testing.T) {
+	db := setupInvoiceOrderTestDB(t)
+	createNotificationFixture(t)
+	createInvoiceOrderTestUser(t, db, 1401, 2_000_000)
+	now := common.GetTimestamp()
+	topUp := TopUp{
+		UserId:            1401,
+		TradeNo:           "TOP-DIRECT-INVOICE-EVENT",
+		PaymentMethod:     "alipay",
+		PaymentProvider:   PaymentProviderEpay,
+		Status:            common.TopUpStatusSuccess,
+		InvoiceRequired:   true,
+		InvoiceType:       InvoiceTypeCompany,
+		InvoiceKind:       InvoiceKindNormal,
+		InvoiceTitle:      "测试公司",
+		InvoiceTaxNo:      "91310000TEST",
+		InvoiceBaseAmount: 70,
+		InvoiceFeeAmount:  7,
+		CreateTime:        now - 60,
+		CompleteTime:      now - 30,
+	}
+	require.NoError(t, db.Create(&topUp).Error)
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+		return CreateInvoiceRecordFromTopUpTx(tx, &topUp)
+	}))
+
+	order := SubscriptionOrder{
+		UserId:            1401,
+		TradeNo:           "SUB-DIRECT-INVOICE-EVENT",
+		PaymentMethod:     PaymentMethodBalance,
+		PaymentProvider:   PaymentProviderBalance,
+		Status:            common.TopUpStatusSuccess,
+		InvoiceRequired:   true,
+		InvoiceType:       InvoiceTypeCompany,
+		InvoiceKind:       InvoiceKindNormal,
+		InvoiceTitle:      "测试公司",
+		InvoiceTaxNo:      "91310000TEST",
+		InvoiceBaseAmount: 100,
+		InvoiceFeeAmount:  10,
+		CreateTime:        now - 50,
+		CompleteTime:      now - 20,
+	}
+	require.NoError(t, db.Create(&order).Error)
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+		return CreateInvoiceRecordFromSubscriptionOrderTx(tx, &order)
+	}))
+
+	var eventCount int64
+	require.NoError(t, db.Model(&NotificationEvent{}).Where("event_type = ?", NotificationEventTypeInvoicePending).Count(&eventCount).Error)
+	assert.EqualValues(t, 2, eventCount)
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+		if err := CreateInvoiceRecordFromTopUpTx(tx, &topUp); err != nil {
+			return err
+		}
+		return CreateInvoiceRecordFromSubscriptionOrderTx(tx, &order)
+	}))
+	require.NoError(t, db.Model(&NotificationEvent{}).Where("event_type = ?", NotificationEventTypeInvoicePending).Count(&eventCount).Error)
+	assert.EqualValues(t, 2, eventCount, "重复创建来源记录不得重复入队")
+}
+
 func TestGetRecentInvoiceOrdersMarksUsedOrdersAndDeduplicatesSubscriptionMirror(t *testing.T) {
 	db := setupInvoiceOrderTestDB(t)
 	createInvoiceOrderTestUser(t, db, 1001, 2_000_000)
@@ -197,6 +263,7 @@ func TestGetRecentInvoiceOrdersMarksUsedOrdersAndDeduplicatesSubscriptionMirror(
 
 func TestCreateCombinedInvoiceWithBalanceChargesFeeAndPreventsReuse(t *testing.T) {
 	db := setupInvoiceOrderTestDB(t)
+	createNotificationFixture(t)
 	createInvoiceOrderTestUser(t, db, 1002, 2_000_000)
 
 	topUp := recentInvoiceTopUp(1002, "TOP-COMBINE", 70)
@@ -269,6 +336,17 @@ func TestCreateCombinedInvoiceWithBalanceChargesFeeAndPreventsReuse(t *testing.T
 	var recordCount int64
 	require.NoError(t, db.Model(&InvoiceRecord{}).Count(&recordCount).Error)
 	assert.EqualValues(t, 1, recordCount)
+	var eventCount int64
+	require.NoError(t, db.Model(&NotificationEvent{}).Where("event_type = ?", NotificationEventTypeInvoicePending).Count(&eventCount).Error)
+	assert.EqualValues(t, 1, eventCount)
+	var event NotificationEvent
+	require.NoError(t, db.Where("event_type = ? AND event_key = ?", NotificationEventTypeInvoicePending, fmt.Sprintf("invoice:%d", record.Id)).First(&event).Error)
+	var payload map[string]any
+	require.NoError(t, common.Unmarshal([]byte(event.Payload), &payload))
+	assert.Equal(t, float64(record.Id), payload["invoice_id"])
+	assert.Equal(t, record.SourceType, payload["source_type"])
+	assert.Equal(t, record.SourceId, payload["source_id"])
+	assert.Equal(t, record.TotalAmount, payload["total_amount"])
 }
 
 func TestCreateCombinedInvoiceWithBalanceRollsBackWhenBalanceInsufficient(t *testing.T) {

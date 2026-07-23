@@ -8,19 +8,19 @@
 
 ### 技术栈
 
-| 类别     | 技术 |
-|----------|------|
-| 包管理   | Bun |
-| 框架     | React 19、TypeScript |
-| 数据与请求 | @tanstack/react-query、axios、Zustand |
-| 路由     | @tanstack/react-router |
-| 表格与列表 | @tanstack/react-table、@tanstack/react-virtual |
-| 国际化   | i18next、react-i18next、i18next-browser-languagedetector |
-| 日期     | Day.js |
-| UI 与样式 | Base UI、Hugeicons、Tailwind CSS、clsx / class-variance-authority |
-| 表单     | React Hook Form、Zod |
-| 图表     | @visactor/vchart、@visactor/react-vchart |
-| 工具     | qrcode.react、prettier、eslint、vitest（可选）|
+| 类别       | 技术                                                              |
+| ---------- | ----------------------------------------------------------------- |
+| 包管理     | Bun                                                               |
+| 框架       | React 19、TypeScript                                              |
+| 数据与请求 | @tanstack/react-query、axios、Zustand                             |
+| 路由       | @tanstack/react-router                                            |
+| 表格与列表 | @tanstack/react-table、@tanstack/react-virtual                    |
+| 国际化     | i18next、react-i18next、i18next-browser-languagedetector          |
+| 日期       | Day.js                                                            |
+| UI 与样式  | Base UI、Hugeicons、Tailwind CSS、clsx / class-variance-authority |
+| 表单       | React Hook Form、Zod                                              |
+| 图表       | @visactor/vchart、@visactor/react-vchart                          |
+| 工具       | qrcode.react、prettier、eslint、vitest（可选）                    |
 
 优先选用成熟、维护良好的开源库；仅在现有库无法满足或需特殊适配时自行实现，并评估可维护性与通用性。
 
@@ -57,17 +57,17 @@
 ### 3.1 国际化
 
 - **页面文本**：所有面向用户的文案均需支持 i18n，使用 `useTranslation()` 的 `t()` 进行翻译。
-- **使用场景**  
-  - **React 组件**：必须使用 `const { t } = useTranslation()`，以保证语言切换时组件会重新渲染。  
-  - **非 React 环境**（工具函数、常量、类方法）：可使用 `import { t } from 'i18next'`；此类用法不会随语言切换自动更新，仅在不依赖响应式更新的场景使用。  
+- **使用场景**
+  - **React 组件**：必须使用 `const { t } = useTranslation()`，以保证语言切换时组件会重新渲染。
+  - **非 React 环境**（工具函数、常量、类方法）：可使用 `import { t } from 'i18next'`；此类用法不会随语言切换自动更新，仅在不依赖响应式更新的场景使用。
   - 即使父组件已使用 `useTranslation()`，子组件仍应自行使用，以保证独立性。
 - **专有名词**：品牌、产品、技术术语等可保留英文（如 API、React、TypeScript）；若有约定俗成的译法则使用翻译。
 - **翻译键**：使用有层级、语义清晰的键名，如 `dashboard.overview.title`，并保持命名一致。
 
 - **枚举与文案（常量中的 i18n）**  
-  各 feature 的 `constants.ts` 中常出现「枚举/状态 + 展示文案」或「成功/错误消息」，须统一约定以免遗漏 i18n、用法混乱：  
-  - **成功/错误/提示类消息**（如 `SUCCESS_MESSAGES`、`ERROR_MESSAGES`）：常量值仅表示 **i18n 键**（与英文 fallback 同字面量）。展示时**必须**通过 `t()` 使用，例如 `toast.success(t(SUCCESS_MESSAGES.API_KEY_CREATED))`、`toast.error(t(ERROR_MESSAGES.UNEXPECTED))`，**禁止**直接 `toast.success(SUCCESS_MESSAGES.xxx)` 当作最终文案。  
-  - **状态/选项的 label**：在常量中统一用 **labelKey**（字符串，即 i18n 键），组件中通过 `t(config.labelKey)` 渲染；或约定用 `label` 存与 en 一致的 key 字符串，组件用 `t(config.label)`。同一 feature 内只采用一种方式，避免混用。  
+  各 feature 的 `constants.ts` 中常出现「枚举/状态 + 展示文案」或「成功/错误消息」，须统一约定以免遗漏 i18n、用法混乱：
+  - **成功/错误/提示类消息**（如 `SUCCESS_MESSAGES`、`ERROR_MESSAGES`）：常量值仅表示 **i18n 键**（与英文 fallback 同字面量）。展示时**必须**通过 `t()` 使用，例如 `toast.success(t(SUCCESS_MESSAGES.API_KEY_CREATED))`、`toast.error(t(ERROR_MESSAGES.UNEXPECTED))`，**禁止**直接 `toast.success(SUCCESS_MESSAGES.xxx)` 当作最终文案。
+  - **状态/选项的 label**：在常量中统一用 **labelKey**（字符串，即 i18n 键），组件中通过 `t(config.labelKey)` 渲染；或约定用 `label` 存与 en 一致的 key 字符串，组件用 `t(config.label)`。同一 feature 内只采用一种方式，避免混用。
   - **新增此类常量时**：同步在 `src/i18n/static-keys.ts` 中登记对应 key（若项目用其做提取），或确保文案以 `t('...')` 字面量形式出现以便扫描，避免遗漏翻译。
 
 ### 3.2 代码风格与类型
@@ -163,7 +163,9 @@
 
 - 提交信息清晰、符合项目约定，描述变更内容与原因，中英文统一即可。
 - 变更需经过代码审查，符合本文档规范，并关注质量、性能与安全。
-- 重大功能或规范变更时更新相关文档与 `AGENTS.md`。
+- 所有程序变更都必须遵循仓库根目录 `AGENTS.md` 的“开发文档优先”规则：编码前先阅读或补齐对应开发文档，接口、页面流程、配置和行为变化必须与文档同步交付。
+- 新增或调整前端功能时，更新对应专题文档中的页面入口、权限、交互状态、错误处理、测试方法和已知限制；没有长期专题可更新的内部修复，记录到 `docs/workflows/YYYY-MM/`。
+- 规范本身发生变化时，同步更新相关开发文档与 `AGENTS.md`。
 
 ---
 
@@ -173,3 +175,4 @@
 - **2026-01-28**：补充状态管理、API、表单、路由、错误处理、样式、文件组织、可访问性、安全、测试、依赖与构建部署规范。
 - **2026-01-29**：重组文档结构，合并重复内容，明确主次与交叉引用。
 - **2026-01-31**：在 3.2 中补充「类型检查」要求：改动 TS/TSX 后须执行 typecheck 并修复至无错。
+- **2026-07-23**：补充开发文档优先规则，要求所有程序变更在编码前记录方案，并同步更新专题文档或工作记录。

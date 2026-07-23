@@ -130,6 +130,9 @@ func main() {
 	// 清理超过保留期的图片异步任务响应体。
 	service.StartImageTaskDataCleanupTask()
 
+	// 通知中心异步投递任务。
+	service.StartNotificationDispatcher()
+
 	// Wire task polling adaptor factory (breaks service -> relay import cycle)
 	service.GetTaskAdaptorFunc = func(platform constant.TaskPlatform) service.TaskPollingAdaptor {
 		a := relay.GetTaskAdaptor(platform)

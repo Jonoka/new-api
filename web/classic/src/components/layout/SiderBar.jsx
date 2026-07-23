@@ -62,6 +62,7 @@ const routerMap = {
   playground: '/console/playground',
   canvas: '/console/canvas',
   personal: '/console/personal',
+  notification_center: '/notification-center',
 };
 
 export const CLASSIC_EXTENSION_REFRESH_EVENT = 'classic-extension-refresh';
@@ -194,13 +195,19 @@ const SiderBar = ({ onNavigate = () => {} }) => {
   }, [t, isModuleVisible, customMenuItems]);
 
   const extensionMenuItems = useMemo(() => {
-    return extensionItems.map((item) => ({
-      ...item,
-      text: item.title,
-      itemKey: item.itemKey,
-      to: item.to,
-    }));
-  }, [extensionItems]);
+    return extensionItems
+      .filter(
+        (item) =>
+          item.itemKey !== 'extension:channel-quality:index' ||
+          isModuleVisible('admin', 'channel_observability'),
+      )
+      .map((item) => ({
+        ...item,
+        text: item.title,
+        itemKey: item.itemKey,
+        to: item.to,
+      }));
+  }, [extensionItems, isModuleVisible]);
 
   const extensionSubItems = useMemo(() => {
     const items = [
@@ -282,6 +289,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         itemKey: 'affiliate_admin',
         to: '/affiliate-admin',
         className: isAdmin() ? '' : 'tableHiddle',
+      },
+      {
+        text: t('通知中心'),
+        itemKey: 'notification_center',
+        to: '/notification-center',
+        className: isRoot() ? '' : 'tableHiddle',
       },
       {
         text: t('系统设置'),

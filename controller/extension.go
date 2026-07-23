@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -122,6 +123,38 @@ func ProxyExtension(c *gin.Context) {
 		return
 	}
 	proxy.ServeHTTP(c.Writer, c.Request)
+}
+
+func GetExtensionNativeAsset(c *gin.Context) {
+	asset, err := extension.DefaultManager.OpenNativeAsset(
+		c.Param("id"),
+		c.Param("pageKey"),
+		c.Param("target"),
+		c.Param("asset"),
+		c.GetInt("role"),
+	)
+	if err != nil {
+		status := http.StatusForbidden
+		if errors.Is(err, extension.ErrNativeAssetNotFound) {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+	defer asset.File.Close()
+
+	c.Header("Content-Type", asset.ContentType)
+	c.Header("Content-Length", strconv.FormatInt(asset.Size, 10))
+	c.Header("Cache-Control", "no-store")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Cross-Origin-Resource-Policy", "same-origin")
+	c.Status(http.StatusOK)
+	if _, err := io.Copy(c.Writer, asset.File); err != nil {
+		_ = c.Error(err)
+	}
 }
 
 func GetExtensionHostContext(c *gin.Context) {
