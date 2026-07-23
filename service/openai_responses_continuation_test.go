@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -177,6 +178,70 @@ func TestRemoveIncompleteOpenAIResponsesReasoningHistoryFromJSON(t *testing.T) {
 	require.Equal(t, "reasoning", gjson.GetBytes(cleaned, "input.1.type").String())
 	require.Equal(t, "enc_123", gjson.GetBytes(cleaned, "input.1.encrypted_content").String())
 	require.Equal(t, "next", gjson.GetBytes(cleaned, "input.2.content").String())
+}
+
+func TestNormalizeOpenAIResponsesInputHistoryForUpstream(t *testing.T) {
+	req := &dto.OpenAIResponsesRequest{Input: []byte(`[
+		{"type":"message","role":"assistant","id":"item_message_1","status":"completed","namespace":"codex","phase":"commentary","content":[{"type":"output_text","id":"content_1","status":"completed","annotations":[],"text":"hello"},{"type":"refusal","refusal":"cannot comply"}]},
+		{"role":"user","id":"item_message_2","status":"completed","content":"next"},
+		{"type":"function_call","id":"item_call_1","status":"completed","namespace":"codex","call_id":"call_1","name":"lookup","arguments":"{\"q\":\"x\"}"},
+		{"type":"function_call_output","id":"item_output_1","status":"completed","call_id":"call_1","output":"ok"},
+		{"type":"custom_tool_call","id":"item_custom_1","status":"completed","namespace":"codex","call_id":"call_2","name":"apply_patch","input":"patch"},
+		{"type":"custom_tool_call_output","id":"item_custom_output_1","status":"completed","call_id":"call_2","output":"done"},
+		{"type":"reasoning","id":"item_reasoning_1","status":"completed","namespace":"codex","encrypted_content":"enc_1"},
+		{"type":"item_reference","id":"item_reference_1","status":"completed","namespace":"codex"},
+		{"type":"vendor_private","role":"assistant","id":"item_vendor_1","status":"completed","namespace":"codex","content":[{"type":"output_text","text":"vendor"}]},
+		"literal input"
+	]`)}
+
+	normalized, err := NormalizeOpenAIResponsesInputHistoryForUpstream(req)
+	require.NoError(t, err)
+	require.Equal(t, 6, normalized)
+
+	for _, index := range []int{0, 1, 2, 3, 4, 5} {
+		path := fmt.Sprintf("%d", index)
+		require.False(t, gjson.GetBytes(req.Input, path+".id").Exists(), string(req.Input))
+		require.False(t, gjson.GetBytes(req.Input, path+".status").Exists(), string(req.Input))
+		require.False(t, gjson.GetBytes(req.Input, path+".namespace").Exists(), string(req.Input))
+	}
+
+	require.Equal(t, "commentary", gjson.GetBytes(req.Input, "0.phase").String())
+	require.Equal(t, "input_text", gjson.GetBytes(req.Input, "0.content.0.type").String())
+	require.Equal(t, "hello", gjson.GetBytes(req.Input, "0.content.0.text").String())
+	require.False(t, gjson.GetBytes(req.Input, "0.content.0.id").Exists(), string(req.Input))
+	require.False(t, gjson.GetBytes(req.Input, "0.content.0.status").Exists(), string(req.Input))
+	require.False(t, gjson.GetBytes(req.Input, "0.content.0.annotations").Exists(), string(req.Input))
+	require.Equal(t, "input_text", gjson.GetBytes(req.Input, "0.content.1.type").String())
+	require.Equal(t, "cannot comply", gjson.GetBytes(req.Input, "0.content.1.text").String())
+	require.Equal(t, "call_1", gjson.GetBytes(req.Input, "2.call_id").String())
+	require.Equal(t, "lookup", gjson.GetBytes(req.Input, "2.name").String())
+	require.Equal(t, "ok", gjson.GetBytes(req.Input, "3.output").String())
+	require.Equal(t, "call_2", gjson.GetBytes(req.Input, "4.call_id").String())
+	require.Equal(t, "done", gjson.GetBytes(req.Input, "5.output").String())
+
+	require.Equal(t, "item_reasoning_1", gjson.GetBytes(req.Input, "6.id").String())
+	require.Equal(t, "item_reference_1", gjson.GetBytes(req.Input, "7.id").String())
+	require.Equal(t, "item_vendor_1", gjson.GetBytes(req.Input, "8.id").String())
+	require.Equal(t, "completed", gjson.GetBytes(req.Input, "8.status").String())
+	require.Equal(t, "output_text", gjson.GetBytes(req.Input, "8.content.0.type").String())
+	require.Equal(t, "literal input", gjson.GetBytes(req.Input, "9").String())
+
+	firstPass := append([]byte(nil), req.Input...)
+	normalized, err = NormalizeOpenAIResponsesInputHistoryForUpstream(req)
+	require.NoError(t, err)
+	require.Zero(t, normalized)
+	require.Equal(t, firstPass, []byte(req.Input))
+}
+
+func TestNormalizeOpenAIResponsesInputHistoryForUpstreamKeepsNonArrayInput(t *testing.T) {
+	req := &dto.OpenAIResponsesRequest{Input: []byte(`"hello"`)}
+	original := append([]byte(nil), req.Input...)
+
+	normalized, err := NormalizeOpenAIResponsesInputHistoryForUpstream(req)
+
+	require.NoError(t, err)
+	require.Zero(t, normalized)
+	require.Equal(t, original, []byte(req.Input))
 }
 
 func mustMarshalRaw(t *testing.T, value any) []byte {

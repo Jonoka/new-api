@@ -110,6 +110,14 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		}
 		requestBody = common.ReaderOnly(storage)
 	} else {
+		normalizedItems, err := service.NormalizeOpenAIResponsesInputHistoryForUpstream(request)
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		if normalizedItems > 0 {
+			logger.LogDebug(c, "normalized %d Responses history item(s) for upstream compatibility", normalizedItems)
+		}
+
 		convertedRequest, err := adaptor.ConvertOpenAIResponsesRequest(c, info, *request)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
