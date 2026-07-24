@@ -116,6 +116,7 @@ const NotificationCenter = () => {
   const [editingTask, setEditingTask] = useState(null);
   const [botForm, setBotForm] = useState(EMPTY_BOT);
   const [taskForm, setTaskForm] = useState(EMPTY_TASK);
+  const [taskChatIdInput, setTaskChatIdInput] = useState('');
 
   const eventOptions = events.length > 0 ? events : [FALLBACK_EVENT];
   const selectedEvent =
@@ -165,6 +166,7 @@ const NotificationCenter = () => {
   const openTaskModal = (task = null) => {
     const defaultEvent = eventOptions[0] || FALLBACK_EVENT;
     setEditingTask(task);
+    setTaskChatIdInput('');
     setTaskForm(
       task
         ? {
@@ -220,7 +222,21 @@ const NotificationCenter = () => {
   };
 
   const saveTask = async () => {
-    const targets = taskForm.targets
+    const pendingChatId = taskChatIdInput.trim();
+    const sourceTargets =
+      pendingChatId &&
+      !taskForm.targets.some((target) => target.chat_id === pendingChatId)
+        ? [
+            ...taskForm.targets,
+            {
+              chat_id: pendingChatId,
+              mention_user_id: '',
+              mention_name: '',
+              enabled: true,
+            },
+          ]
+        : taskForm.targets;
+    const targets = sourceTargets
       .map((target) => ({
         ...(target.id ? { id: target.id } : {}),
         chat_id: String(target.chat_id || '').trim(),
@@ -260,6 +276,7 @@ const NotificationCenter = () => {
         throw new Error(response.data?.message || t('保存失败'));
       }
       Toast.success({ content: t('通知任务已保存') });
+      setTaskChatIdInput('');
       setTaskModalVisible(false);
       await loadData();
     } catch (error) {
@@ -338,6 +355,7 @@ const NotificationCenter = () => {
     const normalized = [
       ...new Set(chatIds.map((id) => String(id).trim())),
     ].filter(Boolean);
+    setTaskChatIdInput('');
     setTaskForm((current) => ({
       ...current,
       targets: normalized.map(
@@ -748,7 +766,10 @@ const NotificationCenter = () => {
               style={{ width: '100%' }}
               value={taskForm.targets.map((target) => target.chat_id)}
               placeholder={t('输入 Chat ID 后按回车，可添加多个')}
+              addOnBlur
+              inputValue={taskChatIdInput}
               onChange={updateChatIds}
+              onInputChange={(value) => setTaskChatIdInput(value)}
             />
             <div className='mt-1'>
               <Text type='tertiary' size='small'>
