@@ -515,18 +515,24 @@ func validateTwoFactorAuth(twoFA *model.TwoFA, code string) bool {
 }
 
 // validateChannel 通用的渠道校验函数
-func validateChannel(channel *model.Channel, isAdd bool) error {
-	if channel != nil && channel.ConcurrencyLimit != nil && *channel.ConcurrencyLimit < 0 {
+func validateChannel(c *gin.Context, channel *model.Channel, isAdd bool) error {
+	if channel == nil {
+		return fmt.Errorf("channel cannot be empty")
+	}
+	if channel.ConcurrencyLimit != nil && *channel.ConcurrencyLimit < 0 {
 		return fmt.Errorf("并发上限不能小于 0")
 	}
 	// 校验 channel settings
 	if err := channel.ValidateSettings(); err != nil {
 		return fmt.Errorf("渠道额外设置[channel setting] 格式错误：%s", err.Error())
 	}
+	if err := service.ValidateChannelBaseURLNotSelf(c, channel); err != nil {
+		return err
+	}
 
 	// 如果是添加操作，检查 channel 和 key 是否为空
 	if isAdd {
-		if channel == nil || channel.Key == "" {
+		if channel.Key == "" {
 			return fmt.Errorf("channel cannot be empty")
 		}
 
@@ -657,7 +663,7 @@ func AddChannel(c *gin.Context) {
 	}
 
 	// 使用统一的校验函数
-	if err := validateChannel(addChannelRequest.Channel, true); err != nil {
+	if err := validateChannel(c, addChannelRequest.Channel, true); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": err.Error(),
@@ -966,7 +972,7 @@ func UpdateChannel(c *gin.Context) {
 	}
 
 	// 使用统一的校验函数
-	if err := validateChannel(&channel.Channel, false); err != nil {
+	if err := validateChannel(c, &channel.Channel, false); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": err.Error(),

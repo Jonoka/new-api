@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -12,6 +13,8 @@ import (
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 )
+
+const maxSelfReferentialChannelSkips = 64
 
 type RetryParam struct {
 	Ctx                *gin.Context
@@ -68,6 +71,45 @@ func CheckTokenGroupRatioLimit(ctx *gin.Context, userGroup string, usingGroup st
 		return errors.New("超过令牌倍率保护")
 	}
 	return nil
+}
+
+func excludeSelfReferentialChannel(param *RetryParam, channel *model.Channel, group string) bool {
+	if param == nil || channel == nil || !IsSelfReferentialChannel(param.Ctx, channel) {
+		return false
+	}
+	if param.ExcludedChannelIDs == nil {
+		param.ExcludedChannelIDs = make(map[int]struct{})
+	}
+	param.ExcludedChannelIDs[channel.Id] = struct{}{}
+	logger.LogError(param.Ctx, fmt.Sprintf("检测到自引用渠道 #%d（分组：%s，上游：%s），已跳过以避免递归请求和 429 放大", channel.Id, group, channel.GetBaseURL()))
+	return true
+}
+
+func getRandomSatisfiedChannelWithGuards(param *RetryParam, group string, modelName string, retry int) (*model.Channel, error) {
+	if param == nil {
+		return model.GetRandomSatisfiedChannelWithExclusions(group, modelName, retry, nil)
+	}
+	priorityRetry := retry
+	skippedSelfReference := false
+	for i := 0; i < maxSelfReferentialChannelSkips; i++ {
+		channel, err := model.GetRandomSatisfiedChannelWithExclusions(group, modelName, priorityRetry, param.ExcludedChannelIDs)
+		if err != nil {
+			return nil, err
+		}
+		if channel == nil {
+			if skippedSelfReference {
+				priorityRetry++
+				skippedSelfReference = false
+				continue
+			}
+			return nil, nil
+		}
+		if !excludeSelfReferentialChannel(param, channel, group) {
+			return channel, nil
+		}
+		skippedSelfReference = true
+	}
+	return nil, fmt.Errorf("分组 %s 存在过多自引用渠道，已停止本次调度", group)
 }
 
 // CacheGetRandomSatisfiedChannel tries to get a random channel that satisfies the requirements.
@@ -140,7 +182,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			logger.LogDebug(param.Ctx, "Auto selecting group: %s, priorityRetry: %d", autoGroup, priorityRetry)
 
-			channel, _ = model.GetRandomSatisfiedChannelWithExclusions(autoGroup, param.ModelName, priorityRetry, param.ExcludedChannelIDs)
+			channel, _ = getRandomSatisfiedChannelWithGuards(param, autoGroup, param.ModelName, priorityRetry)
 			if channel == nil {
 				// Current group has no available channel for this model, try next group
 				// 当前分组没有该模型的可用渠道，尝试下一个分组
@@ -197,7 +239,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			return nil, selectGroup, nil
 		} else if len(candidateGroups) == 1 {
 			// 单候选分组：直接路由，不需要分组间 failover
-			channel, err = model.GetRandomSatisfiedChannelWithExclusions(candidateGroups[0], param.ModelName, param.GetRetry(), param.ExcludedChannelIDs)
+			channel, err = getRandomSatisfiedChannelWithGuards(param, candidateGroups[0], param.ModelName, param.GetRetry())
 			selectGroup = candidateGroups[0]
 			common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroup, candidateGroups[0])
 			if err != nil {
@@ -223,7 +265,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 				}
 				logger.LogDebug(param.Ctx, "Multi-group selecting group: %s, priorityRetry: %d", g, priorityRetry)
 
-				channel, _ = model.GetRandomSatisfiedChannelWithExclusions(g, param.ModelName, priorityRetry, param.ExcludedChannelIDs)
+				channel, _ = getRandomSatisfiedChannelWithGuards(param, g, param.ModelName, priorityRetry)
 				if channel == nil {
 					logger.LogDebug(param.Ctx, "No available channel in group %s for model %s at priorityRetry %d, trying next group", g, param.ModelName, priorityRetry)
 					common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex, i+1)
@@ -250,7 +292,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 		}
 	} else {
-		channel, err = model.GetRandomSatisfiedChannelWithExclusions(param.TokenGroup, param.ModelName, param.GetRetry(), param.ExcludedChannelIDs)
+		channel, err = getRandomSatisfiedChannelWithGuards(param, param.TokenGroup, param.ModelName, param.GetRetry())
 		if err != nil {
 			return nil, param.TokenGroup, err
 		}
