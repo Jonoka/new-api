@@ -210,9 +210,18 @@ func TestExcludeChannelFromRetryPreservesControlledReuse(t *testing.T) {
 		require.True(t, excluded)
 	})
 
-	t.Run("keep rate limited channel reusable", func(t *testing.T) {
+	t.Run("exclude single key rate limited channel", func(t *testing.T) {
 		param := &service.RetryParam{}
 		channel := &model.Channel{Id: 326}
+		excludeChannelFromRetry(buildRelayRetryTestContext(), param, channel, types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, http.StatusTooManyRequests))
+
+		_, excluded := param.ExcludedChannelIDs[channel.Id]
+		require.True(t, excluded)
+	})
+
+	t.Run("keep multi key rate limited channel reusable", func(t *testing.T) {
+		param := &service.RetryParam{}
+		channel := &model.Channel{Id: 326, ChannelInfo: model.ChannelInfo{IsMultiKey: true}}
 		excludeChannelFromRetry(buildRelayRetryTestContext(), param, channel, types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, http.StatusTooManyRequests))
 
 		require.Empty(t, param.ExcludedChannelIDs)

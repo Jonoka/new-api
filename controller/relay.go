@@ -420,8 +420,9 @@ func excludeChannelFromRetry(c *gin.Context, param *service.RetryParam, channel 
 	if param == nil || channel == nil || relayErr == nil {
 		return
 	}
-	// 单分组内保留 429 退避和多 Key 轮换；跨组场景优先切换未尝试渠道。
-	controlledReuse := isRateLimitError(relayErr) || channel.ChannelInfo.IsMultiKey
+	// 只有多 Key 渠道允许同渠道复用，用于同渠道内换 Key/退避。
+	// 单 Key 429 需要切换其它候选渠道，避免把一次上游限流放大成重复撞同一渠道。
+	controlledReuse := channel.ChannelInfo.IsMultiKey
 	crossGroupRetry := strings.Contains(param.TokenGroup, ",") ||
 		(param.TokenGroup == "auto" && common.GetContextKeyBool(c, constant.ContextKeyTokenCrossGroupRetry))
 	if controlledReuse && !crossGroupRetry {
