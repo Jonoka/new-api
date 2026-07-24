@@ -140,11 +140,29 @@ func (e *NewAPIError) Error() string {
 	return e.Err.Error()
 }
 
+func readableRelayErrorMessage(message string) string {
+	trimmed := strings.TrimSpace(message)
+	if trimmed == "" || strings.Contains(trimmed, "中文说明：") {
+		return message
+	}
+	lower := strings.ToLower(trimmed)
+	switch {
+	case strings.Contains(lower, "upstream stream disconnected") && strings.Contains(lower, "connection reset by peer"):
+		return message + "（中文说明：上游流式响应中途断开，连接被对端重置，通常是上游服务、代理或网络链路异常；可稍后重试或切换渠道。）"
+	case strings.Contains(lower, "upstream stream disconnected"):
+		return message + "（中文说明：上游流式响应中途断开，已开始返回但上游没有完整结束，通常不是请求格式问题；可稍后重试或切换渠道。）"
+	case strings.Contains(lower, "connection reset by peer"):
+		return message + "（中文说明：连接被对端重置，通常是上游服务、代理或网络链路中途断开；可稍后重试或切换渠道。）"
+	default:
+		return message
+	}
+}
+
 func (e *NewAPIError) ErrorWithStatusCode() string {
 	if e == nil {
 		return ""
 	}
-	msg := e.Error()
+	msg := readableRelayErrorMessage(e.Error())
 	if e.StatusCode == 0 {
 		return msg
 	}
@@ -165,7 +183,7 @@ func (e *NewAPIError) MaskSensitiveError() string {
 	if e.errorCode == ErrorCodeCountTokenFailed {
 		return errStr
 	}
-	return common.MaskSensitiveInfo(errStr)
+	return readableRelayErrorMessage(common.MaskSensitiveInfo(errStr))
 }
 
 func (e *NewAPIError) MaskSensitiveErrorWithStatusCode() string {
@@ -213,6 +231,7 @@ func (e *NewAPIError) ToOpenAIError() OpenAIError {
 	if e.errorCode != ErrorCodeCountTokenFailed {
 		result.Message = common.MaskSensitiveInfo(result.Message)
 	}
+	result.Message = readableRelayErrorMessage(result.Message)
 	if result.Message == "" {
 		result.Message = string(e.errorType)
 	}
@@ -242,6 +261,7 @@ func (e *NewAPIError) ToClaudeError() ClaudeError {
 	if e.errorCode != ErrorCodeCountTokenFailed {
 		result.Message = common.MaskSensitiveInfo(result.Message)
 	}
+	result.Message = readableRelayErrorMessage(result.Message)
 	if result.Message == "" {
 		result.Message = string(e.errorType)
 	}
