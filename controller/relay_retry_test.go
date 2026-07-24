@@ -386,7 +386,13 @@ func TestProcessChannelErrorRecordsOnlyFinalAttempt(t *testing.T) {
 	requestContext, cancel := context.WithCancel(context.Background())
 	cancel()
 	ctx.Request = ctx.Request.WithContext(requestContext)
-	canceledRelayErr := types.NewError(context.Canceled, types.ErrorCodeDoRequestFailed)
+	canceledRelayErr := types.NewError(
+		context.Canceled,
+		types.ErrorCodeDoRequestFailed,
+		types.ErrOptionWithHideErrMsg("upstream error: do request failed"),
+	)
+	require.ErrorIs(t, canceledRelayErr, context.Canceled)
+	require.Equal(t, "upstream error: do request failed", canceledRelayErr.Error())
 	processChannelError(ctx, nil, finalChannel, canceledRelayErr, true)
 	require.NoError(t, db.Model(&model.Log{}).Where("type = ?", model.LogTypeError).Count(&count).Error)
 	require.EqualValues(t, 1, count)

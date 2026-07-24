@@ -145,12 +145,38 @@ func AttachOpenAIResponsesContinuation(info *relaycommon.RelayInfo, req *dto.Ope
 	}
 	if normalizeOpenAIResponsesPreviousResponseID(req.PreviousResponseID) != "" {
 		req.PreviousResponseID = normalizeOpenAIResponsesPreviousResponseID(req.PreviousResponseID)
-		return false
+		return canReplayOpenAIResponsesWithoutPreviousResponse(req.Input)
 	}
 	// 默认不自动注入 previous_response_id。
 	// 大多数 OpenAI 兼容上游只支持 prompt_cache_key / session_id 亲和，
 	// 并不支持 Responses continuation 续链语义。
 	return false
+}
+
+func canReplayOpenAIResponsesWithoutPreviousResponse(input json.RawMessage) bool {
+	switch common.GetJsonType(input) {
+	case "string":
+		var text string
+		return common.Unmarshal(input, &text) == nil && strings.TrimSpace(text) != ""
+	case "array":
+	default:
+		return false
+	}
+
+	items := gjson.ParseBytes(input)
+	if !items.IsArray() || len(items.Array()) == 0 {
+		return false
+	}
+	replayable := true
+	items.ForEach(func(_, item gjson.Result) bool {
+		itemType := strings.TrimSpace(item.Get("type").String())
+		if itemType == "item_reference" || strings.HasSuffix(itemType, "_call_output") {
+			replayable = false
+			return false
+		}
+		return true
+	})
+	return replayable
 }
 
 func DropOpenAIResponsesPreviousResponseID(req *dto.OpenAIResponsesRequest) {
@@ -280,8 +306,9 @@ func normalizeOpenAIResponsesMessageHistoryContent(item map[string]json.RawMessa
 			return false, err
 		}
 
+		partType := openAIResponsesHistoryString(part, "type")
 		textField := ""
-		switch openAIResponsesHistoryString(part, "type") {
+		switch partType {
 		case "output_text":
 			textField = "text"
 		case "refusal":
@@ -293,12 +320,15 @@ func normalizeOpenAIResponsesMessageHistoryContent(item map[string]json.RawMessa
 		if !exists || common.GetJsonType(text) != "string" {
 			continue
 		}
-
-		converted := map[string]json.RawMessage{
-			"type": json.RawMessage(`"input_text"`),
-			"text": text,
+		if len(part) == 2 {
+			continue
 		}
-		updated, err := common.Marshal(converted)
+
+		normalizedPart := map[string]json.RawMessage{
+			"type":    part["type"],
+			textField: text,
+		}
+		updated, err := common.Marshal(normalizedPart)
 		if err != nil {
 			return false, fmt.Errorf("marshal normalized content item %d: %w", index, err)
 		}
@@ -449,12 +479,16 @@ func expandOpenAIResponsesInputToolCallStart(items []map[string]any, start int) 
 }
 
 func IsOpenAIResponsesPreviousResponseRetryable(statusCode int, message string) bool {
-	if statusCode != 400 && statusCode != 404 {
+	if statusCode != 400 && statusCode != 404 && statusCode != 409 {
 		return false
 	}
 	lower := strings.ToLower(strings.TrimSpace(message))
 	if lower == "" {
 		return false
+	}
+	if statusCode == 409 && strings.Contains(lower, "compact continuation") &&
+		(strings.Contains(lower, "unknown") || strings.Contains(lower, "expired")) {
+		return true
 	}
 	if strings.Contains(lower, "previous_response_not_found") ||
 		(strings.Contains(lower, "previous response") && strings.Contains(lower, "not found")) {

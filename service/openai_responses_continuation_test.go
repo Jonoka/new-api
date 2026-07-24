@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -81,8 +82,38 @@ func TestAttachOpenAIResponsesContinuationDoesNotOverrideExplicitPreviousRespons
 	BindOpenAIResponsesContinuationResponseID(info, req, "resp_cached_456")
 
 	attached := AttachOpenAIResponsesContinuation(info, req)
-	require.False(t, attached)
+	require.True(t, attached)
 	require.Equal(t, "resp_explicit_456", req.PreviousResponseID)
+}
+
+func TestAttachOpenAIResponsesContinuationKeepsDependentToolContinuation(t *testing.T) {
+	req := &dto.OpenAIResponsesRequest{
+		PreviousResponseID: "resp_explicit_tool",
+		Input: mustMarshalRaw(t, []map[string]any{
+			{"type": "function_call_output", "call_id": "call_1", "output": "ok"},
+		}),
+	}
+
+	retryWithoutPreviousResponse := AttachOpenAIResponsesContinuation(&relaycommon.RelayInfo{}, req)
+
+	require.False(t, retryWithoutPreviousResponse)
+	require.Equal(t, "resp_explicit_tool", req.PreviousResponseID)
+}
+
+func TestAttachOpenAIResponsesContinuationRequiresReplayableInput(t *testing.T) {
+	for _, req := range []*dto.OpenAIResponsesRequest{
+		{PreviousResponseID: "resp_without_input"},
+		{PreviousResponseID: "resp_empty_input", Input: json.RawMessage(`[]`)},
+		{PreviousResponseID: "resp_reference", Input: json.RawMessage(`[{"type":"item_reference","id":"item_1"}]`)},
+	} {
+		require.False(t, AttachOpenAIResponsesContinuation(&relaycommon.RelayInfo{}, req))
+	}
+
+	stringInput := &dto.OpenAIResponsesRequest{
+		PreviousResponseID: "resp_string_input",
+		Input:              json.RawMessage(`"next"`),
+	}
+	require.True(t, AttachOpenAIResponsesContinuation(&relaycommon.RelayInfo{}, stringInput))
 }
 
 func TestResolveOpenAIResponsesContinuationSessionIDUsesRuntimeSessionID(t *testing.T) {
@@ -135,6 +166,18 @@ func TestIsOpenAIResponsesPreviousResponseRetryable(t *testing.T) {
 			statusCode: 404,
 			message:    "status_code=404, previous response not found",
 			want:       true,
+		},
+		{
+			name:       "compact continuation expired",
+			statusCode: 409,
+			message:    "status_code=409, compact continuation is unknown or expired; start a new conversation",
+			want:       true,
+		},
+		{
+			name:       "unrelated conflict",
+			statusCode: 409,
+			message:    "status_code=409, request already exists",
+			want:       false,
 		},
 		{
 			name:       "other bad request",
@@ -206,13 +249,13 @@ func TestNormalizeOpenAIResponsesInputHistoryForUpstream(t *testing.T) {
 	}
 
 	require.Equal(t, "commentary", gjson.GetBytes(req.Input, "0.phase").String())
-	require.Equal(t, "input_text", gjson.GetBytes(req.Input, "0.content.0.type").String())
+	require.Equal(t, "output_text", gjson.GetBytes(req.Input, "0.content.0.type").String())
 	require.Equal(t, "hello", gjson.GetBytes(req.Input, "0.content.0.text").String())
 	require.False(t, gjson.GetBytes(req.Input, "0.content.0.id").Exists(), string(req.Input))
 	require.False(t, gjson.GetBytes(req.Input, "0.content.0.status").Exists(), string(req.Input))
 	require.False(t, gjson.GetBytes(req.Input, "0.content.0.annotations").Exists(), string(req.Input))
-	require.Equal(t, "input_text", gjson.GetBytes(req.Input, "0.content.1.type").String())
-	require.Equal(t, "cannot comply", gjson.GetBytes(req.Input, "0.content.1.text").String())
+	require.Equal(t, "refusal", gjson.GetBytes(req.Input, "0.content.1.type").String())
+	require.Equal(t, "cannot comply", gjson.GetBytes(req.Input, "0.content.1.refusal").String())
 	require.Equal(t, "call_1", gjson.GetBytes(req.Input, "2.call_id").String())
 	require.Equal(t, "lookup", gjson.GetBytes(req.Input, "2.name").String())
 	require.Equal(t, "ok", gjson.GetBytes(req.Input, "3.output").String())

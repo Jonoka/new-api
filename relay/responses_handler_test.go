@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -162,11 +163,72 @@ func TestResponsesHelperNormalizesHistoryUnlessBodyPassThroughIsEnabled(t *testi
 				require.False(t, gjson.GetBytes(outboundBody, "input.0.id").Exists(), string(outboundBody))
 				require.False(t, gjson.GetBytes(outboundBody, "input.0.status").Exists(), string(outboundBody))
 				require.False(t, gjson.GetBytes(outboundBody, "input.0.namespace").Exists(), string(outboundBody))
-				require.Equal(t, "input_text", gjson.GetBytes(outboundBody, "input.0.content.0.type").String())
+				require.Equal(t, "output_text", gjson.GetBytes(outboundBody, "input.0.content.0.type").String())
 			} else {
 				require.Equal(t, originalBody, outboundBody)
 			}
 			require.Equal(t, "item_11a43ee66145a174de8027ea", gjson.GetBytes(input, "0.id").String())
 		})
 	}
+}
+
+func TestResponsesHelperRetriesExpiredExplicitContinuationWithoutPreviousResponseID(t *testing.T) {
+	globalSettings := model_setting.GetGlobalSettings()
+	originalPassThrough := globalSettings.PassThroughRequestEnabled
+	globalSettings.PassThroughRequestEnabled = false
+	t.Cleanup(func() { globalSettings.PassThroughRequestEnabled = originalPassThrough })
+
+	var attempts atomic.Int32
+	bodies := make(chan []byte, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		bodies <- body
+		w.Header().Set("Content-Type", "application/json")
+		if attempts.Add(1) == 1 {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"error":{"message":"compact continuation is unknown or expired; start a new conversation","type":"invalid_request_error"}}`))
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"test stop after recovery request capture","type":"invalid_request_error"}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	input := []byte(`[{"type":"message","role":"assistant","id":"item_previous","status":"completed","content":[{"type":"output_text","text":"prior"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}]`)
+	originalBody := []byte(`{"model":"gpt-5","previous_response_id":"resp_expired","input":` + string(input) + `}`)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(originalBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	t.Cleanup(func() { common.CleanupBodyStorage(c) })
+
+	common.SetContextKey(c, appconstant.ContextKeyChannelType, appconstant.ChannelTypeOpenAI)
+	common.SetContextKey(c, appconstant.ContextKeyChannelId, 9102)
+	common.SetContextKey(c, appconstant.ContextKeyChannelBaseUrl, server.URL)
+	common.SetContextKey(c, appconstant.ContextKeyChannelKey, "test-key")
+	common.SetContextKey(c, appconstant.ContextKeyOriginalModel, "gpt-5")
+	common.SetContextKey(c, appconstant.ContextKeyChannelSetting, dto.ChannelSettings{})
+
+	request := &dto.OpenAIResponsesRequest{
+		Model:              "gpt-5",
+		PreviousResponseID: "resp_expired",
+		Input:              input,
+	}
+	info := &relaycommon.RelayInfo{
+		Request:         request,
+		RelayMode:       relayconstant.RelayModeResponses,
+		RelayFormat:     types.RelayFormatOpenAIResponses,
+		RequestURLPath:  "/v1/responses",
+		OriginModelName: "gpt-5",
+	}
+
+	apiErr := ResponsesHelper(c, info)
+	require.NotNil(t, apiErr)
+	require.EqualValues(t, 2, attempts.Load())
+	firstBody := <-bodies
+	secondBody := <-bodies
+	require.Equal(t, "resp_expired", gjson.GetBytes(firstBody, "previous_response_id").String(), string(firstBody))
+	require.False(t, gjson.GetBytes(secondBody, "previous_response_id").Exists(), string(secondBody))
+	require.False(t, gjson.GetBytes(secondBody, "input.0.id").Exists(), string(secondBody))
+	require.Equal(t, "output_text", gjson.GetBytes(secondBody, "input.0.content.0.type").String(), string(secondBody))
 }

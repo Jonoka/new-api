@@ -90,6 +90,7 @@ const (
 
 type NewAPIError struct {
 	Err            error
+	cause          error
 	RelayError     any
 	skipRetry      bool
 	recordErrorLog *bool
@@ -107,6 +108,9 @@ type NewAPIError struct {
 func (e *NewAPIError) Unwrap() error {
 	if e == nil {
 		return nil
+	}
+	if e.cause != nil {
+		return e.cause
 	}
 	return e.Err
 }
@@ -405,6 +409,9 @@ func ErrOptionWithHideErrMsg(replaceStr string) NewAPIErrorOptions {
 	return func(e *NewAPIError) {
 		if common.DebugEnabled {
 			fmt.Printf("ErrOptionWithHideErrMsg: %s, origin error: %s", replaceStr, e.Err)
+		}
+		if e.cause == nil {
+			e.cause = e.Err
 		}
 		e.Err = errors.New(replaceStr)
 	}
