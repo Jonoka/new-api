@@ -154,12 +154,7 @@ func AttachOpenAIResponsesContinuation(info *relaycommon.RelayInfo, req *dto.Ope
 }
 
 func canReplayOpenAIResponsesWithoutPreviousResponse(input json.RawMessage) bool {
-	switch common.GetJsonType(input) {
-	case "string":
-		var text string
-		return common.Unmarshal(input, &text) == nil && strings.TrimSpace(text) != ""
-	case "array":
-	default:
+	if common.GetJsonType(input) != "array" {
 		return false
 	}
 
@@ -167,16 +162,25 @@ func canReplayOpenAIResponsesWithoutPreviousResponse(input json.RawMessage) bool
 	if !items.IsArray() || len(items.Array()) == 0 {
 		return false
 	}
+	hasPriorAssistantOutput := false
 	replayable := true
 	items.ForEach(func(_, item gjson.Result) bool {
+		if !item.IsObject() {
+			replayable = false
+			return false
+		}
 		itemType := strings.TrimSpace(item.Get("type").String())
 		if itemType == "item_reference" || strings.HasSuffix(itemType, "_call_output") {
 			replayable = false
 			return false
 		}
+		if strings.TrimSpace(item.Get("role").String()) == "assistant" ||
+			itemType == "function_call" || itemType == "custom_tool_call" {
+			hasPriorAssistantOutput = true
+		}
 		return true
 	})
-	return replayable
+	return replayable && hasPriorAssistantOutput
 }
 
 func DropOpenAIResponsesPreviousResponseID(req *dto.OpenAIResponsesRequest) {

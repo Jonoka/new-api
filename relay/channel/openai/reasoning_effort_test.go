@@ -103,6 +103,21 @@ func TestConvertOpenAIResponsesRequestParsesUltraReasoningSuffix(t *testing.T) {
 	require.Equal(t, "ultra", info.ReasoningEffort)
 }
 
+func TestConvertOpenAIResponsesRequestDropsCodexClientMetadata(t *testing.T) {
+	info := &relaycommon.RelayInfo{}
+	req := dto.OpenAIResponsesRequest{
+		Model:          "gpt-5.6-sol",
+		ClientMetadata: mustMarshalOpenAITestRaw(t, map[string]any{"thread_id": "thread-123"}),
+	}
+
+	converted, err := (&Adaptor{}).ConvertOpenAIResponsesRequest(nil, info, req)
+
+	require.NoError(t, err)
+	convertedReq := converted.(dto.OpenAIResponsesRequest)
+	require.Empty(t, convertedReq.ClientMetadata)
+	require.NotEmpty(t, req.ClientMetadata)
+}
+
 func mustMarshalOpenAITestRaw(t *testing.T, value any) []byte {
 	t.Helper()
 	data, err := common.Marshal(value)

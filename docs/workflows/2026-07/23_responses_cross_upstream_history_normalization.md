@@ -37,8 +37,11 @@ Responses 客户端会把上一轮 `response.output` 作为下一轮 `input` 历
 - 不修改工具名称、参数、输出、加密推理内容或 `previous_response_id`；
 - 字符串输入、非对象数组元素和未知类型保持原样；
 - 显式开启请求体透传时保持字节级透传语义，不做归一化。
-- 普通对话的续传 ID 未知或过期时，在同一渠道去掉 `previous_response_id` 重放一次；
-  含工具输出或 `item_reference` 的依赖型续链不降级。
+- `client_metadata` 仅属于 Codex 后端扩展；Codex 渠道继续保留，普通 OpenAI 兼容
+  渠道在转换阶段移除，避免上游返回 `Unknown parameter: client_metadata`。
+- 普通 Responses 和 compact 对话的续传 ID 未知或过期，且 `input` 明确包含此前
+  助手输出形成的完整历史时，在同一渠道去掉 `previous_response_id` 重放一次；只带
+  本轮增量输入、工具输出或 `item_reference` 的依赖型续链不降级，避免静默丢失上下文。
 
 ## 方案
 
@@ -53,8 +56,9 @@ Responses 客户端会把上一轮 `response.output` 作为下一轮 `input` 历
 4. 在 Relay 深拷贝请求、完成模型映射后，且在渠道适配器转换前调用归一化。这样同一
    请求的渠道重试和后续请求的渠道切换使用同一规则，各适配器也能收到可移植输入。
 5. 归一化只修改每次尝试的请求副本，不回写客户端原始请求，也不影响下一次渠道选择。
-6. 对 400/404 的 `previous_response_id` 失效和 409 的 compact continuation 失效，若
-   `input` 不含 `*_call_output` 或 `item_reference`，先删除 ID 在当前渠道重试一次；
+6. 对 400/404 的 `previous_response_id` 失效和 409 的 compact continuation 失效，仅当
+   `input` 是数组、明确包含此前助手输出，且不含 `*_call_output` 或
+   `item_reference` 时，先删除 ID 在当前渠道重试一次；字符串输入、仅本轮用户输入和
    依赖上一响应对象的工具续链保持原错误，避免静默丢失上下文。
 
 ## 安全与兼容性
@@ -74,7 +78,8 @@ Responses 客户端会把上一轮 `response.output` 作为下一轮 `input` 历
 - 覆盖函数及自定义工具调用保留 `call_id`、名称、参数和输出；
 - 覆盖 `reasoning`、`item_reference`、未知类型和字符串输入保持原样；
 - 覆盖第二次归一化不再修改请求；
-- 覆盖普通显式续传 ID 的 409 降级重放，以及工具输出续链不降级；
+- 覆盖 Responses 与 compact 在完整历史下显式续传 ID 的 409 降级重放，以及字符串、
+  仅本轮输入和工具输出续链不降级；
 - 端到端覆盖 Responses、compact、渠道请求体透传和全局请求体透传；
 - 运行 `go test ./service ./relay -count=1 -timeout 60s`、相关静态检查、构建和
   `git diff --check`。

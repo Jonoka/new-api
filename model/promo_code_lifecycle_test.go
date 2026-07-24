@@ -1,12 +1,15 @@
 package model
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -158,4 +161,45 @@ func TestMigratePromoCodeDeletionKeyPreservesCodeAndReleasesUniqueValue(t *testi
 	active := newLifecyclePromoCode("MIGRATION_REUSE")
 	require.NoError(t, db.Create(active).Error)
 	require.Error(t, db.Create(newLifecyclePromoCode("MIGRATION_REUSE")).Error)
+}
+
+func TestMigratePromoCodeDeletionKeyDropsPostgreSQLLegacyConstraint(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("NEW_API_TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("NEW_API_TEST_POSTGRES_DSN is not configured")
+	}
+
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	require.NoError(t, err)
+	var databaseName string
+	require.NoError(t, db.Raw("SELECT current_database()").Scan(&databaseName).Error)
+	require.True(t, strings.HasPrefix(databaseName, "newapi_test_"), "refusing destructive migration test against database %q", databaseName)
+
+	require.NoError(t, db.Migrator().DropTable(&PromoCode{}))
+	t.Cleanup(func() {
+		_ = db.Migrator().DropTable(&PromoCode{})
+	})
+	require.NoError(t, db.Exec(`
+		CREATE TABLE promo_codes (
+			id BIGSERIAL PRIMARY KEY,
+			code VARCHAR(64),
+			deleted_at TIMESTAMPTZ,
+			CONSTRAINT idx_promo_codes_code UNIQUE (code)
+		)
+	`).Error)
+	require.NoError(t, db.Exec("INSERT INTO promo_codes (code, deleted_at) VALUES (?, NOW())", "PG_MIGRATION_REUSE").Error)
+	require.NoError(t, db.AutoMigrate(&PromoCode{}))
+	require.True(t, db.Migrator().HasConstraint(&PromoCode{}, promoCodeLegacyCodeIndex))
+
+	require.NoError(t, migratePromoCodeDeletionKey(db))
+	require.NoError(t, migratePromoCodeDeletionKey(db))
+	assert.False(t, db.Migrator().HasConstraint(&PromoCode{}, promoCodeLegacyCodeIndex))
+	assert.False(t, db.Migrator().HasIndex(&PromoCode{}, promoCodeLegacyCodeIndex))
+	assert.True(t, db.Migrator().HasIndex(&PromoCode{}, promoCodeUniqueIndex))
+
+	var migrated PromoCode
+	require.NoError(t, db.Unscoped().Where("code = ?", "PG_MIGRATION_REUSE").First(&migrated).Error)
+	assert.Equal(t, migrated.Id, migrated.DeletedId)
+	require.NoError(t, db.Create(newLifecyclePromoCode("PG_MIGRATION_REUSE")).Error)
+	require.Error(t, db.Create(newLifecyclePromoCode("PG_MIGRATION_REUSE")).Error)
 }

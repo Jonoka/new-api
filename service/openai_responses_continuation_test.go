@@ -67,7 +67,7 @@ func TestAttachOpenAIResponsesContinuationDoesNotAutoInjectCachedPreviousRespons
 	]`, string(req.Input))
 }
 
-func TestAttachOpenAIResponsesContinuationDoesNotOverrideExplicitPreviousResponseID(t *testing.T) {
+func TestAttachOpenAIResponsesContinuationPreservesIncrementalPreviousResponseID(t *testing.T) {
 	info := &relaycommon.RelayInfo{
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelId: 9528,
@@ -82,7 +82,7 @@ func TestAttachOpenAIResponsesContinuationDoesNotOverrideExplicitPreviousRespons
 	BindOpenAIResponsesContinuationResponseID(info, req, "resp_cached_456")
 
 	attached := AttachOpenAIResponsesContinuation(info, req)
-	require.True(t, attached)
+	require.False(t, attached)
 	require.Equal(t, "resp_explicit_456", req.PreviousResponseID)
 }
 
@@ -104,16 +104,21 @@ func TestAttachOpenAIResponsesContinuationRequiresReplayableInput(t *testing.T) 
 	for _, req := range []*dto.OpenAIResponsesRequest{
 		{PreviousResponseID: "resp_without_input"},
 		{PreviousResponseID: "resp_empty_input", Input: json.RawMessage(`[]`)},
+		{PreviousResponseID: "resp_string_input", Input: json.RawMessage(`"next"`)},
+		{PreviousResponseID: "resp_current_turn_only", Input: json.RawMessage(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}]`)},
 		{PreviousResponseID: "resp_reference", Input: json.RawMessage(`[{"type":"item_reference","id":"item_1"}]`)},
 	} {
 		require.False(t, AttachOpenAIResponsesContinuation(&relaycommon.RelayInfo{}, req))
 	}
 
-	stringInput := &dto.OpenAIResponsesRequest{
-		PreviousResponseID: "resp_string_input",
-		Input:              json.RawMessage(`"next"`),
+	selfContainedHistory := &dto.OpenAIResponsesRequest{
+		PreviousResponseID: "resp_self_contained_history",
+		Input: json.RawMessage(`[
+			{"type":"message","role":"assistant","content":[{"type":"output_text","text":"prior"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}
+		]`),
 	}
-	require.True(t, AttachOpenAIResponsesContinuation(&relaycommon.RelayInfo{}, stringInput))
+	require.True(t, AttachOpenAIResponsesContinuation(&relaycommon.RelayInfo{}, selfContainedHistory))
 }
 
 func TestResolveOpenAIResponsesContinuationSessionIDUsesRuntimeSessionID(t *testing.T) {

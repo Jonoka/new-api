@@ -178,57 +178,140 @@ func TestResponsesHelperRetriesExpiredExplicitContinuationWithoutPreviousRespons
 	globalSettings.PassThroughRequestEnabled = false
 	t.Cleanup(func() { globalSettings.PassThroughRequestEnabled = originalPassThrough })
 
-	var attempts atomic.Int32
-	bodies := make(chan []byte, 2)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		bodies <- body
-		w.Header().Set("Content-Type", "application/json")
-		if attempts.Add(1) == 1 {
-			w.WriteHeader(http.StatusConflict)
-			_, _ = w.Write([]byte(`{"error":{"message":"compact continuation is unknown or expired; start a new conversation","type":"invalid_request_error"}}`))
-			return
-		}
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"error":{"message":"test stop after recovery request capture","type":"invalid_request_error"}}`))
-	}))
-	t.Cleanup(server.Close)
+	for _, test := range []struct {
+		name        string
+		relayMode   int
+		relayFormat types.RelayFormat
+		requestPath string
+	}{
+		{name: "responses", relayMode: relayconstant.RelayModeResponses, relayFormat: types.RelayFormatOpenAIResponses, requestPath: "/v1/responses"},
+		{name: "compact", relayMode: relayconstant.RelayModeResponsesCompact, relayFormat: types.RelayFormatOpenAIResponsesCompaction, requestPath: "/v1/responses/compact"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var attempts atomic.Int32
+			bodies := make(chan []byte, 2)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				bodies <- body
+				w.Header().Set("Content-Type", "application/json")
+				if attempts.Add(1) == 1 {
+					w.WriteHeader(http.StatusConflict)
+					_, _ = w.Write([]byte(`{"error":{"message":"compact continuation is unknown or expired; start a new conversation","type":"invalid_request_error"}}`))
+					return
+				}
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":{"message":"test stop after recovery request capture","type":"invalid_request_error"}}`))
+			}))
+			t.Cleanup(server.Close)
 
-	input := []byte(`[{"type":"message","role":"assistant","id":"item_previous","status":"completed","content":[{"type":"output_text","text":"prior"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}]`)
-	originalBody := []byte(`{"model":"gpt-5","previous_response_id":"resp_expired","input":` + string(input) + `}`)
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(originalBody))
-	c.Request.Header.Set("Content-Type", "application/json")
-	t.Cleanup(func() { common.CleanupBodyStorage(c) })
+			input := []byte(`[{"type":"message","role":"assistant","id":"item_previous","status":"completed","content":[{"type":"output_text","text":"prior"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}]`)
+			originalBody := []byte(`{"model":"gpt-5","previous_response_id":"resp_expired","input":` + string(input) + `}`)
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, test.requestPath, bytes.NewReader(originalBody))
+			c.Request.Header.Set("Content-Type", "application/json")
+			t.Cleanup(func() { common.CleanupBodyStorage(c) })
 
-	common.SetContextKey(c, appconstant.ContextKeyChannelType, appconstant.ChannelTypeOpenAI)
-	common.SetContextKey(c, appconstant.ContextKeyChannelId, 9102)
-	common.SetContextKey(c, appconstant.ContextKeyChannelBaseUrl, server.URL)
-	common.SetContextKey(c, appconstant.ContextKeyChannelKey, "test-key")
-	common.SetContextKey(c, appconstant.ContextKeyOriginalModel, "gpt-5")
-	common.SetContextKey(c, appconstant.ContextKeyChannelSetting, dto.ChannelSettings{})
+			common.SetContextKey(c, appconstant.ContextKeyChannelType, appconstant.ChannelTypeOpenAI)
+			common.SetContextKey(c, appconstant.ContextKeyChannelId, 9102)
+			common.SetContextKey(c, appconstant.ContextKeyChannelBaseUrl, server.URL)
+			common.SetContextKey(c, appconstant.ContextKeyChannelKey, "test-key")
+			common.SetContextKey(c, appconstant.ContextKeyOriginalModel, "gpt-5")
+			common.SetContextKey(c, appconstant.ContextKeyChannelSetting, dto.ChannelSettings{})
 
-	request := &dto.OpenAIResponsesRequest{
-		Model:              "gpt-5",
-		PreviousResponseID: "resp_expired",
-		Input:              input,
+			var request dto.Request = &dto.OpenAIResponsesRequest{
+				Model:              "gpt-5",
+				PreviousResponseID: "resp_expired",
+				Input:              input,
+			}
+			if test.relayMode == relayconstant.RelayModeResponsesCompact {
+				request = &dto.OpenAIResponsesCompactionRequest{
+					Model:              "gpt-5",
+					PreviousResponseID: "resp_expired",
+					Input:              input,
+				}
+			}
+			info := &relaycommon.RelayInfo{
+				Request:         request,
+				RelayMode:       test.relayMode,
+				RelayFormat:     test.relayFormat,
+				RequestURLPath:  test.requestPath,
+				OriginModelName: "gpt-5",
+			}
+
+			apiErr := ResponsesHelper(c, info)
+			require.NotNil(t, apiErr)
+			require.EqualValues(t, 2, attempts.Load())
+			firstBody := <-bodies
+			secondBody := <-bodies
+			require.Equal(t, "resp_expired", gjson.GetBytes(firstBody, "previous_response_id").String(), string(firstBody))
+			require.False(t, gjson.GetBytes(secondBody, "previous_response_id").Exists(), string(secondBody))
+			require.False(t, gjson.GetBytes(secondBody, "input.0.id").Exists(), string(secondBody))
+			require.Equal(t, "output_text", gjson.GetBytes(secondBody, "input.0.content.0.type").String(), string(secondBody))
+		})
 	}
-	info := &relaycommon.RelayInfo{
-		Request:         request,
-		RelayMode:       relayconstant.RelayModeResponses,
-		RelayFormat:     types.RelayFormatOpenAIResponses,
-		RequestURLPath:  "/v1/responses",
-		OriginModelName: "gpt-5",
-	}
+}
 
-	apiErr := ResponsesHelper(c, info)
-	require.NotNil(t, apiErr)
-	require.EqualValues(t, 2, attempts.Load())
-	firstBody := <-bodies
-	secondBody := <-bodies
-	require.Equal(t, "resp_expired", gjson.GetBytes(firstBody, "previous_response_id").String(), string(firstBody))
-	require.False(t, gjson.GetBytes(secondBody, "previous_response_id").Exists(), string(secondBody))
-	require.False(t, gjson.GetBytes(secondBody, "input.0.id").Exists(), string(secondBody))
-	require.Equal(t, "output_text", gjson.GetBytes(secondBody, "input.0.content.0.type").String(), string(secondBody))
+func TestResponsesHelperDoesNotDropContinuationForIncrementalInput(t *testing.T) {
+	globalSettings := model_setting.GetGlobalSettings()
+	originalPassThrough := globalSettings.PassThroughRequestEnabled
+	globalSettings.PassThroughRequestEnabled = false
+	t.Cleanup(func() { globalSettings.PassThroughRequestEnabled = originalPassThrough })
+
+	for _, test := range []struct {
+		name        string
+		relayMode   int
+		relayFormat types.RelayFormat
+		requestPath string
+	}{
+		{name: "responses", relayMode: relayconstant.RelayModeResponses, relayFormat: types.RelayFormatOpenAIResponses, requestPath: "/v1/responses"},
+		{name: "compact", relayMode: relayconstant.RelayModeResponsesCompact, relayFormat: types.RelayFormatOpenAIResponsesCompaction, requestPath: "/v1/responses/compact"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var attempts atomic.Int32
+			bodies := make(chan []byte, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				bodies <- body
+				attempts.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"error":{"message":"compact continuation is unknown or expired; start a new conversation","type":"invalid_request_error"}}`))
+			}))
+			t.Cleanup(server.Close)
+
+			input := []byte(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}]`)
+			originalBody := []byte(`{"model":"gpt-5","previous_response_id":"resp_expired","input":` + string(input) + `}`)
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, test.requestPath, bytes.NewReader(originalBody))
+			c.Request.Header.Set("Content-Type", "application/json")
+			t.Cleanup(func() { common.CleanupBodyStorage(c) })
+
+			common.SetContextKey(c, appconstant.ContextKeyChannelType, appconstant.ChannelTypeOpenAI)
+			common.SetContextKey(c, appconstant.ContextKeyChannelId, 9103)
+			common.SetContextKey(c, appconstant.ContextKeyChannelBaseUrl, server.URL)
+			common.SetContextKey(c, appconstant.ContextKeyChannelKey, "test-key")
+			common.SetContextKey(c, appconstant.ContextKeyOriginalModel, "gpt-5")
+			common.SetContextKey(c, appconstant.ContextKeyChannelSetting, dto.ChannelSettings{})
+
+			var request dto.Request = &dto.OpenAIResponsesRequest{Model: "gpt-5", PreviousResponseID: "resp_expired", Input: input}
+			if test.relayMode == relayconstant.RelayModeResponsesCompact {
+				request = &dto.OpenAIResponsesCompactionRequest{Model: "gpt-5", PreviousResponseID: "resp_expired", Input: input}
+			}
+			info := &relaycommon.RelayInfo{
+				Request:         request,
+				RelayMode:       test.relayMode,
+				RelayFormat:     test.relayFormat,
+				RequestURLPath:  test.requestPath,
+				OriginModelName: "gpt-5",
+			}
+
+			apiErr := ResponsesHelper(c, info)
+			require.NotNil(t, apiErr)
+			require.Equal(t, http.StatusConflict, apiErr.StatusCode)
+			require.EqualValues(t, 1, attempts.Load())
+			require.Equal(t, "resp_expired", gjson.GetBytes(<-bodies, "previous_response_id").String())
+		})
+	}
 }

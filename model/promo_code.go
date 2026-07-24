@@ -178,9 +178,24 @@ func migratePromoCodeDeletionKey(db *gorm.DB) error {
 			return fmt.Errorf("创建优惠码组合唯一索引失败: %w", err)
 		}
 	}
-	if db.Migrator().HasIndex(&PromoCode{}, promoCodeLegacyCodeIndex) {
-		if err := db.Migrator().DropIndex(&PromoCode{}, promoCodeLegacyCodeIndex); err != nil {
-			return fmt.Errorf("删除优惠码旧唯一索引失败: %w", err)
+	if err := dropPromoCodeLegacyUniqueKey(db); err != nil {
+		return fmt.Errorf("删除优惠码旧唯一键失败: %w", err)
+	}
+	return nil
+}
+
+func dropPromoCodeLegacyUniqueKey(db *gorm.DB) error {
+	migrator := db.Migrator()
+	// PostgreSQL 的旧版本可能把 uniqueIndex 落成同名 UNIQUE CONSTRAINT。
+	// 约束的支撑索引不能直接 DROP INDEX，必须先删除约束。
+	if db.Dialector.Name() == "postgres" && migrator.HasConstraint(&PromoCode{}, promoCodeLegacyCodeIndex) {
+		if err := migrator.DropConstraint(&PromoCode{}, promoCodeLegacyCodeIndex); err != nil {
+			return fmt.Errorf("删除 PostgreSQL 唯一约束失败: %w", err)
+		}
+	}
+	if migrator.HasIndex(&PromoCode{}, promoCodeLegacyCodeIndex) {
+		if err := migrator.DropIndex(&PromoCode{}, promoCodeLegacyCodeIndex); err != nil {
+			return fmt.Errorf("删除唯一索引失败: %w", err)
 		}
 	}
 	return nil

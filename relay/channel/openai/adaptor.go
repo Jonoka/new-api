@@ -658,6 +658,9 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	if info != nil && request.Reasoning != nil && request.Reasoning.Effort != "" {
 		info.ReasoningEffort = request.Reasoning.Effort
 	}
+	// client_metadata 是 Codex 后端扩展，普通 OpenAI 兼容上游会拒绝该字段。
+	// 只有 Codex 适配器可以继续转发。
+	request.ClientMetadata = nil
 	if shouldUseChatCompletionsForResponses(info) {
 		chatRequest, err := service.ResponsesRequestToChatCompletionsRequest(&request)
 		if err != nil {

@@ -87,7 +87,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		return types.NewError(fmt.Errorf("failed to copy request to GeneralOpenAIRequest: %w", err), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
 	attachedPreviousResponseID := false
-	if info.RelayMode == relayconstant.RelayModeResponses {
+	if info.RelayMode == relayconstant.RelayModeResponses || info.RelayMode == relayconstant.RelayModeResponsesCompact {
 		attachedPreviousResponseID = service.AttachOpenAIResponsesContinuation(info, request)
 	}
 
@@ -150,7 +150,8 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		syncResponsesStreamStateFromBody(c, info, jsonData)
 		retryJSONData := append([]byte(nil), jsonData...)
 		retryWithoutPreviousResponse = func(statusCode int, message string) (*dto.Usage, *types.NewAPIError) {
-			if info.RelayMode != relayconstant.RelayModeResponses || !attachedPreviousResponseID || !service.IsOpenAIResponsesPreviousResponseRetryable(statusCode, message) {
+			if (info.RelayMode != relayconstant.RelayModeResponses && info.RelayMode != relayconstant.RelayModeResponsesCompact) ||
+				!attachedPreviousResponseID || !service.IsOpenAIResponsesPreviousResponseRetryable(statusCode, message) {
 				return nil, nil
 			}
 			service.DeleteOpenAIResponsesContinuationResponseID(info, request)
