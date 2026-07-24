@@ -51,7 +51,6 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
     handleLanguageChange,
     handleThemeToggle,
     handleMobileMenuToggle,
-    navigate,
     t,
   } = useHeaderBar({ onMobileMenuToggle, drawerOpen });
 
@@ -126,7 +125,6 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
             isMobile={isMobile}
             isSelfUseMode={isSelfUseMode}
             logout={logout}
-            navigate={navigate}
             t={t}
           />
         </div>

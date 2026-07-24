@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { getLucideIcon } from '../../helpers/render';
 import { ChevronLeft } from 'lucide-react';
@@ -665,16 +665,16 @@ const SiderBar = ({ onNavigate = () => {} }) => {
             }
 
             return (
-              <Link
+              <a
                 style={{ textDecoration: 'none' }}
-                to={to}
+                href={to}
                 role='link'
                 onClick={() => {
                   onNavigate();
                 }}
               >
                 {itemElement}
-              </Link>
+              </a>
             );
           }}
           onSelect={(data) => {

@@ -18,7 +18,6 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Link } from 'react-router-dom';
 import { getCustomNavIcon } from '../../../helpers/customNav';
 import SkeletonWrapper from '../components/SkeletonWrapper';
 
@@ -53,9 +52,9 @@ const Navigation = ({
 
       if (requiresLogin) {
         return (
-          <Link key={link.itemKey} to='/login' className={commonLinkClasses}>
+          <a key={link.itemKey} href='/login' className={commonLinkClasses}>
             {linkContent}
-          </Link>
+          </a>
         );
       }
 
@@ -74,9 +73,9 @@ const Navigation = ({
       }
 
       return (
-        <Link key={link.itemKey} to={link.to} className={commonLinkClasses}>
+        <a key={link.itemKey} href={link.to} className={commonLinkClasses}>
           {linkContent}
-        </Link>
+        </a>
       );
     });
   };

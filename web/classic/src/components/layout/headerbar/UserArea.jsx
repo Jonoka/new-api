@@ -18,7 +18,6 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useRef } from 'react';
-import { Link } from 'react-router-dom';
 import { Avatar, Button, Dropdown, Typography } from '@douyinfe/semi-ui';
 import { ChevronDown } from 'lucide-react';
 import {
@@ -36,7 +35,6 @@ const UserArea = ({
   isMobile,
   isSelfUseMode,
   logout,
-  navigate,
   t,
 }) => {
   const dropdownRef = useRef(null);
@@ -61,7 +59,7 @@ const UserArea = ({
             <Dropdown.Menu className='!bg-semi-color-bg-overlay !border-semi-color-border !shadow-lg !rounded-lg dark:!bg-gray-700 dark:!border-gray-600'>
               <Dropdown.Item
                 onClick={() => {
-                  navigate('/console/personal');
+                  window.location.href = '/console/personal';
                 }}
                 className='!px-3 !py-1.5 !text-sm !text-semi-color-text-0 hover:!bg-semi-color-fill-1 dark:!text-gray-200 dark:hover:!bg-blue-500 dark:hover:!text-white'
               >
@@ -75,7 +73,7 @@ const UserArea = ({
               </Dropdown.Item>
               <Dropdown.Item
                 onClick={() => {
-                  navigate('/console/token');
+                  window.location.href = '/console/token';
                 }}
                 className='!px-3 !py-1.5 !text-sm !text-semi-color-text-0 hover:!bg-semi-color-fill-1 dark:!text-gray-200 dark:hover:!bg-blue-500 dark:hover:!text-white'
               >
@@ -89,7 +87,7 @@ const UserArea = ({
               </Dropdown.Item>
               <Dropdown.Item
                 onClick={() => {
-                  navigate('/console/topup');
+                  window.location.href = '/console/topup';
                 }}
                 className='!px-3 !py-1.5 !text-sm !text-semi-color-text-0 hover:!bg-semi-color-fill-1 dark:!text-gray-200 dark:hover:!bg-blue-500 dark:hover:!text-white'
               >
@@ -170,7 +168,7 @@ const UserArea = ({
 
     return (
       <div className='flex items-center'>
-        <Link to='/login' className='flex'>
+        <a href='/login' className='flex'>
           <Button
             theme='borderless'
             type='tertiary'
@@ -178,10 +176,10 @@ const UserArea = ({
           >
             <span className={loginButtonTextSpanClass}>{t('登录')}</span>
           </Button>
-        </Link>
+        </a>
         {showRegisterButton && (
           <div className='hidden md:block'>
-            <Link to='/register' className='flex -ml-px'>
+            <a href='/register' className='flex -ml-px'>
               <Button
                 theme='solid'
                 type='primary'
@@ -189,7 +187,7 @@ const UserArea = ({
               >
                 <span className={registerButtonTextSpanClass}>{t('注册')}</span>
               </Button>
-            </Link>
+            </a>
           </div>
         )}
       </div>
