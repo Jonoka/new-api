@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { getLucideIcon } from '../../helpers/render';
 import { ChevronLeft } from 'lucide-react';
@@ -83,6 +83,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
   const [extensionItems, setExtensionItems] = useState([]);
   const [openedKeys, setOpenedKeys] = useState([]);
   const location = useLocation();
+  const navigate = useNavigate();
   const [routerMapState, setRouterMapState] = useState(routerMap);
 
   const customMenuItems = useMemo(() => {
@@ -208,6 +209,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         to: item.to,
       }));
   }, [extensionItems, isModuleVisible]);
+
+  const getNavTarget = (itemKey) =>
+    routerMapState[itemKey] ||
+    routerMap[itemKey] ||
+    extensionMenuItems.find((item) => item.itemKey === itemKey)?.to ||
+    customMenuItems.find((item) => item.itemKey === itemKey)?.to;
 
   const extensionSubItems = useMemo(() => {
     const items = [
@@ -628,14 +635,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           hoverStyle='sidebar-nav-item:hover'
           selectedStyle='sidebar-nav-item-selected'
           renderWrapper={({ itemElement, props }) => {
-            const to =
-              routerMapState[props.itemKey] ||
-              routerMap[props.itemKey] ||
-              [...extensionMenuItems].find(
-                (item) => item.itemKey === props.itemKey,
-              )?.to ||
-              customMenuItems.find((item) => item.itemKey === props.itemKey)
-                ?.to;
+            const to = getNavTarget(props.itemKey);
             const customItem = customMenuItems.find(
               (item) => item.itemKey === props.itemKey,
             );
@@ -650,7 +650,10 @@ const SiderBar = ({ onNavigate = () => {} }) => {
                   href={to}
                   target='_blank'
                   rel='noopener noreferrer'
-                  onClick={onNavigate}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onNavigate();
+                  }}
                 >
                   {itemElement}
                 </a>
@@ -658,22 +661,32 @@ const SiderBar = ({ onNavigate = () => {} }) => {
             }
 
             return (
-              <Link
+              <span
                 style={{ textDecoration: 'none' }}
-                to={to}
-                onClick={onNavigate}
+                role='link'
+                tabIndex={-1}
               >
                 {itemElement}
-              </Link>
+              </span>
             );
           }}
           onSelect={(key) => {
+            const itemKey = key.itemKey;
             // 如果点击的是已经展开的子菜单的父项，则收起子菜单
-            if (openedKeys.includes(key.itemKey)) {
-              setOpenedKeys(openedKeys.filter((k) => k !== key.itemKey));
+            if (openedKeys.includes(itemKey)) {
+              setOpenedKeys(openedKeys.filter((k) => k !== itemKey));
             }
 
-            setSelectedKeys([key.itemKey]);
+            const to = getNavTarget(itemKey);
+            const customItem = customMenuItems.find(
+              (item) => item.itemKey === itemKey,
+            );
+            if (to && !customItem?.external && !customItem?.openInNewTab) {
+              navigate(to);
+              onNavigate();
+            }
+
+            setSelectedKeys([itemKey]);
           }}
           openKeys={openedKeys}
           onOpenChange={(data) => {

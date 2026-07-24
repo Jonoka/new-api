@@ -462,6 +462,15 @@ func updateOptionMap(key string, value string) (err error) {
 	defer common.OptionMapRWMutex.Unlock()
 	common.OptionMap[key] = value
 
+	switch key {
+	case "group_ratio_setting.group_special_usable_group":
+		err = ratio_setting.UpdateGroupSpecialUsableGroupByJSONString(value)
+		if err == nil {
+			InvalidatePricingCache()
+		}
+		return err
+	}
+
 	// 检查是否是模型配置 - 使用更规范的方式处理
 	if handleConfigUpdate(key, value) {
 		return nil // 已由配置系统处理
@@ -784,6 +793,9 @@ func updateOptionMap(key string, value string) (err error) {
 		err = ratio_setting.UpdateGroupRatioByJSONString(value)
 	case "GroupGroupRatio":
 		err = ratio_setting.UpdateGroupGroupRatioByJSONString(value)
+		if err == nil {
+			InvalidatePricingCache()
+		}
 	case "UserUsableGroups":
 		err = setting.UpdateUserUsableGroupsByJSONString(value)
 	case "CompletionRatio":
@@ -850,7 +862,7 @@ func updateOptionMap(key string, value string) (err error) {
 	}
 	if err == nil {
 		switch key {
-		case "ModelPrice", "ModelPriceUnit", "ModelPriceVariants", "ModelRatio", "CompletionRatio", "CacheRatio", "CreateCacheRatio", "ImageRatio", "AudioRatio", "AudioCompletionRatio":
+		case "ModelPrice", "ModelPriceUnit", "ModelPriceVariants", "ModelRatio", "GroupRatio", "CompletionRatio", "CacheRatio", "CreateCacheRatio", "ImageRatio", "AudioRatio", "AudioCompletionRatio":
 			InvalidatePricingCache()
 		}
 	}
@@ -874,6 +886,10 @@ func validateOptionValue(key string, value string) error {
 		return ratio_setting.CheckModelPriceUnitJSONString(value)
 	case "ModelPriceVariants":
 		return ratio_setting.CheckModelPriceVariantsJSONString(value)
+	case "GroupGroupRatio":
+		return ratio_setting.CheckGroupGroupRatio(value)
+	case "group_ratio_setting.group_special_usable_group":
+		return ratio_setting.CheckGroupSpecialUsableGroup(value)
 	case "InvoiceTypes":
 		_, err := ParseInvoiceTypes(value)
 		return err

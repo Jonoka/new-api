@@ -110,3 +110,46 @@ func TestUpdateModelPriceReturnsEffectiveDefaultsToAdmin(t *testing.T) {
 	require.Empty(t, pricingMap)
 	require.True(t, lastGetPricingTime.IsZero())
 }
+
+func TestUpdateGroupSpecialUsableGroupRefreshesRuntimeSetting(t *testing.T) {
+	originalOptionMap := common.OptionMap
+	originalSpecialGroups := ratio_setting.GroupSpecialUsableGroup2JSONString()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptionMap
+		common.OptionMapRWMutex.Unlock()
+		require.NoError(t, ratio_setting.UpdateGroupSpecialUsableGroupByJSONString(originalSpecialGroups))
+		InvalidatePricingCache()
+	})
+
+	common.OptionMapRWMutex.Lock()
+	common.OptionMap = make(map[string]string)
+	common.OptionMapRWMutex.Unlock()
+	pricingMap = []Pricing{{ModelName: "cached-model"}}
+	lastGetPricingTime = time.Now()
+
+	require.NoError(t, updateOptionMap("group_ratio_setting.group_special_usable_group", `{"vip":{"+:exclusive":"专属分组","-:default":"remove"}}`))
+
+	specialGroups, ok := ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.Get("vip")
+	require.True(t, ok)
+	require.Equal(t, "专属分组", specialGroups["+:exclusive"])
+	require.Equal(t, "remove", specialGroups["-:default"])
+	require.Empty(t, pricingMap)
+	require.True(t, lastGetPricingTime.IsZero())
+}
+
+func TestUpdateGroupSpecialUsableGroupRejectsInvalidJSON(t *testing.T) {
+	originalSpecialGroups := ratio_setting.GroupSpecialUsableGroup2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateGroupSpecialUsableGroupByJSONString(originalSpecialGroups))
+	})
+
+	require.NoError(t, ratio_setting.UpdateGroupSpecialUsableGroupByJSONString(`{"vip":{"+:exclusive":"专属分组"}}`))
+
+	err := updateOptionMap("group_ratio_setting.group_special_usable_group", `{invalid`)
+	require.Error(t, err)
+
+	specialGroups, ok := ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.Get("vip")
+	require.True(t, ok)
+	require.Equal(t, "专属分组", specialGroups["+:exclusive"])
+}

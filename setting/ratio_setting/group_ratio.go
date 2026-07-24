@@ -99,6 +99,14 @@ func UpdateGroupGroupRatioByJSONString(jsonStr string) error {
 	return types.LoadFromJsonString(groupGroupRatioMap, jsonStr)
 }
 
+func GroupSpecialUsableGroup2JSONString() string {
+	return GetGroupRatioSetting().GroupSpecialUsableGroup.MarshalJSONString()
+}
+
+func UpdateGroupSpecialUsableGroupByJSONString(jsonStr string) error {
+	return types.LoadFromJsonString(GetGroupRatioSetting().GroupSpecialUsableGroup, jsonStr)
+}
+
 func CheckGroupRatio(jsonStr string) error {
 	checkGroupRatio := make(map[string]float64)
 	err := json.Unmarshal([]byte(jsonStr), &checkGroupRatio)
@@ -111,4 +119,24 @@ func CheckGroupRatio(jsonStr string) error {
 		}
 	}
 	return nil
+}
+
+func CheckGroupGroupRatio(jsonStr string) error {
+	checkGroupGroupRatio := make(map[string]map[string]float64)
+	if err := common.UnmarshalJsonStr(jsonStr, &checkGroupGroupRatio); err != nil {
+		return err
+	}
+	for userGroup, ratios := range checkGroupGroupRatio {
+		for usingGroup, ratio := range ratios {
+			if ratio < 0 {
+				return errors.New("group group ratio must be not less than 0: " + userGroup + "." + usingGroup)
+			}
+		}
+	}
+	return nil
+}
+
+func CheckGroupSpecialUsableGroup(jsonStr string) error {
+	checkGroupSpecialUsableGroup := make(map[string]map[string]string)
+	return common.UnmarshalJsonStr(jsonStr, &checkGroupSpecialUsableGroup)
 }
