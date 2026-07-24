@@ -41,6 +41,40 @@ import { useLocation } from 'react-router-dom';
 import { normalizeLanguage } from '../../i18n/language';
 const { Sider, Content, Header } = Layout;
 
+const CLASSIC_FRONTEND_VERSION_KEY = 'classic_frontend_version';
+const CLASSIC_FRONTEND_RELOAD_KEY = 'classic_frontend_version_reload';
+
+const syncClassicFrontendVersion = (version) => {
+  if (!version) return false;
+
+  try {
+    const previousVersion = localStorage.getItem(CLASSIC_FRONTEND_VERSION_KEY);
+    if (!previousVersion) {
+      localStorage.setItem(CLASSIC_FRONTEND_VERSION_KEY, version);
+      return false;
+    }
+
+    if (previousVersion === version) {
+      return false;
+    }
+
+    const reloadKey = `${previousVersion}->${version}`;
+    localStorage.setItem(CLASSIC_FRONTEND_VERSION_KEY, version);
+
+    if (sessionStorage.getItem(CLASSIC_FRONTEND_RELOAD_KEY) === reloadKey) {
+      return false;
+    }
+
+    // 容器内替换二进制后，旧后台标签页可能继续运行旧 JS。
+    // 检测到服务端版本变化时自动刷新一次，避免后台停留在旧前端交互逻辑。
+    sessionStorage.setItem(CLASSIC_FRONTEND_RELOAD_KEY, reloadKey);
+    window.location.reload();
+    return true;
+  } catch (_) {
+    return false;
+  }
+};
+
 const PageLayout = () => {
   const [userState, userDispatch] = useContext(UserContext);
   const [, statusDispatch] = useContext(StatusContext);
@@ -95,6 +129,9 @@ const PageLayout = () => {
       const res = await API.get('/api/status');
       const { success, data } = res.data;
       if (success) {
+        if (syncClassicFrontendVersion(data?.version)) {
+          return;
+        }
         statusDispatch({ type: 'set', payload: data });
         setStatusData(data);
       } else {
@@ -195,7 +232,9 @@ const PageLayout = () => {
           >
             <SiderBar
               onNavigate={() => {
-                if (isMobile) setDrawerOpen(false);
+                if (isMobile) {
+                  window.setTimeout(() => setDrawerOpen(false), 0);
+                }
               }}
             />
           </Sider>

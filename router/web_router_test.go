@@ -71,6 +71,45 @@ func TestRegisterWebMiddlewareLimitsPagesButNotExistingStaticAssets(t *testing.T
 	require.Equal(t, http.StatusTooManyRequests, performWebRouterRequest(router, "/static/js/missing.js", "192.0.2.206:12345").Code)
 }
 
+func TestServeCurrentIndexAssetFallbackForStaleClassicEntry(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	originalTheme := common.GetTheme()
+	t.Cleanup(func() {
+		common.SetTheme(originalTheme)
+	})
+	common.SetTheme("classic")
+
+	themeFS := &webRouterTestFS{FileSystem: http.FS(fstest.MapFS{
+		"assets/index-current.js":  &fstest.MapFile{Data: []byte("current-js")},
+		"assets/index-current.css": &fstest.MapFile{Data: []byte("current-css")},
+	})}
+	currentAssets := currentWebAssetPaths{
+		classicIndexJS:  "/assets/index-current.js",
+		classicIndexCSS: "/assets/index-current.css",
+	}
+
+	router := gin.New()
+	router.NoRoute(func(c *gin.Context) {
+		if serveCurrentIndexAssetFallback(c, themeFS, currentAssets) {
+			return
+		}
+		c.Status(http.StatusNotFound)
+	})
+
+	jsResponse := performWebRouterRequest(router, "/assets/index-stale.js", "192.0.2.207:12345")
+	require.Equal(t, http.StatusOK, jsResponse.Code)
+	require.Equal(t, "current-js", jsResponse.Body.String())
+	require.Contains(t, jsResponse.Header().Get("Content-Type"), "text/javascript")
+
+	cssResponse := performWebRouterRequest(router, "/assets/index-stale.css", "192.0.2.207:12345")
+	require.Equal(t, http.StatusOK, cssResponse.Code)
+	require.Equal(t, "current-css", cssResponse.Body.String())
+	require.Contains(t, cssResponse.Header().Get("Content-Type"), "text/css")
+
+	licenseResponse := performWebRouterRequest(router, "/assets/index-stale.js.LICENSE.txt", "192.0.2.207:12345")
+	require.Equal(t, http.StatusNotFound, licenseResponse.Code)
+}
+
 func performWebRouterRequest(router http.Handler, requestPath string, remoteAddr string) *httptest.ResponseRecorder {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, requestPath, nil)
