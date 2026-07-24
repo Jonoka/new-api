@@ -862,6 +862,10 @@ func TestSaveGroupConfigPrunesDeletedGroupOptionsAndPreventsRecreation(t *testin
 			Value: `{"vip":{"default":0.8},"default":{"vip":0.9,"vip-option-alias":0.7,"other-option":1.1}}`,
 		},
 		{
+			Key:   layeredGroupGroupRatioOptionKey,
+			Value: `{"vip":{"default":0.8},"default":{"vip":0.9,"vip-option-alias":0.7,"other-option":1.1}}`,
+		},
+		{
 			Key:   "TopupGroupRatio",
 			Value: `{"vip":2,"vip-option-alias":3,"default":1,"other-option":1.2}`,
 		},
@@ -909,6 +913,22 @@ func TestSaveGroupConfigPrunesDeletedGroupOptionsAndPreventsRecreation(t *testin
 	}
 	if groupRatios[defaultGroup.Code][otherGroup.Code] != 1.1 {
 		t.Fatalf("保留组间倍率被误删: %#v", groupRatios)
+	}
+	var layeredGroupRatios map[string]map[string]float64
+	if err := common.UnmarshalJsonStr(byKey[layeredGroupGroupRatioOptionKey], &layeredGroupRatios); err != nil {
+		t.Fatalf("解析清理后的分层组间倍率失败: %v", err)
+	}
+	if _, exists := layeredGroupRatios[vipGroup.Code]; exists {
+		t.Fatal("分层组间倍率仍包含待删 owner")
+	}
+	if _, exists := layeredGroupRatios[defaultGroup.Code][vipGroup.Code]; exists {
+		t.Fatal("分层组间倍率仍包含待删 target")
+	}
+	if _, exists := layeredGroupRatios[defaultGroup.Code][alias]; exists {
+		t.Fatal("分层组间倍率仍包含待删别名 target")
+	}
+	if layeredGroupRatios[defaultGroup.Code][otherGroup.Code] != 1.1 {
+		t.Fatalf("保留分层组间倍率被误删: %#v", layeredGroupRatios)
 	}
 
 	var topupRatios map[string]float64
@@ -1400,7 +1420,8 @@ func TestSaveGroupConfigWithOptionsNormalizesBlankJSONWithoutMutatingInput(t *te
 	}
 
 	jsonKeys := []string{
-		"GroupGroupRatio",
+		groupGroupRatioOptionKey,
+		layeredGroupGroupRatioOptionKey,
 		"TopupGroupRatio",
 		"group_ratio_setting.group_special_usable_group",
 	}
@@ -1436,6 +1457,75 @@ func TestSaveGroupConfigWithOptionsNormalizesBlankJSONWithoutMutatingInput(t *te
 		ratio_setting.GroupGroupRatio2JSONString() != "{}" ||
 		specialUsableGroups.Len() != 0 {
 		t.Fatal("空白 JSON 选项没有同步到运行时配置")
+	}
+}
+
+func TestSaveGroupConfigWithOptionsMirrorsGroupGroupRatioKeys(t *testing.T) {
+	setupGroupBindingsTest(t)
+
+	common.OptionMapRWMutex.Lock()
+	oldOptionMap := common.OptionMap
+	common.OptionMap = make(map[string]string)
+	common.OptionMapRWMutex.Unlock()
+	oldGroupGroupRatio := ratio_setting.GroupGroupRatio2JSONString()
+	t.Cleanup(func() {
+		_ = ratio_setting.UpdateGroupGroupRatioByJSONString(oldGroupGroupRatio)
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = oldOptionMap
+		common.OptionMapRWMutex.Unlock()
+	})
+
+	value := `{"vip":{"default":0.25}}`
+	_, err := SaveGroupConfigWithOptionsAndResult(
+		nil,
+		nil,
+		map[string]string{groupGroupRatioOptionKey: value},
+	)
+	if err != nil {
+		t.Fatalf("保存旧字段分组特殊倍率失败: %v", err)
+	}
+
+	var storedOptions []Option
+	keys := []string{groupGroupRatioOptionKey, layeredGroupGroupRatioOptionKey}
+	if err := DB.Where(commonKeyCol+" IN ?", keys).Find(&storedOptions).Error; err != nil {
+		t.Fatalf("读取镜像分组特殊倍率失败: %v", err)
+	}
+	byKey := make(map[string]string, len(storedOptions))
+	for _, option := range storedOptions {
+		byKey[option.Key] = option.Value
+	}
+	for _, key := range keys {
+		if byKey[key] != value {
+			t.Fatalf("分组特殊倍率 %s 未同步保存: %#v", key, byKey)
+		}
+	}
+	ratio, ok := ratio_setting.GetGroupGroupRatio("vip", "default")
+	if !ok || ratio != 0.25 {
+		t.Fatalf("运行时分组特殊倍率未刷新: ratio=%v ok=%v", ratio, ok)
+	}
+
+	_, err = SaveGroupConfigWithOptionsAndResult(
+		nil,
+		nil,
+		map[string]string{layeredGroupGroupRatioOptionKey: `{}`},
+	)
+	if err != nil {
+		t.Fatalf("保存新字段清空分组特殊倍率失败: %v", err)
+	}
+	if _, ok := ratio_setting.GetGroupGroupRatio("vip", "default"); ok {
+		t.Fatal("通过新字段清空后运行时仍残留分组特殊倍率")
+	}
+	if err := DB.Where(commonKeyCol+" IN ?", keys).Find(&storedOptions).Error; err != nil {
+		t.Fatalf("读取清空后的镜像分组特殊倍率失败: %v", err)
+	}
+	byKey = make(map[string]string, len(storedOptions))
+	for _, option := range storedOptions {
+		byKey[option.Key] = option.Value
+	}
+	for _, key := range keys {
+		if byKey[key] != "{}" {
+			t.Fatalf("分组特殊倍率 %s 未同步清空: %#v", key, byKey)
+		}
 	}
 }
 

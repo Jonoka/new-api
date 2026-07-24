@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +24,11 @@ type Option struct {
 	Value string `json:"value"`
 }
 
+const (
+	groupGroupRatioOptionKey        = "GroupGroupRatio"
+	layeredGroupGroupRatioOptionKey = "group_ratio_setting.group_group_ratio"
+)
+
 var optionWriteMutex sync.Mutex
 
 func sortedUniqueOptionKeys(keys []string) []string {
@@ -36,6 +42,112 @@ func sortedUniqueOptionKeys(keys []string) []string {
 		unique = append(unique, key)
 	}
 	return unique
+}
+
+func isGroupGroupRatioOptionKey(key string) bool {
+	return key == groupGroupRatioOptionKey || key == layeredGroupGroupRatioOptionKey
+}
+
+func parseGroupGroupRatioOption(value string) (map[string]map[string]float64, error) {
+	ratios := make(map[string]map[string]float64)
+	if err := common.UnmarshalJsonStr(value, &ratios); err != nil {
+		return nil, err
+	}
+	return ratios, nil
+}
+
+func groupGroupRatioOptionValuesEqual(left string, right string) (bool, error) {
+	leftRatios, err := parseGroupGroupRatioOption(left)
+	if err != nil {
+		return false, err
+	}
+	rightRatios, err := parseGroupGroupRatioOption(right)
+	if err != nil {
+		return false, err
+	}
+	return reflect.DeepEqual(leftRatios, rightRatios), nil
+}
+
+func normalizeGroupGroupRatioOptionUpdates(values map[string]string) (map[string]string, error) {
+	if len(values) == 0 {
+		return values, nil
+	}
+	legacyValue, hasLegacy := values[groupGroupRatioOptionKey]
+	layeredValue, hasLayered := values[layeredGroupGroupRatioOptionKey]
+	if !hasLegacy && !hasLayered {
+		return values, nil
+	}
+	canonicalValue := legacyValue
+	if !hasLegacy {
+		canonicalValue = layeredValue
+	}
+	if hasLegacy && hasLayered {
+		equal, err := groupGroupRatioOptionValuesEqual(legacyValue, layeredValue)
+		if err != nil {
+			return nil, fmt.Errorf("分组特殊倍率格式错误: %w", err)
+		}
+		if !equal {
+			return nil, fmt.Errorf("分组特殊倍率新旧配置不一致，请只提交一个字段或保持两个字段内容一致")
+		}
+	}
+	normalized := make(map[string]string, len(values)+2)
+	for key, value := range values {
+		normalized[key] = value
+	}
+	normalized[groupGroupRatioOptionKey] = canonicalValue
+	normalized[layeredGroupGroupRatioOptionKey] = canonicalValue
+	return normalized, nil
+}
+
+func resolveGroupGroupRatioMirrorValue(values map[string]string) (string, bool, error) {
+	legacyValue, hasLegacy := values[groupGroupRatioOptionKey]
+	layeredValue, hasLayered := values[layeredGroupGroupRatioOptionKey]
+	if !hasLegacy && !hasLayered {
+		return "", false, nil
+	}
+	if hasLegacy {
+		if err := ratio_setting.CheckGroupGroupRatio(legacyValue); err != nil {
+			return "", true, fmt.Errorf("旧分组特殊倍率配置格式错误: %w", err)
+		}
+		if hasLayered {
+			if err := ratio_setting.CheckGroupGroupRatio(layeredValue); err != nil {
+				common.SysLog("layered group group ratio option is invalid and will be replaced by legacy option: " + err.Error())
+			} else if equal, err := groupGroupRatioOptionValuesEqual(legacyValue, layeredValue); err == nil && !equal {
+				common.SysLog("legacy and layered group group ratio options are inconsistent; using legacy GroupGroupRatio")
+			}
+		}
+		return legacyValue, true, nil
+	}
+	if err := ratio_setting.CheckGroupGroupRatio(layeredValue); err != nil {
+		return "", true, fmt.Errorf("分层分组特殊倍率配置格式错误: %w", err)
+	}
+	return layeredValue, true, nil
+}
+
+func syncGroupGroupRatioMirrorOptionsInDB(values map[string]string) (string, bool, error) {
+	canonicalValue, exists, err := resolveGroupGroupRatioMirrorValue(values)
+	if err != nil || !exists {
+		return canonicalValue, exists, err
+	}
+	if values[groupGroupRatioOptionKey] == canonicalValue && values[layeredGroupGroupRatioOptionKey] == canonicalValue {
+		return canonicalValue, true, nil
+	}
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		keys := []string{groupGroupRatioOptionKey, layeredGroupGroupRatioOptionKey}
+		if err := lockOptionRowsForWrite(tx, keys); err != nil {
+			return err
+		}
+		for _, key := range keys {
+			if err := upsertOption(tx, key, canonicalValue); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return "", true, err
+	}
+	return canonicalValue, true, nil
 }
 
 func lockOptionRowsForWrite(tx *gorm.DB, keys []string) error {
@@ -206,7 +318,9 @@ func InitOptionMap() {
 	common.OptionMap["CacheRatio"] = ratio_setting.CacheRatio2JSONString()
 	common.OptionMap["CreateCacheRatio"] = ratio_setting.CreateCacheRatio2JSONString()
 	common.OptionMap["GroupRatio"] = ratio_setting.GroupRatio2JSONString()
-	common.OptionMap["GroupGroupRatio"] = ratio_setting.GroupGroupRatio2JSONString()
+	groupGroupRatioJSON := ratio_setting.GroupGroupRatio2JSONString()
+	common.OptionMap[groupGroupRatioOptionKey] = groupGroupRatioJSON
+	common.OptionMap[layeredGroupGroupRatioOptionKey] = groupGroupRatioJSON
 	common.OptionMap["UserUsableGroups"] = setting.UserUsableGroups2JSONString()
 	common.OptionMap["CompletionRatio"] = ratio_setting.CompletionRatio2JSONString()
 	common.OptionMap["ImageRatio"] = ratio_setting.ImageRatio2JSONString()
@@ -256,20 +370,39 @@ func loadOptionsFromDatabase() {
 	options, _ := AllOption()
 	loadedValues := make(map[string]string, len(options))
 	for _, option := range options {
-		loadedValues[option.Key] = option.Value
+		value := option.Value
 		if option.Key == "AutomaticRetryStatusCodes" {
-			if normalized, migrated := operation_setting.NormalizeAutomaticRetryStatusCodesOption(option.Value); migrated {
+			if normalized, migrated := operation_setting.NormalizeAutomaticRetryStatusCodesOption(value); migrated {
 				if err := DB.Model(&Option{}).
-					Where(commonKeyCol+" = ? AND value = ?", option.Key, option.Value).
+					Where(commonKeyCol+" = ? AND value = ?", option.Key, value).
 					Update("value", normalized).Error; err != nil {
 					common.SysLog("failed to migrate legacy automatic retry status codes: " + err.Error())
 				}
-				option.Value = normalized
+				value = normalized
 			}
 		}
-		err := updateOptionMap(option.Key, option.Value)
+		loadedValues[option.Key] = value
+	}
+	groupGroupRatioValue, hasGroupGroupRatio, err := syncGroupGroupRatioMirrorOptionsInDB(loadedValues)
+	if err != nil {
+		common.SysLog("failed to sync group group ratio mirror options: " + err.Error())
+		hasGroupGroupRatio = false
+	} else if hasGroupGroupRatio {
+		loadedValues[groupGroupRatioOptionKey] = groupGroupRatioValue
+		loadedValues[layeredGroupGroupRatioOptionKey] = groupGroupRatioValue
+	}
+	for _, option := range options {
+		if isGroupGroupRatioOptionKey(option.Key) {
+			continue
+		}
+		err := updateOptionMap(option.Key, loadedValues[option.Key])
 		if err != nil {
 			common.SysLog("failed to update option map: " + err.Error())
+		}
+	}
+	if hasGroupGroupRatio {
+		if err := updateOptionMap(groupGroupRatioOptionKey, groupGroupRatioValue); err != nil {
+			common.SysLog("failed to update group group ratio option map: " + err.Error())
 		}
 	}
 	config, err := resolveAutoGroupConfigFromOptions(DB, loadedValues)
@@ -352,7 +485,7 @@ func normalizeAutoGroupOptionUpdatesWithDB(tx *gorm.DB, values map[string]string
 }
 
 func UpdateOption(key string, value string) error {
-	if key == "DefaultUseAutoGroup" || key == "AutoGroupConfig" {
+	if key == "DefaultUseAutoGroup" || key == "AutoGroupConfig" || isGroupGroupRatioOptionKey(key) {
 		return UpdateOptionsBulk(map[string]string{key: value})
 	}
 	if err := validateOptionValue(key, value); err != nil {
@@ -389,6 +522,11 @@ func UpdateOptionsBulk(values map[string]string) error {
 	if len(values) == 0 {
 		return nil
 	}
+	var err error
+	values, err = normalizeGroupGroupRatioOptionUpdates(values)
+	if err != nil {
+		return err
+	}
 	for key, value := range values {
 		if err := validateOptionValue(key, value); err != nil {
 			return err
@@ -396,7 +534,7 @@ func UpdateOptionsBulk(values map[string]string) error {
 	}
 	optionWriteMutex.Lock()
 	defer optionWriteMutex.Unlock()
-	err := DB.Transaction(func(tx *gorm.DB) error {
+	err = DB.Transaction(func(tx *gorm.DB) error {
 		groupIDs := make([]int, 0)
 		keys := make([]string, 0, len(values))
 		for key, value := range values {
@@ -463,6 +601,14 @@ func updateOptionMap(key string, value string) (err error) {
 	common.OptionMap[key] = value
 
 	switch key {
+	case groupGroupRatioOptionKey, layeredGroupGroupRatioOptionKey:
+		err = ratio_setting.UpdateGroupGroupRatioByJSONString(value)
+		if err == nil {
+			common.OptionMap[groupGroupRatioOptionKey] = value
+			common.OptionMap[layeredGroupGroupRatioOptionKey] = value
+			InvalidatePricingCache()
+		}
+		return err
 	case "group_ratio_setting.group_special_usable_group":
 		err = ratio_setting.UpdateGroupSpecialUsableGroupByJSONString(value)
 		if err == nil {
@@ -791,11 +937,6 @@ func updateOptionMap(key string, value string) (err error) {
 		err = ratio_setting.UpdateModelRatioByJSONString(value)
 	case "GroupRatio":
 		err = ratio_setting.UpdateGroupRatioByJSONString(value)
-	case "GroupGroupRatio":
-		err = ratio_setting.UpdateGroupGroupRatioByJSONString(value)
-		if err == nil {
-			InvalidatePricingCache()
-		}
 	case "UserUsableGroups":
 		err = setting.UpdateUserUsableGroupsByJSONString(value)
 	case "CompletionRatio":
@@ -886,7 +1027,7 @@ func validateOptionValue(key string, value string) error {
 		return ratio_setting.CheckModelPriceUnitJSONString(value)
 	case "ModelPriceVariants":
 		return ratio_setting.CheckModelPriceVariantsJSONString(value)
-	case "GroupGroupRatio":
+	case groupGroupRatioOptionKey, layeredGroupGroupRatioOptionKey:
 		return ratio_setting.CheckGroupGroupRatio(value)
 	case "group_ratio_setting.group_special_usable_group":
 		return ratio_setting.CheckGroupSpecialUsableGroup(value)

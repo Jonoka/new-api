@@ -780,13 +780,15 @@ func migrateGroupIdentity() error {
 			}
 		}
 	}
-	if raw := readOptionValue(options, "GroupGroupRatio"); raw != "" {
-		var values map[string]map[string]float64
-		if err := common.UnmarshalJsonStr(raw, &values); err == nil {
-			for owner, targets := range values {
-				collectGroupCode(codes, owner, false)
-				for target := range targets {
-					collectGroupCode(codes, target, false)
+	for _, key := range []string{groupGroupRatioOptionKey, layeredGroupGroupRatioOptionKey} {
+		if raw := readOptionValue(options, key); raw != "" {
+			var values map[string]map[string]float64
+			if err := common.UnmarshalJsonStr(raw, &values); err == nil {
+				for owner, targets := range values {
+					collectGroupCode(codes, owner, false)
+					for target := range targets {
+						collectGroupCode(codes, target, false)
+					}
 				}
 			}
 		}
@@ -1102,7 +1104,8 @@ func upsertOption(tx *gorm.DB, key, value string) error {
 }
 
 var groupReferenceOptionKeys = []string{
-	"GroupGroupRatio",
+	groupGroupRatioOptionKey,
+	layeredGroupGroupRatioOptionKey,
 	"TopupGroupRatio",
 	"group_ratio_setting.group_special_usable_group",
 	"ModelRequestRateLimitGroup",
@@ -1119,15 +1122,17 @@ var groupProjectionOptionKeys = []string{
 var groupConfigEditableOptionKeys = []string{
 	"AutoGroupConfig",
 	"DefaultUseAutoGroup",
-	"GroupGroupRatio",
+	groupGroupRatioOptionKey,
+	layeredGroupGroupRatioOptionKey,
 	"TopupGroupRatio",
 	"group_ratio_setting.group_special_usable_group",
 }
 
 var groupConfigJSONOptionKeys = map[string]struct{}{
-	"AutoGroupConfig": {},
-	"GroupGroupRatio": {},
-	"TopupGroupRatio": {},
+	"AutoGroupConfig":                                {},
+	groupGroupRatioOptionKey:                         {},
+	layeredGroupGroupRatioOptionKey:                  {},
+	"TopupGroupRatio":                                {},
 	"group_ratio_setting.group_special_usable_group": {},
 }
 
@@ -1223,7 +1228,7 @@ func groupReferenceOptionGroupIDs(tx *gorm.DB, key string, value string) ([]int,
 		for _, identifier := range values {
 			addIdentifier(identifier)
 		}
-	case "GroupGroupRatio":
+	case groupGroupRatioOptionKey, layeredGroupGroupRatioOptionKey:
 		values := make(map[string]map[string]float64)
 		if err := common.UnmarshalJsonStr(value, &values); err != nil {
 			return nil, fmt.Errorf("解析分组选项 %s 失败: %w", key, err)
@@ -1366,7 +1371,7 @@ func pruneDeletedGroupOptionReferences(
 		changed := false
 		var prunedValue string
 		switch option.Key {
-		case "GroupGroupRatio":
+		case groupGroupRatioOptionKey, layeredGroupGroupRatioOptionKey:
 			values := make(map[string]map[string]float64)
 			if err := common.UnmarshalJsonStr(option.Value, &values); err != nil {
 				return nil, fmt.Errorf("解析分组选项 %s 失败: %w", option.Key, err)
@@ -1665,6 +1670,11 @@ func SaveGroupConfigWithOptionsAndResult(
 		return nil, errors.New("分组配置不能为空")
 	}
 	optionUpdates = normalizeGroupConfigOptionUpdates(optionUpdates)
+	var normalizeErr error
+	optionUpdates, normalizeErr = normalizeGroupGroupRatioOptionUpdates(optionUpdates)
+	if normalizeErr != nil {
+		return nil, normalizeErr
+	}
 	if err := validateGroupConfigOptionUpdates(optionUpdates); err != nil {
 		return nil, err
 	}
