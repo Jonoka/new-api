@@ -121,5 +121,13 @@ func registerWebMiddleware(router *gin.Engine, themeFS static.ServeFileSystem) {
 	router.Use(gzip.Gzip(gzip.DefaultCompression))
 	router.Use(middleware.Cache())
 	router.Use(static.Serve("/", themeFS))
-	router.Use(middleware.GlobalWebRateLimit())
+	router.Use(middleware.GlobalWebRateLimitWithAssetChecker(func(request *http.Request) bool {
+		if request == nil || request.URL == nil {
+			return false
+		}
+		if request.Method != http.MethodGet && request.Method != http.MethodHead {
+			return false
+		}
+		return themeFS.Exists("/", request.URL.Path)
+	}))
 }
