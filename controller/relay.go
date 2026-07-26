@@ -186,7 +186,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	relayInfo.LastError = nil
 	channelRetryStates := make(map[int]channelRetryState)
 	var pendingChannelFailure *channelFailureSnapshot
-	maxRetries := common.RetryTimes
+	maxRetries := service.RelayMaxRetries(retryParam)
 
 	for attemptIndex := 0; attemptIndex <= maxRetries; attemptIndex++ {
 		relayInfo.RetryIndex = attemptIndex
@@ -816,7 +816,11 @@ func RelayTask(c *gin.Context) {
 		ModelName:  relayInfo.OriginModelName,
 		Retry:      common.GetPointer(0),
 	}
-	maxRetries := common.RetryTimes
+	maxRetries := service.RelayMaxRetries(retryParam)
+	if relayInfo.LockedChannel != nil {
+		// remix / continuation 必须绑定原任务渠道，不使用跨组预算。
+		maxRetries = common.RetryTimes
+	}
 
 	for attemptIndex := 0; attemptIndex <= maxRetries; attemptIndex++ {
 		relayInfo.RetryIndex = attemptIndex

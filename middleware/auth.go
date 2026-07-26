@@ -498,6 +498,16 @@ func TokenAuth() func(c *gin.Context) {
 			}
 			return
 		}
+		if err := model.ValidateTokenExclusiveGroupBindingCached(token); err != nil {
+			if errors.Is(err, model.ErrTokenGroupBindingConflict) {
+				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, err.Error(), types.ErrorCodeAccessDenied)
+			} else {
+				common.SysLog("TokenAuth ValidateTokenExclusiveGroupBindingCached error: " + err.Error())
+				abortWithOpenAiMessage(c, http.StatusInternalServerError,
+					common.TranslateMessage(c, i18n.MsgDatabaseError))
+			}
+			return
+		}
 
 		allowIps := token.GetIpLimits()
 		if len(allowIps) > 0 {
@@ -545,11 +555,11 @@ func TokenAuth() func(c *gin.Context) {
 						continue
 					}
 					if _, ok := usableGroups[g]; !ok {
-						abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("无权访问 %s 分组", g))
+						abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("无权访问 %s 分组", groupIdentifierForMessage(g)))
 						return
 					}
 					if !ratio_setting.ContainsGroupRatio(g) {
-						abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("分组 %s 已被弃用", g))
+						abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("分组 %s 已被弃用", groupIdentifierForMessage(g)))
 						return
 					}
 					validGroups = append(validGroups, g)
@@ -563,13 +573,13 @@ func TokenAuth() func(c *gin.Context) {
 			} else {
 				// 单分组或 auto：保持原有逻辑
 				if _, ok := service.GetUserUsableGroups(userGroup)[tokenGroup]; !ok {
-					abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("无权访问 %s 分组", tokenGroup))
+					abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("无权访问 %s 分组", groupIdentifierForMessage(tokenGroup)))
 					return
 				}
 				// check group in common.GroupRatio
 				if !ratio_setting.ContainsGroupRatio(tokenGroup) {
 					if tokenGroup != "auto" {
-						abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("分组 %s 已被弃用", tokenGroup))
+						abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("分组 %s 已被弃用", groupIdentifierForMessage(tokenGroup)))
 						return
 					}
 				}

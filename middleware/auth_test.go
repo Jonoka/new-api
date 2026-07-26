@@ -289,6 +289,81 @@ func TestTokenAuthRejectsSkippedInvalidLegacyGroupBeforeDownstream(t *testing.T)
 	require.Contains(t, recorder.Body.String(), "无权访问")
 }
 
+func TestTokenAuthReturns503ForHistoricalExclusiveGroupConflict(t *testing.T) {
+	db := setupAuthMiddlewareTestDB(t)
+	require.NoError(t, db.AutoMigrate(
+		&model.Token{},
+		&model.Group{},
+		&model.TokenGroupBinding{},
+	))
+	defaultGroup := &model.Group{Code: "default", Name: "默认分组", Ratio: 1, Status: model.GroupStatusActive}
+	exclusiveGroup := &model.Group{Code: "hack", Name: "Hack", Ratio: 1, Exclusive: true, Status: model.GroupStatusActive}
+	require.NoError(t, db.Create(defaultGroup).Error)
+	require.NoError(t, db.Create(exclusiveGroup).Error)
+	require.NoError(t, db.Create(&model.User{
+		Id: 1357, Username: "exclusive-conflict-user", Group: "default",
+		Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Quota: 100,
+	}).Error)
+	const tokenKey = "exclusiveconflict1357"
+	token := &model.Token{
+		Id: 1357, UserId: 1357, Key: tokenKey, Name: "historical-conflict",
+		Status: common.TokenStatusEnabled, ExpiredTime: -1, UnlimitedQuota: true,
+		Group: "hack,default", GroupMode: model.TokenGroupModeExplicit,
+	}
+	require.NoError(t, db.Create(token).Error)
+	require.NoError(t, db.Create([]model.TokenGroupBinding{
+		{TokenId: token.Id, GroupId: exclusiveGroup.Id, Position: 0},
+		{TokenId: token.Id, GroupId: defaultGroup.Id, Position: 1},
+	}).Error)
+	previousRedisEnabled, previousRDB := common.RedisEnabled, common.RDB
+	common.RedisEnabled = true
+	common.RDB = newAuthRedisHashTestClient(map[string]string{
+		"Id":                 "1357",
+		"UserId":             "1357",
+		"Status":             strconv.Itoa(common.TokenStatusEnabled),
+		"Name":               "historical-conflict",
+		"ExpiredTime":        "-1",
+		"RemainQuota":        "100",
+		"UnlimitedQuota":     "true",
+		"ModelLimitsEnabled": "false",
+		"UsedQuota":          "0",
+		"Group":              "hack,default",
+		"GroupMode":          model.TokenGroupModeExplicit,
+		"GroupRatioLimits":   "",
+		"CrossGroupRetry":    "true",
+	}, map[string]string{
+		"Id":       "1357",
+		"Group":    "default",
+		"GroupId":  "1",
+		"Quota":    "100",
+		"Status":   strconv.Itoa(common.UserStatusEnabled),
+		"Role":     strconv.Itoa(common.RoleCommonUser),
+		"Username": "exclusive-conflict-user",
+		"Setting":  "",
+		"Email":    "",
+	})
+	t.Cleanup(func() {
+		_ = common.RDB.Close()
+		common.RedisEnabled, common.RDB = previousRedisEnabled, previousRDB
+	})
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	downstreamCalled := false
+	router.GET("/v1/models", TokenAuth(), func(c *gin.Context) {
+		downstreamCalled = true
+		c.Status(http.StatusNoContent)
+	})
+	request := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	request.Header.Set("Authorization", "Bearer sk-"+tokenKey)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "当前绑定分组违规")
+	require.False(t, downstreamCalled)
+}
+
 func TestTokenAuthAllowsVirtualAutoWithoutLegacyUsableKey(t *testing.T) {
 	db := setupAuthMiddlewareTestDB(t)
 	require.NoError(t, db.AutoMigrate(

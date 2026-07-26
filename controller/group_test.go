@@ -3,11 +3,32 @@ package controller
 import (
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 )
 
 func migrationTargetID(value int) *int {
 	return &value
+}
+
+func TestGroupDetailsUpdateRequestPreservesExclusiveFieldPresence(t *testing.T) {
+	var omitted GroupDetailsUpdateRequest
+	if err := common.UnmarshalJsonStr(`{"groups":[{"id":7,"code":"hack","name":"Hack"}]}`, &omitted); err != nil {
+		t.Fatalf("解析缺失 exclusive 的请求失败: %v", err)
+	}
+	omittedConfig := omitted.modelGroups()[0]
+	if !omittedConfig.ExclusiveOmitted {
+		t.Fatal("缺失 exclusive 时应标记为保留数据库现值")
+	}
+
+	var explicitFalse GroupDetailsUpdateRequest
+	if err := common.UnmarshalJsonStr(`{"groups":[{"id":7,"code":"hack","name":"Hack","exclusive":false}]}`, &explicitFalse); err != nil {
+		t.Fatalf("解析显式 false 请求失败: %v", err)
+	}
+	explicitConfig := explicitFalse.modelGroups()[0]
+	if explicitConfig.ExclusiveOmitted || explicitConfig.Exclusive {
+		t.Fatal("明确传入 false 时应取消独立属性")
+	}
 }
 
 func TestTokenGroupMigrationRequestResolveTarget(t *testing.T) {

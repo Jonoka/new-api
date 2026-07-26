@@ -4,11 +4,36 @@ import test from 'node:test';
 import {
   buildLatencyBarHeights,
   buildPerformanceView,
+  buildStatusSegments,
   getSuccessRateHex,
   getSuccessRateLevel,
+  getStatusRateTextClass,
+  getStatusSegmentHex,
   getUptimeAxisMin,
   normalizePerformanceSeries,
 } from './utils.js';
+
+test('最近 24 小时状态压缩为四段并保留空段', () => {
+  const endTs = 24 * 60 * 60;
+  const segments = buildStatusSegments(
+    [
+      { ts: 60 * 60, success_rate: 100, avg_latency_ms: 100 },
+      { ts: 7 * 60 * 60, success_rate: 100, avg_latency_ms: 200 },
+      { ts: 8 * 60 * 60, success_rate: 98, avg_latency_ms: 400 },
+      { ts: 19 * 60 * 60, success_rate: 90, avg_latency_ms: 800 },
+      { ts: 20 * 60 * 60, success_rate: 101, avg_latency_ms: 100 },
+    ],
+    endTs,
+  );
+
+  assert.equal(segments.length, 4);
+  assert.deepEqual(
+    segments.map((segment) => segment.success_rate),
+    [100, 99, null, 90],
+  );
+  assert.equal(segments[1].avg_latency_ms, 300);
+  assert.equal(segments[2].sample_count, 0);
+});
 
 test('状态柱高度随延迟升高而降低，并忽略无效延迟的缩放影响', () => {
   const heights = buildLatencyBarHeights([
@@ -97,4 +122,13 @@ test('PackyAPI 风格成功率颜色和可用率轴下限保持稳定', () => {
   assert.equal(getUptimeAxisMin([99.9, 98]), 95);
   assert.equal(getUptimeAxisMin([94.5]), 90);
   assert.equal(getUptimeAxisMin([83]), 70);
+});
+
+test('四段式状态条使用统一的成功、提醒和异常阈值', () => {
+  assert.equal(getStatusSegmentHex(99.9), '#10b981');
+  assert.equal(getStatusSegmentHex(99), '#f59e0b');
+  assert.equal(getStatusSegmentHex(98.99), '#f43f5e');
+  assert.equal(getStatusRateTextClass(99.9), 'text-semi-color-success');
+  assert.equal(getStatusRateTextClass(99), 'text-semi-color-warning');
+  assert.equal(getStatusRateTextClass(98.99), 'text-semi-color-danger');
 });

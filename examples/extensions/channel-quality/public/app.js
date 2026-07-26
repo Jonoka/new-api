@@ -5,7 +5,7 @@
   const HOST_CONTEXT_API = '/api/extensions/host/me'
   const REQUIRED_HOST_VERSION = 'v1.0.0-rc.10.1.10.200'
   const REQUIRED_CAPABILITY_API = `${API_ROOT}/filters/models?model_dimension=requested&page=1&page_size=1`
-  const MODULE_VERSION = '0.3.6'
+  const MODULE_VERSION = '0.3.7'
   const UI_ASSET_VERSION = MODULE_VERSION
   const REQUIRED_UI_ELEMENT_IDS = [
     'dataOriginFilter',
@@ -177,6 +177,23 @@
     statuses: null,
     failures: null,
   }
+
+  function applyHostTheme(theme) {
+    const normalized = theme === 'dark' ? 'dark' : 'light'
+    document.documentElement.dataset.hostTheme = normalized
+    document.documentElement.style.colorScheme = normalized
+  }
+
+  window.addEventListener('message', (event) => {
+    if (event.origin !== window.location.origin) return
+    const data = event.data || {}
+    if (data.type === 'new-api-host-theme' || data.themeMode) {
+      applyHostTheme(data.themeMode)
+    }
+    if (data.embedded === true) {
+      document.documentElement.dataset.hostEmbedded = 'true'
+    }
+  })
 
   const $ = (id) => document.getElementById(id)
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector))

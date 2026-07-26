@@ -3379,6 +3379,7 @@
     "Please fix the highlighted fields before saving": "Please fix the highlighted fields before saving",
     "Please log in with the appropriate credentials": "Please log in with the appropriate credentials",
     "Please manually copy and open the authorization link": "Please manually copy and open the authorization link",
+    "Please purchase subscription plans separately on the \"Subscription Plans\" page.": "Please purchase subscription plans separately on the \"Subscription Plans\" page.",
     "Please select a container": "Please select a container",
     "Please select a payment method": "Please select a payment method",
     "Please select a primary model": "Please select a primary model",
@@ -4671,6 +4672,7 @@
     "Top vendors": "Top vendors",
     "Top-up": "Top-up",
     "Top-up amount options": "Top-up amount options",
+    "Top-up balance can only be used for API calls and cannot be used to purchase subscription plans.": "Top-up balance can only be used for API calls and cannot be used to purchase subscription plans.",
     "Top-up Audit Info": "Top-up Audit Info",
     "Top-up count": "Top-up count",
     "Top-up group ratios": "Top-up group ratios",
@@ -5456,6 +5458,9 @@
     "The extension native styles configuration is invalid.": "The extension native styles configuration is invalid.",
     "The native extension entry must default-export a React component.": "The native extension entry must default-export a React component.",
     "Loading extension...": "Loading extension...",
-    "Failed to load native extension": "Failed to load native extension"
+    "Failed to load native extension": "Failed to load native extension",
+    "Independent": "Independent",
+    "Independent group": "Independent group",
+    "Independent groups must be selected alone.": "Independent groups must be selected alone."
   }
 }

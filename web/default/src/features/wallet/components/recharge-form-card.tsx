@@ -17,7 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useState, useEffect } from 'react'
-import { Gift, ExternalLink, Loader2, Receipt, WalletCards } from 'lucide-react'
+import {
+  Gift,
+  ExternalLink,
+  Info,
+  Loader2,
+  Receipt,
+  WalletCards,
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { formatNumber } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -214,6 +221,22 @@ export function RechargeFormCard({
       }
       contentClassName='space-y-4 sm:space-y-6'
     >
+      <Alert>
+        <Info className='h-4 w-4' />
+        <AlertDescription className='space-y-1'>
+          <p>
+            {t(
+              'Top-up balance can only be used for API calls and cannot be used to purchase subscription plans.'
+            )}
+          </p>
+          <p>
+            {t(
+              'Please purchase subscription plans separately on the "Subscription Plans" page.'
+            )}
+          </p>
+        </AlertDescription>
+      </Alert>
+
       {/* Online Topup Section */}
       {hasAnyTopup ? (
         <div className='space-y-4 sm:space-y-6'>

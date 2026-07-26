@@ -355,7 +355,6 @@ const NotificationCenter = () => {
     const normalized = [
       ...new Set(chatIds.map((id) => String(id).trim())),
     ].filter(Boolean);
-    setTaskChatIdInput('');
     setTaskForm((current) => ({
       ...current,
       targets: normalized.map(
@@ -368,6 +367,7 @@ const NotificationCenter = () => {
           },
       ),
     }));
+    setTaskChatIdInput('');
   };
 
   const updateTarget = (chatId, field, value) => {
@@ -528,9 +528,28 @@ const NotificationCenter = () => {
               </Space>
             }
           >
-            <Text type='tertiary' size='small'>
-              {t('Telegram Bot')}
-            </Text>
+            <div className='grid grid-cols-2 gap-3 text-sm'>
+              <div>
+                <Text type='tertiary' size='small'>
+                  {t('机器人账号')}
+                </Text>
+                <div>{bot.username ? `@${bot.username}` : '-'}</div>
+              </div>
+              <div>
+                <Text type='tertiary' size='small'>
+                  {t('最近测试')}
+                </Text>
+                <div>{formatTime(bot.last_test_at)}</div>
+              </div>
+              <div className='col-span-2'>
+                <Text type='tertiary' size='small'>
+                  {t('测试结果')}
+                </Text>
+                <div className={bot.last_test_error ? 'text-red-500' : ''}>
+                  {bot.last_test_error || (bot.last_test_at ? t('成功') : '-')}
+                </div>
+              </div>
+            </div>
           </Card>
         ))}
       </div>

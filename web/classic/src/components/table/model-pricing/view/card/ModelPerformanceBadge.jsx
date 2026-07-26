@@ -73,7 +73,7 @@ const ModelPerformanceBadge = ({ performance, t, isMobile = false }) => {
         <SuccessRateSparkline
           series={series}
           overall={success_rate}
-          maxPoints={isMobile ? 12 : 24}
+          maxPoints={4}
           compact={isMobile}
           latestTimestamp={isMobile ? undefined : latestPoint?.ts}
         />

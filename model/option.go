@@ -484,6 +484,24 @@ func normalizeAutoGroupOptionUpdatesWithDB(tx *gorm.DB, values map[string]string
 	return normalized, nil
 }
 
+func validateAutoGroupsExcludeExclusive(tx *gorm.DB, value string) error {
+	groupIDs, err := groupReferenceOptionGroupIDs(tx, "AutoGroups", value)
+	if err != nil {
+		return err
+	}
+	if len(groupIDs) == 0 {
+		return nil
+	}
+	var groups []Group
+	if err := tx.Select("id", "name").Where("id IN ? AND exclusive = ?", groupIDs, true).Find(&groups).Error; err != nil {
+		return err
+	}
+	if len(groups) > 0 {
+		return fmt.Errorf("独立分组 %s 不能加入自动分组", groups[0].Name)
+	}
+	return nil
+}
+
 func UpdateOption(key string, value string) error {
 	if key == "DefaultUseAutoGroup" || key == "AutoGroupConfig" || isGroupGroupRatioOptionKey(key) {
 		return UpdateOptionsBulk(map[string]string{key: value})
@@ -496,6 +514,11 @@ func UpdateOption(key string, value string) error {
 	if err := DB.Transaction(func(tx *gorm.DB) error {
 		if err := lockGroupReferenceOptionWrite(tx, key, value); err != nil {
 			return err
+		}
+		if key == "AutoGroups" {
+			if err := validateAutoGroupsExcludeExclusive(tx, value); err != nil {
+				return err
+			}
 		}
 		if err := lockOptionRowsForWrite(tx, []string{key}); err != nil {
 			return err
@@ -553,6 +576,11 @@ func UpdateOptionsBulk(values map[string]string) error {
 		}
 		if err := lockGroupRowsForBindingWrite(tx, groupIDs, "分组选项"); err != nil {
 			return err
+		}
+		if value, ok := values["AutoGroups"]; ok {
+			if err := validateAutoGroupsExcludeExclusive(tx, value); err != nil {
+				return err
+			}
 		}
 		keys = sortedUniqueOptionKeys(keys)
 		if err := lockOptionRowsForWrite(tx, keys); err != nil {

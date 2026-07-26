@@ -76,6 +76,7 @@ type InvoiceRequest struct {
 
 type InvoiceRecord struct {
 	Id                 int                `json:"id"`
+	DeletedAt          gorm.DeletedAt     `json:"-" gorm:"index"`
 	UserId             int                `json:"user_id" gorm:"index"`
 	SourceType         string             `json:"source_type" gorm:"type:varchar(32);index;uniqueIndex:idx_invoice_source,priority:1"`
 	SourceId           string             `json:"source_id" gorm:"type:varchar(255);index;uniqueIndex:idx_invoice_source,priority:2"`
@@ -573,7 +574,7 @@ func CreateInvoiceRecordFromTopUpTx(tx *gorm.DB, topUp *TopUp) error {
 		CreateTime:         common.GetTimestamp(),
 		UpdateTime:         common.GetTimestamp(),
 	}
-	if err := tx.Where("source_type = ? AND source_id = ?", record.SourceType, record.SourceId).First(&InvoiceRecord{}).Error; err == nil {
+	if err := tx.Unscoped().Where("source_type = ? AND source_id = ?", record.SourceType, record.SourceId).First(&InvoiceRecord{}).Error; err == nil {
 		return nil
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
@@ -620,7 +621,7 @@ func CreateInvoiceRecordFromSubscriptionOrderTx(tx *gorm.DB, order *Subscription
 		CreateTime:         common.GetTimestamp(),
 		UpdateTime:         common.GetTimestamp(),
 	}
-	if err := tx.Where("source_type = ? AND source_id = ?", record.SourceType, record.SourceId).First(&InvoiceRecord{}).Error; err == nil {
+	if err := tx.Unscoped().Where("source_type = ? AND source_id = ?", record.SourceType, record.SourceId).First(&InvoiceRecord{}).Error; err == nil {
 		return nil
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
@@ -699,6 +700,73 @@ func attachInvoiceOrderLinks(records []*InvoiceRecord) error {
 		}
 	}
 	return nil
+}
+
+const maxAdminInvoiceDeleteBatch = 100
+
+func normalizeAdminInvoiceDeleteIDs(ids []int) ([]int, error) {
+	if len(ids) == 0 {
+		return nil, errors.New("请至少选择一条发票记录")
+	}
+	if len(ids) > maxAdminInvoiceDeleteBatch {
+		return nil, fmt.Errorf("单次最多删除 %d 条发票记录", maxAdminInvoiceDeleteBatch)
+	}
+	seen := make(map[int]struct{}, len(ids))
+	normalized := make([]int, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			return nil, errors.New("发票 ID 无效")
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		normalized = append(normalized, id)
+	}
+	sort.Ints(normalized)
+	return normalized, nil
+}
+
+// DeleteInvoiceRecords 软删除管理员选中的发票记录。
+// 已支付或已开具记录保留来源订单的开票状态，防止删除展示记录后重复开票；
+// 尚未支付的合并申请会先走取消流程，释放被占用的来源订单。
+func DeleteInvoiceRecords(ids []int) (int, error) {
+	normalized, err := normalizeAdminInvoiceDeleteIDs(ids)
+	if err != nil {
+		return 0, err
+	}
+	deleted := 0
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		var records []InvoiceRecord
+		if err := lockForUpdate(tx).
+			Where("id IN ?", normalized).
+			Order("id ASC").
+			Find(&records).Error; err != nil {
+			return err
+		}
+		if len(records) == 0 {
+			return nil
+		}
+
+		actualIDs := make([]int, 0, len(records))
+		for i := range records {
+			record := &records[i]
+			if record.Status == InvoiceStatusPaymentPending && record.PaymentStatus != InvoicePaymentStatusSuccess {
+				if err := cancelInvoiceExternalPaymentTx(tx, record); err != nil {
+					return err
+				}
+			}
+			actualIDs = append(actualIDs, record.Id)
+		}
+
+		result := tx.Where("id IN ?", actualIDs).Delete(&InvoiceRecord{})
+		if result.Error != nil {
+			return result.Error
+		}
+		deleted = int(result.RowsAffected)
+		return nil
+	})
+	return deleted, err
 }
 
 func UpdateInvoiceRecord(id int, downloadUrl string, status string, adminRemark string) error {

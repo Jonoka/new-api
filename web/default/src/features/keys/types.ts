@@ -27,6 +27,7 @@ const groupReferenceSchema = z.object({
   id: z.number(),
   code: z.string(),
   name: z.string(),
+  exclusive: z.boolean().optional().default(false),
 })
 
 export const apiKeySchema = z.object({

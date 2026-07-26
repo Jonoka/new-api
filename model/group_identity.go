@@ -26,6 +26,7 @@ type Group struct {
 	Description    string  `json:"description,omitempty" gorm:"type:text"`
 	Ratio          float64 `json:"ratio" gorm:"default:1"`
 	UserSelectable bool    `json:"user_selectable" gorm:"default:false"`
+	Exclusive      bool    `json:"exclusive" gorm:"default:false;index"`
 	Status         int     `json:"status" gorm:"default:1;index"`
 	CreatedTime    int64   `json:"created_time" gorm:"bigint"`
 	UpdatedTime    int64   `json:"updated_time" gorm:"bigint"`
@@ -108,9 +109,12 @@ type GroupConfig struct {
 	Description    string  `json:"description"`
 	Ratio          float64 `json:"ratio"`
 	UserSelectable bool    `json:"user_selectable"`
-	Status         int     `json:"status"`
-	AutoEnabled    bool    `json:"auto_enabled"`
-	AutoOrder      int     `json:"auto_order"`
+	Exclusive      bool    `json:"exclusive"`
+	// ExclusiveOmitted 仅用于保存请求；旧客户端缺失 exclusive 时保留数据库现值。
+	ExclusiveOmitted bool `json:"-"`
+	Status           int  `json:"status"`
+	AutoEnabled      bool `json:"auto_enabled"`
+	AutoOrder        int  `json:"auto_order"`
 }
 
 type GroupConfigSaveResult struct {
@@ -129,6 +133,7 @@ func (g *Group) ToConfig(autoMembers map[int]AutoGroupMember) GroupConfig {
 		Description:    g.Description,
 		Ratio:          g.Ratio,
 		UserSelectable: g.UserSelectable,
+		Exclusive:      g.Exclusive,
 		Status:         g.Status,
 	}
 	if member, ok := autoMembers[g.Id]; ok {
@@ -1714,6 +1719,9 @@ func SaveGroupConfigWithOptionsAndResult(
 			if item.Ratio < 0 {
 				return fmt.Errorf("分组 %s 的倍率不能小于 0", code)
 			}
+			if !item.ExclusiveOmitted && item.Exclusive && item.AutoEnabled {
+				return fmt.Errorf("独立分组 %s 不能加入自动分组", name)
+			}
 			item.Code = code
 			item.Name = name
 			prepared[index] = item
@@ -1778,6 +1786,9 @@ func SaveGroupConfigWithOptionsAndResult(
 		for index := range prepared {
 			item := &prepared[index]
 			if item.Id <= 0 {
+				if item.Exclusive && item.AutoEnabled {
+					return fmt.Errorf("独立分组 %s 不能加入自动分组", item.Name)
+				}
 				continue
 			}
 			existing, exists := lockedGroups[item.Id]
@@ -1786,6 +1797,12 @@ func SaveGroupConfigWithOptionsAndResult(
 			}
 			if existing.Code != item.Code {
 				return fmt.Errorf("分组 %d 的 code 不允许修改", item.Id)
+			}
+			if item.ExclusiveOmitted {
+				item.Exclusive = existing.Exclusive
+			}
+			if item.Exclusive && item.AutoEnabled {
+				return fmt.Errorf("独立分组 %s 不能加入自动分组", item.Name)
 			}
 			existingByID[item.Id] = existing
 		}
@@ -1958,7 +1975,7 @@ func SaveGroupConfigWithOptionsAndResult(
 
 		for _, item := range prepared {
 			if item.Id == 0 {
-				group := Group{Code: item.Code, Name: item.Name, Description: item.Description, Ratio: item.Ratio, UserSelectable: item.UserSelectable, Status: item.Status, CreatedTime: time.Now().Unix(), UpdatedTime: time.Now().Unix()}
+				group := Group{Code: item.Code, Name: item.Name, Description: item.Description, Ratio: item.Ratio, UserSelectable: item.UserSelectable, Exclusive: item.Exclusive, Status: item.Status, CreatedTime: time.Now().Unix(), UpdatedTime: time.Now().Unix()}
 				if group.Ratio == 0 {
 					group.Ratio = 1
 				}
@@ -1970,7 +1987,7 @@ func SaveGroupConfigWithOptionsAndResult(
 				}
 				continue
 			}
-			updates := map[string]interface{}{"name": item.Name, "description": item.Description, "ratio": item.Ratio, "user_selectable": item.UserSelectable, "status": item.Status, "updated_time": time.Now().Unix()}
+			updates := map[string]interface{}{"name": item.Name, "description": item.Description, "ratio": item.Ratio, "user_selectable": item.UserSelectable, "exclusive": item.Exclusive, "status": item.Status, "updated_time": time.Now().Unix()}
 			if item.Status == 0 {
 				updates["status"] = GroupStatusDisabled
 			}
@@ -2009,6 +2026,7 @@ func SaveGroupConfigWithOptionsAndResult(
 	if err != nil {
 		return nil, err
 	}
+	InvalidateExclusiveGroupSnapshot()
 	cacheSummary := &TokenGroupMigrationSummary{}
 	invalidateTokenGroupMigrationCaches(migratedTokenPlans, cacheSummary)
 	result.CacheInvalidated = cacheSummary.CacheInvalidated

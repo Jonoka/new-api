@@ -6,14 +6,5 @@ it under the terms of the GNU Affero General Public License as
 published by the Free Software Foundation, either version 3 of the
 License, or (at your option) any later version.
 */
-import { createFileRoute, redirect } from '@tanstack/react-router'
-
-// 保留旧入口作为兼容别名，正式页面仍由 channel-quality 扩展注册。
-export const Route = createFileRoute('/_authenticated/channel-observability/')({
-  beforeLoad: () => {
-    throw redirect({
-      to: '/extensions/$moduleId/$pageKey',
-      params: { moduleId: 'channel-quality', pageKey: 'index' },
-    })
-  },
-})
+// 原生页面仅保留为未发布原型；正式入口由 channel-quality 扩展注册。
+export { ChannelObservability as ChannelObservabilityPrototype } from '@/features/channel-observability'

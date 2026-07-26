@@ -585,6 +585,9 @@ func buildTokenGroupMigrationPlans(
 func applyTokenGroupMigrationPlans(tx *gorm.DB, plans []tokenGroupMigrationPlan) error {
 	for index := range plans {
 		token := &plans[index].token
+		if err := ValidateTokenExclusiveGroupBinding(tx, token); err != nil {
+			return fmt.Errorf("令牌 %d 分组绑定冲突: %w", token.Id, err)
+		}
 		if err := tx.Unscoped().Model(&Token{}).Where("id = ?", token.Id).Updates(map[string]interface{}{
 			"group":              token.Group,
 			"group_mode":         token.GroupMode,

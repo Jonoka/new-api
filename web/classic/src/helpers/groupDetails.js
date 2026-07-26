@@ -78,6 +78,7 @@ export const normalizeGroupDetail = (group = {}) => {
     description: String(group.description ?? ''),
     ratio: normalizeRatio(group.ratio),
     user_selectable: group.user_selectable === true,
+    exclusive: group.exclusive === true,
     status: normalizeStatus(group.status),
     auto_enabled: group.auto_enabled === true,
     auto_order:
@@ -148,8 +149,73 @@ export const createUserGroupOptions = (groupMap) =>
       label: name || code,
       description: String(info.description || info.desc || ''),
       ratio: info.ratio,
+      exclusive: info.exclusive === true,
     };
   });
+
+export const includeSelectedGroupOptions = (
+  groupOptions,
+  selectedCodes,
+  references = [],
+) => {
+  const result = Array.isArray(groupOptions) ? [...groupOptions] : [];
+  const byCode = new Map(result.map((group) => [group.code, group]));
+  const indexByCode = new Map(
+    result.map((group, index) => [group.code, index]),
+  );
+
+  (Array.isArray(references) ? references : []).forEach((reference) => {
+    const code = String(reference?.code || '').trim();
+    if (!code) return;
+    const name = String(reference?.name || code).trim();
+    const referenceOption = {
+      id: normalizeId(reference?.id),
+      code,
+      name,
+      legacy_code: code,
+      value: code,
+      label: name || code,
+      description: '',
+      ratio: undefined,
+      exclusive: reference?.exclusive === true,
+    };
+    const existing = byCode.get(code);
+    if (existing) {
+      const merged = {
+        ...existing,
+        id: existing.id || referenceOption.id,
+        exclusive: existing.exclusive || referenceOption.exclusive,
+      };
+      result[indexByCode.get(code)] = merged;
+      byCode.set(code, merged);
+      return;
+    }
+    indexByCode.set(code, result.length);
+    byCode.set(code, referenceOption);
+    result.push(referenceOption);
+  });
+
+  (Array.isArray(selectedCodes) ? selectedCodes : []).forEach((rawCode) => {
+    const code = String(rawCode || '').trim();
+    if (!code || byCode.has(code)) return;
+    const fallback = {
+      id: null,
+      code,
+      name: code,
+      legacy_code: code,
+      value: code,
+      label: code,
+      description: '',
+      ratio: undefined,
+      exclusive: false,
+    };
+    indexByCode.set(code, result.length);
+    byCode.set(code, fallback);
+    result.push(fallback);
+  });
+
+  return result;
+};
 
 export const createPlaygroundGroupOptions = (groupMap) =>
   Object.entries(groupMap || {}).map(([code, info = {}]) => {
@@ -264,6 +330,7 @@ export const buildGroupDetailsPayload = (groups, deletedIds = []) => ({
     description: group.description,
     ratio: group.ratio,
     user_selectable: group.user_selectable,
+    exclusive: group.exclusive,
     status: group.status,
     auto_enabled: group.auto_enabled,
     auto_order: group.auto_order,

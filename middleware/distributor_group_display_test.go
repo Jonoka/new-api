@@ -1,6 +1,10 @@
 package middleware
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/QuantumNous/new-api/model"
+)
 
 func TestFormatDistributorGroupForMessage(t *testing.T) {
 	groupNames := map[string]string{
@@ -37,5 +41,31 @@ func TestFormatDistributorGroupForMessage(t *testing.T) {
 				t.Fatalf("formatDistributorGroupForMessage() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestGroupIdentifierForMessageUsesCurrentNameForAlias(t *testing.T) {
+	db := setupAuthMiddlewareTestDB(t)
+	if err := db.AutoMigrate(&model.Group{}, &model.GroupAlias{}); err != nil {
+		t.Fatalf("迁移分组测试表失败: %v", err)
+	}
+	group := &model.Group{
+		Code:   "Codex-Value",
+		Name:   "Codex-Basic｜基础",
+		Ratio:  0.1,
+		Status: model.GroupStatusActive,
+	}
+	if err := db.Create(group).Error; err != nil {
+		t.Fatalf("创建测试分组失败: %v", err)
+	}
+	if err := db.Create(&model.GroupAlias{Alias: "Codex-Plus", GroupId: group.Id}).Error; err != nil {
+		t.Fatalf("创建测试分组别名失败: %v", err)
+	}
+
+	if got := groupIdentifierForMessage("Codex-Plus"); got != "Codex-Basic｜基础" {
+		t.Fatalf("别名未转换为当前分组名称: %q", got)
+	}
+	if got := groupIdentifierForMessage("unknown-group"); got != "unknown-group" {
+		t.Fatalf("未知分组未回退原始标识: %q", got)
 	}
 }

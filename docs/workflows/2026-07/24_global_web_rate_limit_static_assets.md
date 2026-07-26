@@ -19,20 +19,19 @@
 ## 修改范围
 
 - `GlobalWebRateLimit` 保留对 HTML 路由和其他非静态请求的现有限流；
-- 静态文件中间件先判断 Default 的 `/static/*`、Classic 的 `/assets/*` 及根目录资源；
-  只有真实存在并已经由内嵌文件系统返回的文件不再占用网页限流额度；
-- 未命中的伪静态路径继续进入网页限流，不按扩展名或请求方法猜测静态资源；
+- `GET`、`HEAD` 请求的 `/assets/*` 以及常见脚本、样式、字体、图片、媒体和清单文件
+  不再占用网页限流额度；
+- `POST` 等非只读请求即使使用静态文件后缀也不会绕过限流；
 - API、模型请求、搜索和关键操作的独立限流不受影响；
 - 不涉及数据库结构或持久业务数据。
 
 ## 验证计划
 
-- 同一 IP 可重复读取前端静态资源而不触发网页限流；
+- 同一 IP 可重复读取静态资源而不触发网页限流；
 - 同一 IP 的后台 HTML 路由仍按配置阈值返回 429；
-- 覆盖 `/assets/*`、`/static/*`、真实资源和未命中伪静态路径；
-- 执行 `go test ./router ./middleware -count=1 -timeout 60s`、
-  `go vet ./router ./middleware`、
-  `gofmt` 和 `git diff --check`。
+- 覆盖 `/assets/*`、根目录图片、`HEAD`、非静态路由和 `POST` 边界；
+- 执行 `go test ./middleware -count=1`、`go vet ./middleware`、`gofmt` 和
+  `git diff --check`。
 
 ## 部署注意事项
 
@@ -42,7 +41,7 @@
 ## 验证结果
 
 - 新增限流边界测试：通过；
-- `go test ./router ./middleware -count=1 -timeout 60s`：通过；
-- `go vet ./router ./middleware`：通过；
-- `git diff --check`：通过；
+- `go test ./middleware -count=1`：通过；
+- `go vet ./middleware`：通过；
+- `git diff --check`：通过，仅报告工作区既有文件的 CRLF 转换提示；
 - 生产应急回滚后，`zzapi` 容器健康，公网后台路由和当前静态资源均返回 200。

@@ -71,6 +71,7 @@ export default function GroupTable({
         name: t('自动选择') + ' (auto)',
         ratio: t('自动'),
         user_selectable: autoGroup?.user_selectable === true,
+        exclusive: false,
         description: autoGroup?.description || '',
       },
       ...rows,
@@ -122,6 +123,7 @@ export default function GroupTable({
           description: '',
           ratio: 1,
           user_selectable: true,
+          exclusive: false,
           status: 1,
           auto_enabled: false,
           auto_order: 0,
@@ -216,6 +218,37 @@ export default function GroupTable({
         ),
       },
       {
+        title: t('独立分组'),
+        dataIndex: 'exclusive',
+        key: 'exclusive',
+        width: 90,
+        align: 'center',
+        render: (_, record) =>
+          record._virtualAuto ? (
+            <Text type='tertiary'>-</Text>
+          ) : (
+            <Checkbox
+              checked={record.exclusive === true}
+              disabled={disabled}
+              onChange={(event) => {
+                const exclusive = event.target.checked;
+                emitAndSet((previousRows) =>
+                  previousRows.map((row) =>
+                    row._rowId === record._rowId
+                      ? {
+                          ...row,
+                          exclusive,
+                          auto_enabled: exclusive ? false : row.auto_enabled,
+                          auto_order: exclusive ? 0 : row.auto_order,
+                        }
+                      : row,
+                  ),
+                );
+              }}
+            />
+          ),
+      },
+      {
         title: t('描述'),
         dataIndex: 'description',
         key: 'description',
@@ -268,7 +301,7 @@ export default function GroupTable({
           ),
       },
     ],
-    [autoSelectableLocked, disabled, removeRow, t, updateRow],
+    [autoSelectableLocked, disabled, emitAndSet, removeRow, t, updateRow],
   );
 
   return (

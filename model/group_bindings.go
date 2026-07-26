@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
@@ -16,13 +18,166 @@ type GroupReference struct {
 	// Code 仅供旧客户端兼容，新客户端应使用 Id 关联、使用 Name 展示。
 	Code string `json:"code"`
 	Name string `json:"name"`
+	// Exclusive 供管理端编辑历史令牌时识别独立分组。
+	Exclusive bool `json:"exclusive"`
 }
 
 func newGroupReference(group *Group) GroupReference {
 	if group == nil {
 		return GroupReference{}
 	}
-	return GroupReference{Id: group.Id, Code: group.Code, Name: group.Name}
+	return GroupReference{Id: group.Id, Code: group.Code, Name: group.Name, Exclusive: group.Exclusive}
+}
+
+var ErrTokenGroupBindingConflict = errors.New("当前绑定分组违规")
+
+const exclusiveGroupSnapshotTTL = 5 * time.Second
+
+var exclusiveGroupSnapshot = struct {
+	sync.RWMutex
+	db       *gorm.DB
+	loadedAt time.Time
+	ids      map[int]struct{}
+}{}
+
+// InvalidateExclusiveGroupSnapshot 使当前进程的独立分组快照立即失效。
+func InvalidateExclusiveGroupSnapshot() {
+	exclusiveGroupSnapshot.Lock()
+	exclusiveGroupSnapshot.db = nil
+	exclusiveGroupSnapshot.loadedAt = time.Time{}
+	exclusiveGroupSnapshot.ids = nil
+	exclusiveGroupSnapshot.Unlock()
+}
+
+func ensureExclusiveGroupSnapshot() error {
+	if DB == nil {
+		return errors.New("database is nil")
+	}
+	now := time.Now()
+	exclusiveGroupSnapshot.RLock()
+	fresh := exclusiveGroupSnapshot.db == DB &&
+		exclusiveGroupSnapshot.ids != nil &&
+		now.Sub(exclusiveGroupSnapshot.loadedAt) < exclusiveGroupSnapshotTTL
+	exclusiveGroupSnapshot.RUnlock()
+	if fresh {
+		return nil
+	}
+
+	exclusiveGroupSnapshot.Lock()
+	defer exclusiveGroupSnapshot.Unlock()
+	now = time.Now()
+	if exclusiveGroupSnapshot.db == DB &&
+		exclusiveGroupSnapshot.ids != nil &&
+		now.Sub(exclusiveGroupSnapshot.loadedAt) < exclusiveGroupSnapshotTTL {
+		return nil
+	}
+	var ids []int
+	if err := DB.Model(&Group{}).Where("exclusive = ?", true).Pluck("id", &ids).Error; err != nil {
+		return err
+	}
+	snapshot := make(map[int]struct{}, len(ids))
+	for _, id := range ids {
+		if id > 0 {
+			snapshot[id] = struct{}{}
+		}
+	}
+	exclusiveGroupSnapshot.db = DB
+	exclusiveGroupSnapshot.loadedAt = now
+	exclusiveGroupSnapshot.ids = snapshot
+	return nil
+}
+
+func uniquePositiveGroupIDs(ids []int) []int {
+	seen := make(map[int]struct{}, len(ids))
+	uniqueIDs := make([]int, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniqueIDs = append(uniqueIDs, id)
+	}
+	return uniqueIDs
+}
+
+// ValidateTokenExclusiveGroupBinding 保证独立分组只被单独绑定。
+// 该检查每次从 groups 表读取当前属性，因此管理员修改分组后不依赖令牌缓存刷新。
+func ValidateTokenExclusiveGroupBinding(tx *gorm.DB, token *Token) error {
+	if tx == nil {
+		return errors.New("database is nil")
+	}
+	if token == nil {
+		return errors.New("token is nil")
+	}
+	if token.GroupMode == TokenGroupModeAuto || token.GroupMode == TokenGroupModeInherit {
+		return nil
+	}
+	ids := append([]int(nil), token.GroupIds...)
+	if len(ids) == 0 {
+		legacyCodes := splitLegacyGroupCodes(token.Group)
+		if len(legacyCodes) <= 1 {
+			return nil
+		}
+		for _, code := range legacyCodes {
+			group, err := GetGroupByCodeOrAliasWithDB(tx, code)
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			ids = append(ids, group.Id)
+		}
+	}
+	uniqueIDs := uniquePositiveGroupIDs(ids)
+	if len(uniqueIDs) <= 1 {
+		return nil
+	}
+	var count int64
+	if err := tx.Model(&Group{}).
+		Where("id IN ? AND exclusive = ?", uniqueIDs, true).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return ErrTokenGroupBindingConflict
+	}
+	return nil
+}
+
+// ValidateTokenExclusiveGroupBindingCached 在鉴权热路径中使用短期快照，
+// 避免每个多分组请求都访问 groups 表。写路径仍使用事务内强校验。
+func ValidateTokenExclusiveGroupBindingCached(token *Token) error {
+	if token == nil {
+		return errors.New("token is nil")
+	}
+	if token.GroupMode == TokenGroupModeAuto || token.GroupMode == TokenGroupModeInherit {
+		return nil
+	}
+	ids := append([]int(nil), token.GroupIds...)
+	if len(ids) == 0 {
+		for _, detail := range token.GroupDetails {
+			ids = append(ids, detail.Id)
+		}
+	}
+	uniqueIDs := uniquePositiveGroupIDs(ids)
+	if len(uniqueIDs) <= 1 {
+		return nil
+	}
+	if err := ensureExclusiveGroupSnapshot(); err != nil {
+		return err
+	}
+	exclusiveGroupSnapshot.RLock()
+	defer exclusiveGroupSnapshot.RUnlock()
+	for _, id := range uniqueIDs {
+		if _, exclusive := exclusiveGroupSnapshot.ids[id]; exclusive {
+			return ErrTokenGroupBindingConflict
+		}
+	}
+	return nil
 }
 
 // ChannelGroupBinding 通过 GroupId 关联渠道与分组；Position 保留管理端选择顺序。

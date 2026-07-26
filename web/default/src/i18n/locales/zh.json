@@ -3379,6 +3379,7 @@
     "Please fix the highlighted fields before saving": "请先修复高亮字段后再保存",
     "Please log in with the appropriate credentials": "请使用适当的凭据登录",
     "Please manually copy and open the authorization link": "请手动复制并打开授权链接",
+    "Please purchase subscription plans separately on the \"Subscription Plans\" page.": "订阅套餐请在「订阅套餐」页面单独购买。",
     "Please select a container": "请选择一个容器",
     "Please select a payment method": "请选择支付方式",
     "Please select a primary model": "请选择主模型",
@@ -4671,6 +4672,7 @@
     "Top vendors": "热门厂商",
     "Top-up": "充值",
     "Top-up amount options": "充值金额选项",
+    "Top-up balance can only be used for API calls and cannot be used to purchase subscription plans.": "充值余额仅用于 API 调用消耗，不可用于购买订阅套餐。",
     "Top-up Audit Info": "充值审计信息",
     "Top-up count": "充值次数",
     "Top-up group ratios": "充值分组比例",
@@ -5456,6 +5458,9 @@
     "The extension native styles configuration is invalid.": "扩展的原生样式配置无效。",
     "The native extension entry must default-export a React component.": "原生扩展入口必须默认导出 React 组件。",
     "Loading extension...": "正在加载扩展...",
-    "Failed to load native extension": "原生扩展加载失败"
+    "Failed to load native extension": "原生扩展加载失败",
+    "Independent": "独立",
+    "Independent group": "独立分组",
+    "Independent groups must be selected alone.": "独立分组必须单独选择。"
   }
 }

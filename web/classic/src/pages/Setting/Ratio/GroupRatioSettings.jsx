@@ -485,7 +485,7 @@ export default function GroupRatioSettings(props) {
         <AutoGroupList
           key={`ag_${groupDv}_${autoListVersion}`}
           value={inputs.AutoGroups}
-          groupOptions={groupOptions}
+          groupOptions={groupOptions.filter((group) => !group.exclusive)}
           onChange={handleAutoGroupsChange}
         />
       </Form.Section>

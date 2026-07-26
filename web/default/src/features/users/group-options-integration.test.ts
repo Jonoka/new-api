@@ -28,6 +28,7 @@ describe('用户编辑器分组显示名称', () => {
           label: 'Codex-福利组',
           description: undefined,
           ratio: undefined,
+          exclusive: false,
         },
       ]
     )

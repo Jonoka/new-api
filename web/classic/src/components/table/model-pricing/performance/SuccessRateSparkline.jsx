@@ -19,30 +19,31 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { useMemo } from 'react';
 import {
+  buildStatusSegments,
   buildLatencyBarHeights,
   formatBucketTime,
   formatLatency,
   formatSuccessRate,
-  getSuccessRateHex,
-  getSuccessRateTextClass,
-  normalizePerformanceSeries,
+  getStatusRateTextClass,
+  getStatusSegmentHex,
+  STATUS_SEGMENT_COUNT,
 } from './utils';
 
 const SuccessRateSparkline = ({
   series,
   overall,
-  maxPoints = 24,
+  maxPoints = STATUS_SEGMENT_COUNT,
   showOverall = true,
   compact = false,
   latestTimestamp,
   className = '',
 }) => {
+  const windowEndTs = Math.trunc(Date.now() / 1000);
   const points = useMemo(() => {
-    const normalized = normalizePerformanceSeries(series);
-    return normalized.slice(-Math.max(1, maxPoints));
-  }, [maxPoints, series]);
+    return buildStatusSegments(series, windowEndTs, maxPoints);
+  }, [maxPoints, series, windowEndTs]);
 
-  if (points.length === 0) {
+  if (!Array.isArray(series) || series.length === 0) {
     return (
       <span className={`text-xs text-semi-color-text-2 ${className}`}>—</span>
     );
@@ -50,11 +51,11 @@ const SuccessRateSparkline = ({
 
   const computedOverall = Number.isFinite(Number(overall))
     ? Number(overall)
-    : points.reduce((sum, point) => sum + point.success_rate, 0) /
-      points.length;
+    : points.reduce((sum, point) => sum + (point.success_rate ?? 0), 0) /
+      Math.max(1, points.filter((point) => point.sample_count > 0).length);
   const barHeights = buildLatencyBarHeights(points);
-  const barWidth = compact ? 'w-0.5' : 'w-1';
-  const gap = compact ? 'gap-px' : 'gap-[2px]';
+  const barWidth = compact ? 'w-1' : 'w-2';
+  const gap = 'gap-1';
   const height = compact ? 'h-3.5' : 'h-4';
 
   return (
@@ -73,14 +74,24 @@ const SuccessRateSparkline = ({
           <span
             key={`${point.ts}-${point.success_rate}`}
             className={`flex items-end ${barWidth} ${height}`}
-            title={`${formatBucketTime(point.ts)} · ${formatLatency(
-              point.avg_latency_ms,
-            )} · ${formatSuccessRate(point.success_rate, 2)}`}
+            title={`${formatBucketTime(point.ts)} – ${formatBucketTime(
+              point.end_ts,
+            )} · ${
+              point.sample_count > 0
+                ? `${formatLatency(point.avg_latency_ms)} · ${formatSuccessRate(
+                    point.success_rate,
+                    2,
+                  )}`
+                : '—'
+            }`}
           >
             <span
               className='w-full rounded-sm'
               style={{
-                backgroundColor: getSuccessRateHex(point.success_rate),
+                backgroundColor:
+                  point.sample_count > 0
+                    ? getStatusSegmentHex(point.success_rate)
+                    : 'var(--semi-color-fill-1)',
                 height: `${barHeights[index] || 50}%`,
               }}
             />
@@ -89,7 +100,7 @@ const SuccessRateSparkline = ({
       </div>
       {showOverall && (
         <span
-          className={`whitespace-nowrap font-mono font-semibold leading-none tabular-nums ${compact ? 'text-[11px]' : 'text-xs'} ${getSuccessRateTextClass(
+          className={`whitespace-nowrap font-mono font-semibold leading-none tabular-nums ${compact ? 'text-[11px]' : 'text-xs'} ${getStatusRateTextClass(
             computedOverall,
           )}`}
         >

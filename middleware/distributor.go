@@ -42,6 +42,15 @@ func displayDistributorGroupIdentifier(group string, groupNames map[string]strin
 	return group
 }
 
+// groupIdentifierForMessage 只转换面向用户的分组文案，不改变鉴权使用的稳定标识。
+func groupIdentifierForMessage(group string) string {
+	groupNames, err := model.GetGroupDisplayNameMap()
+	if err != nil {
+		groupNames = nil
+	}
+	return displayDistributorGroupIdentifier(group, groupNames)
+}
+
 func displayDistributorGroupList(groups string, groupNames map[string]string) string {
 	parts := strings.Split(groups, ",")
 	for i, group := range parts {

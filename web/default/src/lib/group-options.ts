@@ -23,6 +23,7 @@ export interface GroupIdentity {
   id: number
   code: string
   name: string
+  exclusive?: boolean
 }
 
 export interface GroupOption {
@@ -33,6 +34,7 @@ export interface GroupOption {
   label: string
   description?: string
   ratio?: number | string
+  exclusive: boolean
 }
 
 export interface UserGroupInfo {
@@ -42,6 +44,7 @@ export interface UserGroupInfo {
   desc?: string
   description?: string
   ratio?: number | string
+  exclusive?: boolean
 }
 
 export type UserGroupMap = Record<string, UserGroupInfo>
@@ -66,6 +69,7 @@ interface GroupOptionSource {
   name?: string | null
   description?: string | null
   ratio?: number | string | null
+  exclusive?: boolean | null
 }
 
 function normalizeGroupId(value: unknown): number | null {
@@ -115,6 +119,7 @@ function createGroupOption(
     label: name,
     description: description || undefined,
     ratio,
+    exclusive: source.exclusive === true,
   }
 }
 
@@ -165,6 +170,7 @@ export function createUserGroupOptions(groups: UserGroupMap): GroupOption[] {
         name,
         description: buildUserGroupDescription(code, name, rawDescription),
         ratio: info.ratio,
+        exclusive: info.exclusive === true,
       },
       mapCode
     )
@@ -196,15 +202,14 @@ export function includeSelectedGroupOptions(
 
     const existing = byCode.get(option.code)
     if (existing) {
-      if (!existing.id && option.id) {
-        const mergedOption: GroupOption = {
-          ...existing,
-          id: option.id,
-        }
-        const existingIndex = indexByCode.get(option.code)
-        if (existingIndex !== undefined) result[existingIndex] = mergedOption
-        byCode.set(option.code, mergedOption)
+      const mergedOption: GroupOption = {
+        ...existing,
+        id: existing.id ?? option.id,
+        exclusive: existing.exclusive || option.exclusive,
       }
+      const existingIndex = indexByCode.get(option.code)
+      if (existingIndex !== undefined) result[existingIndex] = mergedOption
+      byCode.set(option.code, mergedOption)
       continue
     }
 

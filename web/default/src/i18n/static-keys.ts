@@ -528,4 +528,9 @@ export const STATIC_I18N_KEYS = [
   // Notification center dynamic labels
   'New pending invoice order',
   'Triggered when a new invoice request is ready to issue.',
+
+  // Independent token groups
+  'Independent',
+  'Independent group',
+  'Independent groups must be selected alone.',
 ] as const

@@ -28,6 +28,7 @@ import {
   selectFilter,
   buildGroupSelectionPayload,
   createUserGroupOptions,
+  includeSelectedGroupOptions,
   resolveGroupCodes,
 } from '../../../../helpers';
 import {
@@ -87,12 +88,17 @@ const GroupMultiPicker = ({
   const [dragOverGroup, setDragOverGroup] = useState(null);
 
   const isAutoSelected = selectedGroups.includes('auto');
+  const isExclusiveSelected = groups.some(
+    (group) => group.exclusive === true && selectedGroups.includes(group.value),
+  );
 
   const availableGroups = groups.filter((g) => {
+    if (isExclusiveSelected) return false;
     if (selectedGroups.includes(g.value)) return false;
     if (isAutoSelected && g.value !== 'auto') return false;
     if (g.value === 'auto' && selectedGroups.length > 0 && !isAutoSelected)
       return false;
+    if (g.exclusive === true && selectedGroups.length > 0) return false;
     if (searchText) {
       const q = searchText.toLowerCase();
       return (
@@ -104,7 +110,10 @@ const GroupMultiPicker = ({
   });
 
   const handleAdd = (value) => {
-    if (value === 'auto') {
+    const selectedOption = groups.find((group) => group.value === value);
+    if (selectedOption?.exclusive === true) {
+      onChange([value]);
+    } else if (value === 'auto') {
       onChange(['auto']);
     } else {
       onChange([...selectedGroups.filter((v) => v !== 'auto'), value]);
@@ -260,6 +269,11 @@ const GroupMultiPicker = ({
                       {displayName}
                     </Text>
                     {info && renderRatioBadge(info.ratio)}
+                    {info?.exclusive && (
+                      <Tag size='small' color='purple' shape='circle'>
+                        {t('独立')}
+                      </Tag>
+                    )}
                   </div>
                   {info?.description && (
                     <Text
@@ -372,22 +386,40 @@ const GroupMultiPicker = ({
                     )}
                   </div>
                   {renderRatioBadge(g.ratio)}
+                  {g.exclusive && (
+                    <Tag size='small' color='purple' shape='circle'>
+                      {t('独立')}
+                    </Tag>
+                  )}
                 </div>
               ))
             )}
           </div>
         }
       >
-        <Button icon={<IconPlus />} theme='light' type='tertiary' size='small'>
+        <Button
+          icon={<IconPlus />}
+          theme='light'
+          type='tertiary'
+          size='small'
+          disabled={isAutoSelected || isExclusiveSelected}
+        >
           {selectedGroups.length === 0 ? t('选择分组') : t('添加分组')}
         </Button>
       </Popover>
 
       {/* Hint */}
-      {selectedGroups.length > 1 && !isAutoSelected && (
+      {selectedGroups.length > 1 && !isAutoSelected && !isExclusiveSelected && (
         <div style={{ marginTop: 6 }}>
           <Text type='tertiary' size='small'>
             {t('多个分组包含相同模型时，将按排列顺序依次尝试')}
+          </Text>
+        </div>
+      )}
+      {selectedGroups.length > 1 && isExclusiveSelected && (
+        <div style={{ marginTop: 6 }}>
+          <Text type='danger' size='small'>
+            {t('独立分组必须单独选择')}
           </Text>
         </div>
       )}
@@ -584,7 +616,14 @@ const EditTokenModal = (props) => {
         data.remain_amount = Number(
           quotaToDisplayAmount(data.remain_quota || 0).toFixed(6),
         );
-        setSelectedGroups(resolveGroupCodes(data, availableGroups));
+        const resolvedGroups = resolveGroupCodes(data, availableGroups);
+        const mergedGroupOptions = includeSelectedGroupOptions(
+          availableGroups,
+          resolvedGroups,
+          data.group_details,
+        );
+        setGroups(mergedGroupOptions);
+        setSelectedGroups(resolvedGroups);
         setGroupRatioLimits(parseGroupRatioLimits(data.group_ratio_limits));
         // 分组由独立选择器维护，避免表单回传服务端旧值。
         const formData = { ...data };

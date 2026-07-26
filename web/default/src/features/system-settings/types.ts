@@ -46,6 +46,7 @@ export type GroupDetail = {
   description: string
   ratio: number
   user_selectable: boolean
+  exclusive: boolean
   status: number
   auto_enabled: boolean
   auto_order: number

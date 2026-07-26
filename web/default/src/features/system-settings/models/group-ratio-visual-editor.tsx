@@ -252,7 +252,11 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   const availableAutoGroups = useMemo(
     () =>
       groups.filter(
-        (group) => !group.auto_enabled && group.code.trim() && group.name.trim()
+        (group) =>
+          !group.auto_enabled &&
+          !group.exclusive &&
+          group.code.trim() &&
+          group.name.trim()
       ),
     [groups]
   )
@@ -885,6 +889,7 @@ function GroupPricingTable({
         description: '',
         ratio: 1,
         user_selectable: true,
+        exclusive: false,
         status: 1,
         auto_enabled: false,
         auto_order: 0,
@@ -965,6 +970,9 @@ function GroupPricingTable({
                   <TableHead className='w-28 text-center'>
                     {t('User selectable')}
                   </TableHead>
+                  <TableHead className='w-28 text-center'>
+                    {t('Independent group')}
+                  </TableHead>
                   <TableHead className='min-w-56'>{t('Description')}</TableHead>
                   <TableHead className='w-16 text-right'>
                     {t('Actions')}
@@ -975,7 +983,7 @@ function GroupPricingTable({
                 {isLoading ? (
                   <TableRow>
                     <TableCell
-                      colSpan={6}
+                      colSpan={7}
                       className='text-muted-foreground h-20 text-center text-sm'
                     >
                       {t('Loading groups...')}
@@ -983,7 +991,7 @@ function GroupPricingTable({
                   </TableRow>
                 ) : loadError ? (
                   <TableRow>
-                    <TableCell colSpan={6} className='h-24 text-center'>
+                    <TableCell colSpan={7} className='h-24 text-center'>
                       <div className='flex flex-col items-center gap-2'>
                         <span className='text-destructive text-sm'>
                           {loadError}
@@ -1020,6 +1028,9 @@ function GroupPricingTable({
                             aria-label={t('User selectable')}
                           />
                         </div>
+                      </TableCell>
+                      <TableCell className='text-muted-foreground text-center'>
+                        -
                       </TableCell>
                       <TableCell>
                         <Input
@@ -1085,6 +1096,33 @@ function GroupPricingTable({
                                   )
                                 }
                                 aria-label={t('User selectable')}
+                              />
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className='flex justify-center'>
+                              <Checkbox
+                                checked={group.exclusive}
+                                onCheckedChange={(checked) => {
+                                  const exclusive = checked === true
+                                  onGroupsChange(
+                                    groups.map((item) =>
+                                      item._key === group._key
+                                        ? {
+                                            ...item,
+                                            exclusive,
+                                            auto_enabled: exclusive
+                                              ? false
+                                              : item.auto_enabled,
+                                            auto_order: exclusive
+                                              ? 0
+                                              : item.auto_order,
+                                          }
+                                        : item
+                                    )
+                                  )
+                                }}
+                                aria-label={t('Independent group')}
                               />
                             </div>
                           </TableCell>

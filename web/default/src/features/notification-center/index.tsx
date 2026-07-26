@@ -101,10 +101,6 @@ const FALLBACK_EVENT: NotificationEventType = {
     '{{mention}} 来新的发票订单啦~\n订单：{{invoice_id}}\n金额：{{total_amount}}',
 }
 
-const FALLBACK_EVENTS = [FALLBACK_EVENT]
-const EMPTY_BOTS: NotificationBot[] = []
-const EMPTY_EVENTS: NotificationEventType[] = []
-
 const EMPTY_BOT_FORM: NotificationBotInput = {
   name: '',
   token: '',
@@ -372,7 +368,7 @@ function TaskSheet(props: {
   onSave: (input: NotificationTaskInput) => void
 }) {
   const { t } = useTranslation()
-  const eventOptions = props.events.length > 0 ? props.events : FALLBACK_EVENTS
+  const eventOptions = props.events.length > 0 ? props.events : [FALLBACK_EVENT]
   const [form, setForm] = useState<NotificationTaskInput>({
     name: '',
     event_type: FALLBACK_EVENT.value,
@@ -383,7 +379,6 @@ function TaskSheet(props: {
   })
 
   useEffect(() => {
-    if (!props.open) return
     const defaultEvent = eventOptions[0] ?? FALLBACK_EVENT
     setForm(
       props.task
@@ -743,7 +738,9 @@ function BotsPanel(props: {
                 <Badge variant='outline'>{t('Token configured')}</Badge>
               )}
             </CardTitle>
-            <CardDescription>{t('Telegram Bot')}</CardDescription>
+            <CardDescription>
+              {bot.username ? `@${bot.username}` : t('Telegram Bot')}
+            </CardDescription>
             <CardAction className='flex gap-1'>
               <Button
                 variant='outline'
@@ -776,6 +773,22 @@ function BotsPanel(props: {
               </Button>
             </CardAction>
           </CardHeader>
+          <CardContent className='grid gap-3 text-sm sm:grid-cols-2'>
+            <div>
+              <span className='text-muted-foreground text-xs'>
+                {t('Last test')}
+              </span>
+              <p>{formatTime(bot.last_test_at)}</p>
+            </div>
+            <div>
+              <span className='text-muted-foreground text-xs'>
+                {t('Test result')}
+              </span>
+              <p className={bot.last_test_error ? 'text-destructive' : ''}>
+                {bot.last_test_error || (bot.last_test_at ? t('Success') : '-')}
+              </p>
+            </div>
+          </CardContent>
         </Card>
       ))}
     </div>
@@ -1094,8 +1107,8 @@ export function NotificationCenter() {
       <TaskSheet
         open={taskSheetOpen}
         task={editingTask}
-        bots={botsQuery.data ?? EMPTY_BOTS}
-        events={eventsQuery.data ?? EMPTY_EVENTS}
+        bots={botsQuery.data ?? []}
+        events={eventsQuery.data ?? []}
         saving={saveTask.isPending}
         onOpenChange={(open) => {
           setTaskSheetOpen(open)

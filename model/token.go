@@ -310,6 +310,9 @@ func (token *Token) Insert() error {
 		if err := lockTokenGroupBindingGroups(tx, token); err != nil {
 			return err
 		}
+		if err := ValidateTokenExclusiveGroupBinding(tx, token); err != nil {
+			return err
+		}
 		if err := tx.Create(token).Error; err != nil {
 			return err
 		}
@@ -335,6 +338,9 @@ func (token *Token) Update() (err error) {
 			return err
 		}
 		if err := lockTokenGroupBindingGroups(tx, token); err != nil {
+			return err
+		}
+		if err := ValidateTokenExclusiveGroupBinding(tx, token); err != nil {
 			return err
 		}
 		var locked Token

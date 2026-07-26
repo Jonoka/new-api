@@ -382,7 +382,7 @@ func resolveInvoiceOrdersTx(tx *gorm.DB, userId int, references []InvoiceOrderRe
 			return nil, errors.New("所选订单已经申请过发票")
 		}
 		var directCount int64
-		if err := tx.Model(&InvoiceRecord{}).
+		if err := tx.Unscoped().Model(&InvoiceRecord{}).
 			Where("source_type = ? AND source_id = ?", reference.SourceType, reference.SourceId).
 			Count(&directCount).Error; err != nil {
 			return nil, err

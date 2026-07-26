@@ -22,6 +22,11 @@ const finiteNumber = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+export const STATUS_SEGMENT_COUNT = 4;
+export const STATUS_WINDOW_HOURS = 24;
+
+const STATUS_WINDOW_SECONDS = STATUS_WINDOW_HOURS * 60 * 60;
+
 const average = (values, positiveOnly = false) => {
   const filtered = values
     .map((value) => Number(value))
@@ -92,6 +97,22 @@ export const getSuccessRateHex = (value) => {
   return '#f43f5e';
 };
 
+export const getStatusSegmentHex = (value) => {
+  if (!Number.isFinite(Number(value))) return '#9ca3af';
+  const rate = clampSuccessRate(value);
+  if (rate >= 99.9) return '#10b981';
+  if (rate >= 99) return '#f59e0b';
+  return '#f43f5e';
+};
+
+export const getStatusRateTextClass = (value) => {
+  if (!Number.isFinite(Number(value))) return 'text-semi-color-text-2';
+  const rate = clampSuccessRate(value);
+  if (rate >= 99.9) return 'text-semi-color-success';
+  if (rate >= 99) return 'text-semi-color-warning';
+  return 'text-semi-color-danger';
+};
+
 export const buildLatencyBarHeights = (series, minimumHeight = 50) => {
   const points = Array.isArray(series) ? series : [];
   const floor = Math.min(80, Math.max(20, finiteNumber(minimumHeight, 50)));
@@ -130,6 +151,75 @@ export const normalizePerformanceSeries = (series) => {
     }))
     .filter((point) => point.ts > 0)
     .sort((left, right) => left.ts - right.ts);
+};
+
+/**
+ * 将最近 24 小时的性能桶压缩为固定状态段，并保留无数据时段。
+ */
+export const buildStatusSegments = (
+  series,
+  endTs,
+  segmentCount = STATUS_SEGMENT_COUNT,
+) => {
+  const normalizedEndTs = Number.isFinite(Number(endTs))
+    ? Math.trunc(Number(endTs))
+    : Math.trunc(Date.now() / 1000);
+  const safeSegmentCount = Math.min(
+    STATUS_SEGMENT_COUNT,
+    Math.max(1, Math.trunc(finiteNumber(segmentCount, STATUS_SEGMENT_COUNT))),
+  );
+  const startTs = normalizedEndTs - STATUS_WINDOW_SECONDS;
+  const segmentSeconds = STATUS_WINDOW_SECONDS / safeSegmentCount;
+  const accumulators = Array.from({ length: safeSegmentCount }, () => ({
+    totalRate: 0,
+    rateCount: 0,
+    totalLatency: 0,
+    latencyCount: 0,
+  }));
+
+  const validSeries = Array.isArray(series)
+    ? series.filter((point) => {
+        const timestamp = Number(point?.ts);
+        const successRate = Number(point?.success_rate);
+        return (
+          Number.isFinite(timestamp) &&
+          Number.isFinite(successRate) &&
+          successRate >= 0 &&
+          successRate <= 100
+        );
+      })
+    : [];
+
+  normalizePerformanceSeries(validSeries).forEach((point) => {
+    if (point.ts < startTs || point.ts > normalizedEndTs) return;
+    const rawIndex = Math.floor((point.ts - startTs) / segmentSeconds);
+    const index = Math.min(rawIndex, safeSegmentCount - 1);
+    const accumulator = accumulators[index];
+    accumulator.totalRate += point.success_rate;
+    accumulator.rateCount += 1;
+    if (point.avg_latency_ms > 0) {
+      accumulator.totalLatency += point.avg_latency_ms;
+      accumulator.latencyCount += 1;
+    }
+  });
+
+  return accumulators.map((accumulator, index) => {
+    const segmentStartTs = startTs + index * segmentSeconds;
+    return {
+      ts: segmentStartTs,
+      end_ts: segmentStartTs + segmentSeconds,
+      success_rate:
+        accumulator.rateCount > 0
+          ? Math.round((accumulator.totalRate / accumulator.rateCount) * 100) /
+            100
+          : null,
+      avg_latency_ms:
+        accumulator.latencyCount > 0
+          ? Math.round(accumulator.totalLatency / accumulator.latencyCount)
+          : 0,
+      sample_count: accumulator.rateCount,
+    };
+  });
 };
 
 export const getUptimeAxisMin = (values) => {

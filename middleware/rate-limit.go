@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -89,9 +91,39 @@ func rateLimitFactory(maxRequestNum int, duration int64, mark string) func(c *gi
 
 func GlobalWebRateLimit() func(c *gin.Context) {
 	if common.GlobalWebRateLimitEnable {
-		return rateLimitFactory(common.GlobalWebRateLimitNum, common.GlobalWebRateLimitDuration, "GW")
+		limiter := rateLimitFactory(common.GlobalWebRateLimitNum, common.GlobalWebRateLimitDuration, "GW")
+		return func(c *gin.Context) {
+			if isStaticWebAssetRequest(c) {
+				c.Next()
+				return
+			}
+			limiter(c)
+		}
 	}
 	return defNext
+}
+
+func isStaticWebAssetRequest(c *gin.Context) bool {
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return false
+	}
+	if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
+		return false
+	}
+
+	requestPath := strings.ToLower(c.Request.URL.Path)
+	if strings.HasPrefix(requestPath, "/assets/") {
+		return true
+	}
+
+	switch path.Ext(requestPath) {
+	case ".avif", ".css", ".gif", ".ico", ".jpeg", ".jpg", ".js", ".json", ".map",
+		".mp3", ".mp4", ".ogg", ".png", ".svg", ".txt", ".wasm", ".wav", ".webm",
+		".webmanifest", ".webp", ".woff", ".woff2":
+		return true
+	default:
+		return false
+	}
 }
 
 func GlobalAPIRateLimit() func(c *gin.Context) {

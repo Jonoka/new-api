@@ -136,6 +136,20 @@ const RechargeCard = ({
   }, [shouldShowSubscription, activeTab]);
   const topupContent = (
     <Space vertical style={{ width: '100%' }}>
+      <Banner
+        type='info'
+        description={
+          <div>
+            <div>
+              {t('充值余额仅用于 API 调用消耗，不可用于购买订阅套餐。')}
+            </div>
+            <div>{t('订阅套餐请在「订阅套餐」页面单独购买。')}</div>
+          </div>
+        }
+        closeIcon={null}
+        className='!rounded-xl'
+      />
+
       {/* 统计数据 */}
       <Card
         className='!rounded-xl w-full'

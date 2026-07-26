@@ -42,11 +42,34 @@ func GetGroupDetails(c *gin.Context) {
 	})
 }
 
+type groupConfigUpdateRequest struct {
+	model.GroupConfig
+	Exclusive *bool `json:"exclusive"`
+}
+
+func (r groupConfigUpdateRequest) toModel() model.GroupConfig {
+	config := r.GroupConfig
+	if r.Exclusive == nil {
+		config.ExclusiveOmitted = true
+		return config
+	}
+	config.Exclusive = *r.Exclusive
+	return config
+}
+
 type GroupDetailsUpdateRequest struct {
-	Groups        []model.GroupConfig      `json:"groups"`
-	DeletedIDs    []int                    `json:"deleted_ids"`
-	OptionUpdates map[string]string        `json:"option_updates,omitempty"`
-	AutoGroup     *setting.AutoGroupConfig `json:"auto_group,omitempty"`
+	Groups        []groupConfigUpdateRequest `json:"groups"`
+	DeletedIDs    []int                      `json:"deleted_ids"`
+	OptionUpdates map[string]string          `json:"option_updates,omitempty"`
+	AutoGroup     *setting.AutoGroupConfig   `json:"auto_group,omitempty"`
+}
+
+func (r GroupDetailsUpdateRequest) modelGroups() []model.GroupConfig {
+	groups := make([]model.GroupConfig, 0, len(r.Groups))
+	for _, group := range r.Groups {
+		groups = append(groups, group.toModel())
+	}
+	return groups
 }
 
 type TokenGroupMigrationRequest struct {
@@ -168,7 +191,7 @@ func UpdateGroupDetails(c *gin.Context) {
 		return
 	}
 	result, err := model.SaveGroupConfigWithOptionsAndAutoConfigResult(
-		request.Groups,
+		request.modelGroups(),
 		request.DeletedIDs,
 		request.OptionUpdates,
 		request.AutoGroup,
@@ -215,17 +238,20 @@ func GetUserGroups(c *gin.Context) {
 			groupID := 0
 			groupCode := groupName
 			groupNameForDisplay := groupName
+			groupExclusive := false
 			if group, err := model.GetGroupByCodeOrAlias(groupName); err == nil {
 				groupID = group.Id
 				groupCode = group.Code
 				groupNameForDisplay = group.Name
+				groupExclusive = group.Exclusive
 			}
 			usableGroups[groupName] = map[string]interface{}{
-				"id":    groupID,
-				"code":  groupCode,
-				"name":  groupNameForDisplay,
-				"ratio": service.GetUserGroupRatio(userGroup, groupName),
-				"desc":  desc,
+				"id":        groupID,
+				"code":      groupCode,
+				"name":      groupNameForDisplay,
+				"ratio":     service.GetUserGroupRatio(userGroup, groupName),
+				"desc":      desc,
+				"exclusive": groupExclusive,
 			}
 		}
 	}

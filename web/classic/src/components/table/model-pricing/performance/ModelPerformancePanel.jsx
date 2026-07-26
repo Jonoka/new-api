@@ -260,7 +260,7 @@ const ModelPerformancePanel = ({ modelName, groupNames = {}, t }) => {
                     <SuccessRateSparkline
                       series={row.series}
                       overall={row.success_rate}
-                      maxPoints={24}
+                      maxPoints={4}
                     />
                   </td>
                 </tr>

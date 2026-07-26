@@ -10,8 +10,11 @@ License, or (at your option) any later version.
 export interface NotificationBot {
   id: number
   name: string
+  username?: string
   enabled: boolean
   token_configured: boolean
+  last_test_at?: number
+  last_test_error?: string
   created_at?: number
   updated_at?: number
 }
