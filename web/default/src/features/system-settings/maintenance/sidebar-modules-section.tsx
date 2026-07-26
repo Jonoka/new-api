@@ -161,7 +161,9 @@ export function SidebarModulesSection({
       },
       channel_observability: {
         title: t('Channel Observability'),
-        description: t('Analyze channel traffic, stability, failures, and cache efficiency.'),
+        description: t(
+          'Analyze channel traffic, stability, failures, and cache efficiency.'
+        ),
       },
       models: {
         title: t('Models'),
