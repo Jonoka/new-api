@@ -13,6 +13,7 @@
 - [令牌分组错误显示当前名称](../workflows/2026-07/25_token_group_error_display_name.md)
 - [充值余额与订阅套餐用途提示](../workflows/2026-07/26_recharge_balance_subscription_notice.md)
 - [充值余额与订阅套餐用途提示验证记录](../workflows/2026-07/26_topup_balance_subscription_notice.md)
+- [充值用途提示跟随余额购买订阅开关](../workflows/2026-07/27_balance_subscription_notice_toggle.md)
 - [渠道并发上限缓降工作记录](../workflows/2026-07/26_channel_concurrency_ramp_down.md)
 - [BEpusdt EVM 扫描漏单修复记录](../workflows/2026-07/26_bepusdt_callback_rpc_scanner.md)
 - [多分组重试的当前分组选渠道约束](../workflows/2026-07/26_channel_retry_group_isolation.md)

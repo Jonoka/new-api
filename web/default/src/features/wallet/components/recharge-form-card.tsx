@@ -221,21 +221,23 @@ export function RechargeFormCard({
       }
       contentClassName='space-y-4 sm:space-y-6'
     >
-      <Alert>
-        <Info className='h-4 w-4' />
-        <AlertDescription className='space-y-1'>
-          <p>
-            {t(
-              'Top-up balance can only be used for API calls and cannot be used to purchase subscription plans.'
-            )}
-          </p>
-          <p>
-            {t(
-              'Please purchase subscription plans separately on the "Subscription Plans" page.'
-            )}
-          </p>
-        </AlertDescription>
-      </Alert>
+      {topupInfo?.enable_balance_subscription === false && (
+        <Alert>
+          <Info className='h-4 w-4' />
+          <AlertDescription className='space-y-1'>
+            <p>
+              {t(
+                'Top-up balance can only be used for API calls and cannot be used to purchase subscription plans.'
+              )}
+            </p>
+            <p>
+              {t(
+                'Please purchase subscription plans separately on the "Subscription Plans" page.'
+              )}
+            </p>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Online Topup Section */}
       {hasAnyTopup ? (
