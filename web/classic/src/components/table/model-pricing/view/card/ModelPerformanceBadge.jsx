@@ -30,52 +30,54 @@ const ModelPerformanceBadge = ({ performance, t, isMobile = false }) => {
 
   const { avg_latency_ms, avg_tps, success_rate } = performance;
   const series = normalizePerformanceSeries(performance.series);
-  const latestPoint = series[series.length - 1];
+  const statusSeries = series.map((point) => ({
+    ...point,
+    success_rate: Number.isFinite(point.status_rate)
+      ? point.status_rate
+      : point.success_rate,
+  }));
+  const statusRate = Number.isFinite(Number(performance.status_rate))
+    ? Number(performance.status_rate)
+    : success_rate;
+  const compactThroughput = formatThroughput(avg_tps).replace(' t/s', 't');
 
   return (
     <div
       className={
         isMobile
-          ? 'flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] tabular-nums'
-          : 'flex min-w-0 items-center gap-3 text-xs tabular-nums'
+          ? 'grid w-full min-w-0 grid-cols-3 gap-x-3 rounded-md bg-semi-color-fill-0 px-2 py-1 text-left text-[11px] tabular-nums'
+          : 'ml-auto grid w-[132px] shrink-0 grid-cols-[38px_48px_30px] gap-x-2 text-right text-xs tabular-nums'
       }
     >
-      <div
-        className={
-          isMobile
-            ? 'flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1'
-            : 'flex shrink-0 items-center gap-3 whitespace-nowrap'
-        }
-      >
-        <span
-          title={t('吞吐量')}
-          className='inline-flex items-baseline gap-1 text-semi-color-text-2'
-        >
-          <span>{t('吞吐量')}</span>
-          <span className='font-mono font-medium text-semi-color-text-0'>
-            {formatThroughput(avg_tps)}
-          </span>
-        </span>
-        <span
-          title={t('平均延迟')}
-          className='inline-flex items-baseline gap-1 text-semi-color-text-2'
-        >
-          <span>{t('延迟')}</span>
-          <span className='font-mono font-medium text-semi-color-text-0'>
-            {formatLatency(avg_latency_ms)}
-          </span>
-        </span>
+      <div title={t('平均延迟')} className='min-w-0'>
+        <div className='truncate text-[10px] leading-4 text-semi-color-text-2 opacity-60'>
+          {t('延迟')}
+        </div>
+        <div className='whitespace-nowrap font-mono font-normal leading-4 text-semi-color-text-2 opacity-80'>
+          {formatLatency(avg_latency_ms)}
+        </div>
       </div>
-      <div
-        className={isMobile ? 'relative ml-auto shrink-0' : 'relative'}
-        title={t('成功率')}
-      >
+      <div title={t('吞吐量')} className='min-w-0'>
+        <div className='truncate text-[10px] leading-4 text-semi-color-text-2 opacity-60'>
+          {t('吞吐量')}
+        </div>
+        <div className='whitespace-nowrap font-mono font-normal leading-4 text-semi-color-text-2 opacity-80'>
+          {compactThroughput}
+        </div>
+      </div>
+      <div title={t('状态')} className='min-w-0'>
+        <div className='truncate text-[10px] leading-4 text-semi-color-text-2 opacity-60'>
+          {t('状态')}
+        </div>
         <SuccessRateSparkline
-          series={series}
-          overall={success_rate}
-          maxPoints={4}
+          series={statusSeries}
+          overall={statusRate}
+          maxPoints={3}
           compact={isMobile}
-          latestTimestamp={isMobile ? undefined : latestPoint?.ts}
+          showOverall={false}
+          availabilityTone
+          signalStyle
+          className={isMobile ? 'justify-start' : 'justify-end'}
         />
       </div>
     </div>

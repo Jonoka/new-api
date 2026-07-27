@@ -48,4 +48,19 @@ func TestGetPerfMetricsMergesCurrentCodeAndHistoricalAliasIdentity(t *testing.T)
 			t.Fatalf("未指定筛选时历史指标未归并到当前 code：%q", row.Group)
 		}
 	}
+
+	summaryRows, err := GetPerfMetricsSummaryBucketsAll(0, 200, []string{"group_2", group.Code})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaryRows) != 2 {
+		t.Fatalf("分组状态摘要行数 = %d，期望按原始分组标识保留 2 行", len(summaryRows))
+	}
+	seenSummaryGroups := map[string]bool{}
+	for _, row := range summaryRows {
+		seenSummaryGroups[row.Group] = true
+	}
+	if !seenSummaryGroups["group_2"] || !seenSummaryGroups[group.Code] {
+		t.Fatalf("分组状态摘要缺少分组维度：%+v", summaryRows)
+	}
 }

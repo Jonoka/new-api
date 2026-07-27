@@ -301,10 +301,10 @@ const PricingCardView = ({
                 <div className='mt-auto'>
                   {/* 计费类型与性能状态 */}
                   <div
-                    className={`flex min-h-[20px] min-w-0 gap-2 ${
+                    className={`flex min-h-[32px] min-w-0 gap-3 ${
                       isMobile
                         ? 'flex-col items-start'
-                        : 'flex-wrap items-center'
+                        : 'items-end justify-between'
                     }`}
                   >
                     <div className='shrink-0'>{renderBillingTag(model)}</div>

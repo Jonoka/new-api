@@ -105,6 +105,21 @@ export const getStatusSegmentHex = (value) => {
   return '#f43f5e';
 };
 
+export const getAvailabilityStatusLevel = (value) => {
+  if (!Number.isFinite(Number(value))) return 'unavailable';
+  const rate = clampSuccessRate(value);
+  if (rate >= 95) return 'healthy';
+  if (rate > 0) return 'degraded';
+  return 'unavailable';
+};
+
+export const getAvailabilityStatusHex = (value) => {
+  const level = getAvailabilityStatusLevel(value);
+  if (level === 'healthy') return '#10b981';
+  if (level === 'degraded') return '#f59e0b';
+  return '#f43f5e';
+};
+
 export const getStatusRateTextClass = (value) => {
   if (!Number.isFinite(Number(value))) return 'text-semi-color-text-2';
   const rate = clampSuccessRate(value);
@@ -147,6 +162,9 @@ export const normalizePerformanceSeries = (series) => {
       avg_ttft_ms: finiteNumber(point?.avg_ttft_ms),
       avg_latency_ms: finiteNumber(point?.avg_latency_ms),
       success_rate: clampSuccessRate(point?.success_rate),
+      status_rate: Number.isFinite(Number(point?.status_rate))
+        ? clampSuccessRate(point.status_rate)
+        : undefined,
       avg_tps: finiteNumber(point?.avg_tps),
     }))
     .filter((point) => point.ts > 0)

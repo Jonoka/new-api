@@ -26,11 +26,14 @@ import {
 } from '@/components/ui/tooltip'
 import {
   buildStatusSegments,
+  getAvailabilityStatusLevel,
   type StatusSegment,
   type StatusSeriesPoint,
 } from '../lib/status-segments'
 
 type StatusSegmentsSize = 'sm' | 'md'
+type StatusSegmentsTone = 'success-rate' | 'availability'
+type StatusSegmentsShape = 'blocks' | 'signal'
 
 export type StatusSegmentsProps = {
   series: StatusSeriesPoint[]
@@ -40,17 +43,38 @@ export type StatusSegmentsProps = {
   emptyLabel?: string
   endTs?: number
   className?: string
+  tone?: StatusSegmentsTone
+  shape?: StatusSegmentsShape
+  segmentCount?: number
 }
 
-function getSegmentColor(successRate: number | null): string {
+function getSegmentColor(
+  successRate: number | null,
+  tone: StatusSegmentsTone
+): string {
   if (successRate == null) return 'bg-muted-foreground/15'
+  if (tone === 'availability') {
+    const level = getAvailabilityStatusLevel(successRate)
+    if (level === 'healthy') return 'bg-success'
+    if (level === 'degraded') return 'bg-warning'
+    return 'bg-destructive'
+  }
   if (successRate >= 99.9) return 'bg-success'
   if (successRate >= 99) return 'bg-warning'
   return 'bg-destructive'
 }
 
-function getRateTextColor(successRate: number | null): string {
+function getRateTextColor(
+  successRate: number | null,
+  tone: StatusSegmentsTone
+): string {
   if (successRate == null) return 'text-muted-foreground'
+  if (tone === 'availability') {
+    const level = getAvailabilityStatusLevel(successRate)
+    if (level === 'healthy') return 'text-success'
+    if (level === 'degraded') return 'text-warning'
+    return 'text-destructive'
+  }
   if (successRate >= 99.9) return 'text-success'
   if (successRate >= 99) return 'text-warning'
   return 'text-destructive'
@@ -74,13 +98,15 @@ function formatSegmentRange(
 export function StatusSegments(props: StatusSegmentsProps) {
   const { t, i18n } = useTranslation()
   const size = props.size ?? 'md'
+  const tone = props.tone ?? 'success-rate'
+  const shape = props.shape ?? 'blocks'
   const showOverall = props.showOverall ?? true
   const endTs = Number.isFinite(props.endTs)
     ? Number(props.endTs)
     : Math.trunc(Date.now() / 1000)
   const segments = useMemo(
-    () => buildStatusSegments(props.series, endTs),
-    [endTs, props.series]
+    () => buildStatusSegments(props.series, endTs, props.segmentCount),
+    [endTs, props.segmentCount, props.series]
   )
   const formatter = useMemo(
     () =>
@@ -116,15 +142,19 @@ export function StatusSegments(props: StatusSegmentsProps) {
       return `${formatSegmentRange(segment, formatter)} ${rate}`
     })
     .join(', ')
+  const statusLabel = tone === 'availability' ? t('Status') : t('Success rate')
 
   return (
     <div className={cn('flex items-center gap-2', props.className)}>
       <div
-        className='flex items-center gap-1'
+        className={cn(
+          'flex',
+          shape === 'signal' ? 'h-4 items-end gap-0.5' : 'items-center gap-1'
+        )}
         role='img'
-        aria-label={`${t('Success rate')}: ${ariaSummary}`}
+        aria-label={`${statusLabel}: ${ariaSummary}`}
       >
-        {segments.map((segment) => {
+        {segments.map((segment, index) => {
           const rangeLabel = formatSegmentRange(segment, formatter)
           return (
             <Tooltip key={segment.startTs}>
@@ -132,9 +162,12 @@ export function StatusSegments(props: StatusSegmentsProps) {
                 render={
                   <span
                     className={cn(
-                      'rounded-sm transition-opacity hover:opacity-80',
-                      segmentSize,
-                      getSegmentColor(segment.successRate)
+                      'transition-opacity hover:opacity-80',
+                      shape === 'signal' ? 'w-1 rounded-full' : 'rounded-sm',
+                      shape === 'signal'
+                        ? ['h-2', 'h-2.5', 'h-3'][Math.min(index, 2)]
+                        : segmentSize,
+                      getSegmentColor(segment.successRate, tone)
                     )}
                   />
                 }
@@ -156,7 +189,7 @@ export function StatusSegments(props: StatusSegmentsProps) {
           className={cn(
             'font-mono leading-none font-semibold whitespace-nowrap tabular-nums',
             overallTextSize,
-            getRateTextColor(overallRate)
+            getRateTextColor(overallRate, tone)
           )}
         >
           {overallRate == null ? '—' : `${overallRate.toFixed(1)}%`}

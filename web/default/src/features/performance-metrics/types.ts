@@ -21,6 +21,7 @@ export type PerformanceSeriesPoint = {
   avg_ttft_ms: number
   avg_latency_ms: number
   success_rate: number
+  status_rate?: number
   avg_tps: number
 }
 
@@ -47,6 +48,7 @@ export type PerfModelSummary = {
   model_name: string
   avg_latency_ms: number
   success_rate: number
+  status_rate?: number
   avg_tps: number
   series: PerformanceSeriesPoint[]
   request_count?: number

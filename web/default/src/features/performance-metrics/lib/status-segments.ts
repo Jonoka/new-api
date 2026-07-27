@@ -20,7 +20,6 @@ export const STATUS_SEGMENT_COUNT = 4
 export const STATUS_WINDOW_HOURS = 24
 
 const STATUS_WINDOW_SECONDS = STATUS_WINDOW_HOURS * 60 * 60
-const STATUS_SEGMENT_SECONDS = STATUS_WINDOW_SECONDS / STATUS_SEGMENT_COUNT
 
 export type StatusSeriesPoint = {
   ts: number
@@ -34,6 +33,19 @@ export type StatusSegment = {
   sampleCount: number
 }
 
+export type AvailabilityStatusLevel = 'healthy' | 'degraded' | 'unavailable'
+
+/**
+ * 模型广场只在所有分组都无成功请求时显示故障；最佳分组达到 95% 即视为可用。
+ */
+export function getAvailabilityStatusLevel(
+  successRate: number
+): AvailabilityStatusLevel {
+  if (Number.isFinite(successRate) && successRate >= 95) return 'healthy'
+  if (Number.isFinite(successRate) && successRate > 0) return 'degraded'
+  return 'unavailable'
+}
+
 type SegmentAccumulator = {
   totalRate: number
   sampleCount: number
@@ -45,14 +57,19 @@ type SegmentAccumulator = {
  */
 export function buildStatusSegments(
   series: StatusSeriesPoint[],
-  endTs: number
+  endTs: number,
+  segmentCount = STATUS_SEGMENT_COUNT
 ): StatusSegment[] {
+  const normalizedSegmentCount = Number.isFinite(segmentCount)
+    ? Math.max(1, Math.trunc(segmentCount))
+    : STATUS_SEGMENT_COUNT
+  const segmentSeconds = STATUS_WINDOW_SECONDS / normalizedSegmentCount
   const normalizedEndTs = Number.isFinite(endTs)
     ? Math.trunc(endTs)
     : Math.trunc(Date.now() / 1000)
   const startTs = normalizedEndTs - STATUS_WINDOW_SECONDS
   const accumulators: SegmentAccumulator[] = Array.from(
-    { length: STATUS_SEGMENT_COUNT },
+    { length: normalizedSegmentCount },
     () => ({ totalRate: 0, sampleCount: 0 })
   )
 
@@ -68,15 +85,15 @@ export function buildStatusSegments(
       continue
     }
 
-    const rawIndex = Math.floor((point.ts - startTs) / STATUS_SEGMENT_SECONDS)
-    const segmentIndex = Math.min(rawIndex, STATUS_SEGMENT_COUNT - 1)
+    const rawIndex = Math.floor((point.ts - startTs) / segmentSeconds)
+    const segmentIndex = Math.min(rawIndex, normalizedSegmentCount - 1)
     const accumulator = accumulators[segmentIndex]
     accumulator.totalRate += point.success_rate
     accumulator.sampleCount += 1
   }
 
   return accumulators.map((accumulator, index) => {
-    const segmentStartTs = startTs + index * STATUS_SEGMENT_SECONDS
+    const segmentStartTs = startTs + index * segmentSeconds
     const successRate =
       accumulator.sampleCount > 0
         ? Math.round((accumulator.totalRate / accumulator.sampleCount) * 100) /
@@ -85,7 +102,7 @@ export function buildStatusSegments(
 
     return {
       startTs: segmentStartTs,
-      endTs: segmentStartTs + STATUS_SEGMENT_SECONDS,
+      endTs: segmentStartTs + segmentSeconds,
       successRate,
       sampleCount: accumulator.sampleCount,
     }

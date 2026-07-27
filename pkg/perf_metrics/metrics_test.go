@@ -102,6 +102,51 @@ func TestBuildModelSummariesMergesBucketsAndKeepsWeightedTotals(t *testing.T) {
 	}
 }
 
+func TestBuildModelSummariesUsesBestAvailableGroupForCardStatus(t *testing.T) {
+	modelBuckets := map[string]map[int64]counters{}
+	modelGroupBuckets := map[string]map[int64]map[string]counters{}
+
+	healthy := counters{requestCount: 10, successCount: 10, totalLatencyMs: 1000}
+	unavailable := counters{requestCount: 10, successCount: 0, totalLatencyMs: 2000}
+	mergeModelBucket(modelBuckets, "model-a", 100, healthy)
+	mergeModelBucket(modelBuckets, "model-a", 100, unavailable)
+	mergeModelGroupBucket(modelGroupBuckets, "model-a", 100, "healthy", healthy)
+	mergeModelGroupBucket(modelGroupBuckets, "model-a", 100, "unavailable", unavailable)
+
+	allFailed := counters{requestCount: 4, successCount: 0, totalLatencyMs: 800}
+	mergeModelBucket(modelBuckets, "model-a", 200, allFailed)
+	mergeModelGroupBucket(modelGroupBuckets, "model-a", 200, "healthy", allFailed)
+
+	models := buildModelSummariesWithGroupStatus(modelBuckets, modelGroupBuckets)
+	if len(models) != 1 {
+		t.Fatalf("模型数量 = %d，期望 1", len(models))
+	}
+	got := models[0]
+	if got.SuccessRate != 41.67 {
+		t.Fatalf("真实汇总成功率 = %.2f，期望保留全部请求口径 41.67", got.SuccessRate)
+	}
+	if got.StatusRate == nil || *got.StatusRate != 71.43 {
+		t.Fatalf("顶层可用状态 = %v，期望按最佳分组全窗口成功率 71.43", got.StatusRate)
+	}
+	if len(got.Series) != 2 {
+		t.Fatalf("状态序列长度 = %d，期望 2", len(got.Series))
+	}
+	if got.Series[0].StatusRate == nil || *got.Series[0].StatusRate != 100 {
+		t.Fatalf("部分分组不可用时的状态 = %v，期望最佳分组 100", got.Series[0].StatusRate)
+	}
+	if got.Series[1].StatusRate == nil || *got.Series[1].StatusRate != 0 {
+		t.Fatalf("所有分组不可用时的状态 = %v，期望 0", got.Series[1].StatusRate)
+	}
+	payload, err := common.Marshal(got)
+	if err != nil {
+		t.Fatalf("序列化分组可用状态失败：%v", err)
+	}
+	jsonText := string(payload)
+	if !strings.Contains(jsonText, `"status_rate":71.43`) || !strings.Contains(jsonText, `"status_rate":100`) || !strings.Contains(jsonText, `"status_rate":0`) {
+		t.Fatalf("摘要 JSON 未完整输出顶层和分时状态率：%s", jsonText)
+	}
+}
+
 func TestSummaryBucketPointIncludesLatencyAndHidesOtherDetailedMetrics(t *testing.T) {
 	point := summaryBucketPoint(300, counters{
 		requestCount:   3,
@@ -145,6 +190,9 @@ func TestSummaryBucketPointIncludesLatencyAndHidesOtherDetailedMetrics(t *testin
 	}
 	if strings.Contains(jsonText, "request_count") || strings.Contains(jsonText, "recent_success_rates") {
 		t.Fatalf("摘要 JSON 泄露内部字段：%s", jsonText)
+	}
+	if strings.Contains(jsonText, "status_rate") {
+		t.Fatalf("未提供分组状态时不应输出 status_rate：%s", jsonText)
 	}
 }
 

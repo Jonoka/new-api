@@ -26,6 +26,7 @@ import {
   formatSuccessRate,
   getStatusRateTextClass,
   getStatusSegmentHex,
+  getAvailabilityStatusHex,
   STATUS_SEGMENT_COUNT,
 } from './utils';
 
@@ -37,6 +38,8 @@ const SuccessRateSparkline = ({
   compact = false,
   latestTimestamp,
   className = '',
+  availabilityTone = false,
+  signalStyle = false,
 }) => {
   const windowEndTs = Math.trunc(Date.now() / 1000);
   const points = useMemo(() => {
@@ -54,9 +57,9 @@ const SuccessRateSparkline = ({
     : points.reduce((sum, point) => sum + (point.success_rate ?? 0), 0) /
       Math.max(1, points.filter((point) => point.sample_count > 0).length);
   const barHeights = buildLatencyBarHeights(points);
-  const barWidth = compact ? 'w-1' : 'w-2';
-  const gap = 'gap-1';
-  const height = compact ? 'h-3.5' : 'h-4';
+  const barWidth = signalStyle || compact ? 'w-1' : 'w-2';
+  const gap = signalStyle ? 'gap-0.5' : 'gap-1';
+  const height = signalStyle ? 'h-4' : compact ? 'h-3.5' : 'h-4';
 
   return (
     <div className={`relative flex items-center gap-2 ${className}`}>
@@ -86,13 +89,17 @@ const SuccessRateSparkline = ({
             }`}
           >
             <span
-              className='w-full rounded-sm'
+              className={`w-full ${signalStyle ? 'rounded-full' : 'rounded-sm'}`}
               style={{
                 backgroundColor:
                   point.sample_count > 0
-                    ? getStatusSegmentHex(point.success_rate)
+                    ? availabilityTone
+                      ? getAvailabilityStatusHex(point.success_rate)
+                      : getStatusSegmentHex(point.success_rate)
                     : 'var(--semi-color-fill-1)',
-                height: `${barHeights[index] || 50}%`,
+                height: signalStyle
+                  ? `${8 + Math.min(index, 2) * 2}px`
+                  : `${barHeights[index] || 50}%`,
               }}
             />
           </span>

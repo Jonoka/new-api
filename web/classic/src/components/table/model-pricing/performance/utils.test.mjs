@@ -9,6 +9,8 @@ import {
   getSuccessRateLevel,
   getStatusRateTextClass,
   getStatusSegmentHex,
+  getAvailabilityStatusHex,
+  getAvailabilityStatusLevel,
   getUptimeAxisMin,
   normalizePerformanceSeries,
 } from './utils.js';
@@ -131,4 +133,15 @@ test('四段式状态条使用统一的成功、提醒和异常阈值', () => {
   assert.equal(getStatusRateTextClass(99.9), 'text-semi-color-success');
   assert.equal(getStatusRateTextClass(99), 'text-semi-color-warning');
   assert.equal(getStatusRateTextClass(98.99), 'text-semi-color-danger');
+});
+
+test('模型广场状态只在所有分组都不可用时显示红色', () => {
+  assert.equal(getAvailabilityStatusLevel(100), 'healthy');
+  assert.equal(getAvailabilityStatusLevel(95), 'healthy');
+  assert.equal(getAvailabilityStatusLevel(94.99), 'degraded');
+  assert.equal(getAvailabilityStatusLevel(0.01), 'degraded');
+  assert.equal(getAvailabilityStatusLevel(0), 'unavailable');
+  assert.equal(getAvailabilityStatusHex(100), '#10b981');
+  assert.equal(getAvailabilityStatusHex(80), '#f59e0b');
+  assert.equal(getAvailabilityStatusHex(0), '#f43f5e');
 });

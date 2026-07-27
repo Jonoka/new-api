@@ -280,7 +280,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
         </div>
         <ModelPerfBadge
           perf={props.perf}
-          className='mt-1 min-[460px]:col-start-2 min-[460px]:row-span-2 min-[460px]:row-start-1 min-[460px]:mt-0 min-[460px]:self-start'
+          className='mt-1 min-[460px]:col-start-2 min-[460px]:row-span-2 min-[460px]:row-start-1 min-[460px]:mt-0 min-[460px]:self-end'
         />
       </div>
     </div>

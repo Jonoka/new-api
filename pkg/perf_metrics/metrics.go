@@ -184,8 +184,21 @@ func QuerySummaryAll(hours int, groups []string) (SummaryAllResult, error) {
 	}
 
 	modelBuckets := map[string]map[int64]counters{}
+	modelGroupBuckets := map[string]map[int64]map[string]counters{}
+	canonicalGroups := make(map[string]string)
+	canonicalizeGroup := func(identifier string) string {
+		if canonical, exists := canonicalGroups[identifier]; exists {
+			return canonical
+		}
+		canonical := identifier
+		if entity, resolveErr := model.GetGroupByCodeOrAlias(identifier); resolveErr == nil {
+			canonical = entity.Code
+		}
+		canonicalGroups[identifier] = canonical
+		return canonical
+	}
 	for _, row := range rows {
-		mergeModelBucket(modelBuckets, row.ModelName, row.BucketTs, counters{
+		value := counters{
 			requestCount:   row.RequestCount,
 			successCount:   row.SuccessCount,
 			totalLatencyMs: row.TotalLatencyMs,
@@ -193,7 +206,9 @@ func QuerySummaryAll(hours int, groups []string) (SummaryAllResult, error) {
 			ttftCount:      row.TtftCount,
 			outputTokens:   row.OutputTokens,
 			generationMs:   row.GenerationMs,
-		})
+		}
+		mergeModelBucket(modelBuckets, row.ModelName, row.BucketTs, value)
+		mergeModelGroupBucket(modelGroupBuckets, row.ModelName, row.BucketTs, canonicalizeGroup(row.Group), value)
 	}
 
 	hotBuckets.Range(func(key, value any) bool {
@@ -211,10 +226,11 @@ func QuerySummaryAll(hours int, groups []string) (SummaryAllResult, error) {
 			return true
 		}
 		mergeModelBucket(modelBuckets, k.model, k.bucketTs, snap)
+		mergeModelGroupBucket(modelGroupBuckets, k.model, k.bucketTs, canonicalizeGroup(k.group), snap)
 		return true
 	})
 
-	return SummaryAllResult{Models: buildModelSummaries(modelBuckets)}, nil
+	return SummaryAllResult{Models: buildModelSummariesWithGroupStatus(modelBuckets, modelGroupBuckets)}, nil
 }
 
 func mergeModelBucket(modelBuckets map[string]map[int64]counters, modelName string, bucketTs int64, value counters) {
@@ -235,7 +251,36 @@ func mergeModelBucket(modelBuckets map[string]map[int64]counters, modelName stri
 	modelBuckets[modelName][bucketTs] = current
 }
 
+func mergeModelGroupBucket(modelBuckets map[string]map[int64]map[string]counters, modelName string, bucketTs int64, group string, value counters) {
+	if value.requestCount == 0 {
+		return
+	}
+	if _, ok := modelBuckets[modelName]; !ok {
+		modelBuckets[modelName] = map[int64]map[string]counters{}
+	}
+	if _, ok := modelBuckets[modelName][bucketTs]; !ok {
+		modelBuckets[modelName][bucketTs] = map[string]counters{}
+	}
+	current := modelBuckets[modelName][bucketTs][group]
+	mergeCounterValues(&current, value)
+	modelBuckets[modelName][bucketTs][group] = current
+}
+
+func mergeCounterValues(target *counters, value counters) {
+	target.requestCount += value.requestCount
+	target.successCount += value.successCount
+	target.totalLatencyMs += value.totalLatencyMs
+	target.ttftSumMs += value.ttftSumMs
+	target.ttftCount += value.ttftCount
+	target.outputTokens += value.outputTokens
+	target.generationMs += value.generationMs
+}
+
 func buildModelSummaries(modelBuckets map[string]map[int64]counters) []ModelSummary {
+	return buildModelSummariesWithGroupStatus(modelBuckets, nil)
+}
+
+func buildModelSummariesWithGroupStatus(modelBuckets map[string]map[int64]counters, modelGroupBuckets map[string]map[int64]map[string]counters) []ModelSummary {
 	models := make([]ModelSummary, 0, len(modelBuckets))
 	for modelName, buckets := range modelBuckets {
 		timestamps := make([]int64, 0, len(buckets))
@@ -247,6 +292,7 @@ func buildModelSummaries(modelBuckets map[string]map[int64]counters) []ModelSumm
 		})
 
 		total := counters{}
+		groupTotals := map[string]counters{}
 		series := make([]BucketPoint, 0, len(timestamps))
 		for _, ts := range timestamps {
 			value := buckets[ts]
@@ -260,7 +306,16 @@ func buildModelSummaries(modelBuckets map[string]map[int64]counters) []ModelSumm
 			total.ttftCount += value.ttftCount
 			total.outputTokens += value.outputTokens
 			total.generationMs += value.generationMs
-			series = append(series, summaryBucketPoint(ts, value))
+			point := summaryBucketPoint(ts, value)
+			if groups := modelGroupBuckets[modelName][ts]; len(groups) > 0 {
+				point.StatusRate = bestGroupStatusRate(groups)
+				for group, groupValue := range groups {
+					current := groupTotals[group]
+					mergeCounterValues(&current, groupValue)
+					groupTotals[group] = current
+				}
+			}
+			series = append(series, point)
 		}
 		if total.requestCount == 0 {
 			continue
@@ -270,6 +325,7 @@ func buildModelSummaries(modelBuckets map[string]map[int64]counters) []ModelSumm
 			ModelName:    modelName,
 			AvgLatencyMs: avg(total.totalLatencyMs, total.requestCount),
 			SuccessRate:  math.Round(successRate(total)*100) / 100,
+			StatusRate:   bestGroupStatusRate(groupTotals),
 			AvgTps:       math.Round(avgTps(total)*100) / 100,
 			Series:       series,
 			RequestCount: total.requestCount,
@@ -282,6 +338,26 @@ func buildModelSummaries(modelBuckets map[string]map[int64]counters) []ModelSumm
 		return models[i].RequestCount > models[j].RequestCount
 	})
 	return models
+}
+
+func bestGroupStatusRate(groups map[string]counters) *float64 {
+	var best float64
+	found := false
+	for _, value := range groups {
+		if value.requestCount <= 0 {
+			continue
+		}
+		rate := successRate(value)
+		if !found || rate > best {
+			best = rate
+			found = true
+		}
+	}
+	if !found {
+		return nil
+	}
+	rounded := math.Round(best*100) / 100
+	return &rounded
 }
 
 // 摘要接口只公开卡片需要的分时延迟与成功率，避免批量接口携带冗余明细。

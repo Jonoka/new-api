@@ -28,7 +28,7 @@ import type { PerfModelSummary } from '@/features/performance-metrics/types'
 
 export type ModelPerfBadgeData = Pick<
   PerfModelSummary,
-  'avg_latency_ms' | 'success_rate' | 'avg_tps' | 'series'
+  'avg_latency_ms' | 'success_rate' | 'status_rate' | 'avg_tps' | 'series'
 >
 
 export interface ModelPerfBadgeProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -36,7 +36,7 @@ export interface ModelPerfBadgeProps extends React.HTMLAttributes<HTMLDivElement
 }
 
 function formatCompactThroughput(tps: number): string {
-  return formatThroughput(tps).replace(' t/s', 'tps')
+  return formatThroughput(tps).replace(' t/s', 't')
 }
 
 export const ModelPerfBadge = memo(function ModelPerfBadge(
@@ -49,11 +49,20 @@ export const ModelPerfBadge = memo(function ModelPerfBadge(
   }
 
   const { avg_latency_ms, avg_tps, success_rate } = props.perf
+  const statusSeries = (props.perf.series ?? []).map((point) => ({
+    ...point,
+    success_rate: Number.isFinite(point.status_rate)
+      ? Number(point.status_rate)
+      : point.success_rate,
+  }))
+  const statusRate = Number.isFinite(props.perf.status_rate)
+    ? Number(props.perf.status_rate)
+    : success_rate
 
   return (
     <div
       className={cn(
-        'bg-muted/30 grid w-full grid-cols-3 gap-x-1 rounded-md px-2 py-1 text-left tabular-nums min-[460px]:w-[184px] min-[460px]:grid-cols-[38px_48px_82px] min-[460px]:gap-x-2 min-[460px]:rounded-none min-[460px]:bg-transparent min-[460px]:p-0 min-[460px]:text-right',
+        'bg-muted/30 grid w-full grid-cols-3 gap-x-3 rounded-md px-2 py-1 text-left tabular-nums min-[460px]:w-[132px] min-[460px]:grid-cols-[38px_48px_30px] min-[460px]:gap-x-2 min-[460px]:rounded-none min-[460px]:bg-transparent min-[460px]:p-0 min-[460px]:text-right',
         props.className
       )}
     >
@@ -73,14 +82,18 @@ export const ModelPerfBadge = memo(function ModelPerfBadge(
           {formatCompactThroughput(avg_tps)}
         </div>
       </div>
-      <div title={t('Success rate')} className='min-w-0'>
+      <div title={t('Status')} className='min-w-0'>
         <div className='text-muted-foreground/55 truncate text-[10px] leading-4'>
           {t('Status short')}
         </div>
         <StatusSegments
-          series={props.perf.series ?? []}
-          overallRate={success_rate}
+          series={statusSeries}
+          overallRate={statusRate}
           size='sm'
+          showOverall={false}
+          tone='availability'
+          shape='signal'
+          segmentCount={3}
           className='h-4 justify-start min-[460px]:justify-end'
         />
       </div>
