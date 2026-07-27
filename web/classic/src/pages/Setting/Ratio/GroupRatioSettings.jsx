@@ -67,6 +67,7 @@ import AutoGroupList from './components/AutoGroupList';
 import GroupGroupRatioRules from './components/GroupGroupRatioRules';
 import GroupSpecialUsableRules from './components/GroupSpecialUsableRules';
 import GroupTokenMigrationModal from './components/GroupTokenMigrationModal';
+import GroupCodeMigrationModal from './components/GroupCodeMigrationModal';
 
 const { Text, Title, Paragraph } = Typography;
 
@@ -94,6 +95,7 @@ export default function GroupRatioSettings(props) {
   const [editMode, setEditMode] = useState('visual');
   const [showGuide, setShowGuide] = useState(false);
   const [migrationVisible, setMigrationVisible] = useState(false);
+  const [codeMigrationVisible, setCodeMigrationVisible] = useState(false);
 
   const [inputs, setInputs] = useState({
     GroupRatio: '',
@@ -445,12 +447,30 @@ export default function GroupRatioSettings(props) {
           onChange={handleGroupTableChange}
           onAutoGroupChange={handleAutoGroupChange}
           onMigrate={() => setMigrationVisible(true)}
+          onMigrateCodes={() => setCodeMigrationVisible(true)}
         />
         <GroupTokenMigrationModal
           visible={migrationVisible}
           groups={groups}
           onCancel={() => setMigrationVisible(false)}
           onMigrated={() => notifyGroupDetailsUpdated()}
+        />
+        <GroupCodeMigrationModal
+          visible={codeMigrationVisible}
+          onCancel={() => setCodeMigrationVisible(false)}
+          onMigrated={async () => {
+            try {
+              const responseDetails = await fetchGroupDetails();
+              commitGroupDetails(
+                responseDetails.groups,
+                responseDetails.autoGroup,
+              );
+            } catch {
+              showWarning(t('迁移已完成，但分组列表刷新失败，请手动刷新页面'));
+            } finally {
+              notifyGroupDetailsUpdated();
+            }
+          }}
         />
       </Form.Section>
 

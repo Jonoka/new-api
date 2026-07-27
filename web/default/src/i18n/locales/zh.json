@@ -5461,6 +5461,19 @@
     "Failed to load native extension": "原生扩展加载失败",
     "Independent": "独立",
     "Independent group": "独立分组",
-    "Independent groups must be selected alone.": "独立分组必须单独选择。"
+    "Independent groups must be selected alone.": "独立分组必须单独选择。",
+    "All application instances must be upgraded to the same version and configuration writes should be paused before migration.": "执行迁移前，所有应用实例必须升级到同一版本，并暂停配置写入。",
+    "Checking legacy group codes...": "正在检查旧分组标识...",
+    "Failed to preview group code migration": "分组标识迁移预检失败",
+    "Migrate group codes": "迁移分组标识",
+    "Migrate legacy codes": "迁移旧标识",
+    "Migrate legacy group codes": "迁移旧分组标识",
+    "Migrating group codes...": "正在迁移分组标识...",
+    "Migration is blocked by these conflicts:": "以下冲突阻止了迁移：",
+    "No legacy group codes need migration.": "当前没有需要迁移的旧分组标识。",
+    "Preview and replace legacy group codes with stable numeric IDs.": "预览并将旧分组标识替换为稳定的数字 ID。",
+    "{{channels}} channels, {{tokens}} tokens, {{users}} users, {{abilities}} ability records, {{plans}} plans, and {{subscriptions}} subscriptions are affected.": "影响 {{channels}} 个渠道、{{tokens}} 个令牌、{{users}} 个用户、{{abilities}} 条能力记录、{{plans}} 个套餐和 {{subscriptions}} 条订阅记录。",
+    "{{count}} group codes will be migrated.": "将迁移 {{count}} 个分组标识。",
+    "{{count}} legacy group codes migrated successfully.": "已成功迁移 {{count}} 个旧分组标识。"
   }
 }

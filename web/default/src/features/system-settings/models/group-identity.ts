@@ -17,8 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-/** 为新分组生成仅供内部使用、且不与现有分组冲突的稳定标识。 */
-export function createUniqueGroupCode(existingCodes: Iterable<string>): string {
+/** 为新分组生成只在本次保存请求内使用的临时引用。 */
+export function createTemporaryGroupCode(
+  existingCodes: Iterable<string>
+): string {
   const normalizedCodes = new Set(
     Array.from(existingCodes, (code) => code.trim())
   )

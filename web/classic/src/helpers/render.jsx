@@ -20,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import i18next from 'i18next';
 import { Modal, Tag, Typography, Avatar } from '@douyinfe/semi-ui';
 import { copy, showSuccess } from './utils';
+import { getGroupDisplayName } from './groupDetails';
 import { isModelPriceUnitSecond } from './modelPriceUnit';
 import { MOBILE_BREAKPOINT } from '../hooks/common/useIsMobile';
 import {
@@ -832,26 +833,29 @@ export function renderGroup(group, labels = {}) {
 
   return (
     <span key={group}>
-      {groups.map((group) => (
-        <Tag
-          color={tagColors[group] || stringToColor(group)}
-          key={group}
-          shape='circle'
-          onClick={async (event) => {
-            event.stopPropagation();
-            if (await copy(group)) {
-              showSuccess(i18next.t('已复制：') + group);
-            } else {
-              Modal.error({
-                title: i18next.t('无法复制到剪贴板，请手动复制'),
-                content: group,
-              });
-            }
-          }}
-        >
-          {labels[group] || group}
-        </Tag>
-      ))}
+      {groups.map((group) => {
+        const displayName = getGroupDisplayName(group, labels);
+        return (
+          <Tag
+            color={tagColors[group] || stringToColor(group)}
+            key={group}
+            shape='circle'
+            onClick={async (event) => {
+              event.stopPropagation();
+              if (await copy(displayName)) {
+                showSuccess(i18next.t('已复制：') + displayName);
+              } else {
+                Modal.error({
+                  title: i18next.t('无法复制到剪贴板，请手动复制'),
+                  content: displayName,
+                });
+              }
+            }}
+          >
+            {displayName}
+          </Tag>
+        );
+      })}
     </span>
   );
 }

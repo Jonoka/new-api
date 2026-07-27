@@ -78,6 +78,53 @@ type TokenGroupMigrationRequest struct {
 	TargetGroupMode string `json:"target_group_mode,omitempty"`
 }
 
+type GroupCodeMigrationRequest struct {
+	Confirm bool `json:"confirm"`
+}
+
+// PreviewGroupCodeMigration 返回旧分组 code 跟随稳定 ID 迁移的影响和阻塞项。
+func PreviewGroupCodeMigration(c *gin.Context) {
+	summary, err := model.PreviewGroupCodeMigration()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, summary)
+}
+
+// MigrateGroupCodes 执行管理员明确确认的旧分组 code 迁移。
+func MigrateGroupCodes(c *gin.Context) {
+	var request GroupCodeMigrationRequest
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorMsg(c, "分组标识迁移参数格式错误")
+		return
+	}
+	if !request.Confirm {
+		common.ApiErrorMsg(c, "执行分组标识迁移前必须明确确认")
+		return
+	}
+	summary, err := model.MigrateLegacyGroupCodesToIDs()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	model.RecordLog(
+		c.GetInt("id"),
+		model.LogTypeManage,
+		fmt.Sprintf(
+			"迁移旧分组标识：共迁移 %d 个分组，影响 %d 个渠道、%d 个令牌、%d 个用户、%d 条能力记录；缓存清理成功 %d 项、失败 %d 项",
+			len(summary.Groups),
+			summary.AffectedChannels,
+			summary.AffectedTokens,
+			summary.AffectedUsers,
+			summary.AffectedAbilities,
+			summary.CacheInvalidated,
+			summary.CacheInvalidationFailed,
+		),
+	)
+	common.ApiSuccess(c, summary)
+}
+
 func decodeTokenGroupMigrationRequest(c *gin.Context) (*TokenGroupMigrationRequest, bool) {
 	var request TokenGroupMigrationRequest
 	if err := common.DecodeJson(c.Request.Body, &request); err != nil {

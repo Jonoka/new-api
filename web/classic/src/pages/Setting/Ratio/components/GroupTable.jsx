@@ -26,10 +26,15 @@ import {
   Typography,
   Popconfirm,
 } from '@douyinfe/semi-ui';
-import { IconArrowRight, IconPlus, IconDelete } from '@douyinfe/semi-icons';
+import {
+  IconArrowRight,
+  IconPlus,
+  IconDelete,
+  IconRefresh,
+} from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 import CardTable from '../../../../components/common/ui/CardTable';
-import { createUniqueGroupCode } from '../../../../helpers';
+import { createTemporaryGroupCode } from '../../../../helpers';
 
 const { Text } = Typography;
 
@@ -51,6 +56,7 @@ export default function GroupTable({
   onAutoGroupChange,
   autoSelectableLocked = false,
   onMigrate,
+  onMigrateCodes,
   disabled = false,
 }) {
   const { t } = useTranslation();
@@ -110,7 +116,7 @@ export default function GroupTable({
 
   const addRow = useCallback(() => {
     emitAndSet((previousRows) => {
-      const code = createUniqueGroupCode(reservedCodesRef.current);
+      const code = createTemporaryGroupCode(reservedCodesRef.current);
       reservedCodesRef.current.add(code);
 
       return [
@@ -315,6 +321,14 @@ export default function GroupTable({
         empty={<Text type='tertiary'>{t('暂无分组，点击下方按钮添加')}</Text>}
       />
       <div className='mt-3 flex flex-wrap justify-center gap-2'>
+        <Button
+          icon={<IconRefresh />}
+          theme='outline'
+          disabled={disabled}
+          onClick={onMigrateCodes}
+        >
+          {t('迁移旧标识')}
+        </Button>
         <Button
           icon={<IconArrowRight />}
           theme='outline'

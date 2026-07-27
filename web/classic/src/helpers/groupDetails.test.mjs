@@ -6,7 +6,7 @@ import {
   buildGroupSelectionPayload,
   createGroupOptions,
   createPlaygroundGroupOptions,
-  createUniqueGroupCode,
+  createTemporaryGroupCode,
   createUserGroupOptions,
   extractAutoGroupConfigResponse,
   extractGroupDetailsResponse,
@@ -19,8 +19,8 @@ import {
   resolveGroupCodes,
 } from './groupDetails.js';
 
-test('新增分组生成未占用的内部 code 并随保存 payload 发送', () => {
-  const code = createUniqueGroupCode(new Set(['group_1', 'group_3']));
+test('新增分组生成未占用的临时引用并随保存 payload 发送', () => {
+  const code = createTemporaryGroupCode(new Set(['group_1', 'group_3']));
   const payload = buildGroupDetailsPayload(
     [{ code, name: '新分组', ratio: 1, status: 1 }],
     [],

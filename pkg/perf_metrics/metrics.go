@@ -29,11 +29,15 @@ func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens i
 	if info == nil {
 		return
 	}
-	now := time.Now()
+	Record(buildRelaySample(info, success, outputTokens, time.Now()))
+}
+
+func buildRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens int64, now time.Time) Sample {
 	hasTtft := info.IsStream && info.HasSendResponse()
 	ttftMs := int64(0)
 	if hasTtft {
-		ttftMs = info.FirstResponseTime.Sub(info.StartTime).Milliseconds()
+		// 与请求日志、渠道观测保持一致：重试后只统计最终上游尝试的首字耗时。
+		ttftMs = info.FirstResponseLatencyMilliseconds()
 	}
 	latencyMs := now.Sub(info.StartTime).Milliseconds()
 	generationMs := latencyMs
@@ -43,7 +47,7 @@ func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens i
 	if generationMs <= 0 {
 		generationMs = latencyMs
 	}
-	Record(Sample{
+	return Sample{
 		Model:        info.OriginModelName,
 		Group:        info.UsingGroup,
 		LatencyMs:    latencyMs,
@@ -52,7 +56,7 @@ func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens i
 		Success:      success,
 		OutputTokens: outputTokens,
 		GenerationMs: generationMs,
-	})
+	}
 }
 
 func Record(sample Sample) {
@@ -91,14 +95,42 @@ func Query(params QueryParams) (QueryResult, error) {
 	startTs := endTs - int64(params.Hours)*3600
 
 	merged := map[bucketKey]counters{}
+	canonicalGroups := make(map[string]string)
+	canonicalizeGroup := func(identifier string) string {
+		if canonical, exists := canonicalGroups[identifier]; exists {
+			return canonical
+		}
+		canonical := identifier
+		if entity, err := model.GetGroupByCodeOrAlias(identifier); err == nil {
+			canonical = entity.Code
+		}
+		canonicalGroups[identifier] = canonical
+		return canonical
+	}
+	allowedGroups := map[string]struct{}(nil)
+	requestedCanonicalGroup := ""
+	if params.Group != "" {
+		requestedCanonicalGroup = canonicalizeGroup(params.Group)
+		allowedGroups = map[string]struct{}{params.Group: {}}
+		if identifiers, err := model.ResolveGroupLogIdentifiers(params.Group); err == nil {
+			allowedGroups = make(map[string]struct{}, len(identifiers))
+			for _, identifier := range identifiers {
+				allowedGroups[identifier] = struct{}{}
+			}
+		}
+	}
 	rows, err := model.GetPerfMetrics(params.Model, params.Group, startTs, endTs)
 	if err != nil {
 		return QueryResult{}, err
 	}
 	for _, row := range rows {
+		group := canonicalizeGroup(row.Group)
+		if requestedCanonicalGroup != "" {
+			group = requestedCanonicalGroup
+		}
 		mergeCounters(merged, bucketKey{
 			model:    row.ModelName,
-			group:    row.Group,
+			group:    group,
 			bucketTs: row.BucketTs,
 		}, counters{
 			requestCount:   row.RequestCount,
@@ -116,10 +148,16 @@ func Query(params QueryParams) (QueryResult, error) {
 		if k.model != params.Model || k.bucketTs < startTs || k.bucketTs > endTs {
 			return true
 		}
-		if params.Group != "" && k.group != params.Group {
-			return true
+		if allowedGroups != nil {
+			if _, allowed := allowedGroups[k.group]; !allowed {
+				return true
+			}
 		}
-		mergeCounters(merged, k, value.(*atomicBucket).snapshot())
+		group := canonicalizeGroup(k.group)
+		if requestedCanonicalGroup != "" {
+			group = requestedCanonicalGroup
+		}
+		mergeCounters(merged, bucketKey{model: k.model, group: group, bucketTs: k.bucketTs}, value.(*atomicBucket).snapshot())
 		return true
 	})
 

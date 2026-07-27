@@ -42,7 +42,8 @@ const normalizeStatus = (value) => {
   return 1;
 };
 
-export const createUniqueGroupCode = (groupsOrCodes = []) => {
+// 新分组保存成功后由后端把该临时引用替换为真实 ID code。
+export const createTemporaryGroupCode = (groupsOrCodes = []) => {
   const existingCodes = new Set();
   for (const item of groupsOrCodes || []) {
     const value = typeof item === 'object' && item !== null ? item.code : item;

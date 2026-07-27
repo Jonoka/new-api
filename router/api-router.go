@@ -490,6 +490,8 @@ func SetApiRouter(router *gin.Engine) {
 			groupRoute.GET("/", controller.GetGroups)
 			groupRoute.GET("/details", controller.GetGroupDetails)
 			groupRoute.PUT("/details", controller.UpdateGroupDetails)
+			groupRoute.POST("/code-migration/preview", controller.PreviewGroupCodeMigration)
+			groupRoute.POST("/code-migration", controller.MigrateGroupCodes)
 			groupRoute.POST("/token-migration/preview", controller.PreviewTokenGroupMigration)
 			groupRoute.POST("/token-migration", controller.MigrateTokenGroup)
 		}

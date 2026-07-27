@@ -5461,6 +5461,19 @@
     "Failed to load native extension": "Không thể tải tiện ích gốc",
     "Independent": "Độc lập",
     "Independent group": "Nhóm độc lập",
-    "Independent groups must be selected alone.": "Nhóm độc lập phải được chọn riêng."
+    "Independent groups must be selected alone.": "Nhóm độc lập phải được chọn riêng.",
+    "All application instances must be upgraded to the same version and configuration writes should be paused before migration.": "Trước khi di chuyển, tất cả phiên bản ứng dụng phải được nâng cấp lên cùng một phiên bản và tạm dừng ghi cấu hình.",
+    "Checking legacy group codes...": "Đang kiểm tra mã nhóm cũ...",
+    "Failed to preview group code migration": "Không thể xem trước việc di chuyển mã nhóm",
+    "Migrate group codes": "Di chuyển mã nhóm",
+    "Migrate legacy codes": "Di chuyển mã cũ",
+    "Migrate legacy group codes": "Di chuyển mã nhóm cũ",
+    "Migrating group codes...": "Đang di chuyển mã nhóm...",
+    "Migration is blocked by these conflicts:": "Việc di chuyển bị chặn bởi các xung đột sau:",
+    "No legacy group codes need migration.": "Không có mã nhóm cũ nào cần di chuyển.",
+    "Preview and replace legacy group codes with stable numeric IDs.": "Xem trước và thay thế mã nhóm cũ bằng ID số ổn định.",
+    "{{channels}} channels, {{tokens}} tokens, {{users}} users, {{abilities}} ability records, {{plans}} plans, and {{subscriptions}} subscriptions are affected.": "Bị ảnh hưởng: {{channels}} kênh, {{tokens}} token, {{users}} người dùng, {{abilities}} bản ghi khả năng, {{plans}} gói và {{subscriptions}} đăng ký.",
+    "{{count}} group codes will be migrated.": "Sẽ di chuyển {{count}} mã nhóm.",
+    "{{count}} legacy group codes migrated successfully.": "Đã di chuyển thành công {{count}} mã nhóm cũ."
   }
 }

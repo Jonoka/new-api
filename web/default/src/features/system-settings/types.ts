@@ -122,6 +122,36 @@ export type TokenGroupMigrationResponse = {
   data?: TokenGroupMigrationSummary
 }
 
+export type GroupCodeMigrationItem = {
+  group_id: number
+  name: string
+  old_code: string
+  target_code: string
+}
+
+export type GroupCodeMigrationSummary = {
+  can_execute: boolean
+  executed: boolean
+  groups: GroupCodeMigrationItem[]
+  blockers?: string[]
+  affected_channels: number
+  affected_tokens: number
+  affected_users: number
+  affected_abilities: number
+  affected_subscription_plans: number
+  affected_subscriptions: number
+  affected_options: number
+  cache_invalidated: number
+  cache_invalidation_failed: number
+  warning?: string
+}
+
+export type GroupCodeMigrationResponse = {
+  success: boolean
+  message?: string
+  data?: GroupCodeMigrationSummary
+}
+
 export type OkpayRatePreviewResponse = {
   success: boolean
   message: string

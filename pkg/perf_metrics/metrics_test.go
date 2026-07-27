@@ -3,9 +3,36 @@ package perfmetrics
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 )
+
+func TestBuildRelaySampleUsesFinalUpstreamAttemptForTtft(t *testing.T) {
+	now := time.Now()
+	attemptStart := now.Add(-1500 * time.Millisecond)
+	info := &relaycommon.RelayInfo{
+		OriginModelName:        "gpt-test",
+		UsingGroup:             "default",
+		IsStream:               true,
+		StartTime:              now.Add(-8 * time.Second),
+		FirstResponseStartTime: attemptStart,
+		FirstResponseTime:      attemptStart.Add(500 * time.Millisecond),
+	}
+
+	sample := buildRelaySample(info, true, 20, now)
+
+	if !sample.HasTtft || sample.TtftMs != 500 {
+		t.Fatalf("首字样本 = %+v，期望只统计最终上游尝试的 500ms", sample)
+	}
+	if sample.LatencyMs != 8000 {
+		t.Fatalf("总延迟 = %dms，期望继续保留整次请求的 8000ms", sample.LatencyMs)
+	}
+	if sample.GenerationMs != 1000 {
+		t.Fatalf("生成耗时 = %dms，期望从首字到请求结束为 1000ms", sample.GenerationMs)
+	}
+}
 
 func TestBuildModelSummariesMergesBucketsAndKeepsWeightedTotals(t *testing.T) {
 	modelBuckets := map[string]map[int64]counters{}

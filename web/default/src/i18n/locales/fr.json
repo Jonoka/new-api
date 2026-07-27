@@ -5461,6 +5461,19 @@
     "Failed to load native extension": "Échec du chargement de l’extension native",
     "Independent": "Indépendant",
     "Independent group": "Groupe indépendant",
-    "Independent groups must be selected alone.": "Les groupes indépendants doivent être sélectionnés seuls."
+    "Independent groups must be selected alone.": "Les groupes indépendants doivent être sélectionnés seuls.",
+    "All application instances must be upgraded to the same version and configuration writes should be paused before migration.": "Toutes les instances de l’application doivent être mises à niveau vers la même version et les écritures de configuration doivent être suspendues avant la migration.",
+    "Checking legacy group codes...": "Vérification des anciens codes de groupe...",
+    "Failed to preview group code migration": "Échec de la prévisualisation de la migration des codes de groupe",
+    "Migrate group codes": "Migrer les codes de groupe",
+    "Migrate legacy codes": "Migrer les anciens codes",
+    "Migrate legacy group codes": "Migrer les anciens codes de groupe",
+    "Migrating group codes...": "Migration des codes de groupe...",
+    "Migration is blocked by these conflicts:": "La migration est bloquée par les conflits suivants :",
+    "No legacy group codes need migration.": "Aucun ancien code de groupe ne doit être migré.",
+    "Preview and replace legacy group codes with stable numeric IDs.": "Prévisualisez et remplacez les anciens codes de groupe par des ID numériques stables.",
+    "{{channels}} channels, {{tokens}} tokens, {{users}} users, {{abilities}} ability records, {{plans}} plans, and {{subscriptions}} subscriptions are affected.": "{{channels}} canaux, {{tokens}} jetons, {{users}} utilisateurs, {{abilities}} enregistrements de capacité, {{plans}} forfaits et {{subscriptions}} abonnements sont affectés.",
+    "{{count}} group codes will be migrated.": "{{count}} codes de groupe seront migrés.",
+    "{{count}} legacy group codes migrated successfully.": "{{count}} anciens codes de groupe ont été migrés avec succès."
   }
 }

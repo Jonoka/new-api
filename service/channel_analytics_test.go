@@ -25,7 +25,7 @@ func setupChannelAnalyticsTestDB(t *testing.T) *gorm.DB {
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", channelmetrics.SHA256String(t.Name())[:16])
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Group{}))
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Group{}, &model.GroupAlias{}))
 	require.NoError(t, model.MigrateChannelAnalyticsLogDB(db))
 
 	oldDB, oldLogDB := model.DB, model.LOG_DB
@@ -620,6 +620,31 @@ func TestChannelAnalyticsStabilitySeparatesActualGroupChannelAndModel(t *testing
 	require.NoError(t, err)
 	require.Len(t, filters.Groups, 1)
 	assert.Equal(t, dto.ChannelAnalyticsFilterGroup{Code: "vip", Name: "VIP 用户"}, filters.Groups[0])
+}
+
+func TestChannelAnalyticsExpandsAndCollapsesHistoricalGroupAliases(t *testing.T) {
+	db := setupChannelAnalyticsTestDB(t)
+	bucketTs := time.Now().Unix() / 300 * 300
+	defaultGroup := model.Group{Code: "default", Name: "默认", Status: model.GroupStatusActive}
+	require.NoError(t, db.Create(&defaultGroup).Error)
+	group := model.Group{Code: "2", Name: "特价", Status: model.GroupStatusActive}
+	require.NoError(t, db.Create(&group).Error)
+	require.NoError(t, db.Create(&model.GroupAlias{Alias: "group_2", GroupId: group.Id}).Error)
+
+	query, err := ParseChannelAnalyticsQuery(url.Values{"groups": {group.Code}})
+	require.NoError(t, err)
+	assert.Equal(t, []string{group.Code, "group_2"}, query.Groups)
+
+	current := channelAnalyticsTestBucket(bucketTs, "current-group-code", string(channelmetrics.ScopeChannelAttempt), string(channelmetrics.OutcomeSuccess), 1, 1)
+	current.Group, current.GroupHash = group.Code, channelmetrics.SHA256String(group.Code)
+	legacy := channelAnalyticsTestBucket(bucketTs, "legacy-group-code", string(channelmetrics.ScopeChannelAttempt), string(channelmetrics.OutcomeSuccess), 1, 1)
+	legacy.Group, legacy.GroupHash = "group_2", channelmetrics.SHA256String("group_2")
+	require.NoError(t, db.Create(&[]model.ChannelMetricBucket{current, legacy}).Error)
+
+	filters, err := GetChannelAnalyticsFilters()
+	require.NoError(t, err)
+	require.Len(t, filters.Groups, 1)
+	assert.Equal(t, dto.ChannelAnalyticsFilterGroup{Code: group.Code, Name: group.Name}, filters.Groups[0])
 }
 
 func TestChannelAnalyticsStabilityReturnsOperationalBreakdownAndCoverage(t *testing.T) {

@@ -180,6 +180,10 @@ func parseChannelAnalyticsQuery(values url.Values, retentionDays int) (dto.Chann
 	if query.Groups, err = parseStringList(values, "groups"); err != nil {
 		return dto.ChannelAnalyticsQuery{}, err
 	}
+	query.Groups, err = expandChannelAnalyticsGroupIdentifiers(query.Groups)
+	if err != nil {
+		return dto.ChannelAnalyticsQuery{}, err
+	}
 	if query.RequestedModels, err = parseStringList(values, "requested_models"); err != nil {
 		return dto.ChannelAnalyticsQuery{}, err
 	}
@@ -756,12 +760,24 @@ func GetChannelAnalyticsFilters() (dto.ChannelAnalyticsFiltersResponse, error) {
 		return dto.ChannelAnalyticsFiltersResponse{}, err
 	}
 	groups := make([]dto.ChannelAnalyticsFilterGroup, 0, len(groupRows))
+	seenGroups := make(map[string]struct{}, len(groupRows))
 	for _, row := range groupRows {
-		name := groupNames[row.Group]
-		if name == "" {
-			name = row.Group
+		code := row.Group
+		if entity, resolveErr := model.GetGroupByCodeOrAlias(row.Group); resolveErr == nil {
+			code = entity.Code
 		}
-		groups = append(groups, dto.ChannelAnalyticsFilterGroup{Code: row.Group, Name: name})
+		if _, exists := seenGroups[code]; exists {
+			continue
+		}
+		seenGroups[code] = struct{}{}
+		name := groupNames[code]
+		if name == "" {
+			name = groupNames[row.Group]
+		}
+		if name == "" {
+			name = code
+		}
+		groups = append(groups, dto.ChannelAnalyticsFilterGroup{Code: code, Name: name})
 	}
 	requestedRows, err := model.GetChannelMetricModelOptions(model.LOG_DB, setting.BucketLevel, false, 1000)
 	if err != nil {
@@ -821,6 +837,36 @@ func GetChannelAnalyticsFilters() (dto.ChannelAnalyticsFiltersResponse, error) {
 		DataOrigins: []string{string(channelmetrics.DataOriginLive), string(channelmetrics.DataOriginLegacy)},
 		Meta:        meta,
 	}, nil
+}
+
+func expandChannelAnalyticsGroupIdentifiers(groups []string) ([]string, error) {
+	if len(groups) == 0 {
+		return groups, nil
+	}
+	result := make([]string, 0, len(groups))
+	seen := make(map[string]struct{}, len(groups))
+	for _, group := range groups {
+		identifiers := []string{group}
+		if !strings.EqualFold(strings.TrimSpace(group), "auto") {
+			resolved, err := model.ResolveGroupLogIdentifiers(group)
+			if err == nil {
+				identifiers = resolved
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, err
+			}
+		}
+		for _, identifier := range identifiers {
+			if _, exists := seen[identifier]; exists {
+				continue
+			}
+			seen[identifier] = struct{}{}
+			result = append(result, identifier)
+			if len(result) > channelAnalyticsMaxListItems*10 {
+				return nil, invalidChannelAnalyticsQuery("groups 展开历史别名后最多允许 %d 项", channelAnalyticsMaxListItems*10)
+			}
+		}
+	}
+	return result, nil
 }
 
 // GetChannelAnalyticsFilterModels 返回不会因模型数量超过 1000 而静默截断的筛选项。

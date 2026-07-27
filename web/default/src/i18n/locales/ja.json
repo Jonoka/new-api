@@ -5461,6 +5461,19 @@
     "Failed to load native extension": "ネイティブ拡張機能を読み込めませんでした",
     "Independent": "独立",
     "Independent group": "独立グループ",
-    "Independent groups must be selected alone.": "独立グループは単独で選択する必要があります。"
+    "Independent groups must be selected alone.": "独立グループは単独で選択する必要があります。",
+    "All application instances must be upgraded to the same version and configuration writes should be paused before migration.": "移行前にすべてのアプリケーションインスタンスを同じバージョンへ更新し、設定の書き込みを停止してください。",
+    "Checking legacy group codes...": "旧グループコードを確認中...",
+    "Failed to preview group code migration": "グループコード移行の事前確認に失敗しました",
+    "Migrate group codes": "グループコードを移行",
+    "Migrate legacy codes": "旧コードを移行",
+    "Migrate legacy group codes": "旧グループコードを移行",
+    "Migrating group codes...": "グループコードを移行中...",
+    "Migration is blocked by these conflicts:": "次の競合により移行できません：",
+    "No legacy group codes need migration.": "移行が必要な旧グループコードはありません。",
+    "Preview and replace legacy group codes with stable numeric IDs.": "旧グループコードを事前確認し、安定した数値 ID に置き換えます。",
+    "{{channels}} channels, {{tokens}} tokens, {{users}} users, {{abilities}} ability records, {{plans}} plans, and {{subscriptions}} subscriptions are affected.": "{{channels}} 件のチャネル、{{tokens}} 件のトークン、{{users}} 人のユーザー、{{abilities}} 件の能力レコード、{{plans}} 件のプラン、{{subscriptions}} 件のサブスクリプションが影響を受けます。",
+    "{{count}} group codes will be migrated.": "{{count}} 件のグループコードを移行します。",
+    "{{count}} legacy group codes migrated successfully.": "{{count}} 件の旧グループコードを移行しました。"
   }
 }

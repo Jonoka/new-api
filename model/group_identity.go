@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -1155,6 +1156,148 @@ func normalizeGroupConfigOptionUpdates(values map[string]string) map[string]stri
 	return normalized
 }
 
+func rewrittenTemporaryGroupCode(code string, replacements map[string]string) string {
+	trimmed := strings.TrimSpace(code)
+	if replacement, exists := replacements[trimmed]; exists {
+		return replacement
+	}
+	return code
+}
+
+func rewriteTemporaryGroupRatioReferences(
+	key string,
+	value string,
+	replacements map[string]string,
+) (string, error) {
+	values := make(map[string]map[string]float64)
+	if err := common.UnmarshalJsonStr(value, &values); err != nil {
+		return "", fmt.Errorf("解析分组选项 %s 失败: %w", key, err)
+	}
+	rewritten := make(map[string]map[string]float64, len(values))
+	ownerSources := make(map[string]string, len(values))
+	for owner, targets := range values {
+		rewrittenOwner := rewrittenTemporaryGroupCode(owner, replacements)
+		if previous, exists := ownerSources[rewrittenOwner]; exists && previous != owner {
+			return "", fmt.Errorf("分组选项 %s 的临时分组 %q 与 %q 改写后发生冲突", key, previous, owner)
+		}
+		ownerSources[rewrittenOwner] = owner
+		rewrittenTargets := make(map[string]float64, len(targets))
+		targetSources := make(map[string]string, len(targets))
+		for target, ratio := range targets {
+			rewrittenTarget := rewrittenTemporaryGroupCode(target, replacements)
+			if previous, exists := targetSources[rewrittenTarget]; exists && previous != target {
+				return "", fmt.Errorf("分组选项 %s 的临时分组 %q 与 %q 改写后发生冲突", key, previous, target)
+			}
+			targetSources[rewrittenTarget] = target
+			rewrittenTargets[rewrittenTarget] = ratio
+		}
+		rewritten[rewrittenOwner] = rewrittenTargets
+	}
+	return marshalPrunedGroupOption(key, rewritten)
+}
+
+func rewriteTemporaryTopupGroupRatioReferences(
+	key string,
+	value string,
+	replacements map[string]string,
+) (string, error) {
+	values := make(map[string]float64)
+	if err := common.UnmarshalJsonStr(value, &values); err != nil {
+		return "", fmt.Errorf("解析分组选项 %s 失败: %w", key, err)
+	}
+	rewritten := make(map[string]float64, len(values))
+	sources := make(map[string]string, len(values))
+	for code, ratio := range values {
+		rewrittenCode := rewrittenTemporaryGroupCode(code, replacements)
+		if previous, exists := sources[rewrittenCode]; exists && previous != code {
+			return "", fmt.Errorf("分组选项 %s 的临时分组 %q 与 %q 改写后发生冲突", key, previous, code)
+		}
+		sources[rewrittenCode] = code
+		rewritten[rewrittenCode] = ratio
+	}
+	return marshalPrunedGroupOption(key, rewritten)
+}
+
+func rewriteTemporarySpecialGroupTarget(target string, replacements map[string]string) string {
+	trimmed := strings.TrimSpace(target)
+	prefix := ""
+	identifier := trimmed
+	if strings.HasPrefix(identifier, "+:") || strings.HasPrefix(identifier, "-:") {
+		prefix = identifier[:2]
+		identifier = strings.TrimSpace(identifier[2:])
+	}
+	replacement, exists := replacements[identifier]
+	if !exists {
+		return target
+	}
+	return prefix + replacement
+}
+
+func rewriteTemporarySpecialUsableGroupReferences(
+	key string,
+	value string,
+	replacements map[string]string,
+) (string, error) {
+	values := make(map[string]map[string]string)
+	if err := common.UnmarshalJsonStr(value, &values); err != nil {
+		return "", fmt.Errorf("解析分组选项 %s 失败: %w", key, err)
+	}
+	rewritten := make(map[string]map[string]string, len(values))
+	ownerSources := make(map[string]string, len(values))
+	for owner, rules := range values {
+		rewrittenOwner := rewrittenTemporaryGroupCode(owner, replacements)
+		if previous, exists := ownerSources[rewrittenOwner]; exists && previous != owner {
+			return "", fmt.Errorf("分组选项 %s 的临时分组 %q 与 %q 改写后发生冲突", key, previous, owner)
+		}
+		ownerSources[rewrittenOwner] = owner
+		rewrittenRules := make(map[string]string, len(rules))
+		targetSources := make(map[string]string, len(rules))
+		for target, rule := range rules {
+			rewrittenTarget := rewriteTemporarySpecialGroupTarget(target, replacements)
+			if previous, exists := targetSources[rewrittenTarget]; exists && previous != target {
+				return "", fmt.Errorf("分组选项 %s 的临时分组规则 %q 与 %q 改写后发生冲突", key, previous, target)
+			}
+			targetSources[rewrittenTarget] = target
+			rewrittenRules[rewrittenTarget] = rule
+		}
+		rewritten[rewrittenOwner] = rewrittenRules
+	}
+	return marshalPrunedGroupOption(key, rewritten)
+}
+
+// rewriteTemporaryGroupOptionReferences 把一次保存请求中的临时 code 原子改写为
+// 新建分组取得的最终数字 code。临时 code 只用于关联同一请求内的高级配置。
+func rewriteTemporaryGroupOptionReferences(
+	values map[string]string,
+	replacements map[string]string,
+) (map[string]string, error) {
+	if len(values) == 0 || len(replacements) == 0 {
+		return values, nil
+	}
+	rewritten := make(map[string]string, len(values))
+	for key, value := range values {
+		var (
+			normalized string
+			err        error
+		)
+		switch key {
+		case groupGroupRatioOptionKey, layeredGroupGroupRatioOptionKey:
+			normalized, err = rewriteTemporaryGroupRatioReferences(key, value, replacements)
+		case "TopupGroupRatio":
+			normalized, err = rewriteTemporaryTopupGroupRatioReferences(key, value, replacements)
+		case "group_ratio_setting.group_special_usable_group":
+			normalized, err = rewriteTemporarySpecialUsableGroupReferences(key, value, replacements)
+		default:
+			normalized = value
+		}
+		if err != nil {
+			return nil, err
+		}
+		rewritten[key] = normalized
+	}
+	return rewritten, nil
+}
+
 func validateGroupConfigOptionUpdates(values map[string]string) error {
 	if len(values) == 0 {
 		return nil
@@ -1693,6 +1836,14 @@ func SaveGroupConfigWithOptionsAndResult(
 		seenCodes := make(map[string]struct{}, len(configs))
 		seenNames := make(map[string]struct{}, len(configs))
 		seenIDs := make(map[int]struct{}, len(configs))
+		temporaryCodes := make(map[int]string)
+		temporaryCodeReplacements := make(map[string]string)
+		requestedDeletedIDs := make(map[int]struct{}, len(deletedIDs))
+		for _, id := range deletedIDs {
+			if id > 0 {
+				requestedDeletedIDs[id] = struct{}{}
+			}
+		}
 		for index, item := range configs {
 			code, err := NormalizeGroupCode(item.Code)
 			if err != nil {
@@ -1725,29 +1876,88 @@ func SaveGroupConfigWithOptionsAndResult(
 			item.Code = code
 			item.Name = name
 			prepared[index] = item
+			if item.Id <= 0 {
+				temporaryCodes[index] = code
+			}
 		}
 
 		existingByID := make(map[int]Group, len(seenIDs))
 		for index := range prepared {
 			item := &prepared[index]
 			if item.Id <= 0 {
+				// 新客户端提交的 code 只是本次保存请求内的临时引用，但它仍不能
+				// 覆盖已有正式 code 或历史 alias。否则高级配置中的同一字符串
+				// 会被错误改写到新分组，造成计费和访问控制串组。
+				identified, identifyErr := getGroupByCodeOrAliasStrict(tx, item.Code)
+				if identifyErr == nil {
+					if identified.Name != item.Name {
+						return fmt.Errorf(
+							"分组临时标识 %s 已属于分组 %s（ID %d）",
+							item.Code,
+							identified.Name,
+							identified.Id,
+						)
+					}
+					if identified.Code != strconv.Itoa(identified.Id) {
+						return fmt.Errorf(
+							"分组标识 %s 已存在，旧式分组不能作为新建请求重试",
+							item.Code,
+						)
+					}
+					if _, explicitlySaved := seenIDs[identified.Id]; explicitlySaved {
+						return fmt.Errorf("分组 ID 重复: %d", identified.Id)
+					}
+					if _, deleted := requestedDeletedIDs[identified.Id]; deleted {
+						return fmt.Errorf("分组 ID %d 不能同时保存和删除", identified.Id)
+					}
+					item.Id = identified.Id
+					item.Code = identified.Code
+					seenIDs[identified.Id] = struct{}{}
+					existingByID[identified.Id] = *identified
+					if temporaryCode := temporaryCodes[index]; temporaryCode != identified.Code {
+						temporaryCodeReplacements[temporaryCode] = identified.Code
+					}
+					continue
+				}
+				if identifyErr != nil && !errors.Is(identifyErr, gorm.ErrRecordNotFound) {
+					return identifyErr
+				}
+
 				var existing Group
-				err := tx.Where("code = ?", item.Code).First(&existing).Error
+				err := tx.Where("name = ?", item.Name).First(&existing).Error
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					continue
 				}
 				if err != nil {
 					return err
 				}
-				if existing.Name != item.Name {
-					return fmt.Errorf("分组标识已存在: %s", item.Code)
+				if _, explicitlySaved := seenIDs[existing.Id]; explicitlySaved {
+					// 同一请求可能先把旧分组改名，再用释放出的名称创建新分组。
+					continue
 				}
-				if _, exists := seenIDs[existing.Id]; exists {
-					return fmt.Errorf("分组 ID 重复: %d", existing.Id)
+				if _, deleted := requestedDeletedIDs[existing.Id]; deleted {
+					// 删除旧分组并复用其显示名称不是网络重试。
+					continue
+				}
+				// MySQL 常见排序规则不区分大小写，数据库的 name = ? 可能把
+				// vip 命中为 VIP。这里只接受 Go 字符串完全一致的网络重试。
+				if existing.Name != item.Name {
+					return fmt.Errorf("分组名称已存在: %s", existing.Name)
+				}
+				if existing.Code != strconv.Itoa(existing.Id) {
+					return fmt.Errorf(
+						"分组名称 %s 已属于旧式标识 %s，不能作为新建请求重试",
+						existing.Name,
+						existing.Code,
+					)
 				}
 				item.Id = existing.Id
+				item.Code = existing.Code
 				seenIDs[existing.Id] = struct{}{}
 				existingByID[existing.Id] = existing
+				if temporaryCode := temporaryCodes[index]; temporaryCode != existing.Code {
+					temporaryCodeReplacements[temporaryCode] = existing.Code
+				}
 				continue
 			}
 			var existing Group
@@ -1842,6 +2052,94 @@ func SaveGroupConfigWithOptionsAndResult(
 			if referenceCount > 0 {
 				return fmt.Errorf("分组 %s 仍被非令牌业务数据引用，不能删除", group.Name)
 			}
+		}
+
+		// 新分组先使用事务内占位名称和 code 取得数据库 ID，再立即把 code
+		// 固定为十进制 ID。显示名称要等名称冲突组删除或换名后再写入。
+		temporaryNonce := time.Now().UnixNano()
+		skippedPlaceholderIDs := make([]int, 0)
+		for index := range prepared {
+			item := &prepared[index]
+			if item.Id > 0 {
+				continue
+			}
+			var group Group
+			allocated := false
+			for attempt := 0; attempt < 100; attempt++ {
+				codeCandidate := fmt.Sprintf("__group_code_pending_%d_%d_%d", temporaryNonce, index, attempt)
+				nameCandidate := fmt.Sprintf("__group_name_pending_%d_%d_%d", temporaryNonce, index, attempt)
+				var codeCount, nameCount int64
+				if err := tx.Model(&Group{}).Where("code = ?", codeCandidate).Count(&codeCount).Error; err != nil {
+					return err
+				}
+				if err := tx.Model(&Group{}).Where("name = ?", nameCandidate).Count(&nameCount).Error; err != nil {
+					return err
+				}
+				if codeCount != 0 || nameCount != 0 {
+					continue
+				}
+
+				now := time.Now().Unix()
+				group = Group{
+					Code:           codeCandidate,
+					Name:           nameCandidate,
+					Description:    item.Description,
+					Ratio:          item.Ratio,
+					UserSelectable: item.UserSelectable,
+					Exclusive:      item.Exclusive,
+					Status:         item.Status,
+					CreatedTime:    now,
+					UpdatedTime:    now,
+				}
+				if group.Ratio == 0 {
+					group.Ratio = 1
+				}
+				if group.Status == 0 {
+					group.Status = GroupStatusActive
+				}
+				if err := tx.Create(&group).Error; err != nil {
+					return fmt.Errorf("创建分组 %s 的事务内占位记录失败: %w", item.Name, err)
+				}
+
+				finalCode := strconv.Itoa(group.Id)
+				codeHolder, err := getGroupByCodeOrAliasStrict(tx, finalCode)
+				if err == nil && codeHolder.Id != group.Id {
+					// SQLite 在事务回滚后会复用相同 ROWID。占位行必须暂时保留，
+					// 让下一次 Create 取得更大的 ID；成功分配后再统一删除。
+					skippedPlaceholderIDs = append(skippedPlaceholderIDs, group.Id)
+					continue
+				}
+				if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+					return err
+				}
+				if err := tx.Model(&Group{}).Where("id = ?", group.Id).Update("code", finalCode).Error; err != nil {
+					return fmt.Errorf("把新分组 %s 的标识更新为 ID %s 失败: %w", item.Name, finalCode, err)
+				}
+				group.Code = finalCode
+				allocated = true
+				break
+			}
+			if !allocated {
+				return fmt.Errorf("无法为新分组 %s 分配未被占用的数字标识", item.Name)
+			}
+
+			if temporaryCode := temporaryCodes[index]; temporaryCode != group.Code {
+				temporaryCodeReplacements[temporaryCode] = group.Code
+			}
+			item.Id = group.Id
+			item.Code = group.Code
+			item.Ratio = group.Ratio
+			item.Status = group.Status
+		}
+		if len(skippedPlaceholderIDs) > 0 {
+			if err := tx.Where("id IN ?", skippedPlaceholderIDs).Delete(&Group{}).Error; err != nil {
+				return fmt.Errorf("清理数字标识冲突占位记录失败: %w", err)
+			}
+		}
+
+		optionUpdates, err = rewriteTemporaryGroupOptionReferences(optionUpdates, temporaryCodeReplacements)
+		if err != nil {
+			return err
 		}
 		if err := lockOptionRowsForWrite(tx, groupConfigManagedOptionKeys()); err != nil {
 			return err
@@ -1944,7 +2242,6 @@ func SaveGroupConfigWithOptionsAndResult(
 
 		// 唯一索引会让 A/B -> B/A 的逐行更新在第一步就冲突。
 		// 事务内先把所有参与换名的记录移到唯一占位名，再写最终名称。
-		temporaryNonce := time.Now().UnixNano()
 		for _, item := range prepared {
 			existing, ok := existingByID[item.Id]
 			if !ok || existing.Name == item.Name {
@@ -1974,19 +2271,6 @@ func SaveGroupConfigWithOptionsAndResult(
 		}
 
 		for _, item := range prepared {
-			if item.Id == 0 {
-				group := Group{Code: item.Code, Name: item.Name, Description: item.Description, Ratio: item.Ratio, UserSelectable: item.UserSelectable, Exclusive: item.Exclusive, Status: item.Status, CreatedTime: time.Now().Unix(), UpdatedTime: time.Now().Unix()}
-				if group.Ratio == 0 {
-					group.Ratio = 1
-				}
-				if group.Status == 0 {
-					group.Status = GroupStatusActive
-				}
-				if err := tx.Create(&group).Error; err != nil {
-					return err
-				}
-				continue
-			}
 			updates := map[string]interface{}{"name": item.Name, "description": item.Description, "ratio": item.Ratio, "user_selectable": item.UserSelectable, "exclusive": item.Exclusive, "status": item.Status, "updated_time": time.Now().Unix()}
 			if item.Status == 0 {
 				updates["status"] = GroupStatusDisabled
@@ -2006,15 +2290,7 @@ func SaveGroupConfigWithOptionsAndResult(
 		}
 		sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].AutoOrder < ordered[j].AutoOrder })
 		for position, item := range ordered {
-			id := item.Id
-			if id == 0 {
-				var group Group
-				if err := tx.Where("code = ?", item.Code).First(&group).Error; err != nil {
-					return err
-				}
-				id = group.Id
-			}
-			if err := tx.Create(&AutoGroupMember{GroupId: id, Position: position}).Error; err != nil {
+			if err := tx.Create(&AutoGroupMember{GroupId: item.Id, Position: position}).Error; err != nil {
 				return err
 			}
 		}

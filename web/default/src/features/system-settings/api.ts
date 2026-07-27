@@ -23,6 +23,8 @@ import type {
   FetchUpstreamRatiosRequest,
   GroupDetailsData,
   GroupDetailsResponse,
+  GroupCodeMigrationResponse,
+  GroupCodeMigrationSummary,
   OkpayRatePreviewResponse,
   SystemOptionsResponse,
   TokenGroupMigrationRequest,
@@ -98,6 +100,29 @@ export async function migrateTokenGroup(
   )
   if (!res.data.success || !res.data.data) {
     throw new Error(res.data.message || 'Failed to migrate tokens')
+  }
+  return res.data.data
+}
+
+export async function previewGroupCodeMigration(): Promise<GroupCodeMigrationSummary> {
+  const res = await api.post<GroupCodeMigrationResponse>(
+    '/api/group/code-migration/preview'
+  )
+  if (!res.data.success || !res.data.data) {
+    throw new Error(
+      res.data.message || 'Failed to preview group code migration'
+    )
+  }
+  return res.data.data
+}
+
+export async function migrateGroupCodes(): Promise<GroupCodeMigrationSummary> {
+  const res = await api.post<GroupCodeMigrationResponse>(
+    '/api/group/code-migration',
+    { confirm: true }
+  )
+  if (!res.data.success || !res.data.data) {
+    throw new Error(res.data.message || 'Failed to migrate group codes')
   }
   return res.data.data
 }

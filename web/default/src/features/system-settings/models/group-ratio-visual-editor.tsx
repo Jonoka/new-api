@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useState, useMemo, useEffect, useCallback, memo } from 'react'
 import {
   ArrowRightLeft,
+  RefreshCw,
   Pencil,
   Plus,
   Trash2,
@@ -72,8 +73,9 @@ import { ConfirmDialog } from '@/components/confirm-dialog'
 import type { AutoGroupConfig, GroupDetailInput } from '../types'
 import { safeJsonParse } from '../utils/json-parser'
 import { applyAutoGroupOrder } from './auto-group-order'
+import { GroupCodeMigrationDialog } from './group-code-migration-dialog'
 import {
-  createUniqueGroupCode,
+  createTemporaryGroupCode,
   getGroupIdDisplayValue,
   getGroupNameByCode,
 } from './group-identity'
@@ -857,6 +859,7 @@ function GroupPricingTable({
 }: GroupPricingTableProps) {
   const { t } = useTranslation()
   const [migrationDialogOpen, setMigrationDialogOpen] = useState(false)
+  const [codeMigrationDialogOpen, setCodeMigrationDialogOpen] = useState(false)
   const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null)
 
   const updateRow = useCallback(
@@ -875,7 +878,7 @@ function GroupPricingTable({
   )
 
   const addRow = useCallback(() => {
-    const code = createUniqueGroupCode([
+    const code = createTemporaryGroupCode([
       ...reservedGroupCodes,
       ...groups.map((group) => group.code),
     ])
@@ -934,6 +937,15 @@ function GroupPricingTable({
             </CardDescription>
           </div>
           <div className='flex flex-wrap gap-2 sm:self-start'>
+            <Button
+              variant='outline'
+              onClick={() => setCodeMigrationDialogOpen(true)}
+              size='sm'
+              disabled={isLoading || Boolean(loadError)}
+            >
+              <RefreshCw className='mr-2 h-4 w-4' />
+              {t('Migrate legacy codes')}
+            </Button>
             <Button
               variant='outline'
               onClick={() => setMigrationDialogOpen(true)}
@@ -1182,6 +1194,10 @@ function GroupPricingTable({
         open={migrationDialogOpen}
         onOpenChange={setMigrationDialogOpen}
         groups={groups}
+      />
+      <GroupCodeMigrationDialog
+        open={codeMigrationDialogOpen}
+        onOpenChange={setCodeMigrationDialogOpen}
       />
       <ConfirmDialog
         open={Boolean(pendingDeleteGroup)}

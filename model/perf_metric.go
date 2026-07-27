@@ -1,6 +1,8 @@
 package model
 
 import (
+	"errors"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -52,11 +54,47 @@ func GetPerfMetrics(modelName string, group string, startTs int64, endTs int64) 
 	var metrics []PerfMetric
 	query := DB.Model(&PerfMetric{}).
 		Where("model_name = ? AND bucket_ts >= ? AND bucket_ts <= ?", modelName, startTs, endTs)
+	canonicalGroup := strings.TrimSpace(group)
 	if group != "" {
-		query = query.Where(commonGroupCol+" = ?", group)
+		identifiers := []string{canonicalGroup}
+		if !isVirtualAutoCode(canonicalGroup) {
+			resolved, err := ResolveGroupLogIdentifiers(canonicalGroup)
+			if err == nil {
+				identifiers = resolved
+				if entity, resolveErr := GetGroupByCodeOrAlias(canonicalGroup); resolveErr == nil {
+					canonicalGroup = entity.Code
+				}
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, err
+			}
+		}
+		query = query.Where(commonGroupCol+" IN ?", identifiers)
 	}
-	err := query.Order("bucket_ts ASC").Find(&metrics).Error
-	return metrics, err
+	if err := query.Order("bucket_ts ASC").Find(&metrics).Error; err != nil {
+		return nil, err
+	}
+
+	canonicalByIdentifier := make(map[string]string)
+	for index := range metrics {
+		if canonicalGroup != "" {
+			metrics[index].Group = canonicalGroup
+			continue
+		}
+		identifier := metrics[index].Group
+		if canonical, exists := canonicalByIdentifier[identifier]; exists {
+			metrics[index].Group = canonical
+			continue
+		}
+		canonical := identifier
+		if !isVirtualAutoCode(identifier) {
+			if entity, err := GetGroupByCodeOrAlias(identifier); err == nil {
+				canonical = entity.Code
+			}
+		}
+		canonicalByIdentifier[identifier] = canonical
+		metrics[index].Group = canonical
+	}
+	return metrics, nil
 }
 
 type PerfMetricSummary struct {

@@ -7,7 +7,7 @@ import test from 'node:test';
 const root = dirname(fileURLToPath(import.meta.url));
 const readSource = (...parts) => readFileSync(resolve(root, ...parts), 'utf8');
 
-test('分组表保留只读 ID、展示可编辑名称并在内部生成 code', () => {
+test('分组表保留只读 ID、展示可编辑名称并在内部生成临时引用', () => {
   const tableSource = readSource(
     'pages/Setting/Ratio/components/GroupTable.jsx',
   );
@@ -24,12 +24,13 @@ test('分组表保留只读 ID、展示可编辑名称并在内部生成 code', 
     'name',
     'ratio',
     'user_selectable',
+    'exclusive',
     'description',
   ]);
   assert.match(tableSource, /title:\s*t\('ID'\)/);
   assert.match(tableSource, /\{record\.id \|\| '-'\}/);
   assert.match(tableSource, /title:\s*t\('分组名称'\)/);
-  assert.match(tableSource, /createUniqueGroupCode/);
+  assert.match(tableSource, /createTemporaryGroupCode/);
   assert.match(tableSource, /code,\s*\n\s*name:\s*''/);
   assert.doesNotMatch(tableSource, /dataIndex:\s*'code'/);
   assert.doesNotMatch(tableSource, /t\('稳定标识'\)/);
@@ -53,7 +54,11 @@ test('Auto 与规则编辑器统一使用名称 label 和内部 code value', () 
 
   assert.equal(
     [...settingsSource.matchAll(/groupOptions=\{groupOptions\}/g)].length,
-    3,
+    2,
+  );
+  assert.match(
+    settingsSource,
+    /groupOptions=\{groupOptions\.filter\(\(group\) => !group\.exclusive\)\}/,
   );
   assert.match(autoSource, /value=\{item\.code \|\| undefined\}/);
   assert.match(autoSource, /optionList=\{groupOptions\}/);

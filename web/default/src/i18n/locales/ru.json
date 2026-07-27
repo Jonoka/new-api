@@ -5461,6 +5461,19 @@
     "Failed to load native extension": "Не удалось загрузить нативное расширение",
     "Independent": "Независимая",
     "Independent group": "Независимая группа",
-    "Independent groups must be selected alone.": "Независимые группы необходимо выбирать отдельно."
+    "Independent groups must be selected alone.": "Независимые группы необходимо выбирать отдельно.",
+    "All application instances must be upgraded to the same version and configuration writes should be paused before migration.": "Перед миграцией все экземпляры приложения должны быть обновлены до одной версии, а запись конфигурации — приостановлена.",
+    "Checking legacy group codes...": "Проверка устаревших кодов групп...",
+    "Failed to preview group code migration": "Не удалось выполнить предварительную проверку миграции кодов групп",
+    "Migrate group codes": "Мигрировать коды групп",
+    "Migrate legacy codes": "Мигрировать устаревшие коды",
+    "Migrate legacy group codes": "Мигрировать устаревшие коды групп",
+    "Migrating group codes...": "Миграция кодов групп...",
+    "Migration is blocked by these conflicts:": "Миграция заблокирована следующими конфликтами:",
+    "No legacy group codes need migration.": "Нет устаревших кодов групп, требующих миграции.",
+    "Preview and replace legacy group codes with stable numeric IDs.": "Проверьте и замените устаревшие коды групп стабильными числовыми ID.",
+    "{{channels}} channels, {{tokens}} tokens, {{users}} users, {{abilities}} ability records, {{plans}} plans, and {{subscriptions}} subscriptions are affected.": "Затронуто: каналов — {{channels}}, токенов — {{tokens}}, пользователей — {{users}}, записей возможностей — {{abilities}}, планов — {{plans}}, подписок — {{subscriptions}}.",
+    "{{count}} group codes will be migrated.": "Будет мигрировано кодов групп: {{count}}.",
+    "{{count}} legacy group codes migrated successfully.": "Успешно мигрировано устаревших кодов групп: {{count}}."
   }
 }

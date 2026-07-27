@@ -5461,6 +5461,19 @@
     "Failed to load native extension": "Failed to load native extension",
     "Independent": "Independent",
     "Independent group": "Independent group",
-    "Independent groups must be selected alone.": "Independent groups must be selected alone."
+    "Independent groups must be selected alone.": "Independent groups must be selected alone.",
+    "All application instances must be upgraded to the same version and configuration writes should be paused before migration.": "All application instances must be upgraded to the same version and configuration writes should be paused before migration.",
+    "Checking legacy group codes...": "Checking legacy group codes...",
+    "Failed to preview group code migration": "Failed to preview group code migration",
+    "Migrate group codes": "Migrate group codes",
+    "Migrate legacy codes": "Migrate legacy codes",
+    "Migrate legacy group codes": "Migrate legacy group codes",
+    "Migrating group codes...": "Migrating group codes...",
+    "Migration is blocked by these conflicts:": "Migration is blocked by these conflicts:",
+    "No legacy group codes need migration.": "No legacy group codes need migration.",
+    "Preview and replace legacy group codes with stable numeric IDs.": "Preview and replace legacy group codes with stable numeric IDs.",
+    "{{channels}} channels, {{tokens}} tokens, {{users}} users, {{abilities}} ability records, {{plans}} plans, and {{subscriptions}} subscriptions are affected.": "{{channels}} channels, {{tokens}} tokens, {{users}} users, {{abilities}} ability records, {{plans}} plans, and {{subscriptions}} subscriptions are affected.",
+    "{{count}} group codes will be migrated.": "{{count}} group codes will be migrated.",
+    "{{count}} legacy group codes migrated successfully.": "{{count}} legacy group codes migrated successfully."
   }
 }

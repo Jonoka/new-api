@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -1061,7 +1062,7 @@ func TestSaveGroupConfigDeleteRetryIsIdempotent(t *testing.T) {
 func TestSaveGroupConfigNewGroupRetryIsIdempotent(t *testing.T) {
 	setupGroupBindingsTest(t)
 	config := GroupConfig{
-		Code:   "retry-new-group",
+		Code:   "group_2",
 		Name:   "可重试新分组",
 		Ratio:  0.8,
 		Status: GroupStatusActive,
@@ -1069,21 +1070,73 @@ func TestSaveGroupConfigNewGroupRetryIsIdempotent(t *testing.T) {
 	if err := SaveGroupConfig([]GroupConfig{config}, nil); err != nil {
 		t.Fatalf("首次创建分组失败: %v", err)
 	}
-	if err := SaveGroupConfig([]GroupConfig{config}, nil); err != nil {
-		t.Fatalf("缺少返回 ID 后按相同 code 重试应幂等成功: %v", err)
+	retry := config
+	retry.Code = "group_3"
+	if err := SaveGroupConfig([]GroupConfig{retry}, nil); err != nil {
+		t.Fatalf("缺少返回 ID 后按相同显示名称重试应幂等成功: %v", err)
 	}
 	var groups []Group
-	if err := DB.Where("code = ?", config.Code).Find(&groups).Error; err != nil {
+	if err := DB.Where("name = ?", config.Name).Find(&groups).Error; err != nil {
 		t.Fatalf("读取重试创建结果失败: %v", err)
 	}
-	if len(groups) != 1 || groups[0].Name != config.Name || groups[0].Ratio != config.Ratio {
+	if len(groups) != 1 || groups[0].Ratio != config.Ratio || groups[0].Code != strconv.Itoa(groups[0].Id) {
 		t.Fatalf("重试创建产生重复或错误数据: %#v", groups)
 	}
+	if groups[0].Code == config.Code || groups[0].Code == retry.Code {
+		t.Fatalf("请求临时 code 被错误持久化: %#v", groups[0])
+	}
 
-	conflicting := config
-	conflicting.Name = "冲突名称"
-	if err := SaveGroupConfig([]GroupConfig{conflicting}, nil); err == nil {
-		t.Fatal("相同 code 但不同名称不应被当作幂等重试")
+	// 接口响应丢失后，客户端也可能携带已返回过的真实数字 code 重试。
+	codeRetry := config
+	codeRetry.Code = groups[0].Code
+	if err := SaveGroupConfig([]GroupConfig{codeRetry}, nil); err != nil {
+		t.Fatalf("按相同数字 code 和名称重试应幂等成功: %v", err)
+	}
+}
+
+func TestSaveGroupConfigRejectsTemporaryCodeOwnedByExistingGroupOrAlias(t *testing.T) {
+	_, vipGroup := setupGroupBindingsTest(t)
+	if err := DB.Create(&GroupAlias{Alias: "occupied-temporary-alias", GroupId: vipGroup.Id}).Error; err != nil {
+		t.Fatalf("创建冲突历史别名失败: %v", err)
+	}
+
+	for _, temporaryCode := range []string{vipGroup.Code, "occupied-temporary-alias"} {
+		t.Run(temporaryCode, func(t *testing.T) {
+			err := SaveGroupConfig([]GroupConfig{{
+				Code:   temporaryCode,
+				Name:   "不应创建的新分组",
+				Ratio:  1,
+				Status: GroupStatusActive,
+			}}, nil)
+			if err == nil || !strings.Contains(err.Error(), "已属于分组") {
+				t.Fatalf("被现有 code/alias 占用的临时 code 应报冲突，实际错误: %v", err)
+			}
+			var count int64
+			if err := DB.Model(&Group{}).Where("name = ?", "不应创建的新分组").Count(&count).Error; err != nil {
+				t.Fatalf("统计冲突后的分组失败: %v", err)
+			}
+			if count != 0 {
+				t.Fatalf("临时 code 冲突后仍创建了分组: %d", count)
+			}
+		})
+	}
+}
+
+func TestSaveGroupConfigDoesNotTreatLegacySameNameAsNewGroupRetry(t *testing.T) {
+	setupGroupBindingsTest(t)
+	legacy := Group{Code: "legacy-same-name", Name: "旧式同名分组", Ratio: 1, Status: GroupStatusActive}
+	if err := DB.Create(&legacy).Error; err != nil {
+		t.Fatalf("创建旧式同名分组失败: %v", err)
+	}
+
+	err := SaveGroupConfig([]GroupConfig{{
+		Code:   "group_99",
+		Name:   legacy.Name,
+		Ratio:  1,
+		Status: GroupStatusActive,
+	}}, nil)
+	if err == nil || !strings.Contains(err.Error(), "旧式标识") {
+		t.Fatalf("旧式同名分组不应被当成新式网络重试，实际错误: %v", err)
 	}
 }
 
@@ -1349,8 +1402,11 @@ func TestSaveGroupConfigWithOptionsCommitsGroupsAndOptionsAtomically(t *testing.
 	}
 
 	var group Group
-	if err := DB.First(&group, "code = ?", newGroupCode).Error; err != nil {
+	if err := DB.First(&group, "name = ?", "原子选项新分组").Error; err != nil {
 		t.Fatalf("读取原子创建的分组失败: %v", err)
+	}
+	if group.Code != strconv.Itoa(group.Id) {
+		t.Fatalf("新分组 code 未跟随数据库 ID: %#v", group)
 	}
 	var storedOptions []Option
 	if err := DB.Where("key IN ?", []string{"AutoGroupConfig", "DefaultUseAutoGroup", "TopupGroupRatio"}).Find(&storedOptions).Error; err != nil {
@@ -1360,8 +1416,15 @@ func TestSaveGroupConfigWithOptionsCommitsGroupsAndOptionsAtomically(t *testing.
 	for _, option := range storedOptions {
 		optionByKey[option.Key] = option.Value
 	}
-	if optionByKey["DefaultUseAutoGroup"] != "true" || optionByKey["TopupGroupRatio"] != topupValue {
+	var storedTopup map[string]float64
+	if err := common.UnmarshalJsonStr(optionByKey["TopupGroupRatio"], &storedTopup); err != nil {
+		t.Fatalf("解析原子保存的充值倍率失败: %v", err)
+	}
+	if optionByKey["DefaultUseAutoGroup"] != "true" || storedTopup[group.Code] != 2 {
 		t.Fatalf("原子保存的选项错误: %#v", optionByKey)
+	}
+	if _, retainedTemporaryCode := storedTopup[newGroupCode]; retainedTemporaryCode {
+		t.Fatalf("充值倍率仍保留请求临时 code: %#v", storedTopup)
 	}
 	var autoConfig setting.AutoGroupConfig
 	if err := common.UnmarshalJsonStr(optionByKey["AutoGroupConfig"], &autoConfig); err != nil {
@@ -1374,8 +1437,189 @@ func TestSaveGroupConfigWithOptionsCommitsGroupsAndOptionsAtomically(t *testing.
 	runtimeDefault := common.OptionMap["DefaultUseAutoGroup"]
 	runtimeTopup := common.OptionMap["TopupGroupRatio"]
 	common.OptionMapRWMutex.RUnlock()
-	if runtimeDefault != "true" || runtimeTopup != topupValue || !setting.DefaultUseAutoGroup {
+	if runtimeDefault != "true" || runtimeTopup != optionByKey["TopupGroupRatio"] || !setting.DefaultUseAutoGroup {
 		t.Fatalf("事务提交后运行时选项未同步: default=%q topup=%q enabled=%v", runtimeDefault, runtimeTopup, setting.DefaultUseAutoGroup)
+	}
+}
+
+func TestSaveGroupConfigRewritesAllNewGroupOptionReferencesToIDCode(t *testing.T) {
+	setupGroupBindingsTest(t)
+
+	common.OptionMapRWMutex.Lock()
+	oldOptionMap := common.OptionMap
+	common.OptionMap = make(map[string]string)
+	common.OptionMapRWMutex.Unlock()
+	oldTopupGroupRatio := common.TopupGroupRatio2JSONString()
+	oldGroupGroupRatio := ratio_setting.GroupGroupRatio2JSONString()
+	oldSpecialUsableGroup := ratio_setting.GroupSpecialUsableGroup2JSONString()
+	t.Cleanup(func() {
+		_ = common.UpdateTopupGroupRatioByJSONString(oldTopupGroupRatio)
+		_ = ratio_setting.UpdateGroupGroupRatioByJSONString(oldGroupGroupRatio)
+		_ = ratio_setting.UpdateGroupSpecialUsableGroupByJSONString(oldSpecialUsableGroup)
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = oldOptionMap
+		common.OptionMapRWMutex.Unlock()
+	})
+
+	const temporaryCode = "group_2"
+	_, err := SaveGroupConfigWithOptionsAndResult(
+		[]GroupConfig{{
+			Code:   temporaryCode,
+			Name:   "高级配置引用新分组",
+			Ratio:  0.75,
+			Status: GroupStatusActive,
+		}},
+		nil,
+		map[string]string{
+			groupGroupRatioOptionKey: fmt.Sprintf(
+				`{"%s":{"default":0.8},"default":{"%s":0.9}}`,
+				temporaryCode,
+				temporaryCode,
+			),
+			"TopupGroupRatio": fmt.Sprintf(`{"%s":2}`, temporaryCode),
+			"group_ratio_setting.group_special_usable_group": fmt.Sprintf(
+				`{"%s":{"+:default":"owner"},"default":{"+:%s":"include","-:%s":"exclude"}}`,
+				temporaryCode,
+				temporaryCode,
+				temporaryCode,
+			),
+		},
+	)
+	if err != nil {
+		t.Fatalf("保存带临时分组引用的高级配置失败: %v", err)
+	}
+
+	var group Group
+	if err := DB.First(&group, "name = ?", "高级配置引用新分组").Error; err != nil {
+		t.Fatalf("读取新分组失败: %v", err)
+	}
+	if group.Code != strconv.Itoa(group.Id) {
+		t.Fatalf("新分组 code 未使用数据库 ID: %#v", group)
+	}
+
+	keys := []string{
+		groupGroupRatioOptionKey,
+		layeredGroupGroupRatioOptionKey,
+		"TopupGroupRatio",
+		"group_ratio_setting.group_special_usable_group",
+	}
+	var options []Option
+	if err := DB.Where(commonKeyCol+" IN ?", keys).Find(&options).Error; err != nil {
+		t.Fatalf("读取改写后的高级配置失败: %v", err)
+	}
+	byKey := make(map[string]string, len(options))
+	for _, option := range options {
+		byKey[option.Key] = option.Value
+	}
+
+	for _, key := range []string{groupGroupRatioOptionKey, layeredGroupGroupRatioOptionKey} {
+		var ratios map[string]map[string]float64
+		if err := common.UnmarshalJsonStr(byKey[key], &ratios); err != nil {
+			t.Fatalf("解析 %s 失败: %v", key, err)
+		}
+		if ratios[group.Code]["default"] != 0.8 || ratios["default"][group.Code] != 0.9 {
+			t.Fatalf("%s 未完整改写新分组引用: %#v", key, ratios)
+		}
+		if _, exists := ratios[temporaryCode]; exists {
+			t.Fatalf("%s 仍保留临时 owner code: %#v", key, ratios)
+		}
+		if _, exists := ratios["default"][temporaryCode]; exists {
+			t.Fatalf("%s 仍保留临时 target code: %#v", key, ratios)
+		}
+	}
+
+	var topupRatios map[string]float64
+	if err := common.UnmarshalJsonStr(byKey["TopupGroupRatio"], &topupRatios); err != nil {
+		t.Fatalf("解析充值倍率失败: %v", err)
+	}
+	if topupRatios[group.Code] != 2 {
+		t.Fatalf("充值倍率未改写为数字 code: %#v", topupRatios)
+	}
+	if _, exists := topupRatios[temporaryCode]; exists {
+		t.Fatalf("充值倍率仍保留临时 code: %#v", topupRatios)
+	}
+
+	var specialGroups map[string]map[string]string
+	if err := common.UnmarshalJsonStr(
+		byKey["group_ratio_setting.group_special_usable_group"],
+		&specialGroups,
+	); err != nil {
+		t.Fatalf("解析特殊可用分组失败: %v", err)
+	}
+	if specialGroups[group.Code]["+:default"] != "owner" ||
+		specialGroups["default"]["+:"+group.Code] != "include" ||
+		specialGroups["default"]["-:"+group.Code] != "exclude" {
+		t.Fatalf("特殊可用分组未完整改写新分组引用: %#v", specialGroups)
+	}
+	if _, exists := specialGroups[temporaryCode]; exists {
+		t.Fatalf("特殊可用分组仍保留临时 owner code: %#v", specialGroups)
+	}
+}
+
+func TestSaveGroupConfigSkipsOccupiedIDCodeInSameTransaction(t *testing.T) {
+	defaultGroup, _ := setupGroupBindingsTest(t)
+	codeHolder := &Group{Code: "4", Name: "数字标识占用者", Ratio: 1, Status: GroupStatusActive}
+	if err := DB.Create(codeHolder).Error; err != nil {
+		t.Fatalf("创建数字标识占用者失败: %v", err)
+	}
+	if codeHolder.Id != 3 {
+		t.Fatalf("冲突测试前置 ID 不符合预期: %#v", codeHolder)
+	}
+
+	_, err := SaveGroupConfigWithOptionsAndResult(
+		[]GroupConfig{
+			{
+				Id:     defaultGroup.Id,
+				Code:   defaultGroup.Code,
+				Name:   "已提交的默认分组名称",
+				Ratio:  defaultGroup.Ratio,
+				Status: GroupStatusActive,
+			},
+			{
+				Code:   "group_2",
+				Name:   "最终标识冲突的新分组",
+				Ratio:  1,
+				Status: GroupStatusActive,
+			},
+		},
+		nil,
+		map[string]string{"TopupGroupRatio": `{"group_2":2}`},
+	)
+	if err != nil {
+		t.Fatalf("数字 code 冲突后应在同一事务跳过并继续分配: %v", err)
+	}
+
+	var storedDefault Group
+	if err := DB.First(&storedDefault, defaultGroup.Id).Error; err != nil {
+		t.Fatalf("读取保存后的默认分组失败: %v", err)
+	}
+	var created Group
+	if err := DB.First(&created, "name = ?", "最终标识冲突的新分组").Error; err != nil {
+		t.Fatalf("读取跳过冲突 ID 后的新分组失败: %v", err)
+	}
+	if created.Id != 5 || created.Code != "5" {
+		t.Fatalf("未跳过被占用的数字 code 4: %#v", created)
+	}
+	if storedDefault.Name != "已提交的默认分组名称" {
+		t.Fatalf("跳过冲突 ID 后其它分组修改未提交: %q", storedDefault.Name)
+	}
+	var placeholders int64
+	if err := DB.Model(&Group{}).Where("code LIKE ? OR name LIKE ?", "__group_code_pending_%", "__group_name_pending_%").Count(&placeholders).Error; err != nil {
+		t.Fatalf("统计占位分组失败: %v", err)
+	}
+	if placeholders != 0 {
+		t.Fatalf("保存后仍残留事务占位分组: %d", placeholders)
+	}
+	var option Option
+	if err := DB.First(&option, commonKeyCol+" = ?", "TopupGroupRatio").Error; err != nil {
+		t.Fatalf("读取改写后的充值倍率失败: %v", err)
+	}
+	var ratios map[string]float64
+	if err := common.UnmarshalJsonStr(option.Value, &ratios); err != nil {
+		t.Fatalf("解析改写后的充值倍率失败: %v", err)
+	}
+	if ratios[created.Code] != 2 {
+		t.Fatalf("高级配置未改写为跳过冲突后的最终 code: %#v", ratios)
 	}
 }
 
@@ -1608,7 +1852,7 @@ func TestSaveGroupConfigWithOptionsRollsBackAllChangesOnInvalidReference(t *test
 		t.Fatalf("读取回滚后的默认分组失败: %v", err)
 	}
 	var createdCount int64
-	if err := DB.Model(&Group{}).Where("code = ?", "atomic-rollback-new").Count(&createdCount).Error; err != nil {
+	if err := DB.Model(&Group{}).Where("name = ?", "不应提交的新分组").Count(&createdCount).Error; err != nil {
 		t.Fatalf("统计回滚后的新分组失败: %v", err)
 	}
 	var storedOption Option
