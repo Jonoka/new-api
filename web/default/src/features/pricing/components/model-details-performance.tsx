@@ -304,7 +304,6 @@ export function ModelDetailsPerformance(props: {
                     <UptimeSparkline
                       size='sm'
                       series={uptimeByGroup[perf.group] ?? []}
-                      overallRate={perf.success_rate}
                     />
                   </TableCell>
                 </TableRow>

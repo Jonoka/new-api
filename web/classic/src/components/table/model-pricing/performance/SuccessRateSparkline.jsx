@@ -24,9 +24,12 @@ import {
   formatBucketTime,
   formatLatency,
   formatSuccessRate,
+  getAvailabilityStatusHex,
   getStatusRateTextClass,
   getStatusSegmentHex,
-  getAvailabilityStatusHex,
+  getSuccessRateHex,
+  getSuccessRateTextClass,
+  normalizePerformanceSeries,
   STATUS_SEGMENT_COUNT,
 } from './utils';
 
@@ -40,11 +43,15 @@ const SuccessRateSparkline = ({
   className = '',
   availabilityTone = false,
   signalStyle = false,
+  aggregateWindow = false,
 }) => {
   const windowEndTs = Math.trunc(Date.now() / 1000);
   const points = useMemo(() => {
-    return buildStatusSegments(series, windowEndTs, maxPoints);
-  }, [maxPoints, series, windowEndTs]);
+    if (aggregateWindow) {
+      return buildStatusSegments(series, windowEndTs, maxPoints);
+    }
+    return normalizePerformanceSeries(series).slice(-Math.max(1, maxPoints));
+  }, [aggregateWindow, maxPoints, series, windowEndTs]);
 
   if (!Array.isArray(series) || series.length === 0) {
     return (
@@ -52,13 +59,31 @@ const SuccessRateSparkline = ({
     );
   }
 
+  const fallbackOverall = aggregateWindow
+    ? points.reduce((sum, point) => sum + (point.success_rate ?? 0), 0) /
+      Math.max(1, points.filter((point) => point.sample_count > 0).length)
+    : points.reduce((sum, point) => sum + point.success_rate, 0) /
+      Math.max(1, points.length);
   const computedOverall = Number.isFinite(Number(overall))
     ? Number(overall)
-    : points.reduce((sum, point) => sum + (point.success_rate ?? 0), 0) /
-      Math.max(1, points.filter((point) => point.sample_count > 0).length);
+    : fallbackOverall;
   const barHeights = buildLatencyBarHeights(points);
-  const barWidth = signalStyle || compact ? 'w-1' : 'w-2';
-  const gap = signalStyle ? 'gap-0.5' : 'gap-1';
+  const barWidth = signalStyle
+    ? 'w-1'
+    : aggregateWindow
+      ? compact
+        ? 'w-1'
+        : 'w-2'
+      : compact
+        ? 'w-0.5'
+        : 'w-1';
+  const gap = signalStyle
+    ? 'gap-0.5'
+    : aggregateWindow
+      ? 'gap-1'
+      : compact
+        ? 'gap-px'
+        : 'gap-[2px]';
   const height = signalStyle ? 'h-4' : compact ? 'h-3.5' : 'h-4';
 
   return (
@@ -77,26 +102,33 @@ const SuccessRateSparkline = ({
           <span
             key={`${point.ts}-${point.success_rate}`}
             className={`flex items-end ${barWidth} ${height}`}
-            title={`${formatBucketTime(point.ts)} – ${formatBucketTime(
-              point.end_ts,
-            )} · ${
-              point.sample_count > 0
-                ? `${formatLatency(point.avg_latency_ms)} · ${formatSuccessRate(
-                    point.success_rate,
-                    2,
-                  )}`
-                : '—'
-            }`}
+            title={
+              aggregateWindow
+                ? `${formatBucketTime(point.ts)} – ${formatBucketTime(
+                    point.end_ts,
+                  )} · ${
+                    point.sample_count > 0
+                      ? `${formatLatency(
+                          point.avg_latency_ms,
+                        )} · ${formatSuccessRate(point.success_rate, 2)}`
+                      : '—'
+                  }`
+                : `${formatBucketTime(point.ts)} · ${formatLatency(
+                    point.avg_latency_ms,
+                  )} · ${formatSuccessRate(point.success_rate, 2)}`
+            }
           >
             <span
               className={`w-full ${signalStyle ? 'rounded-full' : 'rounded-sm'}`}
               style={{
                 backgroundColor:
-                  point.sample_count > 0
-                    ? availabilityTone
+                  aggregateWindow && point.sample_count <= 0
+                    ? 'var(--semi-color-fill-1)'
+                    : availabilityTone
                       ? getAvailabilityStatusHex(point.success_rate)
-                      : getStatusSegmentHex(point.success_rate)
-                    : 'var(--semi-color-fill-1)',
+                      : aggregateWindow
+                        ? getStatusSegmentHex(point.success_rate)
+                        : getSuccessRateHex(point.success_rate),
                 height: signalStyle
                   ? `${8 + Math.min(index, 2) * 2}px`
                   : `${barHeights[index] || 50}%`,
@@ -107,9 +139,11 @@ const SuccessRateSparkline = ({
       </div>
       {showOverall && (
         <span
-          className={`whitespace-nowrap font-mono font-semibold leading-none tabular-nums ${compact ? 'text-[11px]' : 'text-xs'} ${getStatusRateTextClass(
-            computedOverall,
-          )}`}
+          className={`whitespace-nowrap font-mono font-semibold leading-none tabular-nums ${compact ? 'text-[11px]' : 'text-xs'} ${
+            aggregateWindow
+              ? getStatusRateTextClass(computedOverall)
+              : getSuccessRateTextClass(computedOverall)
+          }`}
         >
           {formatSuccessRate(computedOverall)}
         </span>

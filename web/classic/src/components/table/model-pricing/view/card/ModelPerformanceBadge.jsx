@@ -77,6 +77,7 @@ const ModelPerformanceBadge = ({ performance, t, isMobile = false }) => {
           showOverall={false}
           availabilityTone
           signalStyle
+          aggregateWindow
           className={isMobile ? 'justify-start' : 'justify-end'}
         />
       </div>

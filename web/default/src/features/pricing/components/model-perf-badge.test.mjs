@@ -24,3 +24,14 @@ test('Default 模型卡片把性能摘要放在右侧并隐藏整体百分比', 
   assert.match(statusSegmentsSource, /'w-1 rounded-full'/)
   assert.match(statusSegmentsSource, /\['h-2', 'h-2\.5', 'h-3'\]/)
 })
+
+test('Default 性能详情保留原始逐点状态条', () => {
+  const source = readFileSync(
+    resolve(root, 'model-details-uptime-sparkline.tsx'),
+    'utf8'
+  )
+
+  assert.match(source, /props\.series\.map\(\(day\) =>/)
+  assert.match(source, /const barWidth = size === 'sm' \? 'w-\[3px\]' : 'w-1'/)
+  assert.doesNotMatch(source, /StatusSegments/)
+})
