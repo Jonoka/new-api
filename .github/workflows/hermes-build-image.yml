@@ -35,7 +35,7 @@ jobs:
 
       - name: Run targeted async image tests
         run: |
-          go test ./controller ./dto ./model ./relay ./relay/channel/openai ./relay/channel/task/sora ./service
+          go test ./controller ./dto ./model ./relay ./relay/channel/openai ./relay/channel/task/sora ./service ./service/openaicompat ./setting/reasoning
 
       - name: Resolve image tags
         id: tags
