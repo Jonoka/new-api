@@ -469,9 +469,26 @@ func shouldTrySameGroupAfterAuthUnavailable(c *gin.Context) bool {
 	return true
 }
 
+func consumeResponsesPreOutputCapacityRetry(c *gin.Context) bool {
+	if c == nil || !c.GetBool(string(constant.ContextKeyResponsesPreOutputRetry)) {
+		return false
+	}
+	c.Set(string(constant.ContextKeyResponsesPreOutputRetry), false)
+	return true
+}
+
 func shouldRetryWithReason(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) retryDecision {
 	if openaiErr == nil {
 		return retryDecision{Reason: "nil_error"}
+	}
+	if consumeResponsesPreOutputCapacityRetry(c) {
+		if retryTimes <= 0 {
+			return retryDecision{Reason: "retry_exhausted"}
+		}
+		if _, ok := c.Get("specific_channel_id"); ok {
+			return retryDecision{Reason: "specific_channel"}
+		}
+		return retryDecision{Retry: true, Reason: "responses_capacity_fallback"}
 	}
 	if shouldFastFallbackGroup(c, openaiErr) {
 		if relayInfo, ok := c.Get("relay_info"); ok {

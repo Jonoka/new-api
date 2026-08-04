@@ -70,4 +70,8 @@ const (
 	// ContextKeyLanguage stores the user's language preference for i18n
 	ContextKeyLanguage ContextKey = "language"
 	ContextKeyIsStream ContextKey = "is_stream"
+
+	// ContextKeyResponsesPreOutputRetry marks a native Responses capacity
+	// failure that occurred before any client-visible output was committed.
+	ContextKeyResponsesPreOutputRetry ContextKey = "responses_pre_output_retry"
 )

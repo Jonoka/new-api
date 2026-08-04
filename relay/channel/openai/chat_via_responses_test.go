@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
@@ -244,4 +245,93 @@ func TestOaiResponsesStreamHandlerFallsBackToEstimatedPromptTokensWithOutput(t *
 	require.Equal(t, 9, usage.PromptTokens)
 	require.Greater(t, usage.CompletionTokens, 0)
 	require.Equal(t, usage.PromptTokens+usage.CompletionTokens, usage.TotalTokens)
+}
+
+func TestOaiResponsesStreamHandlerDropsPreOutputNestedCapacityError(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_1","model":"test-model"}}`,
+		`data: {"type":"response.failed","response":{"error":{"code":"model_at_capacity","message":"Selected model is at capacity. Please try a different model."}}}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+	c, recorder, info, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, err.StatusCode)
+	require.True(t, c.GetBool(string(constant.ContextKeyResponsesPreOutputRetry)))
+	require.Empty(t, recorder.Body.String())
+}
+
+func TestOaiResponsesStreamHandlerDropsPreOutputTopLevelCapacityError(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"type":"response.queued"}`,
+		`data: {"type":"error","code":"overloaded","message":"Selected model is at capacity. Please try a different model.","param":"model"}`,
+		"",
+	}, "\n")
+	c, recorder, info, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, err.StatusCode)
+	require.True(t, c.GetBool(string(constant.ContextKeyResponsesPreOutputRetry)))
+	require.Empty(t, recorder.Body.String())
+}
+
+func TestOaiResponsesStreamHandlerFlushesPreambleOnceOnSuccess(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_1","model":"test-model"}}`,
+		`data: {"type":"response.in_progress","response":{"id":"resp_1"}}`,
+		`data: {"type":"response.output_text.delta","delta":"Hi"}`,
+		`data: {"type":"response.completed","response":{"id":"resp_1","model":"test-model"}}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+	c, recorder, info, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+	require.NoError(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 1, strings.Count(recorder.Body.String(), "event: response.created\n"))
+	require.Equal(t, 1, strings.Count(recorder.Body.String(), "event: response.in_progress\n"))
+	require.Equal(t, 1, strings.Count(recorder.Body.String(), "event: response.output_text.delta\n"))
+	require.False(t, c.GetBool(string(constant.ContextKeyResponsesPreOutputRetry)))
+}
+
+func TestOaiResponsesStreamHandlerDoesNotMarkPostOutputCapacityError(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"type":"response.output_text.delta","delta":"Hi"}`,
+		`data: {"type":"response.failed","response":{"error":{"code":"model_at_capacity","message":"Selected model is at capacity"}}}`,
+		"",
+	}, "\n")
+	c, recorder, info, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+	require.NoError(t, err)
+	require.NotNil(t, usage)
+	require.Contains(t, recorder.Body.String(), "event: response.failed\n")
+	require.False(t, c.GetBool(string(constant.ContextKeyResponsesPreOutputRetry)))
+}
+
+func TestOaiResponsesStreamHandlerPreservesPreOutputNonCapacityError(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_1"}}`,
+		`data: {"type":"response.failed","response":{"error":{"code":"invalid_request","message":"Invalid input"}}}`,
+		"",
+	}, "\n")
+	c, recorder, info, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+	require.NoError(t, err)
+	require.NotNil(t, usage)
+	require.Contains(t, recorder.Body.String(), "event: response.created\n")
+	require.Contains(t, recorder.Body.String(), "event: response.failed\n")
+	require.False(t, c.GetBool(string(constant.ContextKeyResponsesPreOutputRetry)))
 }

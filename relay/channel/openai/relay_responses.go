@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -16,6 +17,59 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+const responsesPreambleBufferLimit = 16
+
+type responsesPendingEvent struct {
+	response dto.ResponsesStreamResponse
+	data     string
+}
+
+func isResponsesPreambleEvent(eventType string) bool {
+	switch eventType {
+	case "response.created", "response.queued", "response.in_progress":
+		return true
+	default:
+		return false
+	}
+}
+
+func responsesStreamError(streamResponse dto.ResponsesStreamResponse) *types.OpenAIError {
+	if streamResponse.Response != nil {
+		if openAIError := streamResponse.Response.GetOpenAIError(); openAIError != nil {
+			return openAIError
+		}
+	}
+	if streamResponse.Type != "error" && streamResponse.Code == nil && streamResponse.Message == "" && streamResponse.Param == "" {
+		return nil
+	}
+	return &types.OpenAIError{
+		Type:    "error",
+		Code:    streamResponse.Code,
+		Message: streamResponse.Message,
+		Param:   streamResponse.Param,
+	}
+}
+
+func isResponsesCapacityError(openAIError *types.OpenAIError) bool {
+	if openAIError == nil {
+		return false
+	}
+	code := strings.ToLower(fmt.Sprint(openAIError.Code))
+	message := strings.Join(strings.Fields(strings.ToLower(openAIError.Message)), " ")
+	return strings.Contains(code, "capacity") ||
+		strings.Contains(code, "overloaded") ||
+		strings.Contains(message, "selected model is at capacity")
+}
+
+func isResponsesErrorEvent(eventType string) bool {
+	switch eventType {
+	case "error", "response.error", "response.failed":
+		return true
+	default:
+		return false
+	}
+}
 
 func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
@@ -79,8 +133,21 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 
 	var usage = &dto.Usage{}
 	var responseTextBuilder strings.Builder
+	var streamErr *types.NewAPIError
+	pending := make([]responsesPendingEvent, 0, 3)
+	clientOutputCommitted := false
+	flushPending := func() {
+		for _, event := range pending {
+			sendResponsesStreamData(c, event.response, event.data)
+		}
+		pending = nil
+	}
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+		if streamErr != nil {
+			sr.Stop(streamErr)
+			return
+		}
 		if c.GetBool("sensitive_response_stream_blocked") {
 			sr.Stop(service.ErrSensitiveResponseBlocked)
 			return
@@ -95,6 +162,23 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			logger.LogError(c, "failed to unmarshal stream response: "+err.Error())
 			sr.Error(err)
 			return
+		}
+		if isResponsesErrorEvent(streamResponse.Type) {
+			if openAIError := responsesStreamError(streamResponse); isResponsesCapacityError(openAIError) && !clientOutputCommitted && c.Writer.Size() <= 0 {
+				c.Set(string(constant.ContextKeyResponsesPreOutputRetry), true)
+				pending = nil
+				streamErr = types.WithOpenAIError(*openAIError, http.StatusServiceUnavailable)
+				sr.Stop(streamErr)
+				return
+			}
+		}
+		if !clientOutputCommitted {
+			if isResponsesPreambleEvent(streamResponse.Type) && len(pending) < responsesPreambleBufferLimit {
+				pending = append(pending, responsesPendingEvent{response: streamResponse, data: normalizedData})
+				return
+			}
+			flushPending()
+			clientOutputCommitted = true
 		}
 		sendResponsesStreamData(c, streamResponse, normalizedData)
 		if c.GetBool("sensitive_response_stream_blocked") {
@@ -131,6 +215,13 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 		}
 	})
+
+	if streamErr != nil {
+		return nil, streamErr
+	}
+	if !clientOutputCommitted {
+		flushPending()
+	}
 
 	if usage.CompletionTokens == 0 {
 		// 计算输出文本的 token 数量

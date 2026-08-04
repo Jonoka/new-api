@@ -156,6 +156,43 @@ func TestShouldRetryWithReasonReportsBlockingReason(t *testing.T) {
 	})
 }
 
+func TestShouldRetryWithReasonResponsesCapacityFallback(t *testing.T) {
+	t.Run("bypasses received response and affinity guards", func(t *testing.T) {
+		ctx := buildRelayRetryTestContext()
+		ctx.Set(string(constant.ContextKeyResponsesPreOutputRetry), true)
+		ctx.Set("channel_affinity_skip_retry_on_failure", true)
+		ctx.Set("relay_info", &relaycommon.RelayInfo{ReceivedResponseCount: 2})
+		err := types.WithOpenAIError(types.OpenAIError{Code: "model_at_capacity", Message: "Selected model is at capacity"}, http.StatusServiceUnavailable)
+
+		decision := shouldRetryWithReason(ctx, err, 2)
+
+		require.True(t, decision.Retry)
+		require.Equal(t, "responses_capacity_fallback", decision.Reason)
+		require.False(t, ctx.GetBool(string(constant.ContextKeyResponsesPreOutputRetry)))
+	})
+
+	t.Run("preserves specific channel and retry budget guards", func(t *testing.T) {
+		for _, test := range []struct {
+			name   string
+			setup  func(*gin.Context)
+			times  int
+			reason string
+		}{
+			{name: "specific channel", setup: func(ctx *gin.Context) { ctx.Set("specific_channel_id", "13") }, times: 2, reason: "specific_channel"},
+			{name: "retry exhausted", setup: func(*gin.Context) {}, times: 0, reason: "retry_exhausted"},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				ctx := buildRelayRetryTestContext()
+				ctx.Set(string(constant.ContextKeyResponsesPreOutputRetry), true)
+				test.setup(ctx)
+				decision := shouldRetryWithReason(ctx, types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, http.StatusServiceUnavailable), test.times)
+				require.False(t, decision.Retry)
+				require.Equal(t, test.reason, decision.Reason)
+			})
+		}
+	})
+}
+
 func TestShouldMarkLitePoolExhausted(t *testing.T) {
 	ctx := buildRelayRetryTestContext()
 	ctx.Set("use_channel", []string{"33", "14"})
