@@ -295,8 +295,7 @@ func TestOaiResponsesStreamHandlerFlushesPreambleOnceOnSuccess(t *testing.T) {
 
 	usage, err := OaiResponsesStreamHandler(c, info, resp)
 
-	t.Logf("flush success: usage=%#v err=%#v error=%q body=%q", usage, err, err, recorder.Body.String())
-	require.NoError(t, err)
+	require.Nil(t, err)
 	require.NotNil(t, usage)
 	require.Equal(t, 1, strings.Count(recorder.Body.String(), "event: response.created\n"))
 	require.Equal(t, 1, strings.Count(recorder.Body.String(), "event: response.in_progress\n"))
@@ -314,8 +313,7 @@ func TestOaiResponsesStreamHandlerDoesNotMarkPostOutputCapacityError(t *testing.
 
 	usage, err := OaiResponsesStreamHandler(c, info, resp)
 
-	t.Logf("post-output capacity: usage=%#v err=%#v error=%q body=%q", usage, err, err, recorder.Body.String())
-	require.NoError(t, err)
+	require.Nil(t, err)
 	require.NotNil(t, usage)
 	require.Contains(t, recorder.Body.String(), "event: response.failed\n")
 	require.False(t, c.GetBool(string(constant.ContextKeyResponsesPreOutputRetry)))
@@ -331,8 +329,7 @@ func TestOaiResponsesStreamHandlerPreservesPreOutputNonCapacityError(t *testing.
 
 	usage, err := OaiResponsesStreamHandler(c, info, resp)
 
-	t.Logf("non-capacity: usage=%#v err=%#v error=%q body=%q", usage, err, err, recorder.Body.String())
-	require.NoError(t, err)
+	require.Nil(t, err)
 	require.NotNil(t, usage)
 	require.Contains(t, recorder.Body.String(), "event: response.created\n")
 	require.Contains(t, recorder.Body.String(), "event: response.failed\n")
