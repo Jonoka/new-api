@@ -40,6 +40,9 @@ func responsesStreamError(streamResponse dto.ResponsesStreamResponse) *types.Ope
 			return openAIError
 		}
 	}
+	if openAIError := dto.GetOpenAIError(streamResponse.Error); openAIError != nil {
+		return openAIError
+	}
 	if streamResponse.Type != "error" && streamResponse.Code == nil && streamResponse.Message == "" && streamResponse.Param == "" {
 		return nil
 	}

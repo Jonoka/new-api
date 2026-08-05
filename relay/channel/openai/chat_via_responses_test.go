@@ -282,6 +282,25 @@ func TestOaiResponsesStreamHandlerDropsPreOutputTopLevelCapacityError(t *testing
 	require.Empty(t, recorder.Body.String())
 }
 
+func TestOaiResponsesStreamHandlerDropsPreOutputTopLevelNestedCapacityError(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_1","model":"test-model"}}`,
+		`data: {"type":"error","error":{"type":"server_error","code":"model_at_capacity","message":"Selected model is at capacity. Please try a different model."},"sequence_number":3}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+	c, recorder, info, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, err.StatusCode)
+	require.Equal(t, types.ErrorCode("model_at_capacity"), err.GetErrorCode())
+	require.True(t, c.GetBool(string(constant.ContextKeyResponsesPreOutputRetry)))
+	require.Empty(t, recorder.Body.String())
+}
+
 func TestOaiResponsesStreamHandlerFlushesPreambleOnceOnSuccess(t *testing.T) {
 	body := strings.Join([]string{
 		`data: {"type":"response.created","response":{"id":"resp_1","model":"test-model"}}`,
