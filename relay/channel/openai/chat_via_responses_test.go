@@ -446,6 +446,23 @@ func TestOaiResponsesStreamHandlerDoesNotRetryCapacityErrorWithOutputPayload(t *
 	}
 }
 
+func TestOaiResponsesStreamHandlerRetriesCapacityErrorWithEmptyOutputPayload(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_1"}}`,
+		`data: {"type":"response.failed","response":{"error":{"code":"model_at_capacity","message":"Selected model is at capacity"},"output":[]}}`,
+		"",
+	}, "\n")
+	c, recorder, info, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, err.StatusCode)
+	require.True(t, c.GetBool(string(constant.ContextKeyResponsesPreOutputRetry)))
+	require.Empty(t, recorder.Body.String())
+}
+
 func TestOaiResponsesStreamHandlerDoesNotRetryTopLevelCapacityErrorWithOutputPayload(t *testing.T) {
 	body := strings.Join([]string{
 		`data: {"type":"error","code":"model_at_capacity","message":"Selected model is at capacity","output":[{"type":"message","content":[{"type":"output_text","text":"partial output"}]}]}`,

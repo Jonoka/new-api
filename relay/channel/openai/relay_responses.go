@@ -111,7 +111,24 @@ func responsesOutputHasMeaningfulPayload(output *dto.ResponsesOutput) bool {
 
 func responsesRawPayloadIsMeaningful(payload []byte) bool {
 	normalized := bytes.TrimSpace(payload)
-	return len(normalized) > 0 && !bytes.Equal(normalized, []byte("null")) && !bytes.Equal(normalized, []byte(`""`))
+	if len(normalized) == 0 || bytes.Equal(normalized, []byte("null")) {
+		return false
+	}
+	switch normalized[0] {
+	case '{':
+		var object map[string]any
+		if err := common.Unmarshal(normalized, &object); err == nil {
+			return len(object) > 0
+		}
+	case '[':
+		var array []any
+		if err := common.Unmarshal(normalized, &array); err == nil {
+			return len(array) > 0
+		}
+	case '"':
+		return strings.TrimSpace(common.JsonRawMessageToString(normalized)) != ""
+	}
+	return true
 }
 
 func responsesStreamHasMeaningfulPayload(streamResponse dto.ResponsesStreamResponse) bool {
