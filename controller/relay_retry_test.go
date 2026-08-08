@@ -161,7 +161,7 @@ func TestShouldRetryWithReasonResponsesCapacityFallback(t *testing.T) {
 		ctx := buildRelayRetryTestContext()
 		ctx.Set(string(constant.ContextKeyResponsesPreOutputRetry), true)
 		ctx.Set("channel_affinity_skip_retry_on_failure", true)
-		ctx.Set("relay_info", &relaycommon.RelayInfo{ReceivedResponseCount: 2})
+		ctx.Set("relay_info", &relaycommon.RelayInfo{ReceivedResponseCount: 5})
 		err := types.WithOpenAIError(types.OpenAIError{Code: "model_at_capacity", Message: "Selected model is at capacity"}, http.StatusServiceUnavailable)
 
 		decision := shouldRetryWithReason(ctx, err, 2)
@@ -188,6 +188,7 @@ func TestShouldRetryWithReasonResponsesCapacityFallback(t *testing.T) {
 				decision := shouldRetryWithReason(ctx, types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, http.StatusServiceUnavailable), test.times)
 				require.False(t, decision.Retry)
 				require.Equal(t, test.reason, decision.Reason)
+				require.False(t, ctx.GetBool(string(constant.ContextKeyResponsesPreOutputRetry)))
 			})
 		}
 	})

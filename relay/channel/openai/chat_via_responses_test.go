@@ -250,6 +250,10 @@ func TestOaiResponsesStreamHandlerFallsBackToEstimatedPromptTokensWithOutput(t *
 func TestOaiResponsesStreamHandlerDropsPreOutputNestedCapacityError(t *testing.T) {
 	body := strings.Join([]string{
 		`data: {"type":"response.created","response":{"id":"resp_1","model":"test-model"}}`,
+		`data: {"type":"response.in_progress","response":{"id":"resp_1"}}`,
+		`data: {"type":"response.output_item.added","item":{"id":"rs_1","type":"reasoning","status":"in_progress"}}`,
+		`data: {"type":"response.content_part.added","item_id":"msg_1","part":{"type":"output_text"}}`,
+		`data: {"type":"response.web_search_call.searching","item_id":"ws_1"}`,
 		`data: {"type":"response.failed","response":{"error":{"code":"model_at_capacity","message":"Selected model is at capacity. Please try a different model."}}}`,
 		`data: [DONE]`,
 		"",
@@ -268,6 +272,7 @@ func TestOaiResponsesStreamHandlerDropsPreOutputNestedCapacityError(t *testing.T
 func TestOaiResponsesStreamHandlerDropsPreOutputTopLevelCapacityError(t *testing.T) {
 	body := strings.Join([]string{
 		`data: {"type":"response.queued"}`,
+		`data: {"type":"response.reasoning_summary_text.delta","delta":""}`,
 		`data: {"type":"error","code":"overloaded","message":"Selected model is at capacity. Please try a different model.","param":"model"}`,
 		"",
 	}, "\n")
@@ -305,6 +310,8 @@ func TestOaiResponsesStreamHandlerFlushesPreambleOnceOnSuccess(t *testing.T) {
 	body := strings.Join([]string{
 		`data: {"type":"response.created","response":{"id":"resp_1","model":"test-model"}}`,
 		`data: {"type":"response.in_progress","response":{"id":"resp_1"}}`,
+		`data: {"type":"response.output_item.added","item":{"id":"msg_1","type":"message","status":"in_progress"}}`,
+		`data: {"type":"response.content_part.added","item_id":"msg_1","part":{"type":"output_text"}}`,
 		`data: {"type":"response.output_text.delta","delta":"Hi"}`,
 		`data: {"type":"response.completed","response":{"id":"resp_1","model":"test-model"}}`,
 		`data: [DONE]`,
@@ -316,16 +323,132 @@ func TestOaiResponsesStreamHandlerFlushesPreambleOnceOnSuccess(t *testing.T) {
 
 	require.Nil(t, err)
 	require.NotNil(t, usage)
-	require.Equal(t, 1, strings.Count(recorder.Body.String(), "event: response.created\n"))
-	require.Equal(t, 1, strings.Count(recorder.Body.String(), "event: response.in_progress\n"))
-	require.Equal(t, 1, strings.Count(recorder.Body.String(), "event: response.output_text.delta\n"))
+	streamBody := recorder.Body.String()
+	for _, eventType := range []string{
+		"response.created",
+		"response.in_progress",
+		"response.output_item.added",
+		"response.content_part.added",
+		"response.output_text.delta",
+		"response.completed",
+	} {
+		require.Equal(t, 1, strings.Count(streamBody, "event: "+eventType+"\n"))
+	}
+	require.Less(t, strings.Index(streamBody, "event: response.created\n"), strings.Index(streamBody, "event: response.in_progress\n"))
+	require.Less(t, strings.Index(streamBody, "event: response.in_progress\n"), strings.Index(streamBody, "event: response.output_item.added\n"))
+	require.Less(t, strings.Index(streamBody, "event: response.output_item.added\n"), strings.Index(streamBody, "event: response.content_part.added\n"))
+	require.Less(t, strings.Index(streamBody, "event: response.content_part.added\n"), strings.Index(streamBody, "event: response.output_text.delta\n"))
 	require.False(t, c.GetBool(string(constant.ContextKeyResponsesPreOutputRetry)))
 }
 
+func TestOaiResponsesStreamHandlerAccountsForBufferedToolEventOnlyWhenCommitted(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		terminalEvent string
+		wantCalls     int
+		wantRetry     bool
+	}{
+		{
+			name:          "successful stream",
+			terminalEvent: `{"type":"response.completed","response":{"id":"resp_1"}}`,
+			wantCalls:     1,
+		},
+		{
+			name:          "discarded capacity attempt",
+			terminalEvent: `{"type":"response.failed","response":{"error":{"code":"model_at_capacity","message":"Selected model is at capacity"}}}`,
+			wantRetry:     true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			body := strings.Join([]string{
+				`data: {"type":"response.output_item.done","item":{"id":"ws_1","type":"web_search_call","status":"completed"}}`,
+				"data: " + test.terminalEvent,
+				"",
+			}, "\n")
+			c, recorder, info, resp := setupResponsesStreamTest(body)
+			tool := &relaycommon.BuildInToolInfo{ToolName: dto.BuildInToolWebSearchPreview}
+			info.ResponsesUsageInfo = &relaycommon.ResponsesUsageInfo{
+				BuiltInTools: map[string]*relaycommon.BuildInToolInfo{dto.BuildInToolWebSearchPreview: tool},
+			}
+
+			usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+			require.Equal(t, test.wantCalls, tool.CallCount)
+			require.Equal(t, test.wantRetry, c.GetBool(string(constant.ContextKeyResponsesPreOutputRetry)))
+			if test.wantRetry {
+				require.Nil(t, usage)
+				require.Error(t, err)
+				require.Empty(t, recorder.Body.String())
+			} else {
+				require.NotNil(t, usage)
+				require.Nil(t, err)
+				require.Contains(t, recorder.Body.String(), "event: response.output_item.done\n")
+			}
+		})
+	}
+}
+
 func TestOaiResponsesStreamHandlerDoesNotMarkPostOutputCapacityError(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		event string
+	}{
+		{name: "text", event: `{"type":"response.output_text.delta","delta":"Hi"}`},
+		{name: "reasoning", event: `{"type":"response.reasoning_summary_text.delta","delta":"Thinking"}`},
+		{name: "tool arguments", event: `{"type":"response.function_call_arguments.delta","delta":"{\"city\":\"Paris\"}"}`},
+		{name: "raw tool arguments", event: `{"type":"response.function_call_arguments.done","arguments":{"city":"Paris"}}`},
+		{name: "image", event: `{"type":"response.image_generation_call.partial_image","partial_image_b64":"aW1hZ2U="}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			body := strings.Join([]string{
+				`data: {"type":"response.created","response":{"id":"resp_1"}}`,
+				"data: " + test.event,
+				`data: {"type":"response.failed","response":{"error":{"code":"model_at_capacity","message":"Selected model is at capacity"}}}`,
+				"",
+			}, "\n")
+			c, recorder, info, resp := setupResponsesStreamTest(body)
+
+			usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+			require.Nil(t, err)
+			require.NotNil(t, usage)
+			require.Contains(t, recorder.Body.String(), "event: response.failed\n")
+			require.False(t, c.GetBool(string(constant.ContextKeyResponsesPreOutputRetry)))
+		})
+	}
+}
+
+func TestOaiResponsesStreamHandlerDoesNotRetryCapacityErrorWithOutputPayload(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		output string
+	}{
+		{name: "text", output: `{"type":"message","content":[{"type":"output_text","text":"partial output"}]}`},
+		{name: "refusal", output: `{"type":"message","content":[{"type":"refusal","refusal":"cannot comply"}]}`},
+		{name: "custom tool input", output: `{"type":"custom_tool_call","input":"run diagnostics"}`},
+		{name: "computer action", output: `{"type":"computer_call","action":{"type":"click","x":10,"y":20}}`},
+		{name: "image result object", output: `{"type":"image_generation_call","result":{"b64_json":"aW1hZ2U="}}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			body := strings.Join([]string{
+				`data: {"type":"response.failed","response":{"error":{"code":"model_at_capacity","message":"Selected model is at capacity"},"output":[` + test.output + `]}}`,
+				"",
+			}, "\n")
+			c, recorder, info, resp := setupResponsesStreamTest(body)
+
+			usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+			require.Nil(t, err)
+			require.NotNil(t, usage)
+			require.Contains(t, recorder.Body.String(), "event: response.failed\n")
+			require.False(t, c.GetBool(string(constant.ContextKeyResponsesPreOutputRetry)))
+		})
+	}
+}
+
+func TestOaiResponsesStreamHandlerDoesNotRetryTopLevelCapacityErrorWithOutputPayload(t *testing.T) {
 	body := strings.Join([]string{
-		`data: {"type":"response.output_text.delta","delta":"Hi"}`,
-		`data: {"type":"response.failed","response":{"error":{"code":"model_at_capacity","message":"Selected model is at capacity"}}}`,
+		`data: {"type":"error","code":"model_at_capacity","message":"Selected model is at capacity","output":[{"type":"message","content":[{"type":"output_text","text":"partial output"}]}]}`,
 		"",
 	}, "\n")
 	c, recorder, info, resp := setupResponsesStreamTest(body)
@@ -334,7 +457,7 @@ func TestOaiResponsesStreamHandlerDoesNotMarkPostOutputCapacityError(t *testing.
 
 	require.Nil(t, err)
 	require.NotNil(t, usage)
-	require.Contains(t, recorder.Body.String(), "event: response.failed\n")
+	require.Contains(t, recorder.Body.String(), "event: error\n")
 	require.False(t, c.GetBool(string(constant.ContextKeyResponsesPreOutputRetry)))
 }
 
@@ -342,6 +465,44 @@ func TestOaiResponsesStreamHandlerPreservesPreOutputNonCapacityError(t *testing.
 	body := strings.Join([]string{
 		`data: {"type":"response.created","response":{"id":"resp_1"}}`,
 		`data: {"type":"response.failed","response":{"error":{"code":"invalid_request","message":"Invalid input"}}}`,
+		"",
+	}, "\n")
+	c, recorder, info, resp := setupResponsesStreamTest(body)
+
+	usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Contains(t, recorder.Body.String(), "event: response.created\n")
+	require.Contains(t, recorder.Body.String(), "event: response.failed\n")
+	require.False(t, c.GetBool(string(constant.ContextKeyResponsesPreOutputRetry)))
+}
+
+func TestOaiResponsesStreamHandlerCommitsWhenPreOutputEventLimitIsExceeded(t *testing.T) {
+	lines := make([]string, 0, responsesPreOutputMaxEvents+3)
+	for i := 0; i <= responsesPreOutputMaxEvents; i++ {
+		lines = append(lines, `data: {"type":"response.created","response":{"id":"resp_1"}}`)
+	}
+	lines = append(lines,
+		`data: {"type":"response.failed","response":{"error":{"code":"model_at_capacity","message":"Selected model is at capacity"}}}`,
+		"",
+	)
+	c, recorder, info, resp := setupResponsesStreamTest(strings.Join(lines, "\n"))
+
+	usage, err := OaiResponsesStreamHandler(c, info, resp)
+
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, responsesPreOutputMaxEvents+1, strings.Count(recorder.Body.String(), "event: response.created\n"))
+	require.Contains(t, recorder.Body.String(), "event: response.failed\n")
+	require.False(t, c.GetBool(string(constant.ContextKeyResponsesPreOutputRetry)))
+}
+
+func TestOaiResponsesStreamHandlerCommitsWhenPreOutputByteLimitIsExceeded(t *testing.T) {
+	largeMetadata := strings.Repeat("x", responsesPreOutputMaxBytes)
+	body := strings.Join([]string{
+		`data: {"type":"response.created","metadata":"` + largeMetadata + `"}`,
+		`data: {"type":"response.failed","response":{"error":{"code":"model_at_capacity","message":"Selected model is at capacity"}}}`,
 		"",
 	}, "\n")
 	c, recorder, info, resp := setupResponsesStreamTest(body)

@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,19 +19,183 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const responsesPreambleBufferLimit = 16
+const (
+	responsesPreOutputMaxEvents = 64
+	responsesPreOutputMaxBytes  = 256 << 10
+)
+
+type responsesStreamEventClass string
+
+const (
+	responsesEventStructural      responsesStreamEventClass = "structural"
+	responsesEventMeaningful      responsesStreamEventClass = "meaningful_output"
+	responsesEventTerminalSuccess responsesStreamEventClass = "terminal_success"
+	responsesEventError           responsesStreamEventClass = "error"
+	responsesEventOther           responsesStreamEventClass = "other"
+)
 
 type responsesPendingEvent struct {
 	response dto.ResponsesStreamResponse
 	data     string
 }
 
-func isResponsesPreambleEvent(eventType string) bool {
-	switch eventType {
-	case "response.created", "response.queued", "response.in_progress":
-		return true
-	default:
+type responsesCommittedEventHandler func(dto.ResponsesStreamResponse)
+
+type responsesPreOutputGate struct {
+	pending               []responsesPendingEvent
+	pendingBytes          int
+	clientOutputCommitted bool
+}
+
+func newResponsesPreOutputGate() *responsesPreOutputGate {
+	return &responsesPreOutputGate{
+		pending: make([]responsesPendingEvent, 0, 8),
+	}
+}
+
+func (g *responsesPreOutputGate) canBuffer(data string) bool {
+	return len(g.pending) < responsesPreOutputMaxEvents &&
+		g.pendingBytes+len(data) <= responsesPreOutputMaxBytes
+}
+
+func (g *responsesPreOutputGate) buffer(streamResponse dto.ResponsesStreamResponse, data string) {
+	g.pending = append(g.pending, responsesPendingEvent{response: streamResponse, data: data})
+	g.pendingBytes += len(data)
+}
+
+func (g *responsesPreOutputGate) flush(c *gin.Context, handleCommitted responsesCommittedEventHandler) {
+	for _, event := range g.pending {
+		sendResponsesStreamData(c, event.response, event.data)
+		if c.GetBool("sensitive_response_stream_blocked") {
+			break
+		}
+		if handleCommitted != nil {
+			handleCommitted(event.response)
+		}
+	}
+	g.discard()
+}
+
+func (g *responsesPreOutputGate) discard() {
+	g.pending = nil
+	g.pendingBytes = 0
+}
+
+func (g *responsesPreOutputGate) commit(c *gin.Context, eventClass responsesStreamEventClass, reason string, handleCommitted responsesCommittedEventHandler) {
+	bufferedEvents := len(g.pending)
+	bufferedBytes := g.pendingBytes
+	g.flush(c, handleCommitted)
+	g.clientOutputCommitted = true
+	logger.LogDebug(c, "responses pre-output gate transition=committed event_class=%s reason=%s buffered_events=%d buffered_bytes=%d",
+		eventClass, reason, bufferedEvents, bufferedBytes)
+}
+
+func responsesOutputHasMeaningfulPayload(output *dto.ResponsesOutput) bool {
+	if output == nil {
 		return false
+	}
+	if output.ArgumentsString() != "" ||
+		responsesRawPayloadIsMeaningful(output.Input) ||
+		responsesRawPayloadIsMeaningful(output.Result) ||
+		responsesRawPayloadIsMeaningful(output.Action) ||
+		responsesRawPayloadIsMeaningful(output.Output) {
+		return true
+	}
+	for _, content := range output.Content {
+		if content.Text != "" || content.Refusal != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func responsesRawPayloadIsMeaningful(payload []byte) bool {
+	normalized := bytes.TrimSpace(payload)
+	return len(normalized) > 0 && !bytes.Equal(normalized, []byte("null")) && !bytes.Equal(normalized, []byte(`""`))
+}
+
+func responsesStreamHasMeaningfulPayload(streamResponse dto.ResponsesStreamResponse) bool {
+	if streamResponse.Delta != "" || streamResponse.Text != "" || streamResponse.Refusal != "" ||
+		responsesRawPayloadIsMeaningful(streamResponse.Arguments) || responsesRawPayloadIsMeaningful(streamResponse.Input) ||
+		streamResponse.Transcript != "" || streamResponse.PartialImageB64 != "" ||
+		responsesRawPayloadIsMeaningful(streamResponse.Output) {
+		return true
+	}
+	if streamResponse.Part != nil && (streamResponse.Part.Text != "" || streamResponse.Part.Refusal != "") {
+		return true
+	}
+	if !isResponsesErrorEvent(streamResponse.Type) &&
+		(streamResponse.Type == "response.code_interpreter_call.code.done" || streamResponse.Type == "response.code_interpreter_call.code.delta") {
+		if code, ok := streamResponse.Code.(string); ok && code != "" {
+			return true
+		}
+	}
+	if responsesOutputHasMeaningfulPayload(streamResponse.Item) {
+		return true
+	}
+	if streamResponse.Response != nil {
+		for i := range streamResponse.Response.Output {
+			if responsesOutputHasMeaningfulPayload(&streamResponse.Response.Output[i]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isResponsesToolLifecycleEvent(eventType string) bool {
+	prefixes := []string{
+		"response.web_search_call.",
+		"response.file_search_call.",
+		"response.code_interpreter_call.",
+		"response.computer_tool_call.",
+		"response.image_generation_call.",
+	}
+	for _, prefix := range prefixes {
+		if !strings.HasPrefix(eventType, prefix) {
+			continue
+		}
+		switch strings.TrimPrefix(eventType, prefix) {
+		case "in_progress", "searching", "interpreting", "generating", "completed":
+			return true
+		}
+	}
+	return false
+}
+
+func classifyResponsesStreamEvent(streamResponse dto.ResponsesStreamResponse) responsesStreamEventClass {
+	if isResponsesErrorEvent(streamResponse.Type) {
+		return responsesEventError
+	}
+	if streamResponse.Type == "response.completed" || streamResponse.Type == "response.done" {
+		return responsesEventTerminalSuccess
+	}
+	if responsesStreamHasMeaningfulPayload(streamResponse) {
+		return responsesEventMeaningful
+	}
+
+	switch streamResponse.Type {
+	case "response.created", "response.queued", "response.in_progress",
+		dto.ResponsesOutputTypeItemAdded, dto.ResponsesOutputTypeItemDone,
+		"response.content_part.added", "response.content_part.done",
+		"response.reasoning_summary_part.added", "response.reasoning_summary_part.done",
+		"response.reasoning_summary_text.delta", "response.reasoning_summary_text.done",
+		"response.reasoning_text.delta", "response.reasoning_text.done",
+		"response.output_text.delta", "response.output_text.done",
+		"response.refusal.delta", "response.refusal.done",
+		"response.function_call_arguments.delta", "response.function_call_arguments.done",
+		"response.custom_tool_call_input.delta", "response.custom_tool_call_input.done",
+		"response.mcp_call_arguments.delta", "response.mcp_call_arguments.done",
+		"response.audio.delta", "response.audio.done",
+		"response.audio.transcript.delta", "response.audio.transcript.done",
+		"response.code_interpreter_call.code.delta", "response.code_interpreter_call.code.done",
+		"response.image_generation_call.partial_image", "response.output_text.annotation.added":
+		return responsesEventStructural
+	default:
+		if isResponsesToolLifecycleEvent(streamResponse.Type) {
+			return responsesEventStructural
+		}
+		return responsesEventOther
 	}
 }
 
@@ -137,13 +302,31 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	var usage = &dto.Usage{}
 	var responseTextBuilder strings.Builder
 	var streamErr *types.NewAPIError
-	pending := make([]responsesPendingEvent, 0, 3)
-	clientOutputCommitted := false
-	flushPending := func() {
-		for _, event := range pending {
-			sendResponsesStreamData(c, event.response, event.data)
+	gate := newResponsesPreOutputGate()
+	handleCommittedEvent := func(streamResponse dto.ResponsesStreamResponse) {
+		switch streamResponse.Type {
+		case "response.completed", "response.done", "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
+			if streamResponse.Response != nil {
+				if streamResponse.Type == "response.completed" || streamResponse.Type == "response.done" {
+					service.BindOpenAIResponsesContinuationResponseIDFromInfo(info, streamResponse.Response.ID)
+				}
+				applyResponsesUsageToOpenAIUsage(usage, streamResponse.Response)
+				if streamResponse.Response.HasImageGenerationCall() {
+					c.Set("image_generation_call", true)
+					c.Set("image_generation_call_quality", streamResponse.Response.GetQuality())
+					c.Set("image_generation_call_size", streamResponse.Response.GetSize())
+				}
+			}
+		case "response.output_text.delta":
+			responseTextBuilder.WriteString(streamResponse.Delta)
+		case dto.ResponsesOutputTypeItemDone:
+			if streamResponse.Item != nil && streamResponse.Item.Type == dto.BuildInCallWebSearchCall &&
+				info != nil && info.ResponsesUsageInfo != nil && info.ResponsesUsageInfo.BuiltInTools != nil {
+				if webSearchTool, exists := info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview]; exists && webSearchTool != nil {
+					webSearchTool.CallCount++
+				}
+			}
 		}
-		pending = nil
 	}
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
@@ -166,64 +349,48 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Error(err)
 			return
 		}
-		if isResponsesErrorEvent(streamResponse.Type) {
-			if openAIError := responsesStreamError(streamResponse); isResponsesCapacityError(openAIError) && !clientOutputCommitted && c.Writer.Size() <= 0 {
+		eventClass := classifyResponsesStreamEvent(streamResponse)
+		if !gate.clientOutputCommitted && c.Writer.Size() > 0 {
+			gate.commit(c, eventClass, "downstream_write_detected", handleCommittedEvent)
+		}
+		if eventClass == responsesEventError {
+			if openAIError := responsesStreamError(streamResponse); isResponsesCapacityError(openAIError) &&
+				!responsesStreamHasMeaningfulPayload(streamResponse) &&
+				!gate.clientOutputCommitted && c.Writer.Size() <= 0 {
+				bufferedEvents := len(gate.pending)
+				bufferedBytes := gate.pendingBytes
 				c.Set(string(constant.ContextKeyResponsesPreOutputRetry), true)
-				pending = nil
+				gate.discard()
+				logger.LogInfo(c, fmt.Sprintf("responses pre-output gate transition=capacity_fallback event_class=error buffered_events=%d buffered_bytes=%d", bufferedEvents, bufferedBytes))
 				streamErr = types.WithOpenAIError(*openAIError, http.StatusServiceUnavailable)
 				sr.Stop(streamErr)
 				return
 			}
 		}
-		if !clientOutputCommitted {
-			if isResponsesPreambleEvent(streamResponse.Type) && len(pending) < responsesPreambleBufferLimit {
-				pending = append(pending, responsesPendingEvent{response: streamResponse, data: normalizedData})
+		if !gate.clientOutputCommitted {
+			if eventClass == responsesEventStructural && gate.canBuffer(normalizedData) {
+				gate.buffer(streamResponse, normalizedData)
 				return
 			}
-			flushPending()
-			clientOutputCommitted = true
+			if eventClass == responsesEventStructural {
+				logger.LogWarn(c, fmt.Sprintf("responses pre-output gate transition=buffer_limit event_class=structural buffered_events=%d buffered_bytes=%d next_event_bytes=%d",
+					len(gate.pending), gate.pendingBytes, len(normalizedData)))
+			}
+			gate.commit(c, eventClass, "event_commit", handleCommittedEvent)
 		}
 		sendResponsesStreamData(c, streamResponse, normalizedData)
 		if c.GetBool("sensitive_response_stream_blocked") {
 			sr.Stop(service.ErrSensitiveResponseBlocked)
 			return
 		}
-		switch streamResponse.Type {
-		case "response.completed", "response.done", "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
-			if streamResponse.Response != nil {
-				if streamResponse.Type == "response.completed" || streamResponse.Type == "response.done" {
-					service.BindOpenAIResponsesContinuationResponseIDFromInfo(info, streamResponse.Response.ID)
-				}
-				applyResponsesUsageToOpenAIUsage(usage, streamResponse.Response)
-				if streamResponse.Response.HasImageGenerationCall() {
-					c.Set("image_generation_call", true)
-					c.Set("image_generation_call_quality", streamResponse.Response.GetQuality())
-					c.Set("image_generation_call_size", streamResponse.Response.GetSize())
-				}
-			}
-		case "response.output_text.delta":
-			// 处理输出文本
-			responseTextBuilder.WriteString(streamResponse.Delta)
-		case dto.ResponsesOutputTypeItemDone:
-			// 函数调用处理
-			if streamResponse.Item != nil {
-				switch streamResponse.Item.Type {
-				case dto.BuildInCallWebSearchCall:
-					if info != nil && info.ResponsesUsageInfo != nil && info.ResponsesUsageInfo.BuiltInTools != nil {
-						if webSearchTool, exists := info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview]; exists && webSearchTool != nil {
-							webSearchTool.CallCount++
-						}
-					}
-				}
-			}
-		}
+		handleCommittedEvent(streamResponse)
 	})
 
 	if streamErr != nil {
 		return nil, streamErr
 	}
-	if !clientOutputCommitted {
-		flushPending()
+	if !gate.clientOutputCommitted {
+		gate.commit(c, responsesEventStructural, "stream_end", handleCommittedEvent)
 	}
 
 	if usage.CompletionTokens == 0 {
