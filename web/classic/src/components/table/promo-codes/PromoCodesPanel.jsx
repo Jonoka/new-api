@@ -33,7 +33,10 @@ import {
   Typography,
 } from '@douyinfe/semi-ui';
 import { Plus, TicketPercent } from 'lucide-react';
-import { usePromoCodesData, PROMO_CODE_STATUS } from '../../../hooks/promo-codes/usePromoCodesData';
+import {
+  usePromoCodesData,
+  PROMO_CODE_STATUS,
+} from '../../../hooks/promo-codes/usePromoCodesData';
 import { getCurrencyConfig, timestamp2string } from '../../../helpers';
 import {
   displayAmountToQuota,
@@ -56,7 +59,8 @@ const defaultFormValues = {
 };
 
 const isExpired = (record) =>
-  record.expired_time > 0 && record.expired_time < Math.floor(Date.now() / 1000);
+  record.expired_time > 0 &&
+  record.expired_time < Math.floor(Date.now() / 1000);
 
 const formatDiscount = (record) => {
   if (record.discount_type === 'percent') {
@@ -92,7 +96,9 @@ const toFormValues = (record) => ({
 const buildPayload = (values) => ({
   id: values.id,
   name: String(values.name || '').trim(),
-  code: String(values.code || '').trim().toUpperCase(),
+  code: String(values.code || '')
+    .trim()
+    .toUpperCase(),
   discount_type: values.discount_type || 'percent',
   discount_value:
     values.discount_type === 'fixed'
@@ -162,7 +168,8 @@ const PromoCodesPanel = () => {
     if (
       !values.applies_to_topup &&
       !values.applies_to_all_subscription &&
-      (!values.subscription_plan_ids || values.subscription_plan_ids.length === 0)
+      (!values.subscription_plan_ids ||
+        values.subscription_plan_ids.length === 0)
     ) {
       return Promise.reject(t('优惠码必须至少指定一个适用范围'));
     }
@@ -251,7 +258,11 @@ const PromoCodesPanel = () => {
         fixed: 'right',
         render: (_, record) => (
           <Space wrap>
-            <Button size='small' type='tertiary' onClick={() => openEdit(record)}>
+            <Button
+              size='small'
+              type='tertiary'
+              onClick={() => openEdit(record)}
+            >
               {t('编辑')}
             </Button>
             {record.status === PROMO_CODE_STATUS.ENABLED ? (
@@ -316,7 +327,11 @@ const PromoCodesPanel = () => {
               <Button onClick={() => searchPromoCodes(searchKeyword)}>
                 {t('搜索')}
               </Button>
-              <Button type='primary' icon={<Plus size={14} />} onClick={openCreate}>
+              <Button
+                type='primary'
+                icon={<Plus size={14} />}
+                onClick={openCreate}
+              >
                 {t('创建优惠码')}
               </Button>
             </Space>
@@ -354,7 +369,10 @@ const PromoCodesPanel = () => {
         footer={
           <div className='flex justify-end gap-2'>
             <Button onClick={() => setEditorVisible(false)}>{t('取消')}</Button>
-            <Button type='primary' onClick={() => formApiRef.current?.submitForm()}>
+            <Button
+              type='primary'
+              onClick={() => formApiRef.current?.submitForm()}
+            >
               {t('保存')}
             </Button>
           </div>

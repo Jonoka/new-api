@@ -2582,8 +2582,15 @@ function parseSimpleConditionsBeforeTier(body, tierIndex) {
   if (lastQuestion === -1) return [];
   const lastColon = before.lastIndexOf(':');
   if (lastColon > lastQuestion) return [];
-  const condStart = Math.max(before.lastIndexOf('? ', lastQuestion - 1), before.lastIndexOf(':', lastQuestion - 1)) + 1;
-  const condStr = before.slice(condStart, lastQuestion).trim().replace(/^\(+|\)+$/g, '');
+  const condStart =
+    Math.max(
+      before.lastIndexOf('? ', lastQuestion - 1),
+      before.lastIndexOf(':', lastQuestion - 1),
+    ) + 1;
+  const condStr = before
+    .slice(condStart, lastQuestion)
+    .trim()
+    .replace(/^\(+|\)+$/g, '');
   const conditions = [];
   for (const cp of condStr.split(/\s*&&\s*/)) {
     const cm = cp.trim().match(/^(p|c|len)\s*(<|<=|>|>=)\s*([\d.eE+]+)$/);
@@ -2596,12 +2603,15 @@ export function parseTiersFromExpr(exprStr) {
   if (!exprStr) return [];
   try {
     const { body } = stripExprVersion(exprStr);
-	return extractTierCalls(body).map((call) => {
+    return extractTierCalls(body).map((call) => {
       const tier = parseTierBody(call.expression);
       tier.label = call.label;
-      tier.conditions = parseSimpleConditionsBeforeTier(body, body.indexOf(`tier("${call.label}"`));
-	  return tier;
-	});
+      tier.conditions = parseSimpleConditionsBeforeTier(
+        body,
+        body.indexOf(`tier("${call.label}"`),
+      );
+      return tier;
+    });
   } catch {
     return [];
   }

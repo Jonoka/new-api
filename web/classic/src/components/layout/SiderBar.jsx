@@ -368,14 +368,14 @@ const SiderBar = ({ onNavigate = () => {} }) => {
       return configVisible;
     });
 
-	return [...filteredItems, ...getCustomItemsForSection('chat')];
+    return [...filteredItems, ...getCustomItemsForSection('chat')];
   }, [
     chatItems,
     t,
     isModuleVisible,
     customMenuItems,
-		adminConfig?.chat?.canvasIcon,
-	]);
+    adminConfig?.chat?.canvasIcon,
+  ]);
 
   // 更新路由映射，添加聊天路由
   const updateRouterMapWithChats = (chats) => {

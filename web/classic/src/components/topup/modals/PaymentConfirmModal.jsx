@@ -73,9 +73,19 @@ const PaymentConfirmModal = ({
       title={
         <div className='flex items-center'>
           {payWay === 'bepusdt' ? (
-            <img src='/pay-usdt.svg' alt='USDT' className='mr-2' style={{ width: 18, height: 18 }} />
+            <img
+              src='/pay-usdt.svg'
+              alt='USDT'
+              className='mr-2'
+              style={{ width: 18, height: 18 }}
+            />
           ) : payWay === 'okpay' ? (
-            <img src='/pay-okpay.svg' alt='OKPay' className='mr-2' style={{ width: 18, height: 18 }} />
+            <img
+              src='/pay-okpay.svg'
+              alt='OKPay'
+              className='mr-2'
+              style={{ width: 18, height: 18 }}
+            />
           ) : (
             <CreditCard className='mr-2' size={18} />
           )}

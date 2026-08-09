@@ -8,9 +8,7 @@ const root = dirname(fileURLToPath(import.meta.url));
 const readSource = (...parts) => readFileSync(resolve(root, ...parts), 'utf8');
 
 test('classic root user can create another super administrator', () => {
-  const source = readSource(
-    'components/table/users/modals/AddUserModal.jsx',
-  );
+  const source = readSource('components/table/users/modals/AddUserModal.jsx');
 
   assert.match(source, /field='role'/);
   assert.match(source, /label: t\('超级管理员'\), value: 100/);

@@ -297,7 +297,11 @@ const OtherSetting = () => {
           );
           setShowUpdateModal(false);
         } catch (error) {
-          showError(error?.response?.data?.message || error.message || t('一键更新失败'));
+          showError(
+            error?.response?.data?.message ||
+              error.message ||
+              t('一键更新失败'),
+          );
         } finally {
           setLoadingInput((loadingInput) => ({
             ...loadingInput,

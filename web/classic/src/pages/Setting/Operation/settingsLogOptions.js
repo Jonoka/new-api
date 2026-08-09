@@ -1,6 +1,8 @@
 export function normalizeLogSettingsValue(defaultValue, optionValue) {
   if (typeof defaultValue === 'boolean') {
-    return optionValue === true || optionValue === 'true' || optionValue === '1';
+    return (
+      optionValue === true || optionValue === 'true' || optionValue === '1'
+    );
   }
   return optionValue;
 }
