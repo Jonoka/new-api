@@ -84,5 +84,5 @@ type EmbeddingResponse struct {
 	Object string                  `json:"object"`
 	Data   []EmbeddingResponseItem `json:"data"`
 	Model  string                  `json:"model"`
-	Usage  `json:"usage"`
+	Usage  Usage                   `json:"usage"`
 }

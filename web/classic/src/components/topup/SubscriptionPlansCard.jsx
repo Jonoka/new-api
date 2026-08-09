@@ -86,14 +86,19 @@ const SubscriptionPlansCard = ({
   payMethods = [],
   enableBepusdtTopUp = false,
   bepusdtChains = [],
+  enableOkpayTopUp = false,
   enableOnlineTopUp = false,
   enableStripeTopUp = false,
   enableCreemTopUp = false,
+  enableBalanceSubscription = true,
+  enableBalanceSubscriptionPromo = true,
+  userQuota = 0,
   billingPreference,
   onChangeBillingPreference,
   activeSubscriptions = [],
   allSubscriptions = [],
   reloadSubscriptionSelf,
+  reloadUserQuota,
   invoiceConfig,
   withCard = true,
 }) => {
@@ -126,9 +131,10 @@ const SubscriptionPlansCard = ({
     if (selectedPaymentKind === 'epay' && selectedEpayMethod) {
       return selectedEpayMethod;
     }
+    if (selectedPaymentKind) return selectedPaymentKind;
     if (hasBepusdt) return 'bepusdt';
     if (selectedEpayMethod) return selectedEpayMethod;
-    return 'balance';
+    return enableBalanceSubscription ? 'balance' : '';
   };
 
   const isInvoiceRequestReady = (request) => {
@@ -136,6 +142,17 @@ const SubscriptionPlansCard = ({
       return true;
     }
     if (!invoiceConfig?.enabled) {
+      return false;
+    }
+    const types =
+      Array.isArray(invoiceConfig?.types) && invoiceConfig.types.length > 0
+        ? invoiceConfig.types
+        : ['personal', 'company'];
+    const kinds =
+      Array.isArray(invoiceConfig?.kinds) && invoiceConfig.kinds.length > 0
+        ? invoiceConfig.kinds
+        : ['normal'];
+    if (!types.includes(request.type) || !kinds.includes(request.kind)) {
       return false;
     }
     if (!request.title?.trim()) {
@@ -156,7 +173,12 @@ const SubscriptionPlansCard = ({
         ? invoiceConfig.types
         : ['personal', 'company'];
     const invoiceType = types.includes(request.type) ? request.type : types[0];
-    return types.includes(invoiceType);
+    const kinds =
+      Array.isArray(invoiceConfig?.kinds) && invoiceConfig.kinds.length > 0
+        ? invoiceConfig.kinds
+        : ['normal'];
+    const invoiceKind = kinds.includes(request.kind) ? request.kind : kinds[0];
+    return types.includes(invoiceType) && kinds.includes(invoiceKind);
   };
 
   const buildInvoicePayload = (
@@ -219,9 +241,21 @@ const SubscriptionPlansCard = ({
     setSelectedPlan(p);
     setSelectedEpayMethod(firstEpayMethod);
     setSelectedPaymentKind(
-      hasBepusdt ? 'bepusdt' : firstEpayMethod ? 'epay' : 'balance',
+      enableBalanceSubscription
+        ? 'balance'
+        : firstEpayMethod
+          ? 'epay'
+          : hasBepusdt
+            ? 'bepusdt'
+            : enableOkpayTopUp
+              ? 'okpay'
+              : enableStripeTopUp && p?.plan?.stripe_price_id
+                ? 'stripe'
+                : enableCreemTopUp && p?.plan?.creem_product_id
+                  ? 'creem'
+                  : '',
     );
-    setSelectedBepusdtTradeType(bepusdtChains?.[0]?.trade_type || '');
+    setSelectedBepusdtTradeType('');
     setPromoCode('');
     setPromoDiscount(null);
     setAmountPreview(null);
@@ -274,7 +308,6 @@ const SubscriptionPlansCard = ({
     return code ? { promo_code: code } : {};
   };
 
-
   const handlePromoCodeChange = (value) => {
     setPromoCode(value);
     setPromoDiscount(null);
@@ -293,7 +326,12 @@ const SubscriptionPlansCard = ({
   const handleEpayMethodChange = (value) => {
     setSelectedEpayMethod(value);
     setSelectedPaymentKind('epay');
-    loadAmountPreview(value || 'balance', promoCode.trim(), true, invoiceRequest);
+    loadAmountPreview(
+      value || 'balance',
+      promoCode.trim(),
+      true,
+      invoiceRequest,
+    );
   };
 
   const handleBepusdtTradeTypeChange = (value) => {
@@ -306,7 +344,12 @@ const SubscriptionPlansCard = ({
     setSelectedPaymentKind(kind);
     if (kind === 'epay') {
       setSelectedEpayMethod(value);
-      loadAmountPreview(value || 'balance', promoCode.trim(), true, invoiceRequest);
+      loadAmountPreview(
+        value || 'balance',
+        promoCode.trim(),
+        true,
+        invoiceRequest,
+      );
       return;
     }
     loadAmountPreview(value, promoCode.trim(), true, invoiceRequest);
@@ -314,7 +357,7 @@ const SubscriptionPlansCard = ({
 
   const handleCompletedPurchase = async () => {
     showSuccess(t('购买成功'));
-    await reloadSubscriptionSelf?.();
+    await Promise.all([reloadSubscriptionSelf?.(), reloadUserQuota?.()]);
     closeBuy();
   };
 
@@ -480,6 +523,67 @@ const SubscriptionPlansCard = ({
             : res.data?.message || t('支付失败');
         showError(errorMsg);
       }
+    } catch (e) {
+      showError(t('支付请求失败'));
+    } finally {
+      setPaying(false);
+    }
+  };
+
+  const payOkpay = async () => {
+    if (!ensureInvoiceReady()) return;
+    setSelectedPaymentKind('okpay');
+    setPaying(true);
+    try {
+      const res = await API.post('/api/subscription/okpay/pay', {
+        plan_id: selectedPlan.plan.id,
+        ...buildPromoPayload(),
+        ...buildInvoicePayload(invoiceRequest),
+      });
+      if (res.data?.message === 'success') {
+        if (res.data.completed || res.data.data?.completed) {
+          await handleCompletedPurchase();
+          return;
+        }
+        const paymentUrl = res.data.data?.payment_url;
+        if (paymentUrl) {
+          showSuccess(t('已打开支付页面'));
+          window.location.href = paymentUrl;
+          return;
+        }
+      }
+      const errorMsg =
+        typeof res.data?.data === 'string'
+          ? res.data.data
+          : res.data?.message || t('支付失败');
+      showError(errorMsg);
+    } catch (e) {
+      showError(t('支付请求失败'));
+    } finally {
+      setPaying(false);
+    }
+  };
+
+  const payBalance = async () => {
+    if (!ensureInvoiceReady()) return;
+    if (!enableBalanceSubscription) return;
+    if (!enableBalanceSubscriptionPromo && promoCode.trim()) {
+      showError(t('余额购买订阅暂不支持优惠码'));
+      return;
+    }
+    setSelectedPaymentKind('balance');
+    setPaying(true);
+    try {
+      const res = await API.post('/api/subscription/balance/pay', {
+        plan_id: selectedPlan.plan.id,
+        ...buildPromoPayload(),
+        ...buildInvoicePayload(invoiceRequest),
+      });
+      if (res.data?.success) {
+        await handleCompletedPurchase();
+        return;
+      }
+      showError(res.data?.message || t('支付失败'));
     } catch (e) {
       showError(t('支付请求失败'));
     } finally {
@@ -957,6 +1061,8 @@ const SubscriptionPlansCard = ({
         epayMethods={epayMethods}
         enableBepusdtTopUp={enableBepusdtTopUp}
         bepusdtChains={bepusdtChains}
+        enableOkpayTopUp={enableOkpayTopUp}
+        userQuota={userQuota}
         selectedBepusdtTradeType={selectedBepusdtTradeType}
         setSelectedBepusdtTradeType={handleBepusdtTradeTypeChange}
         selectedPaymentKind={selectedPaymentKind}
@@ -964,6 +1070,8 @@ const SubscriptionPlansCard = ({
         enableOnlineTopUp={enableOnlineTopUp}
         enableStripeTopUp={enableStripeTopUp}
         enableCreemTopUp={enableCreemTopUp}
+        enableBalanceSubscription={enableBalanceSubscription}
+        enableBalanceSubscriptionPromo={enableBalanceSubscriptionPromo}
         purchaseLimitInfo={
           selectedPlan?.plan?.id
             ? {
@@ -984,6 +1092,8 @@ const SubscriptionPlansCard = ({
         onPayStripe={payStripe}
         onPayCreem={payCreem}
         onPayBepusdt={payBepusdt}
+        onPayOkpay={payOkpay}
+        onPayBalance={payBalance}
         onPayEpay={payEpay}
       />
     </>

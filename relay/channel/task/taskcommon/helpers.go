@@ -3,11 +3,15 @@ package taskcommon
 import (
 	"encoding/base64"
 	"fmt"
+	"math"
+	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
 
@@ -43,6 +47,46 @@ func DefaultInt(val, fallback int) int {
 		return fallback
 	}
 	return val
+}
+
+// NormalizeVideoResolution 将常见分辨率参数归一化为计费档位名称。
+// 返回空字符串表示无法识别，调用方应保留原请求或不应用分辨率价格。
+func NormalizeVideoResolution(resolution string) string {
+	resolution = strings.ToLower(strings.TrimSpace(resolution))
+	switch resolution {
+	case "480", "480p", "sd", "854x480":
+		return "480p"
+	case "720", "720p", "hd", "1280x720":
+		return "720p"
+	case "1080", "1080p", "fhd", "full-hd", "full_hd", "1920x1080":
+		return "1080p"
+	case "2k", "2048x1080", "2560x1440":
+		return "2k"
+	case "4k", "3840x2160", "4096x2160":
+		return "4k"
+	}
+	parts := strings.SplitN(resolution, "x", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+	width, widthErr := strconv.Atoi(strings.TrimSpace(parts[0]))
+	height, heightErr := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if widthErr != nil || heightErr != nil || width <= 0 || height <= 0 {
+		return ""
+	}
+	shortSide := min(width, height)
+	switch {
+	case shortSide >= 2160:
+		return "4k"
+	case shortSide >= 1080:
+		return "1080p"
+	case shortSide >= 720:
+		return "720p"
+	case shortSide >= 480:
+		return "480p"
+	default:
+		return ""
+	}
 }
 
 // EncodeLocalTaskID encodes an upstream operation name to a URL-safe base64 string.
@@ -94,4 +138,31 @@ func (BaseBilling) AdjustBillingOnSubmit(_ *relaycommon.RelayInfo, _ []byte) map
 // AdjustBillingOnComplete returns 0 (keep pre-charged amount).
 func (BaseBilling) AdjustBillingOnComplete(_ *model.Task, _ *relaycommon.TaskInfo) int {
 	return 0
+}
+
+// AdjustPerSecondBillingOnComplete 使用上游返回的实际视频时长重算按秒固定价任务。
+// 分辨率等其它倍率沿用提交时已冻结的计费快照，避免轮询期间配置变化影响结算。
+func AdjustPerSecondBillingOnComplete(task *model.Task, taskResult *relaycommon.TaskInfo) int {
+	if task == nil || taskResult == nil || taskResult.DurationSeconds <= 0 {
+		return 0
+	}
+	billing := task.PrivateData.BillingContext
+	if billing == nil || billing.ModelPriceUnit != types.ModelPriceUnitSecond {
+		return 0
+	}
+
+	quotaValue := billing.ModelPrice * common.QuotaPerUnit * billing.GroupRatio * float64(taskResult.DurationSeconds)
+	for key, ratio := range billing.OtherRatios {
+		if key == "seconds" || !(ratio > 0) || math.IsInf(ratio, 1) || ratio == 1 {
+			continue
+		}
+		quotaValue *= ratio
+	}
+
+	if billing.OtherRatios == nil {
+		billing.OtherRatios = make(map[string]float64)
+	}
+	billing.OtherRatios["seconds"] = float64(taskResult.DurationSeconds)
+	quota, _ := common.QuotaFromFloatChecked(quotaValue)
+	return quota
 }

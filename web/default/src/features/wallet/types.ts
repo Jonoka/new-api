@@ -84,6 +84,17 @@ export type OkpayPaymentResponse = ApiResponse<{
   payment_url: string
   trade_no: string
 }>
+export type RetryTopupPaymentResponse = ApiResponse<
+  | Record<string, unknown>
+  | {
+      pay_link?: string
+      checkout_url?: string
+      payment_url?: string
+      trade_no?: string
+    }
+> & {
+  url?: string
+}
 
 /**
  * Creem product configuration
@@ -219,6 +230,10 @@ export interface TopupInfo {
   bepusdt_min_topup?: number
   /** Whether OKPay topup is enabled */
   enable_okpay_topup?: boolean
+  /** Whether subscriptions can be purchased with account balance */
+  enable_balance_subscription?: boolean
+  /** Whether promo codes are allowed for balance subscription purchases */
+  enable_balance_subscription_promo?: boolean
   /** Minimum topup amount for OKPay */
   okpay_min_topup?: number
   /** Whether redemption code usage is enabled */
@@ -332,7 +347,7 @@ export interface UserWalletData {
 /**
  * Topup record status
  */
-export type TopupStatus = 'success' | 'pending' | 'expired'
+export type TopupStatus = 'success' | 'pending' | 'failed' | 'expired'
 
 /**
  * Topup billing record
@@ -342,6 +357,8 @@ export interface TopupRecord {
   id: number
   /** User ID */
   user_id: number
+  /** Username (admin billing history only) */
+  username?: string
   /** Topup amount (quota) */
   amount: number
   /** Payment amount (actual money paid) */
@@ -370,5 +387,12 @@ export interface BillingHistoryResponse {
  * Complete order request (admin only)
  */
 export interface CompleteOrderRequest {
+  trade_no: string
+}
+
+/**
+ * 重新拉起待支付充值订单请求
+ */
+export interface RetryTopupPaymentRequest {
   trade_no: string
 }

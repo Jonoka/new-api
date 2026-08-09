@@ -16,4 +16,17 @@ describe('buildCanvasLaunchUrl', () => {
     )
     assert.equal(url.includes('apiKey'), false)
   })
+
+  test('accepts a configured bare canvas domain', () => {
+    const url = buildCanvasLaunchUrl({
+      canvasOrigin: 'canvas.example.com',
+      newApiOrigin: 'https://maolaoapi.com/',
+      group: 'default',
+    })
+
+    assert.equal(
+      url,
+      'https://canvas.example.com/?mode=newapi&baseUrl=https%3A%2F%2Fmaolaoapi.com%2Fcanvas&group=default'
+    )
+  })
 })

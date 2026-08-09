@@ -14,7 +14,6 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
-	"github.com/QuantumNous/new-api/relay/channel/gemini"
 	"github.com/QuantumNous/new-api/relay/channel/ollama"
 	"github.com/QuantumNous/new-api/service"
 
@@ -167,6 +166,10 @@ func GetAllChannels(c *gin.Context) {
 		}
 	}
 
+	if err := model.HydrateChannelGroupBindings(model.DB, channelData); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	for _, datum := range channelData {
 		clearChannelInfo(datum)
 	}
@@ -416,6 +419,10 @@ func SearchChannels(c *gin.Context) {
 
 	pagedData := channelData[startIdx:endIdx]
 
+	if err := model.HydrateChannelGroupBindings(model.DB, pagedData); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	for _, datum := range pagedData {
 		clearChannelInfo(datum)
 	}
@@ -508,18 +515,24 @@ func validateTwoFactorAuth(twoFA *model.TwoFA, code string) bool {
 }
 
 // validateChannel 通用的渠道校验函数
-func validateChannel(channel *model.Channel, isAdd bool) error {
-	if channel != nil && channel.ConcurrencyLimit != nil && *channel.ConcurrencyLimit < 0 {
+func validateChannel(c *gin.Context, channel *model.Channel, isAdd bool) error {
+	if channel == nil {
+		return fmt.Errorf("channel cannot be empty")
+	}
+	if channel.ConcurrencyLimit != nil && *channel.ConcurrencyLimit < 0 {
 		return fmt.Errorf("并发上限不能小于 0")
 	}
 	// 校验 channel settings
 	if err := channel.ValidateSettings(); err != nil {
 		return fmt.Errorf("渠道额外设置[channel setting] 格式错误：%s", err.Error())
 	}
+	if err := service.ValidateChannelBaseURLNotSelf(c, channel); err != nil {
+		return err
+	}
 
 	// 如果是添加操作，检查 channel 和 key 是否为空
 	if isAdd {
-		if channel == nil || channel.Key == "" {
+		if channel.Key == "" {
 			return fmt.Errorf("channel cannot be empty")
 		}
 
@@ -650,7 +663,7 @@ func AddChannel(c *gin.Context) {
 	}
 
 	// 使用统一的校验函数
-	if err := validateChannel(addChannelRequest.Channel, true); err != nil {
+	if err := validateChannel(c, addChannelRequest.Channel, true); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": err.Error(),
@@ -781,6 +794,7 @@ type ChannelTag struct {
 	ModelMapping     *string `json:"model_mapping"`
 	Models           *string `json:"models"`
 	Groups           *string `json:"groups"`
+	GroupIds         *[]int  `json:"group_ids"`
 	ParamOverride    *string `json:"param_override"`
 	HeaderOverride   *string `json:"header_override"`
 }
@@ -877,7 +891,7 @@ func EditTagChannels(c *gin.Context) {
 		})
 		return
 	}
-	err = model.EditChannelByTag(channelTag.Tag, channelTag.NewTag, channelTag.ModelMapping, channelTag.Models, channelTag.Groups, channelTag.Priority, channelTag.Weight, channelTag.ConcurrencyLimit, channelTag.ParamOverride, channelTag.HeaderOverride)
+	err = model.EditChannelByTag(channelTag.Tag, channelTag.NewTag, channelTag.ModelMapping, channelTag.Models, channelTag.Groups, channelTag.GroupIds, channelTag.Priority, channelTag.Weight, channelTag.ConcurrencyLimit, channelTag.ParamOverride, channelTag.HeaderOverride)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -927,14 +941,38 @@ type PatchChannel struct {
 
 func UpdateChannel(c *gin.Context) {
 	channel := PatchChannel{}
-	err := c.ShouldBindJSON(&channel)
+	rawFields := make(map[string]any)
+	if err := common.UnmarshalBodyReusable(c, &rawFields); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	err := common.UnmarshalBodyReusable(c, &channel)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	_, groupProvided := rawFields["group"]
+	_, groupIDsProvided := rawFields["group_ids"]
+	if rawFields["group"] == nil {
+		groupProvided = false
+	}
+	if rawFields["group_ids"] == nil {
+		groupIDsProvided = false
+	}
+	if groupIDsProvided && len(channel.GroupIds) == 0 {
+		common.ApiError(c, fmt.Errorf("渠道分组不能为空"))
+		return
+	}
+	if groupProvided && !groupIDsProvided && strings.TrimSpace(channel.Group) == "" {
+		common.ApiError(c, fmt.Errorf("渠道分组不能为空"))
+		return
+	}
+	if !groupIDsProvided {
+		channel.GroupIds = nil
+	}
 
 	// 使用统一的校验函数
-	if err := validateChannel(&channel.Channel, false); err != nil {
+	if err := validateChannel(c, &channel.Channel, false); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": err.Error(),
@@ -1058,9 +1096,11 @@ func UpdateChannel(c *gin.Context) {
 
 func FetchModels(c *gin.Context) {
 	var req struct {
-		BaseURL string `json:"base_url"`
-		Type    int    `json:"type"`
-		Key     string `json:"key"`
+		BaseURL        string `json:"base_url"`
+		Type           int    `json:"type"`
+		Key            string `json:"key"`
+		Setting        string `json:"setting"`
+		HeaderOverride string `json:"header_override"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -1071,103 +1111,56 @@ func FetchModels(c *gin.Context) {
 		return
 	}
 
-	baseURL := req.BaseURL
+	baseURL := strings.TrimSpace(req.BaseURL)
 	if baseURL == "" {
 		baseURL = constant.ChannelBaseURLs[req.Type]
 	}
+	baseURL = strings.TrimRight(baseURL, "/")
 
 	// remove line breaks and extra spaces.
 	key := strings.TrimSpace(req.Key)
 	key = strings.Split(key, "\n")[0]
 
-	if req.Type == constant.ChannelTypeOllama {
-		models, err := ollama.FetchOllamaModels(baseURL, key)
-		if err != nil {
+	setting := strings.TrimSpace(req.Setting)
+	if setting != "" {
+		var channelSettings dto.ChannelSettings
+		if err := common.Unmarshal([]byte(setting), &channelSettings); err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
-				"message": fmt.Sprintf("获取Ollama模型失败: %s", err.Error()),
+				"message": fmt.Sprintf("渠道额外设置[channel setting] 格式错误：%s", err.Error()),
 			})
 			return
 		}
+	}
 
-		names := make([]string, 0, len(models))
-		for _, modelInfo := range models {
-			names = append(names, modelInfo.Name)
-		}
-
+	headerOverride := strings.TrimSpace(req.HeaderOverride)
+	if headerOverride != "" && !json.Valid([]byte(headerOverride)) {
 		c.JSON(http.StatusOK, gin.H{
-			"success": true,
-			"data":    names,
+			"success": false,
+			"message": "请求头覆盖必须是合法的 JSON 格式",
 		})
 		return
 	}
 
-	if req.Type == constant.ChannelTypeGemini {
-		models, err := gemini.FetchGeminiModels(baseURL, key, "")
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": fmt.Sprintf("获取Gemini模型失败: %s", err.Error()),
-			})
-			return
-		}
+	channel := &model.Channel{
+		Type:    req.Type,
+		Key:     key,
+		BaseURL: common.GetPointer(baseURL),
+	}
+	if setting != "" {
+		channel.Setting = common.GetPointer(setting)
+	}
+	if headerOverride != "" {
+		channel.HeaderOverride = common.GetPointer(headerOverride)
+	}
 
+	models, err := fetchChannelUpstreamModelIDs(channel)
+	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
-			"success": true,
-			"data":    models,
-		})
-		return
-	}
-
-	client := &http.Client{}
-	url := fmt.Sprintf("%s/v1/models", baseURL)
-
-	request, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
-			"message": err.Error(),
+			"message": fmt.Sprintf("获取模型列表失败: %s", err.Error()),
 		})
 		return
-	}
-
-	request.Header.Set("Authorization", "Bearer "+key)
-
-	response, err := client.Do(request)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": err.Error(),
-		})
-		return
-	}
-	//check status code
-	if response.StatusCode != http.StatusOK {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": "Failed to fetch models",
-		})
-		return
-	}
-	defer response.Body.Close()
-
-	var result struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-
-	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": err.Error(),
-		})
-		return
-	}
-
-	var models []string
-	for _, model := range result.Data {
-		models = append(models, model.ID)
 	}
 
 	c.JSON(http.StatusOK, gin.H{

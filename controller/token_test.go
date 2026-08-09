@@ -1,10 +1,14 @@
 package controller
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +21,7 @@ import (
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/go-redis/redis/v8"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -216,6 +221,51 @@ func decodeAPIResponse(t *testing.T, recorder *httptest.ResponseRecorder) tokenA
 		t.Fatalf("failed to decode api response: %v", err)
 	}
 	return response
+}
+
+func newRedisHashTestClient(fields map[string]string) *redis.Client {
+	return redis.NewClient(&redis.Options{
+		MaxRetries: -1,
+		Dialer: func(context.Context, string, string) (net.Conn, error) {
+			clientConn, serverConn := net.Pipe()
+			go serveRedisHashOnce(serverConn, fields)
+			return clientConn, nil
+		},
+	})
+}
+
+func serveRedisHashOnce(conn net.Conn, fields map[string]string) {
+	defer conn.Close()
+	reader := bufio.NewReader(conn)
+	header, err := reader.ReadString('\n')
+	if err != nil {
+		return
+	}
+	count, err := strconv.Atoi(strings.TrimPrefix(strings.TrimSpace(header), "*"))
+	if err != nil {
+		return
+	}
+	for i := 0; i < count; i++ {
+		lengthHeader, readErr := reader.ReadString('\n')
+		if readErr != nil {
+			return
+		}
+		length, parseErr := strconv.Atoi(strings.TrimPrefix(strings.TrimSpace(lengthHeader), "$"))
+		if parseErr != nil || length < 0 {
+			return
+		}
+		payload := make([]byte, length+2)
+		if _, readErr = io.ReadFull(reader, payload); readErr != nil {
+			return
+		}
+	}
+
+	var response strings.Builder
+	fmt.Fprintf(&response, "*%d\r\n", len(fields)*2)
+	for key, value := range fields {
+		fmt.Fprintf(&response, "$%d\r\n%s\r\n$%d\r\n%s\r\n", len(key), key, len(value), value)
+	}
+	_, _ = io.WriteString(conn, response.String())
 }
 
 func getSQLiteColumnType(t *testing.T, db *gorm.DB, tableName string, columnName string) string {
@@ -505,6 +555,97 @@ func TestUpdateTokenMasksKeyInResponse(t *testing.T) {
 	}
 	if strings.Contains(recorder.Body.String(), token.Key) {
 		t.Fatalf("update response leaked raw token key: %s", recorder.Body.String())
+	}
+}
+
+func TestUpdateTokenStatusOnlyDisablesInvalidLegacyGroup(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	if err := db.AutoMigrate(&model.Group{}, &model.TokenGroupBinding{}); err != nil {
+		t.Fatalf("failed to migrate group binding tables: %v", err)
+	}
+	const invalidGroup = "1' AND SUBSTRING((SELECT username FROM users WHERE role=1 LIMIT 1)"
+	token := &model.Token{
+		Id:             1256,
+		UserId:         1,
+		Key:            "invalidlegacystatus",
+		Name:           "invalid-legacy-status",
+		Status:         common.TokenStatusEnabled,
+		ExpiredTime:    -1,
+		UnlimitedQuota: true,
+		Group:          invalidGroup,
+		GroupMode:      model.TokenGroupModeInherit,
+	}
+	if err := db.Create(token).Error; err != nil {
+		t.Fatalf("failed to create invalid legacy token: %v", err)
+	}
+
+	body := map[string]any{"id": token.Id, "status": common.TokenStatusDisabled}
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPut, "/api/token/?status_only=true", body, token.UserId)
+	UpdateToken(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	if !response.Success {
+		t.Fatalf("expected status-only update to succeed, got message: %s", response.Message)
+	}
+	var stored model.Token
+	if err := db.First(&stored, token.Id).Error; err != nil {
+		t.Fatalf("failed to reload invalid legacy token: %v", err)
+	}
+	if stored.Status != common.TokenStatusDisabled {
+		t.Fatalf("expected disabled status, got %d", stored.Status)
+	}
+	if stored.Group != invalidGroup || stored.GroupMode != model.TokenGroupModeInherit {
+		t.Fatalf("status-only update changed legacy group state: group=%q mode=%q", stored.Group, stored.GroupMode)
+	}
+	var bindingCount int64
+	if err := db.Model(&model.TokenGroupBinding{}).Where("token_id = ?", token.Id).Count(&bindingCount).Error; err != nil {
+		t.Fatalf("failed to count token group bindings: %v", err)
+	}
+	if bindingCount != 0 {
+		t.Fatalf("status-only update unexpectedly created %d group bindings", bindingCount)
+	}
+}
+
+func TestGetTokenByKeyPropagatesCachedHydrationError(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	if err := db.AutoMigrate(&model.Group{}, &model.TokenGroupBinding{}); err != nil {
+		t.Fatalf("failed to migrate group binding tables: %v", err)
+	}
+	if err := db.Migrator().DropTable(&model.TokenGroupBinding{}); err != nil {
+		t.Fatalf("failed to drop token group bindings: %v", err)
+	}
+	if err := db.Exec("CREATE TABLE token_groups (id integer primary key)").Error; err != nil {
+		t.Fatalf("failed to create malformed token group table: %v", err)
+	}
+
+	previousRedisEnabled, previousRDB := common.RedisEnabled, common.RDB
+	common.RedisEnabled = true
+	common.RDB = newRedisHashTestClient(map[string]string{
+		"Id":                 "1256",
+		"UserId":             "1",
+		"Status":             strconv.Itoa(common.TokenStatusEnabled),
+		"Name":               "cached-token",
+		"ExpiredTime":        "-1",
+		"RemainQuota":        "100",
+		"UnlimitedQuota":     "true",
+		"ModelLimitsEnabled": "false",
+		"UsedQuota":          "0",
+		"Group":              "default",
+		"GroupMode":          model.TokenGroupModeExplicit,
+		"GroupRatioLimits":   "",
+		"CrossGroupRetry":    "false",
+	})
+	t.Cleanup(func() {
+		_ = common.RDB.Close()
+		common.RedisEnabled, common.RDB = previousRedisEnabled, previousRDB
+	})
+
+	_, err := model.GetTokenByKey("cachedhydrationerror", false)
+	if err == nil {
+		t.Fatal("expected cached token hydration error")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "token_id") {
+		t.Fatalf("expected token_groups database error, got: %v", err)
 	}
 }
 

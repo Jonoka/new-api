@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -19,31 +20,27 @@ import (
 // 实际扣费已由 BillingSession（PreConsumeBilling + SettleBilling）完成。
 func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	tokenName := c.GetString("token_name")
-	logContent := fmt.Sprintf("操作 %s", info.Action)
-	// 支持任务仅按次计费
-	if common.StringsContains(constant.TaskPricePatches, info.OriginModelName) {
-		logContent = fmt.Sprintf("%s，按次计费", logContent)
-	} else {
-		if len(info.PriceData.OtherRatios) > 0 {
-			var contents []string
-			for key, ra := range info.PriceData.OtherRatios {
-				if 1.0 != ra {
-					contents = append(contents, fmt.Sprintf("%s: %.2f", key, ra))
-				}
-			}
-			if len(contents) > 0 {
-				logContent = fmt.Sprintf("%s, 计算参数：%s", logContent, strings.Join(contents, ", "))
-			}
-		}
-	}
+	logContent := buildTaskConsumptionLogContent(info)
 	other := make(map[string]interface{})
 	other["is_task"] = true
 	other["request_path"] = c.Request.URL.Path
 	other["model_price"] = info.PriceData.ModelPrice
+	if info.PriceData.UsePrice {
+		other["model_price_unit"] = info.PriceData.ModelPriceUnit
+	}
 	if info.PriceData.ModelRatio > 0 {
 		other["model_ratio"] = info.PriceData.ModelRatio
 	}
 	other["group_ratio"] = info.PriceData.GroupRatioInfo.GroupRatio
+	for key, ratio := range info.PriceData.OtherRatios {
+		other[key] = ratio
+	}
+	for key, value := range info.PriceData.BillingMeta {
+		if key == "variant_legacy_ratio_keys" {
+			continue
+		}
+		other["billing_"+key] = value
+	}
 	if info.PriceData.GroupRatioInfo.HasSpecialRatio {
 		other["user_group_ratio"] = info.PriceData.GroupRatioInfo.GroupSpecialRatio
 	}
@@ -51,6 +48,7 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 		other["is_model_mapped"] = true
 		other["upstream_model_name"] = info.UpstreamModelName
 	}
+	attachQuotaSaturationToOther(other, info.QuotaClamp)
 	model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
 		ChannelId: info.ChannelId,
 		ModelName: info.OriginModelName,
@@ -63,6 +61,79 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	})
 	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
 	model.UpdateChannelUsedQuota(info.ChannelId, info.PriceData.Quota)
+}
+
+func buildTaskConsumptionLogContent(info *relaycommon.RelayInfo) string {
+	logContent := fmt.Sprintf("操作 %s", info.Action)
+	// 固定价格任务按配置的价格单位展示。
+	if common.StringsContains(constant.TaskPricePatches, info.OriginModelName) {
+		logContent = fmt.Sprintf("%s，按次计费", logContent)
+	} else if info.PriceData.UsePrice {
+		unitName := "次"
+		if info.PriceData.ModelPriceUnit == "second" {
+			unitName = "秒"
+			logContent = fmt.Sprintf("%s，按秒计费", logContent)
+		} else {
+			logContent = fmt.Sprintf("%s，按次计费", logContent)
+		}
+		variantStatus := info.PriceData.BillingMeta["variant_price_status"]
+		if resolution := info.PriceData.BillingMeta["resolution"]; resolution != "" {
+			if variantStatus == "disabled" {
+				logContent = fmt.Sprintf("%s，请求分辨率 %s（不参与计费）", logContent, resolution)
+			} else {
+				logContent = fmt.Sprintf("%s，计费分辨率 %s", logContent, resolution)
+			}
+		}
+		if quality := info.PriceData.BillingMeta["quality"]; quality != "" {
+			if variantStatus == "disabled" {
+				logContent = fmt.Sprintf("%s，请求质量 %s（不参与计费）", logContent, quality)
+			} else {
+				logContent = fmt.Sprintf("%s，计费质量 %s", logContent, quality)
+			}
+		}
+		if variantStatus == "fallback" {
+			logContent = fmt.Sprintf("%s，未匹配规格档位，使用兜底价", logContent)
+		} else if variantStatus == "legacy" {
+			logContent = fmt.Sprintf("%s，未匹配规格档位，沿用旧倍率计费", logContent)
+		}
+		logContent = fmt.Sprintf("%s，档位单价 $%.6f / %s", logContent, info.PriceData.ModelPrice, unitName)
+		if seconds, ok := info.PriceData.OtherRatios["seconds"]; ok && info.PriceData.ShouldApplyTaskRatio("seconds") {
+			logContent = fmt.Sprintf("%s，时长 %s 秒", logContent, strconv.FormatFloat(seconds, 'f', -1, 64))
+		}
+		if len(info.PriceData.OtherRatios) > 0 {
+			var contents []string
+			for key, ra := range info.PriceData.OtherRatios {
+				if key == "seconds" {
+					continue
+				}
+				if !info.PriceData.ShouldApplyTaskRatio(key) {
+					continue
+				}
+				if 1.0 != ra {
+					contents = append(contents, fmt.Sprintf("%s: %.2f", key, ra))
+				}
+			}
+			if len(contents) > 0 {
+				logContent = fmt.Sprintf("%s，其它倍率：%s", logContent, strings.Join(contents, ", "))
+			}
+		}
+		logContent = fmt.Sprintf("%s，分组倍率 %s", logContent, strconv.FormatFloat(info.PriceData.GroupRatioInfo.GroupRatio, 'f', -1, 64))
+		if common.QuotaPerUnit > 0 {
+			logContent = fmt.Sprintf("%s，合计 $%.6f", logContent, float64(info.PriceData.Quota)/common.QuotaPerUnit)
+		}
+	} else if len(info.PriceData.OtherRatios) > 0 {
+		var contents []string
+		for key, ra := range info.PriceData.OtherRatios {
+			if !info.PriceData.ShouldApplyTaskRatio(key) || ra == 1 {
+				continue
+			}
+			contents = append(contents, fmt.Sprintf("%s: %.2f", key, ra))
+		}
+		if len(contents) > 0 {
+			logContent = fmt.Sprintf("%s，计算参数：%s", logContent, strings.Join(contents, ", "))
+		}
+	}
+	return logContent
 }
 
 // ---------------------------------------------------------------------------
@@ -120,8 +191,14 @@ func taskAdjustTokenQuota(ctx context.Context, task *model.Task, delta int) {
 // taskBillingOther 从 task 的 BillingContext 构建日志 Other 字段。
 func taskBillingOther(task *model.Task) map[string]interface{} {
 	other := make(map[string]interface{})
+	// 差额结算会额外写入消费日志；明确标记为任务流量，避免历史指标回填时
+	// 将这类账单调整误算成一次新的同步转发请求。
+	other["is_task"] = true
 	if bc := task.PrivateData.BillingContext; bc != nil {
 		other["model_price"] = bc.ModelPrice
+		if bc.ModelPriceUnit != "" {
+			other["model_price_unit"] = bc.ModelPriceUnit
+		}
 		if bc.ModelRatio > 0 {
 			other["model_ratio"] = bc.ModelRatio
 		}
@@ -130,6 +207,12 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 			for k, v := range bc.OtherRatios {
 				other[k] = v
 			}
+		}
+		for k, v := range bc.BillingMeta {
+			if k == "variant_legacy_ratio_keys" {
+				continue
+			}
+			other["billing_"+k] = v
 		}
 	}
 	if snap := task.PrivateData.TieredBillingSnapshot; snap != nil {
@@ -247,6 +330,9 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	taskAdjustTokenQuota(ctx, task, quotaDelta)
 
 	task.Quota = actualQuota
+	if err := task.UpdateBillingSettlement(); err != nil {
+		logger.LogError(ctx, fmt.Sprintf("持久化任务差额结算失败 task %s: %s", task.TaskID, err.Error()))
+	}
 
 	var logType int
 	var logQuota int
@@ -325,8 +411,7 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 		}
 	}
 
-	// 计算实际应扣费额度: totalTokens * modelRatio * groupRatio * otherMultiplier
-	actualQuota := int(float64(totalTokens) * modelRatio * finalGroupRatio * otherMultiplier)
+	actualQuota := common.QuotaFromFloat(float64(totalTokens) * modelRatio * finalGroupRatio * otherMultiplier)
 
 	reason := fmt.Sprintf("token重算：tokens=%d, modelRatio=%.2f, groupRatio=%.2f, otherMultiplier=%.4f", totalTokens, modelRatio, finalGroupRatio, otherMultiplier)
 	RecalculateTaskQuota(ctx, task, actualQuota, reason)

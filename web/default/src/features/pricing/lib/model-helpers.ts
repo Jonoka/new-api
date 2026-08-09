@@ -16,6 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import {
+  normalizeModelPriceUnit,
+  type ModelPriceUnit,
+} from '@/lib/model-price-unit'
 import { EXCLUDED_GROUPS, QUOTA_TYPE_VALUES } from '../constants'
 import type { PricingModel } from '../types'
 
@@ -51,4 +55,9 @@ export function replaceModelInPath(path: string, modelName: string): string {
  */
 export function isTokenBasedModel(model: PricingModel): boolean {
   return model.quota_type === QUOTA_TYPE_VALUES.TOKEN
+}
+
+/** 固定价格模型缺少单位时按后端兼容语义视为按次。 */
+export function getModelPriceUnit(model: PricingModel): ModelPriceUnit {
+  return normalizeModelPriceUnit(model.model_price_unit)
 }

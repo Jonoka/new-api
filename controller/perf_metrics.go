@@ -1,15 +1,42 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
+	"github.com/QuantumNous/new-api/model"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
+	"gorm.io/gorm"
 )
+
+func expandPerfMetricGroups(groups []string) ([]string, error) {
+	result := make([]string, 0, len(groups))
+	seen := make(map[string]struct{}, len(groups))
+	for _, group := range groups {
+		identifiers := []string{group}
+		if group != "auto" {
+			resolved, err := model.ResolveGroupLogIdentifiers(group)
+			if err == nil {
+				identifiers = resolved
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, err
+			}
+		}
+		for _, identifier := range identifiers {
+			if _, exists := seen[identifier]; exists {
+				continue
+			}
+			seen[identifier] = struct{}{}
+			result = append(result, identifier)
+		}
+	}
+	return result, nil
+}
 
 func GetPerfMetricsSummary(c *gin.Context) {
 	hours := 24
@@ -19,7 +46,14 @@ func GetPerfMetricsSummary(c *gin.Context) {
 		}
 	}
 
-	activeGroups := append(lo.Keys(ratio_setting.GetGroupRatioCopy()), "auto")
+	activeGroups, err := expandPerfMetricGroups(append(lo.Keys(ratio_setting.GetGroupRatioCopy()), "auto"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
 	result, err := perfmetrics.QuerySummaryAll(hours, activeGroups)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{

@@ -61,11 +61,10 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	var requestBody io.Reader
 
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
-		storage, err := common.GetBodyStorage(c)
+		requestBody, err = prepareImagePassthroughBody(c, info)
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
-		requestBody = common.ReaderOnly(storage)
 	} else {
 		convertedRequest, err := adaptor.ConvertImageRequest(c, info, *request)
 		if err != nil {
@@ -146,6 +145,11 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 			info.PriceData.AddOtherRatio("n", float64(imageN))
 		}
 	}
+	settledImageN, deliveredImageN := resolveImageSettlementCount(imageN, info.PriceData.OtherRatios)
+	if settledImageN != deliveredImageN {
+		// 上游异常多返回图片时，最多按客户端请求数量结算，避免放大扣费。
+		info.PriceData.OtherRatios["n"] = float64(settledImageN)
+	}
 
 	if usage.(*dto.Usage).TotalTokens == 0 {
 		usage.(*dto.Usage).TotalTokens = 1
@@ -167,8 +171,14 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	if len(quality) > 0 {
 		logContent = append(logContent, fmt.Sprintf("品质 %s", quality))
 	}
-	if imageN > 0 {
-		logContent = append(logContent, fmt.Sprintf("生成数量 %d", imageN))
+	if settledImageN > 0 {
+		logContent = append(logContent, fmt.Sprintf("生成数量 %d", settledImageN))
+	}
+	if settledImageN != imageN {
+		logContent = append(logContent, fmt.Sprintf("请求数量 %d", imageN))
+	}
+	if deliveredImageN != settledImageN {
+		logContent = append(logContent, fmt.Sprintf("上游返回数量 %d", deliveredImageN))
 	}
 
 	// tasks_endpoint submissions are handoffs. Keep pre-consumption refundable
@@ -177,4 +187,27 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), logContent)
 	}
 	return nil
+}
+
+func prepareImagePassthroughBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, error) {
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return nil, err
+	}
+	if info != nil {
+		info.UpstreamRequestBodySize = storage.Size()
+	}
+	return common.ReaderOnly(storage), nil
+}
+
+func resolveImageSettlementCount(requested uint, otherRatios map[string]float64) (settled uint, delivered uint) {
+	delivered = requested
+	if actualN, ok := otherRatios["n"]; ok && actualN > 0 {
+		delivered = uint(actualN)
+	}
+	settled = delivered
+	if requested > 0 && settled > requested {
+		settled = requested
+	}
+	return settled, delivered
 }

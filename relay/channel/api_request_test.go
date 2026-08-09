@@ -1,6 +1,9 @@
 package channel
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +17,36 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestNewRelayHTTPRequestInheritsInboundCancellation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	requestContext, cancel := context.WithCancel(context.Background())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil).WithContext(requestContext)
+
+	request, err := newRelayHTTPRequest(ctx, http.MethodPost, "https://example.com/v1/images/generations", strings.NewReader(`{}`))
+	require.NoError(t, err)
+
+	cancel()
+	require.ErrorIs(t, request.Context().Err(), context.Canceled)
+}
+
+func TestIsInboundRequestContextErrorRequiresMatchingCause(t *testing.T) {
+	requestContext, cancel := context.WithCancel(context.Background())
+	cancel()
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(requestContext)
+
+	require.True(t, isInboundRequestContextError(ctx, fmt.Errorf("send failed: %w", context.Canceled)))
+	require.False(t, isInboundRequestContextError(ctx, errors.New("connection reset by peer")))
+
+	activeRecorder := httptest.NewRecorder()
+	activeCtx, _ := gin.CreateTestContext(activeRecorder)
+	activeCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	require.False(t, isInboundRequestContextError(activeCtx, context.Canceled))
+}
 
 func TestProcessHeaderOverride_ChannelTestSkipsPassthroughRules(t *testing.T) {
 	t.Parallel()

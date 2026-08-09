@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useForm, type SubmitErrorHandler } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery } from '@tanstack/react-query'
@@ -25,6 +25,11 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { getUserModels, getUserGroups } from '@/lib/api'
 import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
+import {
+  createUserGroupOptions,
+  includeSelectedGroupOptions,
+  type GroupIdentity,
+} from '@/lib/group-options'
 import { cn } from '@/lib/utils'
 import { useStatus } from '@/hooks/use-status'
 import { Button } from '@/components/ui/button'
@@ -75,9 +80,7 @@ import {
   transformApiKeyToFormDefaults,
 } from '../lib'
 import { type ApiKey } from '../types'
-import {
-  type ApiKeyGroupOption,
-} from './api-key-group-combobox'
+import { type ApiKeyGroupOption } from './api-key-group-combobox'
 import { ApiKeyGroupMultiSelect } from './api-key-group-multi-select'
 import { useApiKeys } from './api-keys-provider'
 
@@ -98,6 +101,10 @@ export function ApiKeysMutateDrawer({
   const { status } = useStatus()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [editingGroupDetails, setEditingGroupDetails] = useState<
+    GroupIdentity[]
+  >([])
+  const initializedFormKeyRef = useRef<string | null>(null)
   const defaultUseAutoGroup = status?.default_use_auto_group === true
 
   // Fetch models
@@ -115,14 +122,9 @@ export function ApiKeysMutateDrawer({
   })
 
   const models = modelsData?.data || []
-  const groupsRaw = groupsData?.data || {}
-  const groups: ApiKeyGroupOption[] = Object.entries(groupsRaw).map(
-    ([key, info]) => ({
-      value: key,
-      label: key,
-      desc: info.desc || key,
-      ratio: info.ratio,
-    })
+  const availableGroupOptions = useMemo(
+    () => createUserGroupOptions(groupsData?.data ?? {}),
+    [groupsData?.data]
   )
   const schema = getApiKeyFormSchema(t)
 
@@ -130,40 +132,65 @@ export function ApiKeysMutateDrawer({
     resolver: zodResolver(schema),
     defaultValues: getApiKeyFormDefaultValues(defaultUseAutoGroup),
   })
+  const selectedGroups = form.watch('groups') ?? []
+  const groups = useMemo<ApiKeyGroupOption[]>(
+    () =>
+      includeSelectedGroupOptions(
+        availableGroupOptions,
+        selectedGroups,
+        editingGroupDetails
+      ).map((option) => ({
+        ...option,
+        desc: option.description,
+      })),
+    [availableGroupOptions, editingGroupDetails, selectedGroups]
+  )
 
   // Load existing data when updating
   useEffect(() => {
+    if (!open) {
+      initializedFormKeyRef.current = null
+      return
+    }
+
+    const formKey = isUpdate
+      ? `edit:${currentRow?.id ?? 'unknown'}`
+      : `new:${defaultUseAutoGroup ? 'auto' : 'inherit'}`
+    if (initializedFormKeyRef.current === formKey) return
+    if (form.formState.isDirty) return
+    initializedFormKeyRef.current = formKey
+
+    let active = true
     if (open && isUpdate && currentRow) {
       getApiKey(currentRow.id).then((result) => {
-        if (result.success && result.data) {
-          form.reset(transformApiKeyToFormDefaults(result.data))
+        if (active && result.success && result.data) {
+          setEditingGroupDetails(result.data.group_details ?? [])
+          form.reset(
+            transformApiKeyToFormDefaults(result.data, availableGroupOptions)
+          )
         }
       })
-    } else if (open && !isUpdate) {
+    } else if (!isUpdate) {
+      setEditingGroupDetails([])
       form.reset(getApiKeyFormDefaultValues(defaultUseAutoGroup))
     }
-  }, [open, isUpdate, currentRow, form, defaultUseAutoGroup])
 
-  // 编辑已有令牌时才校正不可选分组；新建令牌允许交给后端默认分组兜底。
-  useEffect(() => {
-    if (!isUpdate) return
-    if (groups.length === 0) return
-    const currentGroups = form.getValues('groups')
-    if (currentGroups.length === 0) return
-    const validGroupValues = new Set(groups.map((g) => g.value))
-    // Keep only groups that still exist in available options (+ auto is always valid)
-    const filtered = currentGroups.filter(
-      (g) => g === 'auto' || validGroupValues.has(g)
-    )
-    if (filtered.length !== currentGroups.length) {
-      form.setValue('groups', filtered.length > 0 ? filtered : [])
+    return () => {
+      active = false
     }
-  }, [groups, form, isUpdate])
+  }, [
+    open,
+    isUpdate,
+    currentRow?.id,
+    form,
+    defaultUseAutoGroup,
+    availableGroupOptions,
+  ])
 
   const onSubmit = async (data: ApiKeyFormValues) => {
     setIsSubmitting(true)
     try {
-      const basePayload = transformFormDataToPayload(data)
+      const basePayload = transformFormDataToPayload(data, groups)
 
       if (isUpdate && currentRow) {
         const result = await updateApiKey({
@@ -240,7 +267,6 @@ export function ApiKeysMutateDrawer({
   const quotaPlaceholder = tokensOnly
     ? t('Enter quota in tokens')
     : t('Enter quota in {{currency}}', { currency: currencyLabel })
-  const selectedGroups = form.watch('groups') ?? []
   const unlimitedQuota = form.watch('unlimited_quota')
 
   return (

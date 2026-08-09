@@ -34,6 +34,8 @@ import {
   renderNumber,
   renderQuota,
   timestamp2string,
+  getUserIdFromLocalStorage,
+  isRoot,
 } from '../../../helpers';
 
 const renderTimestamp = (text) => (text ? timestamp2string(text) : '-');
@@ -223,6 +225,9 @@ const renderOperations = (
     return <></>;
   }
 
+  const canManageRoles = isRoot();
+  const currentUserId = getUserIdFromLocalStorage();
+
   const moreMenu = [
     {
       node: 'item',
@@ -281,20 +286,42 @@ const renderOperations = (
       >
         {t('编辑')}
       </Button>
-      <Button
-        type='warning'
-        size='small'
-        onClick={() => showPromoteModal(record)}
-      >
-        {t('提升')}
-      </Button>
-      <Button
-        type='secondary'
-        size='small'
-        onClick={() => showDemoteModal(record)}
-      >
-        {t('降级')}
-      </Button>
+      {canManageRoles && record.role < 10 && (
+        <Button
+          type='warning'
+          size='small'
+          onClick={() => showPromoteModal(record)}
+        >
+          {t('提升')} → {t('管理员')}
+        </Button>
+      )}
+      {canManageRoles && record.role === 10 && (
+        <>
+          <Button
+            type='warning'
+            size='small'
+            onClick={() => showPromoteModal(record)}
+          >
+            {t('提升')} → {t('超级管理员')}
+          </Button>
+          <Button
+            type='secondary'
+            size='small'
+            onClick={() => showDemoteModal(record)}
+          >
+            {t('降级')} → {t('普通用户')}
+          </Button>
+        </>
+      )}
+      {canManageRoles && record.role === 100 && record.id !== currentUserId && (
+        <Button
+          type='secondary'
+          size='small'
+          onClick={() => showDemoteModal(record)}
+        >
+          {t('降级')} → {t('管理员')}
+        </Button>
+      )}
       <Dropdown menu={moreMenu} trigger='click' position='bottomRight'>
         <Button type='tertiary' size='small' icon={<IconMore />} />
       </Dropdown>
@@ -342,7 +369,7 @@ export const getUsersColumns = ({
       title: t('分组'),
       dataIndex: 'group',
       render: (text, record, index) => {
-        return <div>{renderGroup(text)}</div>;
+        return <div>{renderGroup(record.group_name || text)}</div>;
       },
     },
     {

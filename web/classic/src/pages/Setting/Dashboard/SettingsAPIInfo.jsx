@@ -35,7 +35,7 @@ import {
   IllustrationNoResult,
   IllustrationNoResultDark,
 } from '@douyinfe/semi-illustrations';
-import { Plus, Edit, Trash2, Save, Settings } from 'lucide-react';
+import { Plus, Edit, Trash2, Save, Settings, GripVertical } from 'lucide-react';
 import { API, showError, showSuccess } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
 
@@ -61,6 +61,8 @@ const SettingsAPIInfo = ({ options, refresh }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
+  const [draggedApiId, setDraggedApiId] = useState(null);
+  const [dragOverApiId, setDragOverApiId] = useState(null);
 
   // 面板启用状态 state
   const [panelEnabled, setPanelEnabled] = useState(true);
@@ -238,7 +240,71 @@ const SettingsAPIInfo = ({ options, refresh }) => {
     }
   };
 
+  const reorderApiInfo = (sourceId, targetId) => {
+    if (sourceId === null || sourceId === targetId) return;
+
+    setApiInfoList((currentList) => {
+      const sourceIndex = currentList.findIndex((api) => api.id === sourceId);
+      const targetIndex = currentList.findIndex((api) => api.id === targetId);
+      if (sourceIndex < 0 || targetIndex < 0) return currentList;
+
+      const reordered = [...currentList];
+      const [movedApi] = reordered.splice(sourceIndex, 1);
+      reordered.splice(targetIndex, 0, movedApi);
+      return reordered;
+    });
+    setHasChanges(true);
+  };
+
+  const moveApiInfoByOffset = (sourceId, offset) => {
+    const sourceIndex = apiInfoList.findIndex((api) => api.id === sourceId);
+    const targetIndex = sourceIndex + offset;
+    if (
+      sourceIndex < 0 ||
+      targetIndex < 0 ||
+      targetIndex >= apiInfoList.length
+    ) {
+      return;
+    }
+    reorderApiInfo(sourceId, apiInfoList[targetIndex].id);
+  };
+
   const columns = [
+    {
+      title: t('排序'),
+      width: 64,
+      align: 'center',
+      render: (_, record) => (
+        <span
+          draggable
+          role='button'
+          tabIndex={0}
+          aria-label={t('排序')}
+          title={t('排序')}
+          className='inline-flex cursor-grab items-center justify-center text-gray-400 active:cursor-grabbing'
+          onDragStart={(event) => {
+            setDraggedApiId(record.id);
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/plain', String(record.id));
+          }}
+          onDragEnd={() => {
+            setDraggedApiId(null);
+            setDragOverApiId(null);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowUp') {
+              event.preventDefault();
+              moveApiInfoByOffset(record.id, -1);
+            } else if (event.key === 'ArrowDown') {
+              event.preventDefault();
+              moveApiInfoByOffset(record.id, 1);
+            }
+          }}
+        >
+          <GripVertical size={18} />
+        </span>
+      ),
+    },
     {
       title: 'ID',
       dataIndex: 'id',
@@ -404,6 +470,31 @@ const SettingsAPIInfo = ({ options, refresh }) => {
           dataSource={getCurrentPageData()}
           rowSelection={rowSelection}
           rowKey='id'
+          onRow={(record) => ({
+            onDragOver: (event) => {
+              if (draggedApiId === null || draggedApiId === record.id) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = 'move';
+            },
+            onDragEnter: () => {
+              if (draggedApiId !== null && draggedApiId !== record.id) {
+                setDragOverApiId(record.id);
+              }
+            },
+            onDrop: (event) => {
+              event.preventDefault();
+              reorderApiInfo(draggedApiId, record.id);
+              setDraggedApiId(null);
+              setDragOverApiId(null);
+            },
+            style: {
+              background:
+                dragOverApiId === record.id
+                  ? 'var(--semi-color-primary-light-default)'
+                  : undefined,
+              transition: 'background 0.15s ease',
+            },
+          })}
           scroll={{ x: 'max-content' }}
           pagination={{
             currentPage: currentPage,

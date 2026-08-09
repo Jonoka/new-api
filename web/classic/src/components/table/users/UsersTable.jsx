@@ -104,12 +104,14 @@ const UsersTable = (usersData) => {
 
   // Modal confirm handlers
   const handlePromoteConfirm = () => {
-    manageUser(modalUser.id, 'promote', modalUser);
+    const action = modalUser.role === 10 ? 'promote_root' : 'promote';
+    manageUser(modalUser.id, action, modalUser);
     setShowPromoteModal(false);
   };
 
   const handleDemoteConfirm = () => {
-    manageUser(modalUser.id, 'demote', modalUser);
+    const action = modalUser.role === 100 ? 'demote_root' : 'demote';
+    manageUser(modalUser.id, action, modalUser);
     setShowDemoteModal(false);
   };
 

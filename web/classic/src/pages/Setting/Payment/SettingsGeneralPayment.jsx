@@ -42,6 +42,7 @@ import {
 import { useTranslation } from 'react-i18next';
 
 const DEFAULT_INVOICE_TYPES = '["personal","company"]';
+const DEFAULT_INVOICE_KINDS = '["normal"]';
 const DEFAULT_INVOICE_FEE_RULES =
   '[{"min":0,"max":500,"type":"fixed","value":50},{"min":501,"max":2000,"type":"fixed","value":100},{"min":2001,"max":5000,"type":"fixed","value":175},{"min":5000,"type":"percent","value":5}]';
 
@@ -55,6 +56,19 @@ const parseInvoiceTypes = (value) => {
     return types.length > 0 ? types : ['personal', 'company'];
   } catch {
     return ['personal', 'company'];
+  }
+};
+
+const parseInvoiceKinds = (value) => {
+  try {
+    const parsed = JSON.parse(value || '[]');
+    if (!Array.isArray(parsed)) return ['normal'];
+    const kinds = parsed.filter(
+      (item) => item === 'normal' || item === 'special',
+    );
+    return kinds.length > 0 ? kinds : ['normal'];
+  } catch {
+    return ['normal'];
   }
 };
 
@@ -101,6 +115,9 @@ const parseInvoiceRules = (value) => {
 const serializeInvoiceTypes = (types) =>
   JSON.stringify(types.length > 0 ? types : ['personal'], null, 2);
 
+const serializeInvoiceKinds = (kinds) =>
+  JSON.stringify(kinds.length > 0 ? kinds : ['normal'], null, 2);
+
 const serializeInvoiceRules = (rules) =>
   JSON.stringify(
     rules
@@ -125,15 +142,26 @@ const serializeInvoiceRules = (rules) =>
 const InvoiceSettingsVisualEditor = ({
   t,
   typesValue,
+  kindsValue,
   rulesValue,
   onChange,
 }) => {
   const types = parseInvoiceTypes(typesValue);
+  const kinds = parseInvoiceKinds(kindsValue);
   const rules = parseInvoiceRules(rulesValue);
 
   const updateTypes = (nextTypes) => {
     onChange({
       InvoiceTypes: serializeInvoiceTypes(nextTypes),
+      InvoiceKinds: kindsValue,
+      InvoiceFeeRules: rulesValue,
+    });
+  };
+
+  const updateKinds = (nextKinds) => {
+    onChange({
+      InvoiceTypes: typesValue,
+      InvoiceKinds: serializeInvoiceKinds(nextKinds),
       InvoiceFeeRules: rulesValue,
     });
   };
@@ -141,12 +169,17 @@ const InvoiceSettingsVisualEditor = ({
   const updateRules = (nextRules) => {
     onChange({
       InvoiceTypes: typesValue,
+      InvoiceKinds: kindsValue,
       InvoiceFeeRules: serializeInvoiceRules(nextRules),
     });
   };
 
   const updateTypeSelection = (nextTypes) => {
     updateTypes(nextTypes.length > 0 ? nextTypes : types);
+  };
+
+  const updateKindSelection = (nextKinds) => {
+    updateKinds(nextKinds.length > 0 ? nextKinds : kinds);
   };
 
   const patchRule = (index, patch) => {
@@ -273,12 +306,24 @@ const InvoiceSettingsVisualEditor = ({
     <Card bodyStyle={{ padding: 16 }}>
       <Space vertical align='start' style={{ width: '100%' }}>
         <div>
-          <Typography.Text strong>{t('发票类型')}</Typography.Text>
+          <Typography.Text strong>{t('发票抬头类型')}</Typography.Text>
           <div style={{ marginTop: 8 }}>
             <Checkbox.Group value={types} onChange={updateTypeSelection}>
               <Checkbox value='personal'>{t('对私')}</Checkbox>
               <Checkbox value='company' style={{ marginLeft: 16 }}>
                 {t('对公')}
+              </Checkbox>
+            </Checkbox.Group>
+          </div>
+        </div>
+
+        <div>
+          <Typography.Text strong>{t('开票票种')}</Typography.Text>
+          <div style={{ marginTop: 8 }}>
+            <Checkbox.Group value={kinds} onChange={updateKindSelection}>
+              <Checkbox value='normal'>{t('增值税普通发票')}</Checkbox>
+              <Checkbox value='special' style={{ marginLeft: 16 }}>
+                {t('增值税专用发票')}
               </Checkbox>
             </Checkbox.Group>
           </div>
@@ -320,8 +365,11 @@ export default function SettingsGeneralPayment(props) {
     PayMethods: '',
     AmountOptions: '',
     AmountDiscount: '',
+    'payment_setting.balance_subscription_enabled': true,
+    'payment_setting.balance_subscription_promo_enabled': true,
     InvoiceEnabled: false,
     InvoiceTypes: DEFAULT_INVOICE_TYPES,
+    InvoiceKinds: DEFAULT_INVOICE_KINDS,
     InvoiceFeeRules: DEFAULT_INVOICE_FEE_RULES,
   });
   const [originInputs, setOriginInputs] = useState({});
@@ -336,8 +384,16 @@ export default function SettingsGeneralPayment(props) {
         PayMethods: props.options.PayMethods || '',
         AmountOptions: props.options.AmountOptions || '',
         AmountDiscount: props.options.AmountDiscount || '',
+        'payment_setting.balance_subscription_enabled':
+          props.options['payment_setting.balance_subscription_enabled'] !==
+          false,
+        'payment_setting.balance_subscription_promo_enabled':
+          props.options[
+            'payment_setting.balance_subscription_promo_enabled'
+          ] !== false,
         InvoiceEnabled: !!props.options.InvoiceEnabled,
         InvoiceTypes: props.options.InvoiceTypes || DEFAULT_INVOICE_TYPES,
+        InvoiceKinds: props.options.InvoiceKinds || DEFAULT_INVOICE_KINDS,
         InvoiceFeeRules:
           props.options.InvoiceFeeRules || DEFAULT_INVOICE_FEE_RULES,
       };
@@ -347,7 +403,12 @@ export default function SettingsGeneralPayment(props) {
     }
   }, [props.options]);
 
-  const handleFormChange = ({ InvoiceTypes, InvoiceFeeRules, ...values }) => {
+  const handleFormChange = ({
+    InvoiceTypes,
+    InvoiceKinds,
+    InvoiceFeeRules,
+    ...values
+  }) => {
     setInputs((prev) => ({
       ...prev,
       ...values,
@@ -422,6 +483,24 @@ export default function SettingsGeneralPayment(props) {
           value: inputs.AmountDiscount,
         });
       }
+      if (
+        originInputs['payment_setting.balance_subscription_enabled'] !==
+        inputs['payment_setting.balance_subscription_enabled']
+      ) {
+        options.push({
+          key: 'payment_setting.balance_subscription_enabled',
+          value: inputs['payment_setting.balance_subscription_enabled'],
+        });
+      }
+      if (
+        originInputs['payment_setting.balance_subscription_promo_enabled'] !==
+        inputs['payment_setting.balance_subscription_promo_enabled']
+      ) {
+        options.push({
+          key: 'payment_setting.balance_subscription_promo_enabled',
+          value: inputs['payment_setting.balance_subscription_promo_enabled'],
+        });
+      }
       if (originInputs.InvoiceEnabled !== inputs.InvoiceEnabled) {
         options.push({
           key: 'InvoiceEnabled',
@@ -430,6 +509,9 @@ export default function SettingsGeneralPayment(props) {
       }
       if (originInputs.InvoiceTypes !== inputs.InvoiceTypes) {
         options.push({ key: 'InvoiceTypes', value: inputs.InvoiceTypes });
+      }
+      if (originInputs.InvoiceKinds !== inputs.InvoiceKinds) {
+        options.push({ key: 'InvoiceKinds', value: inputs.InvoiceKinds });
       }
       if (originInputs.InvoiceFeeRules !== inputs.InvoiceFeeRules) {
         options.push({
@@ -548,6 +630,32 @@ export default function SettingsGeneralPayment(props) {
             gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
             style={{ marginTop: 16 }}
           >
+            <Col xs={24} sm={24} md={12} lg={12} xl={12}>
+              <Form.Switch
+                field='payment_setting.balance_subscription_enabled'
+                label={t('余额购买订阅')}
+                checkedText={t('开')}
+                uncheckedText={t('关')}
+                extraText={t('允许用户使用账户余额购买订阅套餐')}
+              />
+            </Col>
+            <Col xs={24} sm={24} md={12} lg={12} xl={12}>
+              <Form.Switch
+                field='payment_setting.balance_subscription_promo_enabled'
+                label={t('余额购买订阅使用优惠码')}
+                checkedText={t('开')}
+                uncheckedText={t('关')}
+                disabled={
+                  !inputs['payment_setting.balance_subscription_enabled']
+                }
+                extraText={t('允许余额购买订阅时使用优惠码')}
+              />
+            </Col>
+          </Row>
+          <Row
+            gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
+            style={{ marginTop: 16 }}
+          >
             <Col xs={24} sm={24} md={8} lg={8} xl={8}>
               <Form.Switch
                 field='InvoiceEnabled'
@@ -561,6 +669,7 @@ export default function SettingsGeneralPayment(props) {
               <InvoiceSettingsVisualEditor
                 t={t}
                 typesValue={inputs.InvoiceTypes}
+                kindsValue={inputs.InvoiceKinds}
                 rulesValue={inputs.InvoiceFeeRules}
                 onChange={(patch) => {
                   setInputs((prev) => ({

@@ -1,10 +1,16 @@
 package controller
 
 import (
+	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -83,6 +89,55 @@ func TestCollectPendingApplyUpstreamModelChanges(t *testing.T) {
 
 func TestChannelUpstreamModelUpdateSelectFieldsIncludeModelMapping(t *testing.T) {
 	require.Contains(t, channelUpstreamModelUpdateSelectFields, "model_mapping")
+}
+
+func TestFetchModelsForUnsavedChannelUsesSharedUpstreamFetcher(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			http.Error(w, "unexpected path", http.StatusNotFound)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer test-key" {
+			http.Error(w, "missing authorization", http.StatusUnauthorized)
+			return
+		}
+		if r.Header.Get("X-Test-Fetch") != "yes" {
+			http.Error(w, "missing header override", http.StatusBadRequest)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":" gpt-4o "},{"id":"gpt-4o"},{"id":"gpt-4.1"}]}`))
+	}))
+	defer upstream.Close()
+
+	payload, err := common.Marshal(map[string]any{
+		"type":            constant.ChannelTypeOpenAI,
+		"key":             "test-key",
+		"base_url":        upstream.URL + "/",
+		"setting":         `{"proxy":""}`,
+		"header_override": `{"X-Test-Fetch":"yes"}`,
+	})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channel/fetch_models", bytes.NewReader(payload))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	FetchModels(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Success bool     `json:"success"`
+		Message string   `json:"message"`
+		Data    []string `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success, response.Message)
+	require.Equal(t, []string{"gpt-4o", "gpt-4.1"}, response.Data)
 }
 
 func TestNormalizeChannelModelMapping(t *testing.T) {

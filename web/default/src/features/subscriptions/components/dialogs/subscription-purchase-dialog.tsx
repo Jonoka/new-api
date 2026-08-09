@@ -65,6 +65,7 @@ import {
   paySubscriptionWaffoPancake,
   paySubscriptionBalance,
   paySubscriptionBepusdt,
+  paySubscriptionOkpay,
   previewSubscriptionAmount,
 } from '../../api'
 import {
@@ -93,8 +94,11 @@ interface Props {
   enableCreem?: boolean
   enableWaffoPancake?: boolean
   enableBepusdt?: boolean
+  enableOkpay?: boolean
   bepusdtChains?: BepusdtChain[]
   enableOnlineTopUp?: boolean
+  enableBalance?: boolean
+  enableBalancePromo?: boolean
   epayMethods?: PaymentMethod[]
   invoiceConfig?: InvoiceConfig | null
   purchaseLimit?: number
@@ -140,7 +144,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
     }
     if (selectedPaymentKind) return selectedPaymentKind
     if (selectedEpayMethod) return selectedEpayMethod
-    return 'balance'
+    return props.enableBalance !== false ? 'balance' : ''
   }
 
   async function loadAmountPreview(
@@ -155,7 +159,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
       request
     )
       ? request
-      : createEmptyInvoiceRequest(request.type)
+      : createEmptyInvoiceRequest(request.type, request.kind)
     setAmountLoading(true)
     try {
       const res = await previewSubscriptionAmount({
@@ -215,7 +219,10 @@ export function SubscriptionPurchaseDialog(props: Props) {
       setBepusdtConfirmOpen(false)
       setSelectedBepusdtTradeType('')
       setInvoiceRequest(
-        createEmptyInvoiceRequest(normalizedInvoiceConfig.types[0])
+        createEmptyInvoiceRequest(
+          normalizedInvoiceConfig.types[0],
+          normalizedInvoiceConfig.kinds[0]
+        )
       )
       setAmountLoading(false)
     }
@@ -236,7 +243,13 @@ export function SubscriptionPurchaseDialog(props: Props) {
     if (!props.open || !planId) return
     void loadAmountPreview(getPreviewPaymentMethod(), promoCode.trim(), true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.open, planId, selectedEpayMethod, selectedPaymentKind])
+  }, [
+    props.open,
+    planId,
+    selectedEpayMethod,
+    selectedPaymentKind,
+    props.enableBalance,
+  ])
 
   if (!plan) return null
 
@@ -245,10 +258,17 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const hasWaffoPancake =
     props.enableWaffoPancake && !!plan.waffo_pancake_product_id
   const hasBepusdt = hasConfiguredBepusdt
+  const hasOkpay = !!props.enableOkpay
   const hasEpay =
     props.enableOnlineTopUp && (props.epayMethods || []).length > 0
+  const hasBalance = props.enableBalance !== false
   const hasAnyPayment =
-    hasStripe || hasCreem || hasWaffoPancake || hasBepusdt || hasEpay
+    hasStripe ||
+    hasCreem ||
+    hasWaffoPancake ||
+    hasBepusdt ||
+    hasOkpay ||
+    hasEpay
   const selectedEpayMethodLabel =
     (props.epayMethods || []).find((m) => m.type === selectedEpayMethod)
       ?.name ||
@@ -283,6 +303,8 @@ export function SubscriptionPurchaseDialog(props: Props) {
   const userQuota = Math.max(0, Number(props.userQuota || 0))
   const balanceAmountReady = paidPriceUSD > 0 || amountDue <= 0
   const insufficientBalance = !balanceAmountReady || userQuota < balanceCost
+  const balancePromoBlocked =
+    props.enableBalancePromo === false && promoCode.trim() !== ''
   const limitReached =
     (props.purchaseLimit || 0) > 0 &&
     (props.purchaseCount || 0) >= (props.purchaseLimit || 0)
@@ -296,7 +318,13 @@ export function SubscriptionPurchaseDialog(props: Props) {
     invoiceRequest
   )
   const invoiceDisabled = paying || amountLoading
-  const externalPaymentOptions = [
+  const externalPaymentOptions: Array<{
+    key: string
+    kind: string
+    value: string
+    label: string
+    icon?: string
+  }> = [
     ...(hasEpay
       ? (props.epayMethods || []).map((method) => ({
           key: `epay:${method.type}`,
@@ -316,6 +344,9 @@ export function SubscriptionPurchaseDialog(props: Props) {
           },
         ]
       : []),
+    ...(hasOkpay
+      ? [{ key: 'okpay', kind: 'okpay', value: 'okpay', label: 'OKPay' }]
+      : []),
     ...(hasStripe
       ? [{ key: 'stripe', kind: 'stripe', value: 'stripe', label: 'Stripe' }]
       : []),
@@ -333,21 +364,29 @@ export function SubscriptionPurchaseDialog(props: Props) {
         ]
       : []),
   ]
-  const selectedPaymentLabel =
-    externalPaymentOptions.find((option) => {
-      if (option.kind === 'epay') {
-        return (
-          selectedPaymentKind === 'epay' && option.value === selectedEpayMethod
-        )
-      }
-      return selectedPaymentKind === option.kind
-    })?.label || ''
+  const handleOpenBepusdtChains = async () => {
+    if (!invoiceValid) return
+    setSelectedPaymentKind('bepusdt')
+    const preview = await loadAmountPreview(
+      'bepusdt',
+      promoCode.trim(),
+      false,
+      invoiceRequest
+    )
+    if (preview?.message === 'success') {
+      setBepusdtChainOpen(true)
+    }
+  }
 
   const handleSelectPayment = (kind: string, value: string) => {
     setSelectedPaymentKind(kind)
     if (kind === 'epay') {
       setSelectedEpayMethod(value)
       void loadAmountPreview(value, promoCode.trim(), true, invoiceRequest)
+      return
+    }
+    if (kind === 'bepusdt') {
+      void handleOpenBepusdtChains()
       return
     }
     void loadAmountPreview(value, promoCode.trim(), true, invoiceRequest)
@@ -534,6 +573,13 @@ export function SubscriptionPurchaseDialog(props: Props) {
 
   const handlePayBalance = async () => {
     if (!invoiceValid) return
+    if (!hasBalance) return
+    if (balancePromoBlocked) {
+      toast.error(
+        t('Promo codes are disabled for balance subscription purchases.')
+      )
+      return
+    }
     setPaying(true)
     try {
       const res = await paySubscriptionBalance({
@@ -559,16 +605,31 @@ export function SubscriptionPurchaseDialog(props: Props) {
     }
   }
 
-  const handleOpenBepusdtChains = async () => {
+  const handlePayOkpay = async () => {
     if (!invoiceValid) return
-    const preview = await loadAmountPreview(
-      'bepusdt',
-      promoCode.trim(),
-      false,
-      invoiceRequest
-    )
-    if (preview?.message === 'success') {
-      setBepusdtChainOpen(true)
+    setPaying(true)
+    try {
+      const res = await paySubscriptionOkpay({
+        plan_id: plan.id,
+        promo_code: promoCode,
+        ...getInvoicePayload(invoiceRequest),
+      })
+      if (res.message === 'success' && res.data?.completed) {
+        handleCompletedPurchase()
+      } else if (res.message === 'success' && res.data?.payment_url) {
+        toast.success(t('Redirecting to payment page...'))
+        window.location.href = res.data.payment_url
+      } else {
+        toast.error(
+          res.message && res.message !== 'success'
+            ? res.message
+            : t('Payment request failed')
+        )
+      }
+    } catch {
+      toast.error(t('Payment request failed'))
+    } finally {
+      setPaying(false)
     }
   }
 
@@ -728,50 +789,66 @@ export function SubscriptionPurchaseDialog(props: Props) {
               </Alert>
             )}
 
-            <div className='flex flex-col gap-2 rounded-md border p-3'>
-              <div className='flex items-center justify-between gap-2 text-xs'>
-                <span className='text-muted-foreground'>{t('Required')}</span>
-                <span>{formatQuota(balanceCost)}</span>
+            {hasBalance && (
+              <div className='flex flex-col gap-2 rounded-md border p-3'>
+                <div className='flex items-center justify-between gap-2 text-xs'>
+                  <span className='text-muted-foreground'>{t('Required')}</span>
+                  <span>{formatQuota(balanceCost)}</span>
+                </div>
+                <div className='flex items-center justify-between gap-2 text-xs'>
+                  <span className='text-muted-foreground'>
+                    {t('Available')}
+                  </span>
+                  <span>{formatQuota(userQuota)}</span>
+                </div>
+                {balanceAmountReady && insufficientBalance && (
+                  <Alert variant='destructive'>
+                    <AlertDescription>
+                      {t('Insufficient balance')}
+                    </AlertDescription>
+                  </Alert>
+                )}
+                {balancePromoBlocked && (
+                  <Alert variant='destructive'>
+                    <AlertDescription>
+                      {t(
+                        'Promo codes are disabled for balance subscription purchases.'
+                      )}
+                    </AlertDescription>
+                  </Alert>
+                )}
+                <Button
+                  variant='outline'
+                  onClick={handlePayBalance}
+                  disabled={
+                    paying ||
+                    amountLoading ||
+                    limitReached ||
+                    !balanceAmountReady ||
+                    insufficientBalance ||
+                    balancePromoBlocked ||
+                    !invoiceValid
+                  }
+                >
+                  {t('Pay with Balance')}
+                </Button>
               </div>
-              <div className='flex items-center justify-between gap-2 text-xs'>
-                <span className='text-muted-foreground'>{t('Available')}</span>
-                <span>{formatQuota(userQuota)}</span>
-              </div>
-              {balanceAmountReady && insufficientBalance && (
-                <Alert variant='destructive'>
-                  <AlertDescription>
-                    {t('Insufficient balance')}
-                  </AlertDescription>
-                </Alert>
-              )}
-              <Button
-                variant='outline'
-                onClick={handlePayBalance}
-                disabled={
-                  paying ||
-                  amountLoading ||
-                  limitReached ||
-                  !balanceAmountReady ||
-                  insufficientBalance ||
-                  !invoiceValid
-                }
-              >
-                {t('Pay with Balance')}
-              </Button>
-            </div>
+            )}
 
-            <div className='space-y-2'>
-              <Input
-                value={promoCode}
-                onChange={(event) => {
-                  setPromoCode(event.target.value)
-                  setPromoDiscount(null)
-                  setAmountPreview(null)
-                }}
-                onBlur={handlePromoCodeBlur}
-                placeholder={t('Enter promo code')}
-              />
-            </div>
+            {(props.enableBalancePromo !== false || hasAnyPayment) && (
+              <div className='space-y-2'>
+                <Input
+                  value={promoCode}
+                  onChange={(event) => {
+                    setPromoCode(event.target.value)
+                    setPromoDiscount(null)
+                    setAmountPreview(null)
+                  }}
+                  onBlur={handlePromoCodeBlur}
+                  placeholder={t('Enter promo code')}
+                />
+              </div>
+            )}
 
             <InvoiceRequestForm
               config={normalizedInvoiceConfig}
@@ -810,7 +887,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
                           {getPaymentIcon(
                             option.value,
                             'h-4 w-4 shrink-0',
-                            option.icon,
+                            'icon' in option ? option.icon : undefined,
                             option.label
                           )}
                           <span className='truncate'>{option.label}</span>
@@ -846,16 +923,15 @@ export function SubscriptionPurchaseDialog(props: Props) {
                     </Button>
                   </div>
                 )}
-                {selectedPaymentKind === 'bepusdt' && hasBepusdt && (
+                {selectedPaymentKind === 'okpay' && hasOkpay && (
                   <Button
-                    variant='outline'
                     className='w-full'
-                    onClick={handleOpenBepusdtChains}
+                    onClick={handlePayOkpay}
                     disabled={
                       paying || amountLoading || limitReached || !invoiceValid
                     }
                   >
-                    {selectedPaymentLabel || 'USDT'}
+                    OKPay
                   </Button>
                 )}
                 {selectedPaymentKind === 'stripe' && hasStripe && (
@@ -893,6 +969,16 @@ export function SubscriptionPurchaseDialog(props: Props) {
                 )}
               </div>
             )}
+
+            {!hasBalance && !hasAnyPayment && (
+              <Alert variant='destructive'>
+                <AlertDescription>
+                  {t(
+                    'No payment methods available. Please contact administrator.'
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
           </div>
         </DialogContent>
       </Dialog>
@@ -929,11 +1015,6 @@ export function SubscriptionPurchaseDialog(props: Props) {
               <span className='text-muted-foreground'>{t('Amount Due')}</span>
               <span className='text-lg font-semibold'>{amountDueText}</span>
             </div>
-            <Alert>
-              <AlertDescription>
-                {t('USDT subscription payments have no platform service fee.')}
-              </AlertDescription>
-            </Alert>
           </div>
           <AlertDialogFooter className='grid grid-cols-2 gap-2 sm:flex'>
             <AlertDialogCancel disabled={paying}>

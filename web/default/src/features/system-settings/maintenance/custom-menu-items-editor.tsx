@@ -24,10 +24,7 @@ import {
 } from '@/lib/custom-nav'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from '@/components/ui/native-select'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Switch } from '@/components/ui/switch'
 import {
   SettingsControlChildren,
@@ -44,6 +41,7 @@ type CustomMenuItemsEditorProps = {
 }
 
 const SECTION_OPTIONS: Array<{ value: CustomNavSection; labelKey: string }> = [
+  { value: 'header', labelKey: 'Header navigation' },
   { value: 'chat', labelKey: 'Chat area' },
   { value: 'console', labelKey: 'Console area' },
   { value: 'personal', labelKey: 'Personal area' },
@@ -122,7 +120,9 @@ export function CustomMenuItemsEditor({
               >
                 <div className='flex items-center justify-between gap-3'>
                   <div className='flex min-w-0 items-center gap-2'>
-                    {Icon ? <Icon className='text-muted-foreground size-4' /> : null}
+                    {Icon ? (
+                      <Icon className='text-muted-foreground size-4' />
+                    ) : null}
                     <span className='truncate text-sm font-medium'>
                       {item.title || t('Untitled menu item')}
                     </span>
@@ -164,10 +164,14 @@ export function CustomMenuItemsEditor({
                       className='w-full'
                       value={item.icon ?? ''}
                       onChange={(event) =>
-                        setItem(index, { icon: event.target.value || undefined })
+                        setItem(index, {
+                          icon: event.target.value || undefined,
+                        })
                       }
                     >
-                      <NativeSelectOption value=''>{t('No icon')}</NativeSelectOption>
+                      <NativeSelectOption value=''>
+                        {t('No icon')}
+                      </NativeSelectOption>
                       {CUSTOM_NAV_ICON_OPTIONS.map((iconName) => (
                         <NativeSelectOption key={iconName} value={iconName}>
                           {iconName}
@@ -202,7 +206,9 @@ export function CustomMenuItemsEditor({
                       type='number'
                       value={item.order}
                       onChange={(event) =>
-                        setItem(index, { order: Number(event.target.value) || 0 })
+                        setItem(index, {
+                          order: Number(event.target.value) || 0,
+                        })
                       }
                     />
                   </label>

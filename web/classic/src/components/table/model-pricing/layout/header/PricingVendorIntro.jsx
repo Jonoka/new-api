@@ -150,12 +150,17 @@ const PricingVendorIntro = memo(
     setShowWithRecharge,
     currency,
     setCurrency,
+    siteDisplayType,
     showRatio,
     setShowRatio,
     viewMode,
     setViewMode,
     tokenUnit,
     setTokenUnit,
+    onOpenBillingGuide,
+    billingWelcomeVisible,
+    onCloseBillingWelcome,
+    onDismissBillingWelcome,
   }) => {
     const [currentOffset, setCurrentOffset] = useState(0);
     const [descModalVisible, setDescModalVisible] = useState(false);
@@ -285,12 +290,17 @@ const PricingVendorIntro = memo(
           setShowWithRecharge={setShowWithRecharge}
           currency={currency}
           setCurrency={setCurrency}
+          siteDisplayType={siteDisplayType}
           showRatio={showRatio}
           setShowRatio={setShowRatio}
           viewMode={viewMode}
           setViewMode={setViewMode}
           tokenUnit={tokenUnit}
           setTokenUnit={setTokenUnit}
+          onOpenBillingGuide={onOpenBillingGuide}
+          billingWelcomeVisible={billingWelcomeVisible}
+          onCloseBillingWelcome={onCloseBillingWelcome}
+          onDismissBillingWelcome={onDismissBillingWelcome}
           t={t}
         />
       ),
@@ -307,12 +317,17 @@ const PricingVendorIntro = memo(
         setShowWithRecharge,
         currency,
         setCurrency,
+        siteDisplayType,
         showRatio,
         setShowRatio,
         viewMode,
         setViewMode,
         tokenUnit,
         setTokenUnit,
+        onOpenBillingGuide,
+        billingWelcomeVisible,
+        onCloseBillingWelcome,
+        onDismissBillingWelcome,
         t,
       ],
     );

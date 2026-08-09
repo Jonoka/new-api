@@ -9,6 +9,10 @@ const (
 
 	ContextKeyOriginalModel    ContextKey = "original_model"
 	ContextKeyRequestStartTime ContextKey = "request_start_time"
+	// ContextKeyRelayInfo 保存当前逻辑请求的 RelayInfo，供重试与可观测性流程共享。
+	ContextKeyRelayInfo ContextKey = "relay_info"
+	// ContextKeyChannelMetricState 保存当前请求的渠道指标生命周期状态。
+	ContextKeyChannelMetricState ContextKey = "channel_metric_state"
 
 	/* token related keys */
 	ContextKeyTokenUnlimited         ContextKey = "token_unlimited_quota"

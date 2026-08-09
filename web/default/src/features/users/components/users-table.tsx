@@ -35,6 +35,14 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   DISABLED_ROW_DESKTOP,
   DISABLED_ROW_MOBILE,
   DataTablePage,
@@ -46,6 +54,7 @@ import {
   getUserRoleOptions,
   isUserDeleted,
 } from '../constants'
+import { matchesUserSearchFilter } from '../lib/user-search'
 import type { User } from '../types'
 import { DataTableBulkActions } from './data-table-bulk-actions'
 import { useUsersColumns } from './users-columns'
@@ -65,6 +74,9 @@ export function UsersTable() {
   const [rowSelection, setRowSelection] = useState({})
   const [sorting, setSorting] = useState<SortingState>([])
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
+  const routeSearch = route.useSearch()
+  const navigate = route.useNavigate()
+  const searchType = routeSearch.searchType ?? 'username'
 
   const {
     globalFilter,
@@ -75,8 +87,8 @@ export function UsersTable() {
     onPaginationChange,
     ensurePageInRange,
   } = useTableUrlState({
-    search: route.useSearch(),
-    navigate: route.useNavigate(),
+    search: routeSearch,
+    navigate,
     pagination: { defaultPage: 1, defaultPageSize: isMobile ? 10 : 20 },
     globalFilter: { enabled: true, key: 'filter' },
     columnFilters: [
@@ -104,6 +116,7 @@ export function UsersTable() {
       pagination.pageIndex + 1,
       pagination.pageSize,
       globalFilter,
+      searchType,
       statusFilter,
       roleFilter,
       groupFilter,
@@ -123,6 +136,7 @@ export function UsersTable() {
           ? await searchUsers({
               ...params,
               keyword: globalFilter,
+              search_type: searchType,
               status: statusFilter[0] ?? '',
               role: roleFilter[0] ?? '',
               group: groupFilter,
@@ -161,19 +175,8 @@ export function UsersTable() {
     onRowSelectionChange: setRowSelection,
     onSortingChange: setSorting,
     onColumnVisibilityChange: setColumnVisibility,
-    globalFilterFn: (row, _columnId, filterValue) => {
-      const searchValue = String(filterValue).toLowerCase()
-      const fields = [
-        row.getValue('username'),
-        row.original.display_name,
-        row.original.email,
-      ]
-      return fields.some((field) =>
-        String(field || '')
-          .toLowerCase()
-          .includes(searchValue)
-      )
-    },
+    globalFilterFn: (row, _columnId, filterValue) =>
+      matchesUserSearchFilter(row.original, filterValue),
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
@@ -204,7 +207,40 @@ export function UsersTable() {
       )}
       skeletonKeyPrefix='users-skeleton'
       toolbarProps={{
-        searchPlaceholder: t('Filter by username, name or email...'),
+        searchPlaceholder:
+          searchType === 'id' ? t('User ID') : t('Enter username'),
+        additionalSearch: (
+          <Select
+            items={[
+              { value: 'id', label: t('User ID') },
+              { value: 'username', label: t('Username') },
+            ]}
+            value={searchType}
+            onValueChange={(value) => {
+              if (value === null) return
+              navigate({
+                search: (previous) => ({
+                  ...previous,
+                  page: undefined,
+                  searchType: value,
+                }),
+              })
+            }}
+          >
+            <SelectTrigger
+              className='w-full sm:w-[130px]'
+              aria-label={t('Search')}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent alignItemWithTrigger={false}>
+              <SelectGroup>
+                <SelectItem value='id'>{t('User ID')}</SelectItem>
+                <SelectItem value='username'>{t('Username')}</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        ),
         filters: [
           {
             columnId: 'status',

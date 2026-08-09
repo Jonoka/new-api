@@ -57,6 +57,10 @@ import {
   getLobeHubIcon,
   getModelCategories,
   selectFilter,
+  buildGroupSelectionPayload,
+  createGroupOptions,
+  extractGroupDetailsResponse,
+  resolveGroupCodes,
 } from '../../../../helpers';
 import ModelSelectModal from './ModelSelectModal';
 import SingleModelSelectModal from './SingleModelSelectModal';
@@ -841,8 +845,12 @@ const EditChannelModal = (props) => {
 
   const loadChannel = async () => {
     setLoading(true);
-    let res = await API.get(`/api/channel/${channelId}`);
+    const [availableGroupOptions, res] = await Promise.all([
+      fetchGroups(),
+      API.get(`/api/channel/${channelId}`),
+    ]);
     if (res === undefined) {
+      setLoading(false);
       return;
     }
     const { success, message, data } = res.data;
@@ -852,11 +860,7 @@ const EditChannelModal = (props) => {
       } else {
         data.models = data.models.split(',');
       }
-      if (data.group === '') {
-        data.groups = [];
-      } else {
-        data.groups = data.group.split(',');
-      }
+      data.groups = resolveGroupCodes(data, availableGroupOptions);
       if (data.model_mapping !== '') {
         data.model_mapping = JSON.stringify(
           JSON.parse(data.model_mapping),
@@ -1268,18 +1272,17 @@ const EditChannelModal = (props) => {
 
   const fetchGroups = async () => {
     try {
-      let res = await API.get(`/api/group/`);
+      const res = await API.get('/api/group/details');
       if (res === undefined) {
-        return;
+        return [];
       }
-      setGroupOptions(
-        res.data.data.map((group) => ({
-          label: group,
-          value: group,
-        })),
-      );
+      const groupDetails = extractGroupDetailsResponse(res.data);
+      const options = createGroupOptions(groupDetails || []);
+      setGroupOptions(options);
+      return options;
     } catch (error) {
       showError(error.message);
+      return [];
     }
   };
 
@@ -1401,8 +1404,8 @@ const EditChannelModal = (props) => {
 
   useEffect(() => {
     fetchModels().then();
-    fetchGroups().then();
     if (!isEdit) {
+      fetchGroups().then();
       initialBaseUrlRef.current = '';
       setInputs(originInputs);
       if (formApiRef.current) {
@@ -2040,7 +2043,13 @@ const EditChannelModal = (props) => {
     let res;
     localInputs.auto_ban = localInputs.auto_ban ? 1 : 0;
     localInputs.models = localInputs.models.join(',');
-    localInputs.group = (localInputs.groups || []).join(',');
+    const groupSelection = buildGroupSelectionPayload(
+      localInputs.groups,
+      groupOptions,
+    );
+    localInputs.group = groupSelection.group;
+    localInputs.group_ids = groupSelection.group_ids;
+    delete localInputs.groups;
 
     let mode = 'single';
     if (batch) {

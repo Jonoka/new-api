@@ -33,6 +33,21 @@ func filterPricingByUsableGroups(pricing []model.Pricing, usableGroup map[string
 	return filtered
 }
 
+func buildPricingGroupNames(groupRatio map[string]float64, activeGroupNames map[string]string) map[string]string {
+	groupNames := make(map[string]string, len(activeGroupNames)+len(groupRatio))
+	for code, name := range activeGroupNames {
+		if code != "" && name != "" {
+			groupNames[code] = name
+		}
+	}
+	for code := range groupRatio {
+		if _, ok := groupNames[code]; !ok {
+			groupNames[code] = code
+		}
+	}
+	return groupNames
+}
+
 func GetPricing(c *gin.Context) {
 	pricing := model.GetPricing()
 	userId, exists := c.Get("id")
@@ -64,15 +79,24 @@ func GetPricing(c *gin.Context) {
 		}
 	}
 
+	// 分组 Code 继续作为筛选和计费的内部兼容值；展示名称单独返回，
+	// 这样管理员改名后模型广场会立即显示新名称，同时不破坏已有绑定。
+	activeGroupNames := map[string]string{}
+	if names, err := model.GetActiveGroupNameMap(); err == nil {
+		activeGroupNames = names
+	}
+	groupNames := buildPricingGroupNames(groupRatio, activeGroupNames)
+
 	c.JSON(200, gin.H{
 		"success":            true,
 		"data":               pricing,
 		"vendors":            model.GetVendors(),
 		"group_ratio":        groupRatio,
+		"group_names":        groupNames,
 		"usable_group":       usableGroup,
 		"supported_endpoint": model.GetSupportedEndpointMap(),
 		"auto_groups":        service.GetUserAutoGroup(group),
-		"pricing_version":    "a42d372ccf0b5dd13ecf71203521f9d2",
+		"pricing_version":    "e89fe67d8363d95ef8e8c19715be2e4b",
 	})
 }
 

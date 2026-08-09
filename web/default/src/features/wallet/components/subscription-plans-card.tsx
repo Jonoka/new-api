@@ -134,7 +134,11 @@ export function SubscriptionPlansCard({
   const enableCreem = !!topupInfo?.enable_creem_topup
   const enableWaffoPancake = !!topupInfo?.enable_waffo_pancake_topup
   const enableBepusdt = !!topupInfo?.enable_bepusdt_topup
+  const enableOkpay = !!topupInfo?.enable_okpay_topup
   const enableOnlineTopUp = !!topupInfo?.enable_online_topup
+  const enableBalance = topupInfo?.enable_balance_subscription !== false
+  const enableBalancePromo =
+    topupInfo?.enable_balance_subscription_promo !== false
   const bepusdtChains = useMemo(
     () => topupInfo?.bepusdt_chains || [],
     [topupInfo?.bepusdt_chains]
@@ -660,8 +664,11 @@ export function SubscriptionPlansCard({
         enableCreem={enableCreem}
         enableWaffoPancake={enableWaffoPancake}
         enableBepusdt={enableBepusdt}
+        enableOkpay={enableOkpay}
         bepusdtChains={bepusdtChains}
         enableOnlineTopUp={enableOnlineTopUp}
+        enableBalance={enableBalance}
+        enableBalancePromo={enableBalancePromo}
         epayMethods={epayMethods}
         invoiceConfig={topupInfo?.invoice}
         userQuota={userQuota}

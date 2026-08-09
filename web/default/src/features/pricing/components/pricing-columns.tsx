@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { type ColumnDef } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
 import { getLobeIcon } from '@/lib/lobe-icon'
+import { MODEL_PRICE_UNITS } from '@/lib/model-price-unit'
 import {
   Tooltip,
   TooltipContent,
@@ -34,13 +35,14 @@ import {
   getDynamicPricingSummary,
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
-import { isTokenBasedModel } from '../lib/model-helpers'
+import { getGroupDisplayName } from '../lib/group-names'
+import { getModelPriceUnit, isTokenBasedModel } from '../lib/model-helpers'
 import {
   formatPrice,
-  formatRequestPrice,
+  formatRequestPriceDisplay,
   stripTrailingZeros,
 } from '../lib/price'
-import type { PricingModel, TokenUnit } from '../types'
+import type { GroupNameMap, PricingModel, TokenUnit } from '../types'
 
 // ----------------------------------------------------------------------------
 // Pricing Table Columns
@@ -51,6 +53,7 @@ export interface PricingColumnsOptions {
   priceRate?: number
   usdExchangeRate?: number
   showRechargePrice?: boolean
+  groupNames?: GroupNameMap
 }
 
 function renderLimitedTags(
@@ -71,6 +74,7 @@ function renderLimitedTags(
 
 function renderLimitedGroupBadges(
   groups: string[],
+  groupNames: GroupNameMap,
   maxDisplay: number = 2
 ): React.ReactNode {
   return (
@@ -78,7 +82,13 @@ function renderLimitedGroupBadges(
       items={groups}
       max={maxDisplay}
       getKey={(group) => group}
-      renderItem={(group) => <GroupBadge group={group} size='sm' />}
+      renderItem={(group) => (
+        <GroupBadge
+          group={group}
+          label={getGroupDisplayName(group, groupNames)}
+          size='sm'
+        />
+      )}
     />
   )
 }
@@ -92,6 +102,7 @@ export function usePricingColumns(
     priceRate = 1,
     usdExchangeRate = 1,
     showRechargePrice = false,
+    groupNames = {},
   } = options
 
   const tokenUnitLabel = tokenUnit === 'K' ? '1K' : '1M'
@@ -129,13 +140,20 @@ export function usePricingColumns(
       header: t('Type'),
       cell: ({ row }) => {
         const isTokenBased = row.original.quota_type === QUOTA_TYPE_VALUES.TOKEN
-        return (
-          <StatusBadge
-            label={isTokenBased ? t('Token') : t('Request')}
-            variant={isTokenBased ? 'info' : 'neutral'}
-            copyable={false}
-          />
-        )
+        let label = t('Token')
+        let variant: 'info' | 'neutral' | 'warning' = 'info'
+
+        if (!isTokenBased) {
+          if (getModelPriceUnit(row.original) === MODEL_PRICE_UNITS.SECOND) {
+            label = t('Per-second')
+            variant = 'warning'
+          } else {
+            label = t('Per-request')
+            variant = 'neutral'
+          }
+        }
+
+        return <StatusBadge label={label} variant={variant} copyable={false} />
       },
       size: 80,
       enableSorting: false,
@@ -245,20 +263,26 @@ export function usePricingColumns(
           )
         }
 
-        const price = stripTrailingZeros(
-          formatRequestPrice(
-            model,
-            showRechargePrice,
-            priceRate,
-            usdExchangeRate
-          )
+        const priceDisplay = formatRequestPriceDisplay(
+          model,
+          showRechargePrice,
+          priceRate,
+          usdExchangeRate
         )
+        const price = stripTrailingZeros(priceDisplay.formatted)
+        const fixedPriceUnitLabel =
+          getModelPriceUnit(model) === MODEL_PRICE_UNITS.SECOND
+            ? t('second')
+            : t('request')
 
         return (
           <div className='min-w-[100px]'>
-            <span className='font-mono text-sm tabular-nums'>{price}</span>
+            <span className='font-mono text-sm tabular-nums'>
+              {priceDisplay.hasVariants && `${t('from')} `}
+              {price}
+            </span>
             <div className='text-muted-foreground/50 text-[10px]'>
-              / {t('request')}
+              / {fixedPriceUnitLabel}
             </div>
           </div>
         )
@@ -446,13 +470,18 @@ export function usePricingColumns(
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger render={<div />}>
-                {renderLimitedGroupBadges(groups, 2)}
+                {renderLimitedGroupBadges(groups, groupNames, 2)}
               </TooltipTrigger>
               {groups.length > 2 && (
                 <TooltipContent side='top' className='max-w-[280px] p-2'>
                   <div className='flex flex-wrap gap-1'>
                     {groups.map((group) => (
-                      <GroupBadge key={group} group={group} size='sm' />
+                      <GroupBadge
+                        key={group}
+                        group={group}
+                        label={getGroupDisplayName(group, groupNames)}
+                        size='sm'
+                      />
                     ))}
                   </div>
                 </TooltipContent>

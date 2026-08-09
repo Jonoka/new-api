@@ -44,6 +44,7 @@ export const userSchema = z.object({
   used_quota: z.number(),
   request_count: z.number(),
   group: z.string(),
+  group_name: z.string().optional().default(''),
   aff_code: z.string().optional(),
   aff_count: z.number().optional(),
   aff_quota: z.number().optional(),
@@ -91,6 +92,7 @@ export interface GetUsersResponse {
 
 export interface SearchUsersParams {
   keyword?: string
+  search_type?: 'all' | 'id' | 'username'
   group?: string
   role?: string
   status?: string
@@ -102,7 +104,7 @@ export interface UserFormData {
   username: string
   display_name: string
   password?: string
-  role?: number // Only used when creating user
+  role?: number
   quota?: number // Only used when updating user
   group?: string // Only used when updating user
   remark?: string // Only used when updating user
@@ -110,7 +112,9 @@ export interface UserFormData {
 
 export type ManageUserAction =
   | 'promote'
+  | 'promote_root'
   | 'demote'
+  | 'demote_root'
   | 'enable'
   | 'disable'
   | 'delete'

@@ -104,9 +104,7 @@ const OPERATIONS_SECTIONS = [
     build: (settings: OperationsSettings) => (
       <LogSettingsSection
         defaultEnabled={Boolean(settings.LogConsumeEnabled)}
-        defaultForceRecordIpEnabled={Boolean(
-          settings.ForceRecordLogIpEnabled
-        )}
+        defaultForceRecordIpEnabled={Boolean(settings.ForceRecordLogIpEnabled)}
       />
     ),
   },
@@ -124,6 +122,9 @@ const OPERATIONS_SECTIONS = [
             settings['performance_setting.disk_cache_max_size_mb'] ?? 1024,
           'performance_setting.disk_cache_path':
             settings['performance_setting.disk_cache_path'] ?? '',
+          'performance_setting.image_task_data_retention_hours':
+            settings['performance_setting.image_task_data_retention_hours'] ??
+            1,
           'performance_setting.monitor_enabled':
             settings['performance_setting.monitor_enabled'] ?? false,
           'performance_setting.monitor_cpu_threshold':

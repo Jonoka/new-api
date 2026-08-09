@@ -105,6 +105,11 @@ func SetRelayRouter(router *gin.Engine) {
 	relayV1Router.Use(middleware.SystemPerformanceCheck())
 	relayV1Router.Use(middleware.TokenAuth())
 	{
+		// 图片异步任务路由本身负责在后台选择渠道并执行转发。
+		relayV1Router.POST("/images/tasks", controller.ImageTaskSubmit)
+		relayV1Router.GET("/images/tasks/:task_id", controller.ImageTaskFetch)
+		relayV1Router.GET("/images/tasks/:task_id/content/:index", controller.ImageTaskContent)
+
 		// WebSocket 路由（统一到 Relay）
 		wsRouter := relayV1Router.Group("")
 		wsRouter.Use(middleware.Distribute())

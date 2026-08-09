@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
+import { getGroupDisplayName } from '../../../../helpers';
 import SelectableButtonGroup from '../../../common/ui/SelectableButtonGroup';
 
 /**
@@ -26,6 +27,7 @@ import SelectableButtonGroup from '../../../common/ui/SelectableButtonGroup';
  * @param {Function} setFilterGroup 设置选中分组
  * @param {Record<string, any>} usableGroup 后端返回的可用分组对象
  * @param {Record<string, number>} groupRatio 分组倍率对象
+ * @param {Record<string, string>} groupNames 分组 code 到显示名称的映射
  * @param {Array} models 模型列表
  * @param {boolean} loading 是否加载中
  * @param {Function} t i18n
@@ -35,6 +37,7 @@ const PricingGroups = ({
   setFilterGroup,
   usableGroup = {},
   groupRatio = {},
+  groupNames = {},
   models = [],
   loading = false,
   t,
@@ -63,7 +66,7 @@ const PricingGroups = ({
     }
     return {
       value: g,
-      label: g === 'all' ? t('全部分组') : g,
+      label: g === 'all' ? t('全部分组') : getGroupDisplayName(g, groupNames),
       tagCount: ratioDisplay,
     };
   });

@@ -58,6 +58,8 @@ func paymentProviderFromSubscriptionPaymentMethod(paymentMethod string) string {
 		return model.PaymentProviderWaffoPancake
 	case model.PaymentMethodBepusdt:
 		return model.PaymentProviderBepusdt
+	case model.PaymentMethodOkpay:
+		return model.PaymentProviderOkpay
 	case model.PaymentMethodBalance:
 		return model.PaymentProviderBalance
 	default:
@@ -84,6 +86,7 @@ func addInvoiceFieldsToResponse(response gin.H, amounts *invoicePaymentAmounts) 
 		return
 	}
 	response["invoice_required"] = amounts.Required
+	response["invoice_kind"] = amounts.Request.Kind
 	response["invoice_base_amount"] = amounts.BaseCNY
 	response["invoice_fee"] = amounts.FeeCNY
 	response["invoice_total_amount"] = amounts.TotalCNY

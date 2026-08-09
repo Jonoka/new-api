@@ -25,9 +25,20 @@ test('classic router mounts the canvas launcher page', () => {
 
 test('classic sidebar configuration defaults include canvas', () => {
   assert.match(readSource('hooks/common/useSidebar.js'), /canvas:\s*true/);
+  assert.match(readSource('hooks/common/useSidebar.js'), /customItems:\s*\[\]/);
+  assert.match(readSource('hooks/common/useSidebar.js'), /canvasOrigin/);
+  assert.match(readSource('hooks/common/useSidebar.js'), /canvasIcon/);
   assert.match(
     readSource('pages/Setting/Operation/SettingsSidebarModulesAdmin.jsx'),
-    /canvas:\s*true/,
+    /key:\s*'canvas'/,
+  );
+  assert.match(
+    readSource('pages/Setting/Operation/SettingsSidebarModulesAdmin.jsx'),
+    /自定义侧边栏/,
+  );
+  assert.match(
+    readSource('pages/Setting/Operation/SettingsSidebarModulesAdmin.jsx'),
+    /CUSTOM_NAV_ICON_OPTIONS/,
   );
   assert.match(
     readSource('components/settings/personal/cards/NotificationSettings.jsx'),
@@ -47,6 +58,8 @@ test('classic sidebar configuration defaults include canvas', () => {
 test('classic canvas launcher builds session based New API URL', () => {
   const source = readSource('helpers/canvas.js');
 
+  assert.match(source, /normalizeCanvasOrigin/);
+  assert.match(source, /getCanvasSettingsFromSidebarModules/);
   assert.match(source, /mode['"]?,\s*['"]newapi/);
   assert.match(source, /baseUrl['"]?,\s*`\$\{normalizedOrigin\}\/canvas`/);
   assert.match(source, /group['"]?,\s*group/);
@@ -60,6 +73,8 @@ test('classic canvas launcher builds session based New API URL', () => {
 test('classic canvas launcher exposes optional capability groups', () => {
   const source = readSource('pages/Canvas/index.jsx');
 
+  assert.match(source, /getCanvasSettingsFromSidebarModules/);
+  assert.match(source, /canvasSettings\.canvasOrigin/);
   assert.match(source, /defaultGroup/);
   assert.match(source, /textGroup/);
   assert.match(source, /imageGroup/);
@@ -74,8 +89,13 @@ test('classic canvas launcher exposes optional capability groups', () => {
 
 test('classic group selector displays group names instead of descriptions', () => {
   const source = readSource('helpers/api.js');
+  const renderSource = readSource('helpers/render.jsx');
+  const groupRenderer = renderSource.slice(
+    renderSource.indexOf('export const renderGroupOption'),
+    renderSource.indexOf('export function renderNumber'),
+  );
 
-  assert.match(source, /label:\s*group/);
-  assert.match(source, /value:\s*group/);
-  assert.doesNotMatch(source, /label:\s*\n\s*info\.desc/);
+  assert.match(source, /createPlaygroundGroupOptions\(data\)/);
+  assert.match(groupRenderer, /<Typography\.Text strong[\s\S]*?\{label\}/);
+  assert.doesNotMatch(groupRenderer, /\{value\}/);
 });

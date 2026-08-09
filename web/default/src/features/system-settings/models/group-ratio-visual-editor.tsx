@@ -17,7 +17,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useState, useMemo, useEffect, useCallback, memo } from 'react'
-import { Pencil, Plus, Trash2, GripVertical, ChevronDown } from 'lucide-react'
+import {
+  ArrowRightLeft,
+  RefreshCw,
+  Pencil,
+  Plus,
+  Trash2,
+  GripVertical,
+  ChevronUp,
+  ChevronDown,
+} from 'lucide-react'
+import { Reorder, useDragControls } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import {
@@ -44,6 +54,14 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Table,
   TableBody,
   TableCell,
@@ -51,15 +69,31 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { ConfirmDialog } from '@/components/confirm-dialog'
+import type { AutoGroupConfig, GroupDetailInput } from '../types'
 import { safeJsonParse } from '../utils/json-parser'
+import { applyAutoGroupOrder } from './auto-group-order'
+import { GroupCodeMigrationDialog } from './group-code-migration-dialog'
+import {
+  createTemporaryGroupCode,
+  getGroupIdDisplayValue,
+  getGroupNameByCode,
+} from './group-identity'
+import { GroupTokenMigrationDialog } from './group-token-migration-dialog'
 
 type GroupRatioVisualEditorProps = {
-  groupRatio: string
+  groups: EditableGroupDetail[]
+  autoGroup: AutoGroupConfig
+  autoSelectableLocked: boolean
+  reservedGroupCodes: ReadonlySet<string>
+  isLoadingGroups: boolean
+  groupLoadError: string | null
   topupGroupRatio: string
-  userUsableGroups: string
   groupGroupRatio: string
-  autoGroups: string
   onChange: (field: string, value: string) => void
+  onGroupsChange: (groups: EditableGroupDetail[]) => void
+  onAutoGroupChange: (config: AutoGroupConfig) => void
+  onRetryGroups: () => void
 }
 
 type SimpleGroup = {
@@ -67,12 +101,9 @@ type SimpleGroup = {
   value: string
 }
 
-type GroupPricingRow = {
-  _id: string
-  name: string
-  ratio: number
-  selectable: boolean
-  description: string
+export type EditableGroupDetail = Omit<GroupDetailInput, 'status'> & {
+  _key: string
+  status: number
 }
 
 type GroupOverride = {
@@ -92,91 +123,100 @@ function createGroupPricingId() {
 
 function normalizeRatio(value: unknown): number {
   const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : 1
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1
 }
 
-function buildGroupPricingRows(
-  groupRatio: string,
-  userUsableGroups: string
-): GroupPricingRow[] {
-  const ratioMap = safeJsonParse<Record<string, number>>(groupRatio, {
-    fallback: {},
-    context: 'group ratios',
-  })
-  const usableMap = safeJsonParse<Record<string, string>>(userUsableGroups, {
-    fallback: {},
-    context: 'user usable groups',
-  })
-  const names = new Set([...Object.keys(ratioMap), ...Object.keys(usableMap)])
+function AutoGroupReorderItem({
+  group,
+  index,
+  itemCount,
+  onMove,
+  onDelete,
+}: {
+  group: EditableGroupDetail
+  index: number
+  itemCount: number
+  onMove: (index: number, direction: 'up' | 'down') => void
+  onDelete: (index: number) => void
+}) {
+  const { t } = useTranslation()
+  const dragControls = useDragControls()
 
-  return Array.from(names).map((name) => ({
-    _id: createGroupPricingId(),
-    name,
-    ratio: normalizeRatio(ratioMap[name]),
-    selectable: Object.prototype.hasOwnProperty.call(usableMap, name),
-    description: String(usableMap[name] ?? ''),
-  }))
-}
-
-function serializeGroupPricingRows(rows: GroupPricingRow[]) {
-  const groupRatio: Record<string, number> = {}
-  const userUsableGroups: Record<string, string> = {}
-
-  for (const row of rows) {
-    const name = row.name.trim()
-    if (!name) continue
-    groupRatio[name] = normalizeRatio(row.ratio)
-    if (row.selectable) {
-      userUsableGroups[name] = row.description
-    }
-  }
-
-  return {
-    GroupRatio: JSON.stringify(groupRatio, null, 2),
-    UserUsableGroups: JSON.stringify(userUsableGroups, null, 2),
-  }
-}
-
-function groupPricingSignature(rows: GroupPricingRow[]): string {
-  const serialized = serializeGroupPricingRows(rows)
-  return JSON.stringify({
-    groupRatio: safeJsonParse(serialized.GroupRatio, {
-      fallback: {},
-      silent: true,
-    }),
-    userUsableGroups: safeJsonParse(serialized.UserUsableGroups, {
-      fallback: {},
-      silent: true,
-    }),
-  })
-}
-
-function sourceGroupPricingSignature(
-  groupRatio: string,
-  userUsableGroups: string
-): string {
-  return JSON.stringify({
-    groupRatio: safeJsonParse(groupRatio, { fallback: {}, silent: true }),
-    userUsableGroups: safeJsonParse(userUsableGroups, {
-      fallback: {},
-      silent: true,
-    }),
-  })
+  return (
+    <Reorder.Item
+      as='div'
+      value={group._key}
+      dragListener={false}
+      dragControls={dragControls}
+      className='bg-background relative flex items-center gap-2 rounded-md border p-3'
+      whileDrag={{
+        boxShadow: '0 4px 16px rgba(0, 0, 0, 0.12)',
+        zIndex: 50,
+      }}
+    >
+      <span
+        aria-hidden='true'
+        className='text-muted-foreground hover:text-foreground shrink-0 cursor-grab touch-none active:cursor-grabbing'
+        title={t('Sort')}
+        onPointerDown={(event) => dragControls.start(event)}
+      >
+        <GripVertical className='h-4 w-4' />
+      </span>
+      <span className='min-w-0 flex-1 truncate font-medium'>{group.name}</span>
+      <div className='flex shrink-0 gap-1'>
+        <Button
+          type='button'
+          variant='ghost'
+          size='icon-sm'
+          disabled={index === 0}
+          aria-label={`${t('Sort')} ↑`}
+          title={`${t('Sort')} ↑`}
+          onClick={() => onMove(index, 'up')}
+        >
+          <ChevronUp className='h-4 w-4' />
+        </Button>
+        <Button
+          type='button'
+          variant='ghost'
+          size='icon-sm'
+          disabled={index === itemCount - 1}
+          aria-label={`${t('Sort')} ↓`}
+          title={`${t('Sort')} ↓`}
+          onClick={() => onMove(index, 'down')}
+        >
+          <ChevronDown className='h-4 w-4' />
+        </Button>
+        <Button
+          type='button'
+          variant='ghost'
+          size='icon-sm'
+          aria-label={t('Delete')}
+          title={t('Delete')}
+          onClick={() => onDelete(index)}
+        >
+          <Trash2 className='h-4 w-4' />
+        </Button>
+      </div>
+    </Reorder.Item>
+  )
 }
 
 export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
-  groupRatio,
+  groups,
+  autoGroup,
+  autoSelectableLocked,
+  reservedGroupCodes,
+  isLoadingGroups,
+  groupLoadError,
   topupGroupRatio,
-  userUsableGroups,
   groupGroupRatio,
-  autoGroups,
   onChange,
+  onGroupsChange,
+  onAutoGroupChange,
+  onRetryGroups,
 }: GroupRatioVisualEditorProps) {
   const { t } = useTranslation()
   const [simpleDialogOpen, setSimpleDialogOpen] = useState(false)
-  const [simpleDialogType, setSimpleDialogType] = useState<
-    'groupRatio' | 'topupGroupRatio' | null
-  >(null)
   const [simpleEditData, setSimpleEditData] = useState<SimpleGroup | null>(null)
 
   const [autoGroupDialogOpen, setAutoGroupDialogOpen] = useState(false)
@@ -204,13 +244,24 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
     }))
   }, [topupGroupRatio])
 
-  // Parse auto groups
+  // 自动分组顺序直接维护在结构化分组数据中。
   const autoGroupsList = useMemo(() => {
-    return safeJsonParse<string[]>(autoGroups, {
-      fallback: [],
-      context: 'auto groups',
-    })
-  }, [autoGroups])
+    return groups
+      .filter((group) => group.auto_enabled)
+      .sort((a, b) => a.auto_order - b.auto_order)
+  }, [groups])
+
+  const availableAutoGroups = useMemo(
+    () =>
+      groups.filter(
+        (group) =>
+          !group.auto_enabled &&
+          !group.exclusive &&
+          group.code.trim() &&
+          group.name.trim()
+      ),
+    [groups]
+  )
 
   // Parse group-group ratios
   const groupGroupRatioList = useMemo(() => {
@@ -229,29 +280,33 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
       })),
     }))
   }, [groupGroupRatio])
+  const availableUserGroupOptions = useMemo(() => {
+    const configuredCodes = new Set(
+      groupGroupRatioList.map((item) => item.userGroup)
+    )
+    return groups
+      .filter(
+        (group) =>
+          group.code.trim() &&
+          group.name.trim() &&
+          !configuredCodes.has(group.code)
+      )
+      .map((group) => ({ value: group.code, label: group.name }))
+  }, [groupGroupRatioList, groups])
 
-  // Simple group handlers (for groupRatio and topupGroupRatio)
-  const handleSimpleAdd = (type: 'groupRatio' | 'topupGroupRatio') => {
-    setSimpleDialogType(type)
+  // 充值倍率仍使用旧 Option 配置。
+  const handleSimpleAdd = () => {
     setSimpleEditData(null)
     setSimpleDialogOpen(true)
   }
 
-  const handleSimpleEdit = (
-    type: 'groupRatio' | 'topupGroupRatio',
-    group: SimpleGroup
-  ) => {
-    setSimpleDialogType(type)
+  const handleSimpleEdit = (group: SimpleGroup) => {
     setSimpleEditData(group)
     setSimpleDialogOpen(true)
   }
 
   const handleSimpleSave = (name: string, value: string) => {
-    if (!simpleDialogType) return
-
-    const fieldName =
-      simpleDialogType === 'groupRatio' ? groupRatio : topupGroupRatio
-    const map = safeJsonParse<Record<string, number>>(fieldName, {
+    const map = safeJsonParse<Record<string, number>>(topupGroupRatio, {
       fallback: {},
       silent: true,
     })
@@ -262,25 +317,18 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
 
     map[name] = parseFloat(value)
 
-    const field =
-      simpleDialogType === 'groupRatio' ? 'GroupRatio' : 'TopupGroupRatio'
-    onChange(field, JSON.stringify(map, null, 2))
+    onChange('TopupGroupRatio', JSON.stringify(map, null, 2))
     setSimpleDialogOpen(false)
   }
 
-  const handleSimpleDelete = (
-    type: 'groupRatio' | 'topupGroupRatio',
-    name: string
-  ) => {
-    const fieldName = type === 'groupRatio' ? groupRatio : topupGroupRatio
-    const map = safeJsonParse<Record<string, number>>(fieldName, {
+  const handleSimpleDelete = (name: string) => {
+    const map = safeJsonParse<Record<string, number>>(topupGroupRatio, {
       fallback: {},
       silent: true,
     })
     delete map[name]
 
-    const field = type === 'groupRatio' ? 'GroupRatio' : 'TopupGroupRatio'
-    onChange(field, JSON.stringify(map, null, 2))
+    onChange('TopupGroupRatio', JSON.stringify(map, null, 2))
   }
 
   // Auto groups handlers
@@ -290,25 +338,38 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   }
 
   const handleAutoGroupSave = () => {
-    if (!autoGroupInput.trim()) return
+    if (!autoGroupInput) return
 
-    const list = [...autoGroupsList, autoGroupInput.trim()]
-    onChange('AutoGroups', JSON.stringify(list, null, 2))
+    onGroupsChange(
+      applyAutoGroupOrder(groups, [
+        ...autoGroupsList.map((group) => group._key),
+        autoGroupInput,
+      ])
+    )
     setAutoGroupDialogOpen(false)
   }
 
   const handleAutoGroupDelete = (index: number) => {
-    const list = autoGroupsList.filter((_, i) => i !== index)
-    onChange('AutoGroups', JSON.stringify(list, null, 2))
+    const orderedKeys = autoGroupsList
+      .filter((_, currentIndex) => currentIndex !== index)
+      .map((group) => group._key)
+    onGroupsChange(applyAutoGroupOrder(groups, orderedKeys))
   }
 
   const handleAutoGroupMove = (index: number, direction: 'up' | 'down') => {
-    const list = [...autoGroupsList]
+    const orderedKeys = autoGroupsList.map((group) => group._key)
     const newIndex = direction === 'up' ? index - 1 : index + 1
 
-    if (newIndex < 0 || newIndex >= list.length) return
-    ;[list[index], list[newIndex]] = [list[newIndex], list[index]]
-    onChange('AutoGroups', JSON.stringify(list, null, 2))
+    if (newIndex < 0 || newIndex >= orderedKeys.length) return
+    ;[orderedKeys[index], orderedKeys[newIndex]] = [
+      orderedKeys[newIndex],
+      orderedKeys[index],
+    ]
+    onGroupsChange(applyAutoGroupOrder(groups, orderedKeys))
+  }
+
+  const handleAutoGroupReorder = (orderedKeys: string[]) => {
+    onGroupsChange(applyAutoGroupOrder(groups, orderedKeys))
   }
 
   // Group-group ratio handlers
@@ -411,9 +472,15 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   return (
     <div className='space-y-4'>
       <GroupPricingTable
-        groupRatio={groupRatio}
-        userUsableGroups={userUsableGroups}
-        onChange={onChange}
+        groups={groups}
+        autoGroup={autoGroup}
+        autoSelectableLocked={autoSelectableLocked}
+        reservedGroupCodes={reservedGroupCodes}
+        isLoading={isLoadingGroups}
+        loadError={groupLoadError}
+        onGroupsChange={onGroupsChange}
+        onAutoGroupChange={onAutoGroupChange}
+        onRetry={onRetryGroups}
       />
 
       {/* Topup Group Ratios */}
@@ -426,10 +493,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
         </CardHeader>
         <CardContent>
           <div className='space-y-4'>
-            <Button
-              onClick={() => handleSimpleAdd('topupGroupRatio')}
-              size='sm'
-            >
+            <Button onClick={handleSimpleAdd} size='sm'>
               <Plus className='mr-2 h-4 w-4' />
               {t('Add group')}
             </Button>
@@ -449,7 +513,8 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
                     {topupRatioList.map((group) => (
                       <TableRow key={group.name}>
                         <TableCell className='font-medium'>
-                          {group.name}
+                          {getGroupNameByCode(groups, group.name) ||
+                            t('Unknown')}
                         </TableCell>
                         <TableCell>{group.value}</TableCell>
                         <TableCell className='text-right'>
@@ -457,21 +522,14 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
                             <Button
                               variant='ghost'
                               size='sm'
-                              onClick={() =>
-                                handleSimpleEdit('topupGroupRatio', group)
-                              }
+                              onClick={() => handleSimpleEdit(group)}
                             >
                               <Pencil className='h-4 w-4' />
                             </Button>
                             <Button
                               variant='ghost'
                               size='sm'
-                              onClick={() =>
-                                handleSimpleDelete(
-                                  'topupGroupRatio',
-                                  group.name
-                                )
-                              }
+                              onClick={() => handleSimpleDelete(group.name)}
                             >
                               <Trash2 className='h-4 w-4' />
                             </Button>
@@ -516,7 +574,10 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
                             <ChevronDown className='h-4 w-4' />
                           </CollapsibleTrigger>
                           <span className='font-semibold'>
-                            {userGroupData.userGroup}
+                            {getGroupNameByCode(
+                              groups,
+                              userGroupData.userGroup
+                            ) || t('Unknown')}
                           </span>
                           <span className='text-muted-foreground text-sm'>
                             {t('{{count}} override', {
@@ -562,7 +623,10 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
                                 {userGroupData.overrides.map((override) => (
                                   <TableRow key={override.targetGroup}>
                                     <TableCell className='font-medium'>
-                                      {override.targetGroup}
+                                      {getGroupNameByCode(
+                                        groups,
+                                        override.targetGroup
+                                      ) || t('Unknown')}
                                     </TableCell>
                                     <TableCell>{override.ratio}</TableCell>
                                     <TableCell className='text-right'>
@@ -626,42 +690,25 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
               {t('Add group')}
             </Button>
             {autoGroupsList.length > 0 && (
-              <div className='space-y-2'>
+              <Reorder.Group
+                as='div'
+                axis='y'
+                values={autoGroupsList.map((group) => group._key)}
+                onReorder={handleAutoGroupReorder}
+                className='flex flex-col gap-2'
+                layoutScroll
+              >
                 {autoGroupsList.map((group, index) => (
-                  <div
-                    key={index}
-                    className='flex items-center gap-2 rounded-md border p-3'
-                  >
-                    <GripVertical className='text-muted-foreground h-4 w-4' />
-                    <span className='flex-1 font-medium'>{group}</span>
-                    <div className='flex gap-1'>
-                      <Button
-                        variant='ghost'
-                        size='sm'
-                        disabled={index === 0}
-                        onClick={() => handleAutoGroupMove(index, 'up')}
-                      >
-                        ↑
-                      </Button>
-                      <Button
-                        variant='ghost'
-                        size='sm'
-                        disabled={index === autoGroupsList.length - 1}
-                        onClick={() => handleAutoGroupMove(index, 'down')}
-                      >
-                        ↓
-                      </Button>
-                      <Button
-                        variant='ghost'
-                        size='sm'
-                        onClick={() => handleAutoGroupDelete(index)}
-                      >
-                        <Trash2 className='h-4 w-4' />
-                      </Button>
-                    </div>
-                  </div>
+                  <AutoGroupReorderItem
+                    key={group._key}
+                    group={group}
+                    index={index}
+                    itemCount={autoGroupsList.length}
+                    onMove={handleAutoGroupMove}
+                    onDelete={handleAutoGroupDelete}
+                  />
                 ))}
-              </div>
+              </Reorder.Group>
             )}
           </div>
         </CardContent>
@@ -673,7 +720,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
         onOpenChange={setSimpleDialogOpen}
         onSave={handleSimpleSave}
         editData={simpleEditData}
-        type={simpleDialogType}
+        groups={groups}
       />
 
       {/* Auto Group Dialog */}
@@ -681,18 +728,37 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t('Add auto group')}</DialogTitle>
-            <DialogDescription>
-              {t('Add a group identifier to the auto assignment list.')}
-            </DialogDescription>
+            <DialogDescription>{t('Select a group')}</DialogDescription>
           </DialogHeader>
           <div className='space-y-4 py-4'>
             <div className='space-y-2'>
-              <Label>{t('Group identifier')}</Label>
-              <Input
+              <Label>{t('Group')}</Label>
+              <Select
+                items={availableAutoGroups.map((group) => ({
+                  value: group._key,
+                  label: group.name,
+                }))}
                 value={autoGroupInput}
-                onChange={(e) => setAutoGroupInput(e.target.value)}
-                placeholder={t('default')}
-              />
+                onValueChange={(value) => setAutoGroupInput(value ?? '')}
+              >
+                <SelectTrigger className='w-full'>
+                  <SelectValue placeholder={t('Select a group')} />
+                </SelectTrigger>
+                <SelectContent alignItemWithTrigger={false}>
+                  <SelectGroup>
+                    {availableAutoGroups.map((group) => (
+                      <SelectItem key={group._key} value={group._key}>
+                        {group.name}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              {availableAutoGroups.length === 0 && (
+                <p className='text-muted-foreground text-sm'>
+                  {t('All groups are already in the auto assignment list.')}
+                </p>
+              )}
             </div>
           </div>
           <DialogFooter>
@@ -702,7 +768,9 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
             >
               {t('Cancel')}
             </Button>
-            <Button onClick={handleAutoGroupSave}>{t('Add')}</Button>
+            <Button onClick={handleAutoGroupSave} disabled={!autoGroupInput}>
+              {t('Add')}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -718,12 +786,25 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
           </DialogHeader>
           <div className='space-y-4 py-4'>
             <div className='space-y-2'>
-              <Label>{t('User group name')}</Label>
-              <Input
+              <Label>{t('User group')}</Label>
+              <Select
+                items={availableUserGroupOptions}
                 value={userGroupInput}
-                onChange={(e) => setUserGroupInput(e.target.value)}
-                placeholder={t('vip')}
-              />
+                onValueChange={(value) => setUserGroupInput(value ?? '')}
+              >
+                <SelectTrigger className='w-full'>
+                  <SelectValue placeholder={t('Select a group')} />
+                </SelectTrigger>
+                <SelectContent alignItemWithTrigger={false}>
+                  <SelectGroup>
+                    {availableUserGroupOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <DialogFooter>
@@ -733,7 +814,9 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
             >
               {t('Cancel')}
             </Button>
-            <Button onClick={handleUserGroupSave}>{t('Add')}</Button>
+            <Button onClick={handleUserGroupSave} disabled={!userGroupInput}>
+              {t('Add')}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -745,101 +828,101 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
         onSave={handleOverrideSave}
         editData={groupOverrideEditData}
         userGroup={groupOverrideUserGroup}
+        groups={groups}
       />
     </div>
   )
 })
 
 type GroupPricingTableProps = {
-  groupRatio: string
-  userUsableGroups: string
-  onChange: (field: string, value: string) => void
+  groups: EditableGroupDetail[]
+  autoGroup: AutoGroupConfig
+  autoSelectableLocked: boolean
+  reservedGroupCodes: ReadonlySet<string>
+  isLoading: boolean
+  loadError: string | null
+  onGroupsChange: (groups: EditableGroupDetail[]) => void
+  onAutoGroupChange: (config: AutoGroupConfig) => void
+  onRetry: () => void
 }
 
 function GroupPricingTable({
-  groupRatio,
-  userUsableGroups,
-  onChange,
+  groups,
+  autoGroup,
+  autoSelectableLocked,
+  reservedGroupCodes,
+  isLoading,
+  loadError,
+  onGroupsChange,
+  onAutoGroupChange,
+  onRetry,
 }: GroupPricingTableProps) {
   const { t } = useTranslation()
-  const [rows, setRows] = useState<GroupPricingRow[]>(() =>
-    buildGroupPricingRows(groupRatio, userUsableGroups)
-  )
-
-  useEffect(() => {
-    const incomingSignature = sourceGroupPricingSignature(
-      groupRatio,
-      userUsableGroups
-    )
-    setRows((currentRows) => {
-      if (groupPricingSignature(currentRows) === incomingSignature) {
-        return currentRows
-      }
-      return buildGroupPricingRows(groupRatio, userUsableGroups)
-    })
-  }, [groupRatio, userUsableGroups])
-
-  const emitRows = useCallback(
-    (nextRows: GroupPricingRow[]) => {
-      setRows(nextRows)
-      const serialized = serializeGroupPricingRows(nextRows)
-      onChange('GroupRatio', serialized.GroupRatio)
-      onChange('UserUsableGroups', serialized.UserUsableGroups)
-    },
-    [onChange]
-  )
+  const [migrationDialogOpen, setMigrationDialogOpen] = useState(false)
+  const [codeMigrationDialogOpen, setCodeMigrationDialogOpen] = useState(false)
+  const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null)
 
   const updateRow = useCallback(
     (
-      id: string,
-      field: Exclude<keyof GroupPricingRow, '_id'>,
+      key: string,
+      field: 'name' | 'description' | 'ratio' | 'user_selectable',
       value: string | number | boolean
     ) => {
-      emitRows(
-        rows.map((row) => (row._id === id ? { ...row, [field]: value } : row))
+      onGroupsChange(
+        groups.map((group) =>
+          group._key === key ? { ...group, [field]: value } : group
+        )
       )
     },
-    [emitRows, rows]
+    [groups, onGroupsChange]
   )
 
   const addRow = useCallback(() => {
-    const existingNames = new Set(rows.map((row) => row.name))
-    let index = 1
-    let name = `group_${index}`
-    while (existingNames.has(name)) {
-      index += 1
-      name = `group_${index}`
-    }
-    emitRows([
-      ...rows,
+    const code = createTemporaryGroupCode([
+      ...reservedGroupCodes,
+      ...groups.map((group) => group.code),
+    ])
+
+    onGroupsChange([
+      ...groups,
       {
-        _id: createGroupPricingId(),
-        name,
-        ratio: 1,
-        selectable: true,
+        _key: createGroupPricingId(),
+        code,
+        name: '',
         description: '',
+        ratio: 1,
+        user_selectable: true,
+        exclusive: false,
+        status: 1,
+        auto_enabled: false,
+        auto_order: 0,
       },
     ])
-  }, [emitRows, rows])
+  }, [groups, onGroupsChange, reservedGroupCodes])
 
   const removeRow = useCallback(
-    (id: string) => {
-      emitRows(rows.filter((row) => row._id !== id))
+    (key: string) => {
+      onGroupsChange(groups.filter((group) => group._key !== key))
     },
-    [emitRows, rows]
+    [groups, onGroupsChange]
   )
 
   const duplicateNames = useMemo(() => {
     const counts = new Map<string, number>()
-    for (const row of rows) {
-      const name = row.name.trim()
+    for (const group of groups) {
+      const name = group.name.trim()
       if (!name) continue
       counts.set(name, (counts.get(name) ?? 0) + 1)
     }
     return Array.from(counts.entries())
       .filter(([, count]) => count > 1)
       .map(([name]) => name)
-  }, [rows])
+  }, [groups])
+
+  const hasMissingName = groups.some((group) => !group.name.trim())
+  const pendingDeleteGroup = groups.find(
+    (group) => group._key === pendingDeleteKey
+  )
 
   return (
     <Card className={sectionCardClassName}>
@@ -853,22 +936,54 @@ function GroupPricingTable({
               )}
             </CardDescription>
           </div>
-          <Button onClick={addRow} size='sm' className='sm:self-start'>
-            <Plus className='mr-2 h-4 w-4' />
-            {t('Add group')}
-          </Button>
+          <div className='flex flex-wrap gap-2 sm:self-start'>
+            <Button
+              variant='outline'
+              onClick={() => setCodeMigrationDialogOpen(true)}
+              size='sm'
+              disabled={isLoading || Boolean(loadError)}
+            >
+              <RefreshCw className='mr-2 h-4 w-4' />
+              {t('Migrate legacy codes')}
+            </Button>
+            <Button
+              variant='outline'
+              onClick={() => setMigrationDialogOpen(true)}
+              size='sm'
+              disabled={
+                isLoading ||
+                Boolean(loadError) ||
+                groups.filter((group) => Number(group.id) > 0).length < 1
+              }
+            >
+              <ArrowRightLeft className='mr-2 h-4 w-4' />
+              {t('Migrate tokens')}
+            </Button>
+            <Button
+              onClick={addRow}
+              size='sm'
+              disabled={isLoading || Boolean(loadError)}
+            >
+              <Plus className='mr-2 h-4 w-4' />
+              {t('Add group')}
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent>
         <div className='space-y-3'>
-          <div className='overflow-hidden rounded-md border'>
+          <div className='overflow-x-auto rounded-md border'>
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className='w-20'>{t('ID')}</TableHead>
                   <TableHead className='min-w-40'>{t('Group name')}</TableHead>
                   <TableHead className='w-28'>{t('Ratio')}</TableHead>
                   <TableHead className='w-28 text-center'>
                     {t('User selectable')}
+                  </TableHead>
+                  <TableHead className='w-28 text-center'>
+                    {t('Independent group')}
                   </TableHead>
                   <TableHead className='min-w-56'>{t('Description')}</TableHead>
                   <TableHead className='w-16 text-right'>
@@ -877,86 +992,185 @@ function GroupPricingTable({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.length === 0 ? (
+                {isLoading ? (
                   <TableRow>
                     <TableCell
-                      colSpan={5}
+                      colSpan={7}
                       className='text-muted-foreground h-20 text-center text-sm'
                     >
-                      {t('No groups yet. Add a group to get started.')}
+                      {t('Loading groups...')}
+                    </TableCell>
+                  </TableRow>
+                ) : loadError ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className='h-24 text-center'>
+                      <div className='flex flex-col items-center gap-2'>
+                        <span className='text-destructive text-sm'>
+                          {loadError}
+                        </span>
+                        <Button variant='outline' size='sm' onClick={onRetry}>
+                          {t('Retry')}
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ) : (
-                  rows.map((row) => (
-                    <TableRow key={row._id}>
-                      <TableCell>
-                        <Input
-                          value={row.name}
-                          onChange={(event) =>
-                            updateRow(row._id, 'name', event.target.value)
-                          }
-                          aria-invalid={duplicateNames.includes(
-                            row.name.trim()
-                          )}
-                        />
+                  <>
+                    <TableRow className='bg-muted/25'>
+                      <TableCell className='text-muted-foreground font-mono text-xs'>
+                        -
                       </TableCell>
-                      <TableCell>
-                        <Input
-                          type='number'
-                          min={0}
-                          step={0.1}
-                          value={String(row.ratio)}
-                          onChange={(event) =>
-                            updateRow(
-                              row._id,
-                              'ratio',
-                              normalizeRatio(event.target.value)
-                            )
-                          }
-                        />
+                      <TableCell className='font-medium'>
+                        {t('Auto (Circuit Breaker)')}
+                      </TableCell>
+                      <TableCell className='text-muted-foreground'>
+                        {t('Auto')}
                       </TableCell>
                       <TableCell>
                         <div className='flex justify-center'>
                           <Checkbox
-                            checked={row.selectable}
+                            checked={autoGroup.user_selectable}
+                            disabled={autoSelectableLocked}
                             onCheckedChange={(checked) =>
-                              updateRow(row._id, 'selectable', checked === true)
+                              onAutoGroupChange({
+                                ...autoGroup,
+                                user_selectable: checked === true,
+                              })
                             }
                             aria-label={t('User selectable')}
                           />
                         </div>
                       </TableCell>
+                      <TableCell className='text-muted-foreground text-center'>
+                        -
+                      </TableCell>
                       <TableCell>
-                        {row.selectable ? (
-                          <Input
-                            value={row.description}
-                            placeholder={t('Group description')}
-                            onChange={(event) =>
-                              updateRow(
-                                row._id,
-                                'description',
-                                event.target.value
-                              )
-                            }
-                          />
-                        ) : (
-                          <span className='text-muted-foreground px-3 text-sm'>
-                            -
-                          </span>
-                        )}
+                        <Input
+                          value={autoGroup.description}
+                          placeholder={t('Group description')}
+                          onChange={(event) =>
+                            onAutoGroupChange({
+                              ...autoGroup,
+                              description: event.target.value,
+                            })
+                          }
+                        />
                       </TableCell>
-                      <TableCell className='text-right'>
-                        <Button
-                          variant='ghost'
-                          size='sm'
-                          onClick={() => removeRow(row._id)}
-                          aria-label={t('Delete')}
-                        >
-                          <Trash2 className='h-4 w-4' />
-                        </Button>
-                      </TableCell>
+                      <TableCell />
                     </TableRow>
-                  ))
+                    {groups.map((group) => {
+                      const groupId = getGroupIdDisplayValue(group.id)
+                      return (
+                        <TableRow key={group._key}>
+                          <TableCell className='text-muted-foreground font-mono text-xs'>
+                            {groupId === 'New' ? t(groupId) : groupId}
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              value={group.name}
+                              onChange={(event) =>
+                                updateRow(
+                                  group._key,
+                                  'name',
+                                  event.target.value
+                                )
+                              }
+                              aria-invalid={
+                                !group.name.trim() ||
+                                duplicateNames.includes(group.name.trim())
+                              }
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type='number'
+                              min={0}
+                              step={0.1}
+                              value={String(group.ratio)}
+                              onChange={(event) =>
+                                updateRow(
+                                  group._key,
+                                  'ratio',
+                                  normalizeRatio(event.target.value)
+                                )
+                              }
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <div className='flex justify-center'>
+                              <Checkbox
+                                checked={group.user_selectable}
+                                onCheckedChange={(checked) =>
+                                  updateRow(
+                                    group._key,
+                                    'user_selectable',
+                                    checked === true
+                                  )
+                                }
+                                aria-label={t('User selectable')}
+                              />
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className='flex justify-center'>
+                              <Checkbox
+                                checked={group.exclusive}
+                                onCheckedChange={(checked) => {
+                                  const exclusive = checked === true
+                                  onGroupsChange(
+                                    groups.map((item) =>
+                                      item._key === group._key
+                                        ? {
+                                            ...item,
+                                            exclusive,
+                                            auto_enabled: exclusive
+                                              ? false
+                                              : item.auto_enabled,
+                                            auto_order: exclusive
+                                              ? 0
+                                              : item.auto_order,
+                                          }
+                                        : item
+                                    )
+                                  )
+                                }}
+                                aria-label={t('Independent group')}
+                              />
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              value={group.description}
+                              placeholder={t('Group description')}
+                              onChange={(event) =>
+                                updateRow(
+                                  group._key,
+                                  'description',
+                                  event.target.value
+                                )
+                              }
+                            />
+                          </TableCell>
+                          <TableCell className='text-right'>
+                            <Button
+                              variant='ghost'
+                              size='sm'
+                              onClick={() => {
+                                if (Number(group.id) > 0) {
+                                  setPendingDeleteKey(group._key)
+                                } else {
+                                  removeRow(group._key)
+                                }
+                              }}
+                              aria-label={t('Delete')}
+                            >
+                              <Trash2 className='h-4 w-4' />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </>
                 )}
               </TableBody>
             </Table>
@@ -969,8 +1183,38 @@ function GroupPricingTable({
               })}
             </p>
           )}
+          {hasMissingName && (
+            <p className='text-destructive text-sm'>
+              {`${t('Group name')}: ${t('Required')}`}
+            </p>
+          )}
         </div>
       </CardContent>
+      <GroupTokenMigrationDialog
+        open={migrationDialogOpen}
+        onOpenChange={setMigrationDialogOpen}
+        groups={groups}
+      />
+      <GroupCodeMigrationDialog
+        open={codeMigrationDialogOpen}
+        onOpenChange={setCodeMigrationDialogOpen}
+      />
+      <ConfirmDialog
+        open={Boolean(pendingDeleteGroup)}
+        onOpenChange={(open) => {
+          if (!open) setPendingDeleteKey(null)
+        }}
+        title={t('Mark this group for deletion?')}
+        desc={t(
+          'Tokens bound to this group will switch to automatic grouping when you save. Channels, users, or other references can still prevent deletion.'
+        )}
+        confirmText={t('Mark for deletion')}
+        destructive
+        handleConfirm={() => {
+          if (pendingDeleteKey) removeRow(pendingDeleteKey)
+          setPendingDeleteKey(null)
+        }}
+      />
     </Card>
   )
 }
@@ -981,7 +1225,7 @@ type SimpleGroupDialogProps = {
   onOpenChange: (open: boolean) => void
   onSave: (name: string, value: string) => void
   editData: SimpleGroup | null
-  type: 'groupRatio' | 'topupGroupRatio' | null
+  groups: EditableGroupDetail[]
 }
 
 function SimpleGroupDialog({
@@ -989,13 +1233,26 @@ function SimpleGroupDialog({
   onOpenChange,
   onSave,
   editData,
-  type,
+  groups,
 }: SimpleGroupDialogProps) {
   const { t } = useTranslation()
   const [name, setName] = useState('')
   const [value, setValue] = useState('')
 
-  const title = type === 'groupRatio' ? t('group ratio') : t('top-up ratio')
+  const title = t('top-up ratio')
+  const groupOptions = useMemo(() => {
+    const options = groups
+      .filter((group) => group.code.trim() && group.name.trim())
+      .map((group) => ({ value: group.code, label: group.name }))
+
+    if (
+      editData?.name &&
+      !options.some((option) => option.value === editData.name)
+    ) {
+      options.push({ value: editData.name, label: t('Unknown') })
+    }
+    return options
+  }, [editData?.name, groups, t])
 
   useEffect(() => {
     if (!open) {
@@ -1030,13 +1287,26 @@ function SimpleGroupDialog({
         </DialogHeader>
         <div className='space-y-4 py-4'>
           <div className='space-y-2'>
-            <Label>{t('Group name')}</Label>
-            <Input
+            <Label>{t('Group')}</Label>
+            <Select
+              items={groupOptions}
               value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t('default')}
+              onValueChange={(nextName) => setName(nextName ?? '')}
               disabled={!!editData}
-            />
+            >
+              <SelectTrigger className='w-full'>
+                <SelectValue placeholder={t('Select a group')} />
+              </SelectTrigger>
+              <SelectContent alignItemWithTrigger={false}>
+                <SelectGroup>
+                  {groupOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
           </div>
           <div className='space-y-2'>
             <Label>{t('Ratio')}</Label>
@@ -1072,6 +1342,7 @@ type GroupOverrideDialogProps = {
   onSave: (targetGroup: string, ratio: number, oldTargetGroup?: string) => void
   editData: GroupOverride | null
   userGroup: string | null
+  groups: EditableGroupDetail[]
 }
 
 function GroupOverrideDialog({
@@ -1080,10 +1351,31 @@ function GroupOverrideDialog({
   onSave,
   editData,
   userGroup,
+  groups,
 }: GroupOverrideDialogProps) {
   const { t } = useTranslation()
   const [targetGroup, setTargetGroup] = useState('')
   const [ratio, setRatio] = useState('')
+  const groupOptions = useMemo(() => {
+    const options = groups
+      .filter((group) => group.code.trim() && group.name.trim())
+      .map((group) => ({ value: group.code, label: group.name }))
+
+    if (
+      editData?.targetGroup &&
+      !options.some((option) => option.value === editData.targetGroup)
+    ) {
+      options.push({ value: editData.targetGroup, label: t('Unknown') })
+    }
+
+    return options
+  }, [editData?.targetGroup, groups, t])
+  const targetGroupName =
+    groupOptions.find((option) => option.value === targetGroup)?.label ||
+    t('this token group')
+  const userGroupName = userGroup
+    ? getGroupNameByCode(groups, userGroup) || t('Unknown')
+    : t('this user group')
 
   useEffect(() => {
     if (!open) {
@@ -1117,7 +1409,7 @@ function GroupOverrideDialog({
             {userGroup
               ? t(
                   'Configure a custom ratio for "{{userGroup}}" users when using a specific token group.',
-                  { userGroup }
+                  { userGroup: userGroupName }
                 )
               : t(
                   'Configure a custom ratio for when users use a specific token group.'
@@ -1127,12 +1419,25 @@ function GroupOverrideDialog({
         <div className='space-y-4 py-4'>
           <div className='space-y-2'>
             <Label>{t('Target group')}</Label>
-            <Input
+            <Select
+              items={groupOptions}
               value={targetGroup}
-              onChange={(e) => setTargetGroup(e.target.value)}
-              placeholder={t('edit_this')}
+              onValueChange={(value) => setTargetGroup(value ?? '')}
               disabled={!!editData}
-            />
+            >
+              <SelectTrigger className='w-full'>
+                <SelectValue placeholder={t('Select a group')} />
+              </SelectTrigger>
+              <SelectContent alignItemWithTrigger={false}>
+                <SelectGroup>
+                  {groupOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
             <p className='text-muted-foreground text-xs'>
               {t('The token group that will have a custom ratio')}
             </p>
@@ -1151,8 +1456,8 @@ function GroupOverrideDialog({
             />
             <p className='text-muted-foreground text-xs'>
               {t('Multiplier applied when {{userGroup}} uses {{targetGroup}}', {
-                userGroup: userGroup || t('this user group'),
-                targetGroup: targetGroup || t('this token group'),
+                userGroup: userGroupName,
+                targetGroup: targetGroupName,
               })}
             </p>
           </div>

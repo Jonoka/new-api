@@ -184,6 +184,7 @@ type RelayInfo struct {
 	// captured at pre-consume time. Non-nil only when billing mode is "tiered_expr".
 	TieredBillingSnapshot *billingexpr.BillingSnapshot
 	BillingRequestInput   *billingexpr.RequestInput
+	QuotaClamp            *common.QuotaClamp
 
 	Request dto.Request
 
@@ -695,6 +696,22 @@ func (info *RelayInfo) ResetFirstResponseTiming(start time.Time) {
 	info.isFirstResponse = true
 }
 
+// ResetAttemptState 为每次重新选渠创建独立的流与首字状态，避免重试间相互污染。
+func (info *RelayInfo) ResetAttemptState(start time.Time) {
+	if info == nil {
+		return
+	}
+	info.ResetFirstResponseTiming(start)
+	info.SendResponseCount = 0
+	info.ReceivedResponseCount = 0
+	info.TimingDiagnostics = nil
+	if info.IsStream {
+		info.StreamStatus = NewStreamStatus()
+	} else {
+		info.StreamStatus = nil
+	}
+}
+
 func (info *RelayInfo) EnableTimingDiagnostics(start time.Time) {
 	if info == nil {
 		return
@@ -857,6 +874,7 @@ type TaskSubmitReq struct {
 	Image          string                 `json:"image,omitempty"`
 	Images         []string               `json:"images,omitempty"`
 	Size           string                 `json:"size,omitempty"`
+	Resolution     string                 `json:"resolution,omitempty"`
 	Duration       int                    `json:"duration,omitempty"`
 	Seconds        string                 `json:"seconds,omitempty"`
 	InputReference string                 `json:"input_reference,omitempty"`
@@ -940,6 +958,7 @@ type TaskInfo struct {
 	Url              string `json:"url,omitempty"`
 	RemoteUrl        string `json:"remote_url,omitempty"`
 	Progress         string `json:"progress,omitempty"`
+	DurationSeconds  int    `json:"duration_seconds,omitempty"`  // 用于视频按实际时长差额结算
 	CompletionTokens int    `json:"completion_tokens,omitempty"` // 用于按倍率计费
 	TotalTokens      int    `json:"total_tokens,omitempty"`      // 用于按倍率计费
 }

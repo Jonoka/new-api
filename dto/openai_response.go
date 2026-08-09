@@ -13,8 +13,8 @@ const (
 )
 
 type SimpleResponse struct {
-	Usage `json:"usage"`
-	Error any `json:"error"`
+	Usage Usage `json:"usage"`
+	Error any   `json:"error"`
 }
 
 // GetOpenAIError 从动态错误类型中提取OpenAIError结构
@@ -28,7 +28,7 @@ type TextResponse struct {
 	Created int64                      `json:"created"`
 	Model   string                     `json:"model"`
 	Choices []OpenAITextResponseChoice `json:"choices"`
-	Usage   `json:"usage"`
+	Usage   Usage                      `json:"usage"`
 }
 
 type OpenAITextResponseChoice struct {
@@ -44,7 +44,7 @@ type OpenAITextResponse struct {
 	Created any                        `json:"created"`
 	Choices []OpenAITextResponseChoice `json:"choices"`
 	Error   any                        `json:"error,omitempty"`
-	Usage   `json:"usage"`
+	Usage   Usage                      `json:"usage"`
 }
 
 // GetOpenAIError 从动态错误类型中提取OpenAIError结构
@@ -62,7 +62,7 @@ type OpenAIEmbeddingResponse struct {
 	Object string                        `json:"object"`
 	Data   []OpenAIEmbeddingResponseItem `json:"data"`
 	Model  string                        `json:"model"`
-	Usage  `json:"usage"`
+	Usage  Usage                         `json:"usage"`
 }
 
 type FlexibleEmbeddingResponseItem struct {
@@ -75,7 +75,7 @@ type FlexibleEmbeddingResponse struct {
 	Object string                          `json:"object"`
 	Data   []FlexibleEmbeddingResponseItem `json:"data"`
 	Model  string                          `json:"model"`
-	Usage  `json:"usage"`
+	Usage  Usage                           `json:"usage"`
 }
 
 type ChatCompletionsStreamResponseChoice struct {
@@ -234,12 +234,165 @@ type Usage struct {
 	OutputTokens           int                `json:"output_tokens"`
 	InputTokensDetails     *InputTokenDetails `json:"input_tokens_details"`
 
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheWriteInputTokens    int `json:"cache_write_input_tokens,omitempty"`
+	CacheWriteTokens         int `json:"cache_write_tokens,omitempty"`
+	CacheCreationTokens      int `json:"cache_creation_tokens,omitempty"`
+
+	HasCacheCreationInputTokens bool `json:"-"`
+	HasCacheWriteInputTokens    bool `json:"-"`
+	HasCacheWriteTokens         bool `json:"-"`
+	HasCacheCreationTokens      bool `json:"-"`
+
 	// claude cache 1h
 	ClaudeCacheCreation5mTokens int `json:"claude_cache_creation_5_m_tokens"`
 	ClaudeCacheCreation1hTokens int `json:"claude_cache_creation_1_h_tokens"`
 
 	// OpenRouter Params
 	Cost any `json:"cost,omitempty"`
+}
+
+func (u *Usage) UnmarshalJSON(data []byte) error {
+	type alias Usage
+	var raw struct {
+		*alias
+		CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
+		CacheWriteInputTokens    *int `json:"cache_write_input_tokens"`
+		CacheWriteTokens         *int `json:"cache_write_tokens"`
+		CacheCreationTokens      *int `json:"cache_creation_tokens"`
+	}
+	raw.alias = (*alias)(u)
+	if err := common.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.CacheCreationInputTokens != nil {
+		u.CacheCreationInputTokens = *raw.CacheCreationInputTokens
+		u.HasCacheCreationInputTokens = true
+	}
+	if raw.CacheWriteInputTokens != nil {
+		u.CacheWriteInputTokens = *raw.CacheWriteInputTokens
+		u.HasCacheWriteInputTokens = true
+	}
+	if raw.CacheWriteTokens != nil {
+		u.CacheWriteTokens = *raw.CacheWriteTokens
+		u.HasCacheWriteTokens = true
+	}
+	if raw.CacheCreationTokens != nil {
+		u.CacheCreationTokens = *raw.CacheCreationTokens
+		u.HasCacheCreationTokens = true
+	}
+	return nil
+}
+
+func (u Usage) GetTopLevelCacheCreationTokens() int {
+	switch {
+	case u.CacheWriteTokens > 0:
+		return u.CacheWriteTokens
+	case u.CacheCreationInputTokens > 0:
+		return u.CacheCreationInputTokens
+	case u.CacheWriteInputTokens > 0:
+		return u.CacheWriteInputTokens
+	case u.CacheCreationTokens > 0:
+		return u.CacheCreationTokens
+	default:
+		return 0
+	}
+}
+
+func (u Usage) GetCacheCreationTokens() int {
+	if tokens, ok := u.GetDetailCacheCreationTokens(); ok {
+		return tokens
+	}
+
+	// 内部转换代码可能直接给字段赋值而没有设置 presence 标记。
+	// 与 JSON 别名解析保持相同优先级：先新字段，再兼容旧字段；
+	// 同一字段优先 Responses 的 input_tokens_details。
+	if u.InputTokensDetails != nil && u.InputTokensDetails.CacheWriteTokens != 0 {
+		return nonNegativeTokenCount(u.InputTokensDetails.CacheWriteTokens)
+	}
+	if u.PromptTokensDetails.CacheWriteTokens != 0 {
+		return nonNegativeTokenCount(u.PromptTokensDetails.CacheWriteTokens)
+	}
+	if u.InputTokensDetails != nil && u.InputTokensDetails.CacheCreationTokens != 0 {
+		return nonNegativeTokenCount(u.InputTokensDetails.CacheCreationTokens)
+	}
+	if u.PromptTokensDetails.CacheCreationTokens != 0 {
+		return nonNegativeTokenCount(u.PromptTokensDetails.CacheCreationTokens)
+	}
+	if u.InputTokensDetails != nil && u.InputTokensDetails.CachedCreationTokens != 0 {
+		return nonNegativeTokenCount(u.InputTokensDetails.CachedCreationTokens)
+	}
+	if u.PromptTokensDetails.CachedCreationTokens != 0 {
+		return nonNegativeTokenCount(u.PromptTokensDetails.CachedCreationTokens)
+	}
+	return u.GetTopLevelCacheCreationTokens()
+}
+
+func nonNegativeTokenCount(tokens int) int {
+	if tokens < 0 {
+		return 0
+	}
+	return tokens
+}
+
+// 明细字段显式返回 0 时，也要覆盖陈旧的顶层别名，避免重复或误计费。
+func (u Usage) GetDetailCacheCreationTokens() (int, bool) {
+	if u.InputTokensDetails != nil && u.InputTokensDetails.HasCacheWriteTokens {
+		return nonNegativeTokenCount(u.InputTokensDetails.CacheWriteTokens), true
+	}
+	if u.PromptTokensDetails.HasCacheWriteTokens {
+		return nonNegativeTokenCount(u.PromptTokensDetails.CacheWriteTokens), true
+	}
+	if u.InputTokensDetails != nil && u.InputTokensDetails.HasCacheCreationTokens {
+		return nonNegativeTokenCount(u.InputTokensDetails.CacheCreationTokens), true
+	}
+	if u.PromptTokensDetails.HasCacheCreationTokens {
+		return nonNegativeTokenCount(u.PromptTokensDetails.CacheCreationTokens), true
+	}
+	if u.InputTokensDetails != nil && u.InputTokensDetails.HasCachedCreationTokens {
+		return nonNegativeTokenCount(u.InputTokensDetails.CachedCreationTokens), true
+	}
+	if u.PromptTokensDetails.HasCachedCreationTokens {
+		return nonNegativeTokenCount(u.PromptTokensDetails.CachedCreationTokens), true
+	}
+	return 0, false
+}
+
+func (u Usage) HasAnyCacheCreationTokensField() bool {
+	return (u.InputTokensDetails != nil && u.InputTokensDetails.HasAnyCacheCreationTokensField()) ||
+		u.PromptTokensDetails.HasAnyCacheCreationTokensField() ||
+		u.HasCacheCreationInputTokens ||
+		u.HasCacheWriteInputTokens ||
+		u.HasCacheWriteTokens ||
+		u.HasCacheCreationTokens
+}
+
+func (u Usage) HasAnyDetailCacheCreationTokensField() bool {
+	return (u.InputTokensDetails != nil && u.InputTokensDetails.HasAnyCacheCreationTokensField()) ||
+		u.PromptTokensDetails.HasAnyCacheCreationTokensField()
+}
+
+func (u *Usage) SetCacheCreationTokens(tokens int) {
+	if tokens <= 0 {
+		return
+	}
+	u.SetCacheCreationTokensWithPresence(tokens)
+}
+
+func (u *Usage) SetCacheCreationTokensWithPresence(tokens int) {
+	tokens = nonNegativeTokenCount(tokens)
+	u.PromptTokensDetails.SetCacheCreationTokensWithPresence(tokens)
+	if u.InputTokensDetails != nil {
+		u.InputTokensDetails.SetCacheCreationTokensWithPresence(tokens)
+	}
+	u.CacheCreationInputTokens = tokens
+	u.CacheWriteInputTokens = tokens
+	u.CacheWriteTokens = tokens
+	u.CacheCreationTokens = tokens
+	u.HasCacheCreationInputTokens = true
+	u.HasCacheWriteInputTokens = true
+	u.HasCacheWriteTokens = true
+	u.HasCacheCreationTokens = true
 }
 
 type OpenAIVideoResponse struct {
@@ -253,41 +406,93 @@ type OpenAIVideoResponse struct {
 }
 
 type InputTokenDetails struct {
-	CachedTokens                int  `json:"cached_tokens"`
-	CachedCreationTokens        int  `json:"cached_creation_tokens,omitempty"`
+	CachedTokens         int `json:"cached_tokens"`
+	CacheWriteTokens     int `json:"cache_write_tokens,omitempty"`
+	CacheCreationTokens  int `json:"cache_creation_tokens,omitempty"`
+	CachedCreationTokens int `json:"cached_creation_tokens,omitempty"`
+	TextTokens           int `json:"text_tokens"`
+	AudioTokens          int `json:"audio_tokens"`
+	ImageTokens          int `json:"image_tokens"`
+
+	HasCacheWriteTokens         bool `json:"-"`
+	HasCacheCreationTokens      bool `json:"-"`
+	HasCachedCreationTokens     bool `json:"-"`
 	CachedCreationTokensPresent bool `json:"-"`
-	TextTokens                  int  `json:"text_tokens"`
-	AudioTokens                 int  `json:"audio_tokens"`
-	ImageTokens                 int  `json:"image_tokens"`
 }
 
-// UnmarshalJSON accepts both New API's historical cached_creation_tokens name
-// and OpenAI's GPT-5.6+ cache_write_tokens name. Internally both represent
-// prompt tokens written to cache and use CachedCreationTokens for billing.
 func (d *InputTokenDetails) UnmarshalJSON(data []byte) error {
-	type inputTokenDetailsAlias InputTokenDetails
-	d.CachedCreationTokens = 0
-	d.CachedCreationTokensPresent = false
-	if err := common.Unmarshal(data, (*inputTokenDetailsAlias)(d)); err != nil {
+	type alias InputTokenDetails
+	*d = InputTokenDetails{}
+	var raw struct {
+		*alias
+		CacheWriteTokens     *int `json:"cache_write_tokens"`
+		CacheCreationTokens  *int `json:"cache_creation_tokens"`
+		CachedCreationTokens *int `json:"cached_creation_tokens"`
+	}
+	raw.alias = (*alias)(d)
+	if err := common.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-
-	var fields map[string]json.RawMessage
-	if err := common.Unmarshal(data, &fields); err != nil {
-		return err
-	}
-	if raw, ok := fields["cache_write_tokens"]; ok {
-		if string(raw) == "null" {
-			return nil
-		}
+	if raw.CacheWriteTokens != nil {
+		d.CacheWriteTokens = *raw.CacheWriteTokens
+		d.HasCacheWriteTokens = true
+		d.CachedCreationTokens = *raw.CacheWriteTokens
 		d.CachedCreationTokensPresent = true
-		if err := common.Unmarshal(raw, &d.CachedCreationTokens); err != nil {
-			return err
-		}
-	} else if raw, ok := fields["cached_creation_tokens"]; ok && string(raw) != "null" {
+	}
+	if raw.CacheCreationTokens != nil {
+		d.CacheCreationTokens = *raw.CacheCreationTokens
+		d.HasCacheCreationTokens = true
+	}
+	if raw.CachedCreationTokens != nil {
+		d.CachedCreationTokens = *raw.CachedCreationTokens
+		d.HasCachedCreationTokens = true
+		d.CachedCreationTokensPresent = true
+	}
+	if tokens, ok := d.GetCacheCreationTokensWithPresence(); ok {
+		d.CachedCreationTokens = tokens
 		d.CachedCreationTokensPresent = true
 	}
 	return nil
+}
+
+func (d InputTokenDetails) GetCacheCreationTokens() int {
+	tokens, _ := d.GetCacheCreationTokensWithPresence()
+	return tokens
+}
+
+func (d InputTokenDetails) GetCacheCreationTokensWithPresence() (int, bool) {
+	switch {
+	case d.HasCacheWriteTokens:
+		return nonNegativeTokenCount(d.CacheWriteTokens), true
+	case d.HasCacheCreationTokens:
+		return nonNegativeTokenCount(d.CacheCreationTokens), true
+	case d.HasCachedCreationTokens:
+		return nonNegativeTokenCount(d.CachedCreationTokens), true
+	default:
+		return 0, false
+	}
+}
+
+func (d InputTokenDetails) HasAnyCacheCreationTokensField() bool {
+	return d.HasCacheWriteTokens || d.HasCacheCreationTokens || d.HasCachedCreationTokens
+}
+
+func (d *InputTokenDetails) SetCacheCreationTokens(tokens int) {
+	if tokens <= 0 {
+		return
+	}
+	d.SetCacheCreationTokensWithPresence(tokens)
+}
+
+func (d *InputTokenDetails) SetCacheCreationTokensWithPresence(tokens int) {
+	tokens = nonNegativeTokenCount(tokens)
+	d.CacheWriteTokens = tokens
+	d.CacheCreationTokens = tokens
+	d.CachedCreationTokens = tokens
+	d.HasCacheWriteTokens = true
+	d.HasCacheCreationTokens = true
+	d.HasCachedCreationTokens = true
+	d.CachedCreationTokensPresent = true
 }
 
 type OutputTokenDetails struct {
@@ -364,6 +569,7 @@ func (o *OpenAIResponsesResponse) GetSize() string {
 }
 
 type IncompleteDetails struct {
+	Reason    string `json:"reason,omitempty"`
 	Reasoning string `json:"reasoning"`
 }
 

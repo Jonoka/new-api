@@ -49,10 +49,71 @@ type Log struct {
 	ChannelName       string `json:"channel_name" gorm:"->"`
 	TokenId           int    `json:"token_id" gorm:"default:0;index"`
 	Group             string `json:"group" gorm:"index"`
+	GroupName         string `json:"group_name" gorm:"-"`
 	Ip                string `json:"ip" gorm:"index;default:''"`
 	RequestId         string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
 	UpstreamRequestId string `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
 	Other             string `json:"other"`
+}
+
+func applyLogGroupNames(logs []*Log, groupNames map[string]string) {
+	for _, log := range logs {
+		if log == nil {
+			continue
+		}
+		group := strings.TrimSpace(log.Group)
+		if group == "" {
+			other, _ := common.StrToMap(log.Other)
+			if value, ok := other["group"].(string); ok {
+				group = strings.TrimSpace(value)
+			}
+		}
+		if group == "" {
+			continue
+		}
+		log.GroupName = group
+		if name := strings.TrimSpace(groupNames[group]); name != "" {
+			log.GroupName = name
+		}
+	}
+}
+
+func hydrateLogGroupNames(logs []*Log) {
+	groupNames, err := GetGroupDisplayNameMap()
+	if err != nil {
+		groupNames = map[string]string{}
+	}
+	applyLogGroupNames(logs, groupNames)
+}
+
+// resolveLogGroupFilterValues 将日志筛选输入解析为可命中的历史标识集合。
+// 日志表仍保存字符串 code/alias；无法解析的输入回退为原值，兼容旧数据和旧分组。
+func resolveLogGroupFilterValues(group string) ([]string, error) {
+	if group == "" {
+		return nil, nil
+	}
+	values, err := ResolveGroupLogIdentifiers(group)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return []string{group}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(values) == 0 {
+		return []string{group}, nil
+	}
+	return values, nil
+}
+
+func applyLogGroupFilter(tx *gorm.DB, column string, group string) (*gorm.DB, error) {
+	values, err := resolveLogGroupFilterValues(group)
+	if err != nil {
+		return nil, err
+	}
+	if len(values) == 0 {
+		return tx, nil
+	}
+	return tx.Where(column+" IN ?", values), nil
 }
 
 // don't use iota, avoid change log type value
@@ -67,6 +128,7 @@ const (
 )
 
 func formatUserLogs(logs []*Log, startIdx int) {
+	hydrateLogGroupNames(logs)
 	for i := range logs {
 		logs[i].ChannelName = ""
 		logs[i].Ip = ""
@@ -131,15 +193,44 @@ func RecordLogWithAdminInfo(userId int, logType int, content string, adminInfo m
 	}
 }
 
-func RecordTopupLog(userId int, content string, callerIp string, paymentMethod string, callbackPaymentMethod string) {
+type TopupLogDetails struct {
+	RequestIP             string
+	CallbackIP            string
+	PaymentMethod         string
+	CallbackPaymentMethod string
+	TradeNo               string
+	BalanceBefore         int
+	BalanceAfter          int
+	CreditedQuota         int
+	PaidAmountCNY         float64
+	HasBalanceSnapshot    bool
+	HasPaidAmountSnapshot bool
+}
+
+func RecordTopupLogWithDetails(userId int, content string, details TopupLogDetails) {
 	username, _ := GetUsernameById(userId, false)
+	requestIp := strings.TrimSpace(details.RequestIP)
+	callbackIp := strings.TrimSpace(details.CallbackIP)
 	adminInfo := map[string]interface{}{
 		"server_ip":               common.GetIp(),
 		"node_name":               common.NodeName,
-		"caller_ip":               callerIp,
-		"payment_method":          paymentMethod,
-		"callback_payment_method": callbackPaymentMethod,
+		"caller_ip":               requestIp,
+		"request_ip":              requestIp,
+		"callback_ip":             callbackIp,
+		"payment_method":          details.PaymentMethod,
+		"callback_payment_method": details.CallbackPaymentMethod,
 		"version":                 common.Version,
+	}
+	if tradeNo := strings.TrimSpace(details.TradeNo); tradeNo != "" {
+		adminInfo["trade_no"] = tradeNo
+	}
+	if details.HasBalanceSnapshot {
+		adminInfo["balance_before"] = details.BalanceBefore
+		adminInfo["credited_quota"] = details.CreditedQuota
+		adminInfo["balance_after"] = details.BalanceAfter
+	}
+	if details.HasPaidAmountSnapshot {
+		adminInfo["paid_amount_cny"] = details.PaidAmountCNY
 	}
 	other := map[string]interface{}{
 		"admin_info": adminInfo,
@@ -150,13 +241,55 @@ func RecordTopupLog(userId int, content string, callerIp string, paymentMethod s
 		CreatedAt: common.GetTimestamp(),
 		Type:      LogTypeTopup,
 		Content:   content,
-		Ip:        callerIp,
+		Ip:        requestIp,
 		Other:     common.MapToJsonStr(other),
 	}
 	err := LOG_DB.Create(log).Error
 	if err != nil {
 		common.SysLog("failed to record topup log: " + err.Error())
 	}
+}
+
+func RecordTopupLog(userId int, content string, requestIp string, paymentMethod string, callbackPaymentMethod string, callbackIps ...string) {
+	callbackIp := ""
+	if len(callbackIps) > 0 {
+		callbackIp = callbackIps[0]
+	}
+	RecordTopupLogWithDetails(userId, content, TopupLogDetails{
+		RequestIP:             requestIp,
+		CallbackIP:            callbackIp,
+		PaymentMethod:         paymentMethod,
+		CallbackPaymentMethod: callbackPaymentMethod,
+	})
+}
+
+func RecordTopupOrderLog(topUp *TopUp, content string, callbackPaymentMethod string, callbackIps ...string) {
+	if topUp == nil {
+		return
+	}
+	callbackIp := ""
+	if len(callbackIps) > 0 {
+		callbackIp = callbackIps[0]
+	}
+	paidAmountCNY := topUp.PaidAmountCNY
+	if paidAmountCNY <= 0 {
+		paidAmount := invoiceOrderPaidAmount(topUp.Money, topUp.ActualMoney, topUp.PromoCodeId)
+		provider := invoiceOrderPaymentProvider(topUp.PaymentProvider, topUp.PaymentMethod)
+		paidAmountCNY = invoiceOrderAmountCNY(paidAmount, provider)
+	}
+	RecordTopupLogWithDetails(topUp.UserId, content, TopupLogDetails{
+		RequestIP:             topUp.RequestIP,
+		CallbackIP:            callbackIp,
+		PaymentMethod:         topUp.PaymentMethod,
+		CallbackPaymentMethod: callbackPaymentMethod,
+		TradeNo:               topUp.TradeNo,
+		BalanceBefore:         topUp.BalanceBefore,
+		BalanceAfter:          topUp.BalanceAfter,
+		CreditedQuota:         topUp.CreditedQuota,
+		PaidAmountCNY:         paidAmountCNY,
+		HasBalanceSnapshot:    topUp.CreditedQuota != 0 || topUp.BalanceAfter != topUp.BalanceBefore,
+		HasPaidAmountSnapshot: true,
+	})
 }
 
 func shouldRecordLogIp(adminForceRecordIp bool, userRecordIpLog bool) bool {
@@ -348,8 +481,8 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	if channel != 0 {
 		tx = tx.Where("logs.channel_id = ?", channel)
 	}
-	if group != "" {
-		tx = tx.Where("logs."+logGroupCol+" = ?", group)
+	if tx, err = applyLogGroupFilter(tx, "logs."+logGroupCol, group); err != nil {
+		return nil, 0, err
 	}
 	err = tx.Model(&Log{}).Count(&total).Error
 	if err != nil {
@@ -399,6 +532,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 			logs[i].ChannelName = channelMap[logs[i].ChannelId]
 		}
 	}
+	hydrateLogGroupNames(logs)
 
 	return logs, total, err
 }
@@ -431,8 +565,8 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 	if endTimestamp != 0 {
 		tx = tx.Where("logs.created_at <= ?", endTimestamp)
 	}
-	if group != "" {
-		tx = tx.Where("logs."+logGroupCol+" = ?", group)
+	if tx, err = applyLogGroupFilter(tx, "logs."+logGroupCol, group); err != nil {
+		return nil, 0, err
 	}
 	err = tx.Model(&Log{}).Limit(logSearchCountLimit).Count(&total).Error
 	if err != nil {
@@ -487,9 +621,13 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 		tx = tx.Where("channel_id = ?", channel)
 		rpmTpmQuery = rpmTpmQuery.Where("channel_id = ?", channel)
 	}
-	if group != "" {
-		tx = tx.Where(logGroupCol+" = ?", group)
-		rpmTpmQuery = rpmTpmQuery.Where(logGroupCol+" = ?", group)
+	groupValues, groupErr := resolveLogGroupFilterValues(group)
+	if groupErr != nil {
+		return stat, groupErr
+	}
+	if len(groupValues) > 0 {
+		tx = tx.Where(logGroupCol+" IN ?", groupValues)
+		rpmTpmQuery = rpmTpmQuery.Where(logGroupCol+" IN ?", groupValues)
 	}
 
 	tx = tx.Where("type = ?", LogTypeConsume)

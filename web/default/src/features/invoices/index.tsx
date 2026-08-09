@@ -25,6 +25,7 @@ import {
   ExternalLink,
   FileText,
   RefreshCw,
+  XCircle,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -50,8 +51,25 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { SectionPageLayout } from '@/components/layout'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
-import { getAdminInvoices, getUserInvoices, updateInvoiceRecord } from './api'
-import type { InvoiceRecord, InvoiceStatus } from './types'
+import {
+  createOrderInvoice,
+  createOrderInvoicePayment,
+  cancelOrderInvoicePayment,
+  getAdminInvoices,
+  getInvoiceConfig,
+  getInvoiceEligibleOrders,
+  getUserInvoices,
+  updateInvoiceRecord,
+} from './api'
+import { OrderInvoiceRequest } from './components/order-invoice-request'
+import { openInvoicePaymentCheckout } from './payment'
+import type {
+  InvoiceConfig,
+  InvoiceEligibleOrder,
+  InvoiceRecord,
+  InvoiceRequest,
+  InvoiceStatus,
+} from './types'
 
 interface InvoicesProps {
   admin?: boolean
@@ -73,6 +91,8 @@ function getStatusConfig(
   t: (key: string) => string
 ): { label: string; variant: StatusBadgeProps['variant'] } {
   switch (status) {
+    case 'payment_pending':
+      return { label: t('Pending payment'), variant: 'warning' }
     case 'issued':
       return { label: t('Issued'), variant: 'success' }
     case 'closed':
@@ -86,8 +106,21 @@ function getInvoiceTypeLabel(type: string, t: (key: string) => string) {
   return type === 'company' ? t('Company invoice') : t('Personal invoice')
 }
 
+function getInvoiceKindLabel(kind: string, t: (key: string) => string) {
+  return kind === 'special'
+    ? t('VAT special invoice')
+    : t('VAT general invoice')
+}
+
 function getSourceLabel(type: string, t: (key: string) => string) {
-  return type === 'subscription' ? t('Subscription purchase') : t('Top-up')
+  switch (type) {
+    case 'subscription':
+      return t('Subscription purchase')
+    case 'batch':
+      return t('Combined orders')
+    default:
+      return t('Top-up')
+  }
 }
 
 export function Invoices({ admin = false }: InvoicesProps) {
@@ -97,7 +130,12 @@ export function Invoices({ admin = false }: InvoicesProps) {
   const [page, setPage] = useState(1)
   const [status, setStatus] = useState<InvoiceStatus | 'all'>('pending')
   const [loading, setLoading] = useState(false)
+  const [invoiceConfig, setInvoiceConfig] = useState<InvoiceConfig | null>(null)
+  const [invoiceOrders, setInvoiceOrders] = useState<InvoiceEligibleOrder[]>([])
+  const [ordersLoading, setOrdersLoading] = useState(false)
+  const [orderInvoiceSubmitting, setOrderInvoiceSubmitting] = useState(false)
   const [savingId, setSavingId] = useState<number | null>(null)
+  const [cancelingId, setCancelingId] = useState<number | null>(null)
   const [editing, setEditing] = useState<
     Record<
       number,
@@ -127,7 +165,10 @@ export function Invoices({ admin = false }: InvoicesProps) {
             if (!next[record.id]) {
               next[record.id] = {
                 download_url: record.download_url || '',
-                status: record.status || 'pending',
+                status:
+                  record.status === 'payment_pending'
+                    ? 'closed'
+                    : record.status || 'pending',
                 admin_remark: record.admin_remark || '',
               }
             }
@@ -144,9 +185,45 @@ export function Invoices({ admin = false }: InvoicesProps) {
     }
   }, [admin, page, status, t])
 
+  const loadInvoiceOrders = useCallback(async () => {
+    if (admin) return
+    setOrdersLoading(true)
+    try {
+      const [configResponse, ordersResponse] = await Promise.all([
+        getInvoiceConfig(),
+        getInvoiceEligibleOrders(),
+      ])
+      if (!configResponse.success || !configResponse.data) {
+        throw new Error(
+          configResponse.message || t('Failed to load invoice configuration')
+        )
+      }
+      if (!ordersResponse.success || !ordersResponse.data) {
+        throw new Error(
+          ordersResponse.message || t('Failed to load invoiceable orders')
+        )
+      }
+      setInvoiceConfig(configResponse.data)
+      setInvoiceOrders(ordersResponse.data.orders || [])
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t('Failed to load invoiceable orders')
+      )
+      setInvoiceOrders([])
+    } finally {
+      setOrdersLoading(false)
+    }
+  }, [admin, t])
+
   useEffect(() => {
     void loadInvoices()
   }, [loadInvoices])
+
+  useEffect(() => {
+    void loadInvoiceOrders()
+  }, [loadInvoiceOrders])
 
   const pageRange = useMemo(() => {
     if (total === 0) return '0-0'
@@ -173,6 +250,94 @@ export function Invoices({ admin = false }: InvoicesProps) {
     }
   }
 
+  const cancelInvoicePayment = async (record: InvoiceRecord) => {
+    if (
+      record.status !== 'payment_pending' ||
+      !window.confirm(
+        t(
+          'Cancel this unpaid invoice request only if you have not completed payment.'
+        )
+      )
+    ) {
+      return
+    }
+    setCancelingId(record.id)
+    try {
+      const response = await cancelOrderInvoicePayment(record.source_id)
+      if (response.success) {
+        toast.success(t('Pending payment request canceled'))
+        await Promise.all([loadInvoices(), loadInvoiceOrders()])
+      } else {
+        toast.error(response.message || t('Failed to cancel invoice request'))
+      }
+    } catch {
+      toast.error(t('Failed to cancel invoice request'))
+    } finally {
+      setCancelingId(null)
+    }
+  }
+
+  const submitOrderInvoice = async (
+    orders: InvoiceEligibleOrder[],
+    invoice: InvoiceRequest,
+    paymentMethod: string,
+    tradeType?: string
+  ) => {
+    setOrderInvoiceSubmitting(true)
+    try {
+      const request = {
+        orders: orders.map((order) => ({
+          source_type: order.source_type,
+          source_id: order.source_id,
+        })),
+        invoice: { ...invoice, required: true },
+      }
+      if (paymentMethod === 'balance') {
+        const response = await createOrderInvoice(request)
+        if (!response.success || !response.data) {
+          toast.error(response.message || t('Failed to submit invoice request'))
+          return false
+        }
+        toast.success(t('Invoice request submitted'))
+        await Promise.all([loadInvoices(), loadInvoiceOrders()])
+        return true
+      }
+
+      const response = await createOrderInvoicePayment({
+        ...request,
+        payment_method: paymentMethod,
+        ...(tradeType ? { trade_type: tradeType } : {}),
+      })
+      if (!response.success || !response.data) {
+        toast.error(response.message || t('Failed to submit invoice request'))
+        return false
+      }
+      if (response.data.completed) {
+        toast.success(t('Invoice request submitted'))
+      } else if (
+        !response.data.checkout ||
+        !openInvoicePaymentCheckout(response.data.checkout)
+      ) {
+        toast.error(t('Failed to open payment checkout'))
+        await Promise.all([loadInvoices(), loadInvoiceOrders()])
+        return true
+      } else {
+        toast.success(
+          t(
+            'Pending payment request created. It will automatically move to pending issue after successful payment.'
+          )
+        )
+      }
+      await Promise.all([loadInvoices(), loadInvoiceOrders()])
+      return true
+    } catch {
+      toast.error(t('Failed to submit invoice request'))
+      return false
+    } finally {
+      setOrderInvoiceSubmitting(false)
+    }
+  }
+
   return (
     <SectionPageLayout>
       <SectionPageLayout.Title>
@@ -192,6 +357,10 @@ export function Invoices({ admin = false }: InvoicesProps) {
               {admin && (
                 <Select
                   items={[
+                    {
+                      value: 'payment_pending',
+                      label: t('Pending payment'),
+                    },
                     { value: 'pending', label: t('Pending issue') },
                     { value: 'issued', label: t('Issued') },
                     { value: 'closed', label: t('Closed') },
@@ -209,6 +378,9 @@ export function Invoices({ admin = false }: InvoicesProps) {
                   </SelectTrigger>
                   <SelectContent alignItemWithTrigger={false}>
                     <SelectGroup>
+                      <SelectItem value='payment_pending'>
+                        {t('Pending payment')}
+                      </SelectItem>
                       <SelectItem value='pending'>
                         {t('Pending issue')}
                       </SelectItem>
@@ -232,6 +404,17 @@ export function Invoices({ admin = false }: InvoicesProps) {
               </Button>
             </div>
           </div>
+
+          {!admin && (
+            <OrderInvoiceRequest
+              config={invoiceConfig}
+              orders={invoiceOrders}
+              loading={ordersLoading}
+              submitting={orderInvoiceSubmitting}
+              onRefresh={loadInvoiceOrders}
+              onSubmit={submitOrderInvoice}
+            />
+          )}
 
           {loading ? (
             <div className='space-y-3'>
@@ -259,7 +442,10 @@ export function Invoices({ admin = false }: InvoicesProps) {
                 const statusConfig = getStatusConfig(record.status, t)
                 const draft = editing[record.id] || {
                   download_url: record.download_url || '',
-                  status: record.status || 'pending',
+                  status:
+                    record.status === 'payment_pending'
+                      ? 'closed'
+                      : record.status || 'pending',
                   admin_remark: record.admin_remark || '',
                 }
 
@@ -301,7 +487,15 @@ export function Invoices({ admin = false }: InvoicesProps) {
                       <div className='grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4'>
                         <div>
                           <Label className='text-muted-foreground text-xs'>
-                            {t('Invoice type')}
+                            {t('Invoice kind')}
+                          </Label>
+                          <div>
+                            {getInvoiceKindLabel(record.invoice_kind, t)}
+                          </div>
+                        </div>
+                        <div>
+                          <Label className='text-muted-foreground text-xs'>
+                            {t('Invoice title type')}
                           </Label>
                           <div>
                             {getInvoiceTypeLabel(record.invoice_type, t)}
@@ -483,6 +677,17 @@ export function Invoices({ admin = false }: InvoicesProps) {
                               {t('Save')}
                             </Button>
                           </div>
+                        </div>
+                      ) : record.status === 'payment_pending' ? (
+                        <div className='flex justify-end border-t pt-4'>
+                          <Button
+                            variant='outline'
+                            onClick={() => cancelInvoicePayment(record)}
+                            disabled={cancelingId === record.id}
+                          >
+                            <XCircle className='mr-2 h-4 w-4' />
+                            {t('Cancel pending payment')}
+                          </Button>
                         </div>
                       ) : record.download_url ? (
                         <div className='flex justify-end border-t pt-4'>

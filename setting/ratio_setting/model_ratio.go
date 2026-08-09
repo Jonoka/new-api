@@ -1,6 +1,7 @@
 package ratio_setting
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -303,11 +304,26 @@ var defaultModelPrice = map[string]float64{
 	"mj_upload":                      0.05,
 	"sora-2":                         0.3,
 	"sora-2-pro":                     0.5,
+	"grok-imagine-video":             0.05,
+	"grok-imagine-video-1.5":         0.08,
 	"gpt-4o-mini-tts":                0.3,
 	"veo-3.0-generate-001":           0.4,
 	"veo-3.0-fast-generate-001":      0.15,
 	"veo-3.1-generate-preview":       0.4,
 	"veo-3.1-fast-generate-preview":  0.15,
+}
+
+// defaultModelPriceUnit 声明固定价格的计价单位。
+// 未声明的固定价格默认按请求计费，避免普通任务被意外乘以视频时长。
+var defaultModelPriceUnit = map[string]string{
+	"sora-2":                        string(types.ModelPriceUnitSecond),
+	"sora-2-pro":                    string(types.ModelPriceUnitSecond),
+	"grok-imagine-video":            string(types.ModelPriceUnitSecond),
+	"grok-imagine-video-1.5":        string(types.ModelPriceUnitSecond),
+	"veo-3.0-generate-001":          string(types.ModelPriceUnitSecond),
+	"veo-3.0-fast-generate-001":     string(types.ModelPriceUnitSecond),
+	"veo-3.1-generate-preview":      string(types.ModelPriceUnitSecond),
+	"veo-3.1-fast-generate-preview": string(types.ModelPriceUnitSecond),
 }
 
 var defaultAudioRatio = map[string]float64{
@@ -329,6 +345,7 @@ var defaultAudioCompletionRatio = map[string]float64{
 }
 
 var modelPriceMap = types.NewRWMap[string, float64]()
+var modelPriceUnitMap = types.NewRWMap[string, string]()
 var modelRatioMap = types.NewRWMap[string, float64]()
 var completionRatioMap = types.NewRWMap[string, float64]()
 
@@ -342,6 +359,7 @@ var defaultCompletionRatio = map[string]float64{
 // InitRatioSettings initializes all model related settings maps
 func InitRatioSettings() {
 	modelPriceMap.AddAll(defaultModelPrice)
+	modelPriceUnitMap.AddAll(defaultModelPriceUnit)
 	modelRatioMap.AddAll(defaultModelRatio)
 	completionRatioMap.AddAll(defaultCompletionRatio)
 	cacheRatioMap.AddAll(defaultCacheRatio)
@@ -360,7 +378,77 @@ func ModelPrice2JSONString() string {
 }
 
 func UpdateModelPriceByJSONString(jsonStr string) error {
-	return types.LoadFromJsonStringWithCallback(modelPriceMap, jsonStr, InvalidateExposedDataCache)
+	prices := make(map[string]float64)
+	if err := common.UnmarshalJsonStr(jsonStr, &prices); err != nil {
+		return err
+	}
+	// 持久化配置按“覆盖项”理解。升级前保存的稀疏配置不包含后续新增的
+	// 内置模型价格，必须在运行时补齐，否则价格单位存在但基础价格缺失，
+	// 管理端会把按秒视频模型误判成按量计费。
+	merged := make(map[string]float64, len(defaultModelPrice)+len(prices))
+	for modelName, price := range defaultModelPrice {
+		merged[modelName] = price
+	}
+	for modelName, price := range prices {
+		// 显式配置（包括 0）始终覆盖内置默认值。
+		merged[modelName] = price
+	}
+	normalized, err := common.Marshal(merged)
+	if err != nil {
+		return err
+	}
+	return types.LoadFromJsonStringWithCallback(modelPriceMap, string(normalized), InvalidateExposedDataCache)
+}
+
+func ModelPriceUnit2JSONString() string {
+	return modelPriceUnitMap.MarshalJSONString()
+}
+
+func parseModelPriceUnits(jsonStr string) (map[string]string, error) {
+	units := make(map[string]string)
+	if err := common.UnmarshalJsonStr(jsonStr, &units); err != nil {
+		return nil, err
+	}
+	if units == nil {
+		return nil, fmt.Errorf("固定价格单位必须是 JSON 对象")
+	}
+	for modelName, unit := range units {
+		if strings.TrimSpace(modelName) == "" {
+			return nil, fmt.Errorf("固定价格单位的模型名称不能为空")
+		}
+		switch types.ModelPriceUnit(unit) {
+		case types.ModelPriceUnitRequest, types.ModelPriceUnitSecond:
+		default:
+			return nil, fmt.Errorf("模型 %s 的固定价格单位无效: %s", modelName, unit)
+		}
+	}
+	return units, nil
+}
+
+func CheckModelPriceUnitJSONString(jsonStr string) error {
+	_, err := parseModelPriceUnits(jsonStr)
+	return err
+}
+
+func UpdateModelPriceUnitByJSONString(jsonStr string) error {
+	units, err := parseModelPriceUnits(jsonStr)
+	if err != nil {
+		return err
+	}
+	// 配置按“覆盖项”理解：未显式声明的内置视频模型继续沿用默认单位，
+	// 显式写入 request 仍可覆盖默认的 second。
+	merged := make(map[string]string, len(defaultModelPriceUnit)+len(units))
+	for modelName, unit := range defaultModelPriceUnit {
+		merged[modelName] = unit
+	}
+	for modelName, unit := range units {
+		merged[modelName] = unit
+	}
+	normalized, err := common.Marshal(merged)
+	if err != nil {
+		return err
+	}
+	return types.LoadFromJsonStringWithCallback(modelPriceUnitMap, string(normalized), InvalidateExposedDataCache)
 }
 
 // GetModelPrice 返回模型的价格，如果模型不存在则返回-1，false
@@ -386,6 +474,17 @@ func GetModelPrice(name string, printErr bool) (float64, bool) {
 		common.SysError("model price not found: " + name)
 	}
 	return -1, false
+}
+
+func GetModelPriceUnit(name string) types.ModelPriceUnit {
+	name = FormatMatchingModelName(name)
+	if unit, ok := modelPriceUnitMap.Get(name); ok {
+		return types.ModelPriceUnit(unit)
+	}
+	if unit, ok := defaultModelPriceUnit[name]; ok {
+		return types.ModelPriceUnit(unit)
+	}
+	return types.ModelPriceUnitRequest
 }
 
 func UpdateModelRatioByJSONString(jsonStr string) error {
@@ -432,6 +531,10 @@ func GetDefaultModelPriceMap() map[string]float64 {
 	return defaultModelPrice
 }
 
+func GetDefaultModelPriceUnitMap() map[string]string {
+	return defaultModelPriceUnit
+}
+
 func CompletionRatio2JSONString() string {
 	return completionRatioMap.MarshalJSONString()
 }
@@ -448,13 +551,10 @@ func GetCompletionRatio(name string) float64 {
 			return ratio
 		}
 	}
-	hardCodedRatio, contain := getHardcodedCompletionModelRatio(name)
-	if contain {
-		return hardCodedRatio
-	}
 	if ratio, ok := completionRatioMap.Get(name); ok {
 		return ratio
 	}
+	hardCodedRatio, _ := getHardcodedCompletionModelRatio(name)
 	return hardCodedRatio
 }
 
@@ -475,14 +575,6 @@ func GetCompletionRatioInfo(name string) CompletionRatioInfo {
 		}
 	}
 
-	hardCodedRatio, locked := getHardcodedCompletionModelRatio(name)
-	if locked {
-		return CompletionRatioInfo{
-			Ratio:  hardCodedRatio,
-			Locked: true,
-		}
-	}
-
 	if ratio, ok := completionRatioMap.Get(name); ok {
 		return CompletionRatioInfo{
 			Ratio:  ratio,
@@ -490,6 +582,7 @@ func GetCompletionRatioInfo(name string) CompletionRatioInfo {
 		}
 	}
 
+	hardCodedRatio, _ := getHardcodedCompletionModelRatio(name)
 	return CompletionRatioInfo{
 		Ratio:  hardCodedRatio,
 		Locked: false,
@@ -706,6 +799,10 @@ func GetModelRatioCopy() map[string]float64 {
 
 func GetModelPriceCopy() map[string]float64 {
 	return modelPriceMap.ReadAll()
+}
+
+func GetModelPriceUnitCopy() map[string]string {
+	return modelPriceUnitMap.ReadAll()
 }
 
 func GetCompletionRatioCopy() map[string]float64 {

@@ -215,7 +215,11 @@ func InitDB() (err error) {
 func InitLogDB() (err error) {
 	if os.Getenv("LOG_SQL_DSN") == "" {
 		LOG_DB = DB
-		return
+		if !common.IsMasterNode {
+			return nil
+		}
+		// 日志库复用主库时，也必须在最终 LOG_DB 句柄确定后迁移日志事实表。
+		return MigrateChannelAnalyticsLogDB(LOG_DB)
 	}
 	db, err := chooseDB("LOG_SQL_DSN", true)
 	if err == nil {
@@ -274,6 +278,11 @@ func migrateDB() error {
 	}
 
 	err := DB.AutoMigrate(
+		&Group{},
+		&GroupAlias{},
+		&AutoGroupMember{},
+		&ChannelGroupBinding{},
+		&TokenGroupBinding{},
 		&Channel{},
 		&Token{},
 		&User{},
@@ -288,6 +297,13 @@ func migrateDB() error {
 		&Midjourney{},
 		&TopUp{},
 		&InvoiceRecord{},
+		&InvoiceOrderLink{},
+		&NotificationBot{},
+		&NotificationTask{},
+		&NotificationTarget{},
+		&NotificationEventReceipt{},
+		&NotificationEvent{},
+		&NotificationDelivery{},
 		&QuotaData{},
 		&Task{},
 		&Model{},
@@ -331,6 +347,15 @@ func migrateDB() error {
 			return err
 		}
 	}
+	if err := migratePromoCodeDeletionKey(DB); err != nil {
+		return fmt.Errorf("failed to migrate promo code deletion key: %w", err)
+	}
+	if err := migrateGroupIdentity(); err != nil {
+		return fmt.Errorf("failed to migrate group identity: %w", err)
+	}
+	if err := BackfillGroupBindings(); err != nil {
+		return fmt.Errorf("failed to backfill group bindings: %w", err)
+	}
 	return nil
 }
 
@@ -356,6 +381,13 @@ func migrateDBFast() error {
 		{&Midjourney{}, "Midjourney"},
 		{&TopUp{}, "TopUp"},
 		{&InvoiceRecord{}, "InvoiceRecord"},
+		{&InvoiceOrderLink{}, "InvoiceOrderLink"},
+		{&NotificationBot{}, "NotificationBot"},
+		{&NotificationTask{}, "NotificationTask"},
+		{&NotificationTarget{}, "NotificationTarget"},
+		{&NotificationEventReceipt{}, "NotificationEventReceipt"},
+		{&NotificationEvent{}, "NotificationEvent"},
+		{&NotificationDelivery{}, "NotificationDelivery"},
 		{&QuotaData{}, "QuotaData"},
 		{&Task{}, "Task"},
 		{&Model{}, "Model"},
@@ -419,6 +451,26 @@ func migrateDBFast() error {
 			return err
 		}
 	}
+	if err := migratePromoCodeDeletionKey(DB); err != nil {
+		return fmt.Errorf("failed to migrate promo code deletion key: %w", err)
+	}
+	// 稳定分组表依赖业务表的新列。快速迁移先等待业务表迁移完成，
+	// 再串行建关系表，避免 SQLite 锁冲突和并发迁移下的回填竞态。
+	if err := DB.AutoMigrate(
+		&Group{},
+		&GroupAlias{},
+		&AutoGroupMember{},
+		&ChannelGroupBinding{},
+		&TokenGroupBinding{},
+	); err != nil {
+		return fmt.Errorf("failed to migrate group relationship tables: %w", err)
+	}
+	if err := migrateGroupIdentity(); err != nil {
+		return fmt.Errorf("failed to migrate group identity: %w", err)
+	}
+	if err := BackfillGroupBindings(); err != nil {
+		return fmt.Errorf("failed to backfill group bindings: %w", err)
+	}
 	common.SysLog("database migrated")
 	return nil
 }
@@ -428,7 +480,7 @@ func migrateLOGDB() error {
 	if err = LOG_DB.AutoMigrate(&Log{}); err != nil {
 		return err
 	}
-	return nil
+	return MigrateChannelAnalyticsLogDB(LOG_DB)
 }
 
 type sqliteColumnDef struct {

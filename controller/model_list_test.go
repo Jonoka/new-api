@@ -14,6 +14,8 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -210,6 +212,33 @@ func TestListModelsIncludesTieredBillingModel(t *testing.T) {
 	require.Empty(t, missingExprPricing.BillingExpr)
 }
 
+func TestPricingIncludesFixedPriceUnit(t *testing.T) {
+	savedPrices := ratio_setting.ModelPrice2JSONString()
+	savedUnits := ratio_setting.ModelPriceUnit2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(savedPrices))
+		require.NoError(t, ratio_setting.UpdateModelPriceUnitByJSONString(savedUnits))
+		model.InvalidatePricingCache()
+	})
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"zz-video-second-model":0.05}`))
+	require.NoError(t, ratio_setting.UpdateModelPriceUnitByJSONString(`{"zz-video-second-model":"second"}`))
+
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.Create(&model.Ability{
+		Group:     "default",
+		Model:     "zz-video-second-model",
+		ChannelId: 1,
+		Enabled:   true,
+	}).Error)
+	model.InvalidatePricingCache()
+
+	pricing, ok := pricingByModelName(model.GetPricing())["zz-video-second-model"]
+	require.True(t, ok)
+	require.Equal(t, 1, pricing.QuotaType)
+	require.Equal(t, 0.05, pricing.ModelPrice)
+	require.Equal(t, types.ModelPriceUnitSecond, pricing.ModelPriceUnit)
+}
+
 func TestListModelsTokenLimitIncludesTieredBillingModel(t *testing.T) {
 	withSelfUseModeDisabled(t)
 	withTieredBillingConfig(t, map[string]string{
@@ -242,4 +271,70 @@ func TestListModelsTokenLimitIncludesTieredBillingModel(t *testing.T) {
 	require.NotContains(t, ids, "zz-token-tiered-empty-expr-model")
 	require.NotContains(t, ids, "zz-token-tiered-missing-expr-model")
 	require.NotContains(t, ids, "zz-token-unpriced-model")
+}
+
+func TestListModelsIncludesXAIImageGenerationEndpointTypes(t *testing.T) {
+	originalSelfUseMode := operation_setting.SelfUseModeEnabled
+	operation_setting.SelfUseModeEnabled = true
+	t.Cleanup(func() {
+		operation_setting.SelfUseModeEnabled = originalSelfUseMode
+		model.InvalidatePricingCache()
+	})
+
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.Create(&model.Channel{
+		Id:     1,
+		Type:   constant.ChannelTypeXai,
+		Key:    "test-key",
+		Status: common.ChannelStatusEnabled,
+		Name:   "xAI test channel",
+	}).Error)
+	require.NoError(t, db.Create(&[]model.Ability{
+		{Group: "default", Model: "grok-imagine-image", ChannelId: 1, Enabled: true},
+		{Group: "default", Model: "grok-imagine-image-pro", ChannelId: 1, Enabled: true},
+		{Group: "default", Model: "grok-2-image-1212", ChannelId: 1, Enabled: true},
+		{Group: "default", Model: "grok-4-fast-reasoning", ChannelId: 1, Enabled: true},
+	}).Error)
+
+	model.InvalidatePricingCache()
+	_ = model.GetPricing()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
+
+	ListModels(ctx, constant.ChannelTypeOpenAI)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var payload listModelsResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.True(t, payload.Success)
+
+	modelsByID := make(map[string]dto.OpenAIModels, len(payload.Data))
+	for _, item := range payload.Data {
+		modelsByID[item.Id] = item
+	}
+
+	wantImageEndpoints := []constant.EndpointType{
+		constant.EndpointTypeImageGeneration,
+		constant.EndpointTypeOpenAI,
+		constant.EndpointTypeOpenAIResponse,
+	}
+	for _, modelName := range []string{
+		"grok-imagine-image",
+		"grok-imagine-image-pro",
+		"grok-2-image-1212",
+	} {
+		got, ok := modelsByID[modelName]
+		require.True(t, ok, "模型列表缺少 %s", modelName)
+		require.Equal(t, wantImageEndpoints, got.SupportedEndpointTypes)
+	}
+
+	chatModel, ok := modelsByID["grok-4-fast-reasoning"]
+	require.True(t, ok, "模型列表缺少普通 xAI 聊天模型")
+	require.Equal(t, []constant.EndpointType{
+		constant.EndpointTypeOpenAI,
+		constant.EndpointTypeOpenAIResponse,
+	}, chatModel.SupportedEndpointTypes)
 }

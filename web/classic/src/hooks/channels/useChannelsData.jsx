@@ -27,6 +27,9 @@ import {
   loadChannelModels,
   copy,
   toBoolean,
+  createGroupOptions,
+  extractGroupDetailsResponse,
+  GROUP_DETAILS_UPDATED_EVENT,
 } from '../../helpers';
 import {
   CHANNEL_OPTIONS,
@@ -124,6 +127,8 @@ export const useChannelsData = () => {
   // Refs
   const requestCounter = useRef(0);
   const allSelectingRef = useRef(false);
+  const fetchGroupsRef = useRef(null);
+  const refreshRef = useRef(null);
   const [formApi, setFormApi] = useState(null);
 
   const formInitValues = {
@@ -263,6 +268,8 @@ export const useChannelsData = () => {
             tag: tag,
             name: '标签：' + tag,
             group: '',
+            group_ids: [],
+            group_details: [],
             used_quota: 0,
             response_time: 0,
             priority: -1,
@@ -303,13 +310,31 @@ export const useChannelsData = () => {
         if (tagChannelDates.group === '') {
           tagChannelDates.group = channels[i].group;
         } else {
-          let channelGroupsStr = channels[i].group;
-          channelGroupsStr.split(',').forEach((item, index) => {
-            if (tagChannelDates.group.indexOf(item) === -1) {
-              tagChannelDates.group += ',' + item;
-            }
-          });
+          const groupSet = new Set(
+            tagChannelDates.group.split(',').filter(Boolean),
+          );
+          channels[i].group
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean)
+            .forEach((item) => groupSet.add(item));
+          tagChannelDates.group = Array.from(groupSet).join(',');
         }
+
+        const detailsByKey = new Map(
+          (tagChannelDates.group_details || []).map((detail) => [
+            detail.id > 0 ? `id:${detail.id}` : `code:${detail.code}`,
+            detail,
+          ]),
+        );
+        (channels[i].group_details || []).forEach((detail) => {
+          const key = detail.id > 0 ? `id:${detail.id}` : `code:${detail.code}`;
+          if (!detailsByKey.has(key)) detailsByKey.set(key, detail);
+        });
+        tagChannelDates.group_details = Array.from(detailsByKey.values());
+        tagChannelDates.group_ids = tagChannelDates.group_details
+          .map((detail) => detail.id)
+          .filter((id) => id > 0);
 
         tagChannelDates.children.push(channels[i]);
         if (channels[i].status === 1) {
@@ -345,9 +370,15 @@ export const useChannelsData = () => {
   ) => {
     if (statusF === undefined) statusF = statusFilter;
 
-    const { searchKeyword, searchGroup, searchModel, searchVendor } = getFormValues();
+    const { searchKeyword, searchGroup, searchModel, searchVendor } =
+      getFormValues();
     const vendorKey = searchVendor || activeVendorKey;
-    if (searchKeyword !== '' || searchGroup !== '' || searchModel !== '' || vendorKey !== 'all') {
+    if (
+      searchKeyword !== '' ||
+      searchGroup !== '' ||
+      searchModel !== '' ||
+      vendorKey !== 'all'
+    ) {
       setLoading(true);
       await searchChannels(
         enableTagMode,
@@ -409,11 +440,17 @@ export const useChannelsData = () => {
     sortFlag = idSort,
     vendorKey,
   ) => {
-    const { searchKeyword, searchGroup, searchModel, searchVendor } = getFormValues();
+    const { searchKeyword, searchGroup, searchModel, searchVendor } =
+      getFormValues();
     const effectiveVendorKey = vendorKey || searchVendor || activeVendorKey;
     setSearching(true);
     try {
-      if (searchKeyword === '' && searchGroup === '' && searchModel === '' && effectiveVendorKey === 'all') {
+      if (
+        searchKeyword === '' &&
+        searchGroup === '' &&
+        searchModel === '' &&
+        effectiveVendorKey === 'all'
+      ) {
         await loadChannels(
           page,
           pageSz,
@@ -427,13 +464,19 @@ export const useChannelsData = () => {
 
       const typeParam = typeKey !== 'all' ? `&type=${typeKey}` : '';
       const statusParam = statusF !== 'all' ? `&status=${statusF}` : '';
-      const vendorParam = effectiveVendorKey !== 'all' ? `&vendor=${effectiveVendorKey}` : '';
+      const vendorParam =
+        effectiveVendorKey !== 'all' ? `&vendor=${effectiveVendorKey}` : '';
       const res = await API.get(
         `/api/channel/search?keyword=${searchKeyword}&group=${searchGroup}&model=${searchModel}&id_sort=${sortFlag}&tag_mode=${enableTagMode}&p=${page}&page_size=${pageSz}${typeParam}${statusParam}${vendorParam}`,
       );
       const { success, message, data } = res.data;
       if (success) {
-        const { items = [], total = 0, type_counts = {}, vendor_counts = {} } = data;
+        const {
+          items = [],
+          total = 0,
+          type_counts = {},
+          vendor_counts = {},
+        } = data;
         const sumAll = Object.values(type_counts).reduce(
           (acc, v) => acc + v,
           0,
@@ -457,9 +500,15 @@ export const useChannelsData = () => {
 
   // Refresh
   const refresh = async (page = activePage) => {
-    const { searchKeyword, searchGroup, searchModel, searchVendor } = getFormValues();
+    const { searchKeyword, searchGroup, searchModel, searchVendor } =
+      getFormValues();
     const vendorKey = searchVendor || activeVendorKey;
-    if (searchKeyword === '' && searchGroup === '' && searchModel === '' && vendorKey === 'all') {
+    if (
+      searchKeyword === '' &&
+      searchGroup === '' &&
+      searchModel === '' &&
+      vendorKey === 'all'
+    ) {
       await loadChannels(page, pageSize, idSort, enableTagMode);
     } else {
       await searchChannels(
@@ -561,10 +610,16 @@ export const useChannelsData = () => {
 
   // Page handlers
   const handlePageChange = (page) => {
-    const { searchKeyword, searchGroup, searchModel, searchVendor } = getFormValues();
+    const { searchKeyword, searchGroup, searchModel, searchVendor } =
+      getFormValues();
     const vendorKey = searchVendor || activeVendorKey;
     setActivePage(page);
-    if (searchKeyword === '' && searchGroup === '' && searchModel === '' && vendorKey === 'all') {
+    if (
+      searchKeyword === '' &&
+      searchGroup === '' &&
+      searchModel === '' &&
+      vendorKey === 'all'
+    ) {
       loadChannels(page, pageSize, idSort, enableTagMode).then(() => {});
     } else {
       searchChannels(
@@ -583,9 +638,15 @@ export const useChannelsData = () => {
     localStorage.setItem('page-size', size + '');
     setPageSize(size);
     setActivePage(1);
-    const { searchKeyword, searchGroup, searchModel, searchVendor } = getFormValues();
+    const { searchKeyword, searchGroup, searchModel, searchVendor } =
+      getFormValues();
     const vendorKey = searchVendor || activeVendorKey;
-    if (searchKeyword === '' && searchGroup === '' && searchModel === '' && vendorKey === 'all') {
+    if (
+      searchKeyword === '' &&
+      searchGroup === '' &&
+      searchModel === '' &&
+      vendorKey === 'all'
+    ) {
       loadChannels(1, size, idSort, enableTagMode)
         .then()
         .catch((reason) => {
@@ -607,18 +668,40 @@ export const useChannelsData = () => {
   // Fetch groups
   const fetchGroups = async () => {
     try {
-      let res = await API.get(`/api/group/`);
+      const res = await API.get('/api/group/details');
       if (res === undefined) return;
-      setGroupOptions(
-        res.data.data.map((group) => ({
-          label: group,
-          value: group,
-        })),
-      );
+      const groupDetails = extractGroupDetailsResponse(res.data);
+      setGroupOptions(createGroupOptions(groupDetails || []));
     } catch (error) {
-      showError(error.message);
+      showError(error?.message || t('刷新失败'));
     }
   };
+
+  fetchGroupsRef.current = fetchGroups;
+  refreshRef.current = refresh;
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+
+    const handleGroupDetailsUpdated = async () => {
+      try {
+        await Promise.all([fetchGroupsRef.current?.(), refreshRef.current?.()]);
+      } catch (error) {
+        showError(error?.message || t('刷新失败'));
+      }
+    };
+
+    window.addEventListener(
+      GROUP_DETAILS_UPDATED_EVENT,
+      handleGroupDetailsUpdated,
+    );
+    return () => {
+      window.removeEventListener(
+        GROUP_DETAILS_UPDATED_EVENT,
+        handleGroupDetailsUpdated,
+      );
+    };
+  }, [t]);
 
   const loadVendors = async () => {
     try {

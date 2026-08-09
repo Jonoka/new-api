@@ -360,7 +360,7 @@ func RemoveAffiliateRiskAction(userId int, adminId int, req AffiliateRiskRemoveR
 	result := &AffiliateRiskRemoveResult{}
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var risk AffiliateRiskUser
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").
+		if err := lockForUpdate(tx).
 			Where("user_id = ? AND status = ?", userId, AffiliateRiskStatusActive).
 			First(&risk).Error; err != nil {
 			return errors.New("active risk user not found")
@@ -411,7 +411,7 @@ func RemoveAffiliateRiskAction(userId int, adminId int, req AffiliateRiskRemoveR
 
 func getOrCreateActiveAffiliateRiskUserTx(tx *gorm.DB, userId int) (*AffiliateRiskUser, error) {
 	var risk AffiliateRiskUser
-	err := tx.Set("gorm:query_option", "FOR UPDATE").
+	err := lockForUpdate(tx).
 		Where("user_id = ? AND status = ?", userId, AffiliateRiskStatusActive).
 		First(&risk).Error
 	if err == nil {
@@ -420,7 +420,7 @@ func getOrCreateActiveAffiliateRiskUserTx(tx *gorm.DB, userId int) (*AffiliateRi
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
-	err = tx.Set("gorm:query_option", "FOR UPDATE").
+	err = lockForUpdate(tx).
 		Where("user_id = ?", userId).
 		First(&risk).Error
 	if err == nil {
@@ -487,7 +487,7 @@ func unfreezeAffiliateAssetsTx(tx *gorm.DB, userId int) (int, error) {
 
 func detachAffiliateInviteesTx(tx *gorm.DB, riskUserId int, userId int) (int, error) {
 	var invitees []User
-	if err := tx.Set("gorm:query_option", "FOR UPDATE").
+	if err := lockForUpdate(tx).
 		Select("id").
 		Where("inviter_id = ?", userId).
 		Find(&invitees).Error; err != nil {
@@ -532,7 +532,7 @@ func detachAffiliateInviteesTx(tx *gorm.DB, riskUserId int, userId int) (int, er
 
 func restoreAffiliateDetachedInviteesTx(tx *gorm.DB, riskUserId int, userId int) (int, error) {
 	var rows []AffiliateRiskDetachedInvitee
-	if err := tx.Set("gorm:query_option", "FOR UPDATE").
+	if err := lockForUpdate(tx).
 		Where("risk_user_id = ? AND user_id = ? AND restored = ?", riskUserId, userId, false).
 		Find(&rows).Error; err != nil {
 		return 0, err
@@ -588,7 +588,7 @@ func clearAffiliateAssetsTx(tx *gorm.DB, userId int, adminId int) (*affiliateRis
 
 	now := common.GetTimestamp()
 	var withdrawals []AffiliateWithdrawal
-	if err := tx.Set("gorm:query_option", "FOR UPDATE").
+	if err := lockForUpdate(tx).
 		Where("user_id = ? AND status IN ?", userId, []string{AffiliateWithdrawalStatusPending, AffiliateWithdrawalStatusApproved}).
 		Find(&withdrawals).Error; err != nil {
 		return nil, err

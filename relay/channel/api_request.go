@@ -426,7 +426,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		return nil, fmt.Errorf("get request url failed: %w", err)
 	}
 	logger.LogDebug(c, "fullRequestURL: %s", fullRequestURL)
-	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
+	req, err := newRelayHTTPRequest(c, c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
@@ -458,7 +458,7 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 		return nil, fmt.Errorf("get request url failed: %w", err)
 	}
 	logger.LogDebug(c, "fullRequestURL: %s", fullRequestURL)
-	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
+	req, err := newRelayHTTPRequest(c, c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
@@ -508,20 +508,29 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	sanitizeClaudeCodeHeadersForCompatibleClient(c, targetReq, info)
 	targetHeader = targetReq.Header
 	targetHeader.Set("Content-Type", c.Request.Header.Get("Content-Type"))
-	targetConn, _, err := websocket.DefaultDialer.Dial(fullRequestURL, targetHeader)
+	callIndex := service.BeginChannelMetricUpstreamCall(c)
+	targetConn, dialResp, err := websocket.DefaultDialer.Dial(fullRequestURL, targetHeader)
 	if err != nil {
+		statusCode := 0
+		if dialResp != nil {
+			statusCode = dialResp.StatusCode
+		}
+		service.CompleteChannelMetricUpstreamHeader(c, callIndex, statusCode, err)
 		return nil, fmt.Errorf("dial failed to %s: %w", fullRequestURL, err)
 	}
+	service.CompleteChannelMetricUpstreamHeader(c, callIndex, http.StatusSwitchingProtocols, nil)
 	// send request body
 	//all, err := io.ReadAll(requestBody)
 	//err = service.WssString(c, targetConn, string(all))
 	return targetConn, nil
 }
 
-func startPingKeepAlive(c *gin.Context, pingInterval time.Duration) context.CancelFunc {
+func startPingKeepAlive(c *gin.Context, pingInterval time.Duration) (context.CancelFunc, <-chan struct{}) {
 	pingerCtx, stopPinger := context.WithCancel(context.Background())
+	done := make(chan struct{})
 
 	gopool.Go(func() {
+		defer close(done)
 		defer func() {
 			// 增加panic恢复处理
 			if r := recover(); r != nil {
@@ -571,36 +580,23 @@ func startPingKeepAlive(c *gin.Context, pingInterval time.Duration) context.Canc
 		}
 	})
 
-	return stopPinger
+	return stopPinger, done
 }
 
 func sendPingData(c *gin.Context, mutex *sync.Mutex) error {
-	// 增加超时控制，防止锁死等待
-	done := make(chan error, 1)
-	go func() {
-		mutex.Lock()
-		defer mutex.Unlock()
+	mutex.Lock()
+	defer mutex.Unlock()
 
-		err := helper.PingData(c)
-		if err != nil {
-			logger.LogError(c, "SSE ping error: "+err.Error())
-			done <- err
-			return
-		}
-
-		logger.LogDebug(c, "SSE ping data sent")
-		done <- nil
-	}()
-
-	// 设置发送ping数据的超时时间
-	select {
-	case err := <-done:
+	// 给写入设置上限，确保 doRequest 返回前能等待保活 goroutine 安全退出。
+	helper.ExtendWriteDeadline(c)
+	err := helper.PingData(c)
+	if err != nil {
+		logger.LogError(c, "SSE ping error: "+err.Error())
 		return err
-	case <-time.After(10 * time.Second):
-		return errors.New("SSE ping data send timeout")
-	case <-c.Request.Context().Done():
-		return errors.New("request context cancelled during ping")
 	}
+
+	logger.LogDebug(c, "SSE ping data sent")
+	return nil
 }
 
 func DoRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
@@ -652,6 +648,16 @@ func selectRelayHTTPClient(c *gin.Context, info *common.RelayInfo) (*http.Client
 	return service.GetHttpClient(), nil
 }
 
+// newRelayHTTPRequest 继承入口请求上下文，使客户端断开或后台任务超时能够
+// 及时取消正在等待的上游请求，避免无界占用连接和 goroutine。
+func newRelayHTTPRequest(c *gin.Context, method string, target string, body io.Reader) (*http.Request, error) {
+	ctx := context.Background()
+	if c != nil && c.Request != nil {
+		ctx = c.Request.Context()
+	}
+	return http.NewRequestWithContext(ctx, method, target, body)
+}
+
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	client, err := selectRelayHTTPClient(c, info)
 	if err != nil {
@@ -659,17 +665,19 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	}
 
 	var stopPinger context.CancelFunc
+	var pingerDone <-chan struct{}
 	if info.IsStream {
 		helper.SetEventStreamHeaders(c)
 		// 处理流式请求的 ping 保活
 		generalSettings := operation_setting.GetGeneralSetting()
 		if generalSettings.PingIntervalEnabled && !info.DisablePing {
 			pingInterval := time.Duration(generalSettings.PingIntervalSeconds) * time.Second
-			stopPinger = startPingKeepAlive(c, pingInterval)
+			stopPinger, pingerDone = startPingKeepAlive(c, pingInterval)
 			// 使用defer确保在任何情况下都能停止ping goroutine
 			defer func() {
 				if stopPinger != nil {
 					stopPinger()
+					<-pingerDone
 					logger.LogDebug(c, "SSE ping goroutine stopped by defer")
 				}
 			}()
@@ -695,14 +703,27 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 			req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
 		}
 	}
+	callIndex := service.BeginChannelMetricUpstreamCall(c)
 	resp, err := client.Do(req)
 	if err != nil {
-		logger.LogError(c, "do request failed: "+err.Error())
+		statusCode := 0
+		if resp != nil {
+			statusCode = resp.StatusCode
+		}
+		service.CompleteChannelMetricUpstreamHeader(c, callIndex, statusCode, err)
+		if isInboundRequestContextError(c, err) {
+			logger.LogInfo(c, "do request stopped after request context ended: "+err.Error())
+		} else {
+			logger.LogError(c, "do request failed: "+err.Error())
+		}
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 	}
 	if resp == nil {
-		return nil, errors.New("resp is nil")
+		err = errors.New("resp is nil")
+		service.CompleteChannelMetricUpstreamHeader(c, callIndex, 0, err)
+		return nil, err
 	}
+	service.CompleteChannelMetricUpstreamHeader(c, callIndex, resp.StatusCode, nil)
 	if info != nil {
 		info.MarkTimingClientDoReturn()
 	}
@@ -719,12 +740,20 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	return resp, nil
 }
 
+func isInboundRequestContextError(c *gin.Context, err error) bool {
+	if err == nil || c == nil || c.Request == nil {
+		return false
+	}
+	contextErr := c.Request.Context().Err()
+	return contextErr != nil && errors.Is(err, contextErr)
+}
+
 func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
 	fullRequestURL, err := a.BuildRequestURL(info)
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
+	req, err := newRelayHTTPRequest(c, c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}

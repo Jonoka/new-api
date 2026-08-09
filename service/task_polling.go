@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/samber/lo"
 )
@@ -40,17 +41,27 @@ var GetTaskAdaptorFunc func(platform constant.TaskPlatform) TaskPollingAdaptor
 // 每次最多处理 100 条，剩余的下个周期继续处理。
 // 使用 per-task CAS (UpdateWithStatus) 防止覆盖被正常轮询已推进的任务。
 func sweepTimedOutTasks(ctx context.Context) {
-	if constant.TaskTimeoutMinutes <= 0 {
-		return
+	if constant.ImageTaskTimeoutMinutes > 0 {
+		cutoff := time.Now().Unix() - int64(constant.ImageTaskTimeoutMinutes)*60
+		tasks := model.GetTimedOutUnfinishedTasksByPlatforms(cutoff, 100, constant.ImageTaskPlatforms())
+		reason := fmt.Sprintf("图片生成任务超时（%d分钟）", constant.ImageTaskTimeoutMinutes)
+		sweepTimedOutTaskBatch(ctx, tasks, reason)
 	}
-	cutoff := time.Now().Unix() - int64(constant.TaskTimeoutMinutes)*60
-	tasks := model.GetTimedOutUnfinishedTasks(cutoff, 100)
+
+	if constant.TaskTimeoutMinutes > 0 {
+		cutoff := time.Now().Unix() - int64(constant.TaskTimeoutMinutes)*60
+		tasks := model.GetTimedOutUnfinishedTasks(cutoff, 100)
+		reason := fmt.Sprintf("任务超时（%d分钟）", constant.TaskTimeoutMinutes)
+		sweepTimedOutTaskBatch(ctx, tasks, reason)
+	}
+}
+
+func sweepTimedOutTaskBatch(ctx context.Context, tasks []*model.Task, reason string) {
 	if len(tasks) == 0 {
 		return
 	}
 
 	const legacyTaskCutoff int64 = 1740182400 // 2026-02-22 00:00:00 UTC
-	reason := fmt.Sprintf("任务超时（%d分钟）", constant.TaskTimeoutMinutes)
 	legacyReason := "任务超时（旧系统遗留任务，不进行退款，请联系管理员）"
 	now := time.Now().Unix()
 	timedOutCount := 0
@@ -564,9 +575,14 @@ func truncateBase64(s string) string {
 //  2. taskResult.TotalTokens > 0 → 按 token 重算
 //  3. 都不满足 → 保持预扣额度不变
 func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo) {
-	// 0. 按次计费的任务不做差额结算
+	// 0. 固定价格任务不回退到 token 计费；按秒任务仍允许适配器按实际结果调整。
 	if bc := task.PrivateData.BillingContext; bc != nil && bc.PerCallBilling {
-		logger.LogInfo(ctx, fmt.Sprintf("任务 %s 按次计费，跳过差额结算", task.TaskID))
+		if bc.ModelPriceUnit == types.ModelPriceUnitSecond {
+			if actualQuota := adaptor.AdjustBillingOnComplete(task, taskResult); actualQuota > 0 {
+				RecalculateTaskQuota(ctx, task, actualQuota, "适配器按秒计费调整")
+			}
+		}
+		logger.LogInfo(ctx, fmt.Sprintf("任务 %s 固定价格计费，跳过 token 差额结算", task.TaskID))
 		return
 	}
 	// 1. 优先让 adaptor 决定最终额度

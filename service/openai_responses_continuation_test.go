@@ -1,6 +1,8 @@
 package service
 
 import (
+	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -65,7 +67,7 @@ func TestAttachOpenAIResponsesContinuationDoesNotAutoInjectCachedPreviousRespons
 	]`, string(req.Input))
 }
 
-func TestAttachOpenAIResponsesContinuationDoesNotOverrideExplicitPreviousResponseID(t *testing.T) {
+func TestAttachOpenAIResponsesContinuationPreservesIncrementalPreviousResponseID(t *testing.T) {
 	info := &relaycommon.RelayInfo{
 		ChannelMeta: &relaycommon.ChannelMeta{
 			ChannelId: 9528,
@@ -84,6 +86,41 @@ func TestAttachOpenAIResponsesContinuationDoesNotOverrideExplicitPreviousRespons
 	require.Equal(t, "resp_explicit_456", req.PreviousResponseID)
 }
 
+func TestAttachOpenAIResponsesContinuationKeepsDependentToolContinuation(t *testing.T) {
+	req := &dto.OpenAIResponsesRequest{
+		PreviousResponseID: "resp_explicit_tool",
+		Input: mustMarshalRaw(t, []map[string]any{
+			{"type": "function_call_output", "call_id": "call_1", "output": "ok"},
+		}),
+	}
+
+	retryWithoutPreviousResponse := AttachOpenAIResponsesContinuation(&relaycommon.RelayInfo{}, req)
+
+	require.False(t, retryWithoutPreviousResponse)
+	require.Equal(t, "resp_explicit_tool", req.PreviousResponseID)
+}
+
+func TestAttachOpenAIResponsesContinuationRequiresReplayableInput(t *testing.T) {
+	for _, req := range []*dto.OpenAIResponsesRequest{
+		{PreviousResponseID: "resp_without_input"},
+		{PreviousResponseID: "resp_empty_input", Input: json.RawMessage(`[]`)},
+		{PreviousResponseID: "resp_string_input", Input: json.RawMessage(`"next"`)},
+		{PreviousResponseID: "resp_current_turn_only", Input: json.RawMessage(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}]`)},
+		{PreviousResponseID: "resp_reference", Input: json.RawMessage(`[{"type":"item_reference","id":"item_1"}]`)},
+	} {
+		require.False(t, AttachOpenAIResponsesContinuation(&relaycommon.RelayInfo{}, req))
+	}
+
+	selfContainedHistory := &dto.OpenAIResponsesRequest{
+		PreviousResponseID: "resp_self_contained_history",
+		Input: json.RawMessage(`[
+			{"type":"message","role":"assistant","content":[{"type":"output_text","text":"prior"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}
+		]`),
+	}
+	require.True(t, AttachOpenAIResponsesContinuation(&relaycommon.RelayInfo{}, selfContainedHistory))
+}
+
 func TestResolveOpenAIResponsesContinuationSessionIDUsesRuntimeSessionID(t *testing.T) {
 	info := &relaycommon.RelayInfo{
 		ChannelMeta: &relaycommon.ChannelMeta{
@@ -98,6 +135,16 @@ func TestResolveOpenAIResponsesContinuationSessionIDUsesRuntimeSessionID(t *test
 
 	sessionID := resolveOpenAIResponsesContinuationSessionID(info, req)
 	require.Equal(t, relaycommon.NormalizeOpenAIBridgeSessionIDForCache(info, "123e4567-e89b-12d3-a456-426614174000"), sessionID)
+}
+
+func TestResolveOpenAIResponsesContinuationSessionIDWithoutIdentityIsEmpty(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId: 9530,
+		},
+	}
+
+	require.Empty(t, resolveOpenAIResponsesContinuationSessionID(info, &dto.OpenAIResponsesRequest{}))
 }
 
 func TestIsOpenAIResponsesPreviousResponseRetryable(t *testing.T) {
@@ -124,6 +171,18 @@ func TestIsOpenAIResponsesPreviousResponseRetryable(t *testing.T) {
 			statusCode: 404,
 			message:    "status_code=404, previous response not found",
 			want:       true,
+		},
+		{
+			name:       "compact continuation expired",
+			statusCode: 409,
+			message:    "status_code=409, compact continuation is unknown or expired; start a new conversation",
+			want:       true,
+		},
+		{
+			name:       "unrelated conflict",
+			statusCode: 409,
+			message:    "status_code=409, request already exists",
+			want:       false,
 		},
 		{
 			name:       "other bad request",
@@ -167,6 +226,70 @@ func TestRemoveIncompleteOpenAIResponsesReasoningHistoryFromJSON(t *testing.T) {
 	require.Equal(t, "reasoning", gjson.GetBytes(cleaned, "input.1.type").String())
 	require.Equal(t, "enc_123", gjson.GetBytes(cleaned, "input.1.encrypted_content").String())
 	require.Equal(t, "next", gjson.GetBytes(cleaned, "input.2.content").String())
+}
+
+func TestNormalizeOpenAIResponsesInputHistoryForUpstream(t *testing.T) {
+	req := &dto.OpenAIResponsesRequest{Input: []byte(`[
+		{"type":"message","role":"assistant","id":"item_message_1","status":"completed","namespace":"codex","phase":"commentary","content":[{"type":"output_text","id":"content_1","status":"completed","annotations":[],"text":"hello"},{"type":"refusal","refusal":"cannot comply"}]},
+		{"role":"user","id":"item_message_2","status":"completed","content":"next"},
+		{"type":"function_call","id":"item_call_1","status":"completed","namespace":"codex","call_id":"call_1","name":"lookup","arguments":"{\"q\":\"x\"}"},
+		{"type":"function_call_output","id":"item_output_1","status":"completed","call_id":"call_1","output":"ok"},
+		{"type":"custom_tool_call","id":"item_custom_1","status":"completed","namespace":"codex","call_id":"call_2","name":"apply_patch","input":"patch"},
+		{"type":"custom_tool_call_output","id":"item_custom_output_1","status":"completed","call_id":"call_2","output":"done"},
+		{"type":"reasoning","id":"item_reasoning_1","status":"completed","namespace":"codex","encrypted_content":"enc_1"},
+		{"type":"item_reference","id":"item_reference_1","status":"completed","namespace":"codex"},
+		{"type":"vendor_private","role":"assistant","id":"item_vendor_1","status":"completed","namespace":"codex","content":[{"type":"output_text","text":"vendor"}]},
+		"literal input"
+	]`)}
+
+	normalized, err := NormalizeOpenAIResponsesInputHistoryForUpstream(req)
+	require.NoError(t, err)
+	require.Equal(t, 6, normalized)
+
+	for _, index := range []int{0, 1, 2, 3, 4, 5} {
+		path := fmt.Sprintf("%d", index)
+		require.False(t, gjson.GetBytes(req.Input, path+".id").Exists(), string(req.Input))
+		require.False(t, gjson.GetBytes(req.Input, path+".status").Exists(), string(req.Input))
+		require.False(t, gjson.GetBytes(req.Input, path+".namespace").Exists(), string(req.Input))
+	}
+
+	require.Equal(t, "commentary", gjson.GetBytes(req.Input, "0.phase").String())
+	require.Equal(t, "output_text", gjson.GetBytes(req.Input, "0.content.0.type").String())
+	require.Equal(t, "hello", gjson.GetBytes(req.Input, "0.content.0.text").String())
+	require.False(t, gjson.GetBytes(req.Input, "0.content.0.id").Exists(), string(req.Input))
+	require.False(t, gjson.GetBytes(req.Input, "0.content.0.status").Exists(), string(req.Input))
+	require.False(t, gjson.GetBytes(req.Input, "0.content.0.annotations").Exists(), string(req.Input))
+	require.Equal(t, "refusal", gjson.GetBytes(req.Input, "0.content.1.type").String())
+	require.Equal(t, "cannot comply", gjson.GetBytes(req.Input, "0.content.1.refusal").String())
+	require.Equal(t, "call_1", gjson.GetBytes(req.Input, "2.call_id").String())
+	require.Equal(t, "lookup", gjson.GetBytes(req.Input, "2.name").String())
+	require.Equal(t, "ok", gjson.GetBytes(req.Input, "3.output").String())
+	require.Equal(t, "call_2", gjson.GetBytes(req.Input, "4.call_id").String())
+	require.Equal(t, "done", gjson.GetBytes(req.Input, "5.output").String())
+
+	require.Equal(t, "item_reasoning_1", gjson.GetBytes(req.Input, "6.id").String())
+	require.Equal(t, "item_reference_1", gjson.GetBytes(req.Input, "7.id").String())
+	require.Equal(t, "item_vendor_1", gjson.GetBytes(req.Input, "8.id").String())
+	require.Equal(t, "completed", gjson.GetBytes(req.Input, "8.status").String())
+	require.Equal(t, "output_text", gjson.GetBytes(req.Input, "8.content.0.type").String())
+	require.Equal(t, "literal input", gjson.GetBytes(req.Input, "9").String())
+
+	firstPass := append([]byte(nil), req.Input...)
+	normalized, err = NormalizeOpenAIResponsesInputHistoryForUpstream(req)
+	require.NoError(t, err)
+	require.Zero(t, normalized)
+	require.Equal(t, firstPass, []byte(req.Input))
+}
+
+func TestNormalizeOpenAIResponsesInputHistoryForUpstreamKeepsNonArrayInput(t *testing.T) {
+	req := &dto.OpenAIResponsesRequest{Input: []byte(`"hello"`)}
+	original := append([]byte(nil), req.Input...)
+
+	normalized, err := NormalizeOpenAIResponsesInputHistoryForUpstream(req)
+
+	require.NoError(t, err)
+	require.Zero(t, normalized)
+	require.Equal(t, original, []byte(req.Input))
 }
 
 func mustMarshalRaw(t *testing.T, value any) []byte {

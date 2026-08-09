@@ -181,6 +181,9 @@ func initConstantEnv() {
 	constant.TaskQueryLimit = GetEnvOrDefault("TASK_QUERY_LIMIT", 1000)
 	// 异步任务超时时间（分钟），超过此时间未完成的任务将被标记为失败并退款。0 表示禁用。
 	constant.TaskTimeoutMinutes = GetEnvOrDefault("TASK_TIMEOUT_MINUTES", 1440)
+	// 本地异步图片包装任务的单次执行超时。该任务在后台等待同步图片上游，
+	// 需要比全局任务清扫更短的边界，避免上游不返回时长期停留在处理中。
+	constant.ImageTaskTimeoutMinutes = GetEnvOrDefault("IMAGE_TASK_TIMEOUT_MINUTES", 30)
 
 	soraPatchStr := GetEnvOrDefaultString("TASK_PRICE_PATCH", "")
 	if soraPatchStr != "" {

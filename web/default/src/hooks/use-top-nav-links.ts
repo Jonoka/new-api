@@ -19,8 +19,11 @@ For commercial licensing, please contact support@quantumnous.com
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/auth-store'
-import { parseCustomNavItems } from '@/lib/custom-nav'
-import { parseHeaderNavModulesFromStatus } from '@/lib/nav-modules'
+import { parseTopNavCustomItems } from '@/lib/custom-nav'
+import {
+  parseHeaderNavModulesFromStatus,
+  parseSidebarModulesFromStatus,
+} from '@/lib/nav-modules'
 import { useStatus } from '@/hooks/use-status'
 
 export type TopNavLink = {
@@ -52,6 +55,11 @@ export function useTopNavLinks(): TopNavLink[] {
   // Parse HeaderNavModules
   const modules = useMemo(() => {
     return parseHeaderNavModulesFromStatus(
+      status as Record<string, unknown> | null
+    )
+  }, [status])
+  const sidebarModules = useMemo(() => {
+    return parseSidebarModulesFromStatus(
       status as Record<string, unknown> | null
     )
   }, [status])
@@ -101,7 +109,10 @@ export function useTopNavLinks(): TopNavLink[] {
     links.push({ title: t('About'), href: '/about' })
   }
 
-  parseCustomNavItems(modules?.customItems).forEach((item) => {
+  parseTopNavCustomItems(
+    modules?.customItems,
+    sidebarModules.customItems
+  ).forEach((item) => {
     const requiresAuth = Boolean(item.requireAuth && !isAuthed)
     links.push({
       title: item.title,

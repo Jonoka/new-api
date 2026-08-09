@@ -19,6 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 // ----------------------------------------------------------------------------
 // Pricing Types
 // ----------------------------------------------------------------------------
+import type { ModelPriceUnit } from '@/lib/model-price-unit'
+import type { ModelPriceVariantConfig } from '@/lib/model-price-variants'
 
 export type PricingVendor = {
   id: number
@@ -26,6 +28,8 @@ export type PricingVendor = {
   icon?: string
   description?: string
 }
+
+export type GroupNameMap = Record<string, string>
 
 export type PricingModel = {
   id: number
@@ -39,6 +43,8 @@ export type PricingModel = {
   model_ratio: number
   completion_ratio: number
   model_price?: number
+  model_price_unit?: ModelPriceUnit | ''
+  model_price_variants?: ModelPriceVariantConfig
   cache_ratio?: number | null
   create_cache_ratio?: number | null
   image_ratio?: number | null
@@ -95,6 +101,7 @@ export type PricingData = {
   data: PricingModel[]
   vendors: PricingVendor[]
   group_ratio: Record<string, number>
+  group_names: GroupNameMap
   usable_group: Record<string, { desc: string; ratio: number }>
   supported_endpoint: Record<string, string>
   auto_groups: string[]

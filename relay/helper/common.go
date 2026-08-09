@@ -47,7 +47,7 @@ func FlushWriter(c *gin.Context) (err error) {
 		return nil
 	}
 
-	if c.Request != nil && c.Request.Context().Err() != nil {
+	if requestContextDone(c) {
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
 
@@ -58,6 +58,10 @@ func FlushWriter(c *gin.Context) (err error) {
 
 	flusher.Flush()
 	return nil
+}
+
+func requestContextDone(c *gin.Context) bool {
+	return c != nil && c.Request != nil && c.Request.Context().Err() != nil
 }
 
 func SetEventStreamHeaders(c *gin.Context) {
@@ -77,6 +81,10 @@ func SetEventStreamHeaders(c *gin.Context) {
 }
 
 func ClaudeData(c *gin.Context, resp dto.ClaudeResponse) error {
+	if requestContextDone(c) {
+		return nil
+	}
+
 	if c.GetBool("sensitive_response_stream_blocked") {
 		return nil
 	}
@@ -93,6 +101,10 @@ func ClaudeData(c *gin.Context, resp dto.ClaudeResponse) error {
 }
 
 func ClaudeChunkData(c *gin.Context, resp dto.ClaudeResponse, data string) {
+	if requestContextDone(c) {
+		return
+	}
+
 	if c.GetBool("sensitive_response_stream_blocked") {
 		return
 	}
@@ -102,26 +114,29 @@ func ClaudeChunkData(c *gin.Context, resp dto.ClaudeResponse, data string) {
 	_ = FlushWriter(c)
 }
 
-func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data string) {
+func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data string) error {
+	if requestContextDone(c) {
+		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
+	}
+
 	if c.GetBool("sensitive_response_stream_blocked") {
-		return
+		return nil
 	}
-	if blocked, _ := writeFilteredEventData(c, fmt.Sprintf("event: %s\n", resp.Type), data); blocked {
-		return
+	if blocked, err := writeFilteredEventData(c, fmt.Sprintf("event: %s\n", resp.Type), data); blocked || err != nil {
+		return err
 	}
-	_ = FlushWriter(c)
+	return FlushWriter(c)
 }
 
 func StringData(c *gin.Context, str string) error {
 	if c == nil || c.Writer == nil {
 		return errors.New("context or writer is nil")
 	}
+	if requestContextDone(c) {
+		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
+	}
 	if c.GetBool("sensitive_response_stream_blocked") {
 		return nil
-	}
-
-	if c.Request != nil && c.Request.Context().Err() != nil {
-		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
 
 	result, err := service.ApplySensitiveFilterToStreamDataForSend(c, str)
@@ -143,7 +158,7 @@ func PingData(c *gin.Context) error {
 		return errors.New("context or writer is nil")
 	}
 
-	if c.Request != nil && c.Request.Context().Err() != nil {
+	if requestContextDone(c) {
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
 
@@ -201,7 +216,7 @@ func writeSensitiveStreamErrorEvent(c *gin.Context) {
 }
 
 func Done(c *gin.Context) {
-	if c.GetBool("sensitive_response_stream_blocked") {
+	if requestContextDone(c) || c.GetBool("sensitive_response_stream_blocked") {
 		return
 	}
 	writeStreamDataItems(c, service.FlushSensitiveStreamDataForSend(c))

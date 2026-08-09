@@ -134,6 +134,9 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			return
 		}
 		if len(data) > 0 {
+			if info.RelayMode == relayconstant.RelayModeChatCompletions {
+				data = normalizeOpenAIStreamUsageData(data)
+			}
 			// 对音频模型，保存倒数第二个stream data
 			if isAudioModel && lastStreamData != "" {
 				secondLastStreamData = lastStreamData
@@ -170,7 +173,7 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			Usage *dto.Usage `json:"usage"`
 		}
 		err := common.Unmarshal([]byte(secondLastStreamData), &streamResp)
-		if err == nil && streamResp.Usage != nil && service.ValidUsage(streamResp.Usage) {
+		if err == nil && normalizeAndValidateOpenAIUsage(streamResp.Usage) {
 			usage = streamResp.Usage
 			containStreamUsage = true
 
@@ -186,6 +189,15 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	if err := handleLastResponse(lastStreamData, &responseId, &createAt, &systemFingerprint, &model, &usage,
 		&containStreamUsage); err != nil {
 		logger.LogError(c, fmt.Sprintf("error handling last response: %s, lastStreamData: [%s]", err.Error(), lastStreamData))
+	}
+	normalizeOpenAIUsageTokenCounts(usage)
+	if containStreamUsage {
+		patchedData, patchErr := patchOpenAIChatUsage(common.StringToByteSlice(lastStreamData), usage)
+		if patchErr != nil {
+			logger.LogError(c, "failed to patch stream usage: "+patchErr.Error())
+		} else {
+			lastStreamData = string(patchedData)
+		}
 	}
 
 	if !containStreamUsage {
@@ -399,20 +411,14 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 		forceFormat = true
 	}
 
-	usageModified := false
-	if simpleResponse.Usage.PromptTokens == 0 {
-		completionTokens := simpleResponse.Usage.CompletionTokens
-		if completionTokens == 0 {
-			for _, choice := range simpleResponse.Choices {
-				ctkm := service.CountTextToken(choice.Message.StringContent()+choice.Message.GetReasoningContent(), info.UpstreamModelName)
-				completionTokens += ctkm
-			}
+	usageModified := normalizeOpenAIUsageTokenCounts(&simpleResponse.Usage)
+	completionTokens := 0
+	if simpleResponse.Usage.CompletionTokens == 0 {
+		for _, choice := range simpleResponse.Choices {
+			completionTokens += service.CountTextToken(choice.Message.StringContent()+choice.Message.GetReasoningContent(), info.UpstreamModelName)
 		}
-		simpleResponse.Usage = dto.Usage{
-			PromptTokens:     info.GetEstimatePromptTokens(),
-			CompletionTokens: completionTokens,
-			TotalTokens:      info.GetEstimatePromptTokens() + completionTokens,
-		}
+	}
+	if fillMissingOpenAIChatUsage(&simpleResponse.Usage, info.GetEstimatePromptTokens(), completionTokens) {
 		usageModified = true
 	}
 
@@ -421,13 +427,10 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:
 		if usageModified {
-			var bodyMap map[string]interface{}
-			err = common.Unmarshal(responseBody, &bodyMap)
+			responseBody, err = patchOpenAIChatUsage(responseBody, &simpleResponse.Usage)
 			if err != nil {
 				return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 			}
-			bodyMap["usage"] = simpleResponse.Usage
-			responseBody, _ = common.Marshal(bodyMap)
 		}
 		if forceFormat {
 			responseBody, err = common.Marshal(simpleResponse)
@@ -730,6 +733,16 @@ func OpenaiHandlerWithUsage(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 
+	deliveredImageCount, countErr := countDeliveredOpenAIImages(responseBody)
+	if countErr != nil {
+		return nil, types.NewOpenAIError(countErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
+	if info != nil && info.PriceData.UsePrice {
+		// 图片按次计费必须以实际可交付数量为准。上游可能返回 2xx，
+		// 但 data 数量少于请求 n；此时不能继续按请求数量全额结算。
+		info.PriceData.AddOtherRatio("n", float64(deliveredImageCount))
+	}
+
 	// 写入新的 response body
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
@@ -737,21 +750,38 @@ func OpenaiHandlerWithUsage(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	// because the upstream has already consumed resources and returned content
 	// We should still perform billing even if parsing fails
 	// format
-	if usageResp.InputTokens > 0 {
-		usageResp.PromptTokens += usageResp.InputTokens
+	usage := &usageResp.Usage
+	normalizeOpenAIUsageTokenCounts(usage)
+	if usage.InputTokensDetails != nil {
+		if usage.PromptTokensDetails.ImageTokens == 0 {
+			usage.PromptTokensDetails.ImageTokens = usage.InputTokensDetails.ImageTokens
+		}
+		if usage.PromptTokensDetails.TextTokens == 0 {
+			usage.PromptTokensDetails.TextTokens = usage.InputTokensDetails.TextTokens
+		}
 	}
-	if usageResp.OutputTokens > 0 {
-		usageResp.CompletionTokens += usageResp.OutputTokens
+	applyUsagePostProcessing(info, usage, responseBody)
+	return usage, nil
+}
+
+func countDeliveredOpenAIImages(responseBody []byte) (int, error) {
+	var imageResponse struct {
+		Data []dto.ImageData `json:"data"`
 	}
-	if usageResp.InputTokensDetails != nil {
-		usageResp.PromptTokensDetails.CachedTokens = usageResp.InputTokensDetails.CachedTokens
-		usageResp.PromptTokensDetails.CachedCreationTokens = usageResp.InputTokensDetails.CachedCreationTokens
-		usageResp.PromptTokensDetails.CachedCreationTokensPresent = usageResp.InputTokensDetails.CachedCreationTokensPresent
-		usageResp.PromptTokensDetails.ImageTokens += usageResp.InputTokensDetails.ImageTokens
-		usageResp.PromptTokensDetails.TextTokens += usageResp.InputTokensDetails.TextTokens
+	if err := common.Unmarshal(responseBody, &imageResponse); err != nil {
+		return 0, err
 	}
-	applyUsagePostProcessing(info, &usageResp.Usage, responseBody)
-	return &usageResp.Usage, nil
+
+	delivered := 0
+	for _, image := range imageResponse.Data {
+		if strings.TrimSpace(image.Url) != "" || strings.TrimSpace(image.B64Json) != "" {
+			delivered++
+		}
+	}
+	if delivered == 0 {
+		return 0, fmt.Errorf("upstream image response contains no deliverable images")
+	}
+	return delivered, nil
 }
 
 func applyUsagePostProcessing(info *relaycommon.RelayInfo, usage *dto.Usage, responseBody []byte) {

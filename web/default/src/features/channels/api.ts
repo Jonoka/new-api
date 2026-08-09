@@ -17,7 +17,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api, type ApiRequestConfig } from '@/lib/api'
-import { getGroups as getUserGroups } from '@/features/users/api'
 import type {
   AddChannelRequest,
   BatchDeleteParams,
@@ -31,6 +30,7 @@ import type {
   GetChannelResponse,
   GetChannelsParams,
   GetChannelsResponse,
+  GetGroupDetailsResponse,
   MultiKeyManageParams,
   MultiKeyStatusResponse,
   SearchChannelsParams,
@@ -504,6 +504,8 @@ export async function fetchModels(data: {
   base_url: string
   type: number
   key: string
+  setting?: string
+  header_override?: string
 }): Promise<FetchModelsResponse> {
   const res = await api.post(
     '/api/channel/fetch_models',
@@ -595,9 +597,13 @@ export async function getOllamaVersion(
 // ============================================================================
 
 /**
- * Get all available groups (re-exported from users API for convenience)
+ * 获取渠道管理使用的结构化分组身份。
+ * 旧 /api/group/ 接口继续保持字符串数组契约。
  */
-export const getGroups = getUserGroups
+export async function getGroupDetails(): Promise<GetGroupDetailsResponse> {
+  const res = await api.get<GetGroupDetailsResponse>('/api/group/details')
+  return res.data
+}
 
 // ============================================================================
 // Prefill Groups (Model Groups)

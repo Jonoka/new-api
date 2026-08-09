@@ -10,7 +10,11 @@ import (
 )
 
 func GetInvoiceConfig(c *gin.Context) {
-	common.ApiSuccess(c, model.InvoiceConfigSnapshot())
+	config := model.InvoiceConfigSnapshot()
+	payMethods, bepusdtChains := availableInvoicePayMethods()
+	config["pay_methods"] = payMethods
+	config["bepusdt_chains"] = bepusdtChains
+	common.ApiSuccess(c, config)
 }
 
 func GetUserInvoices(c *gin.Context) {
@@ -60,4 +64,36 @@ func AdminUpdateInvoice(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, nil)
+}
+
+type AdminDeleteInvoicesRequest struct {
+	Ids []int `json:"ids"`
+}
+
+func AdminDeleteInvoice(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	deleted, err := model.DeleteInvoiceRecords([]int{id})
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, deleted)
+}
+
+func AdminDeleteInvoices(c *gin.Context) {
+	var req AdminDeleteInvoicesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	deleted, err := model.DeleteInvoiceRecords(req.Ids)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, deleted)
 }

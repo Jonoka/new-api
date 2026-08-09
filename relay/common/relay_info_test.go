@@ -95,3 +95,25 @@ func TestRelayInfoTimingDiagnosticsFirstSSEDataRecordsOnce(t *testing.T) {
 
 	require.Equal(t, first, info.TimingDiagnostics.firstSSEData)
 }
+
+func TestRelayInfoResetAttemptStateClearsRetryScopedState(t *testing.T) {
+	info := &RelayInfo{
+		IsStream:              true,
+		SendResponseCount:     3,
+		ReceivedResponseCount: 4,
+		StreamStatus:          NewStreamStatus(),
+	}
+	info.StreamStatus.RecordError("previous attempt")
+	info.EnableTimingDiagnostics(time.Now().Add(-time.Second))
+
+	start := time.Now()
+	info.ResetAttemptState(start)
+
+	require.Equal(t, 0, info.SendResponseCount)
+	require.Equal(t, 0, info.ReceivedResponseCount)
+	require.Nil(t, info.TimingDiagnostics)
+	require.NotNil(t, info.StreamStatus)
+	require.False(t, info.StreamStatus.HasErrors())
+	require.Equal(t, start, info.FirstResponseStartTime)
+	require.False(t, info.HasSendResponse())
+}

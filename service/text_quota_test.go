@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -15,6 +16,38 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCalculateTextQuotaSummaryBillsNativeCacheWriteAndClampsRemainingTokens(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	var usage dto.Usage
+	require.NoError(t, common.Unmarshal([]byte(`{
+		"prompt_tokens":100,
+		"completion_tokens":0,
+		"prompt_tokens_details":{"cached_tokens":80,"cache_write_tokens":30}
+	}`), &usage))
+
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-cache-test",
+		PriceData: types.PriceData{
+			ModelRatio:         1,
+			CompletionRatio:    1,
+			CacheRatio:         0.1,
+			CacheCreationRatio: 1,
+			GroupRatioInfo:     types.GroupRatioInfo{GroupRatio: 1},
+		},
+		StartTime: time.Now(),
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, &usage)
+
+	// cached_tokens 与 cache_write_tokens 可能重叠，普通输入最低按 0 计算。
+	// 计费结果为 80*0.1 + 30*1 = 38。
+	require.Equal(t, 30, summary.CacheCreationTokens)
+	require.Equal(t, 38, summary.Quota)
+}
 
 func TestCalculateTextQuotaSummaryUnifiedForClaudeSemantic(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -514,6 +547,120 @@ func TestCalculateTextQuotaSummarySeparatesOpenRouterCacheCreationFromPromptBill
 	// quota = (2604 - 100) + 100*1.25 + 383 = 3012
 	require.Equal(t, 2604, summary.PromptTokens)
 	require.Equal(t, 3012, summary.Quota)
+}
+
+func TestCalculateTextQuotaSummaryBillsOpenAIResponsesCacheCreationSeparately(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.6",
+		ChannelMeta:     &relaycommon.ChannelMeta{},
+		PriceData: types.PriceData{
+			ModelRatio:         1,
+			CompletionRatio:    2,
+			CacheRatio:         0.1,
+			CacheCreationRatio: 1.25,
+			GroupRatioInfo:     types.GroupRatioInfo{GroupRatio: 1},
+		},
+		StartTime: time.Now(),
+	}
+
+	usage := &dto.Usage{
+		PromptTokens:     169969,
+		CompletionTokens: 60,
+		TotalTokens:      170029,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:         168704,
+			CachedCreationTokens: 1265,
+		},
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+
+	// normal input = 169969 - 168704 - 1265 = 0
+	// quota = 168704*0.1 + 1265*1.25 + 60*2 = 18572.65 => 18572
+	require.Equal(t, 169969, summary.PromptTokens)
+	require.Equal(t, 168704, summary.CacheTokens)
+	require.Equal(t, 1265, summary.CacheCreationTokens)
+	require.Equal(t, 18572, summary.Quota)
+}
+
+func TestCalculateTextQuotaSummaryBillsInferredGPT56CacheCreationSeparately(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta:     &relaycommon.ChannelMeta{},
+		PriceData: types.PriceData{
+			ModelRatio:         1,
+			CompletionRatio:    6,
+			CacheRatio:         0.1,
+			CacheCreationRatio: 1.25,
+			GroupRatioInfo:     types.GroupRatioInfo{GroupRatio: 0.2},
+		},
+		StartTime: time.Now(),
+	}
+
+	usage := &dto.Usage{
+		PromptTokens:     188727,
+		CompletionTokens: 368,
+		TotalTokens:      189095,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:         185088,
+			CachedCreationTokens: 3639,
+		},
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+
+	// normal input = 188727 - 185088 - 3639 = 0
+	// quota = (185088*0.1 + 3639*1.25 + 368*6) * group 0.2 = 5053.95 => 5053
+	require.Equal(t, 188727, summary.PromptTokens)
+	require.Equal(t, 185088, summary.CacheTokens)
+	require.Equal(t, 3639, summary.CacheCreationTokens)
+	require.Equal(t, 5053, summary.Quota)
+}
+
+func TestOpenAIResponsesCacheCreationUsageLogFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.6",
+		ChannelMeta:     &relaycommon.ChannelMeta{},
+		PriceData: types.PriceData{
+			ModelRatio:         1,
+			CompletionRatio:    2,
+			CacheRatio:         0.1,
+			CacheCreationRatio: 1.25,
+			GroupRatioInfo:     types.GroupRatioInfo{GroupRatio: 1},
+		},
+		StartTime: time.Now(),
+	}
+
+	summary := textQuotaSummary{
+		CacheCreationTokens: 1265,
+		CacheCreationRatio:  1.25,
+	}
+	other := GenerateTextOtherInfo(ctx, relayInfo, 1, 1, 2, 168704, 0.1, 0, 1)
+	if summary.CacheCreationTokens > 0 {
+		other["cache_creation_tokens"] = summary.CacheCreationTokens
+		other["cache_creation_ratio"] = summary.CacheCreationRatio
+	}
+	if cacheWriteTokens := cacheWriteTokensTotal(summary); cacheWriteTokens > 0 {
+		other["cache_write_tokens"] = cacheWriteTokens
+	}
+
+	require.Equal(t, 168704, other["cache_tokens"])
+	require.Equal(t, 0.1, other["cache_ratio"])
+	require.Equal(t, 1265, other["cache_creation_tokens"])
+	require.Equal(t, 1.25, other["cache_creation_ratio"])
+	require.Equal(t, 1265, other["cache_write_tokens"])
 }
 
 func TestCalculateTextQuotaSummaryKeepsPrePRClaudeOpenRouterBilling(t *testing.T) {

@@ -27,6 +27,7 @@ var ModelList = []string{
 	"grok-2-image-1212",
 	// video generation model
 	"grok-imagine-video",
+	"grok-imagine-video-1.5",
 }
 
 var ChannelName = "xai"

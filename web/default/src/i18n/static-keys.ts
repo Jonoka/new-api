@@ -501,6 +501,19 @@ export const STATIC_I18N_KEYS = [
   'Batch detection failed',
   'Batch detection complete: {{channels}} channels, {{add}} to add, {{remove}} to remove, {{fails}} failed',
 
+  // Channel observability data quality notices
+  'Current range contains partial data',
+  '{{count}} invalid samples excluded',
+  '{{count}} dimensions merged into Other',
+  '{{count}} dimension hash collisions isolated',
+  '{{count}} metric events dropped',
+  '{{count}} failure details dropped',
+  '{{count}} metric batches pending',
+  'Metric write last failed at {{time}}',
+  'Some channel types are not fully covered: {{types}}',
+  'Detailed failure records are currently unavailable',
+  'Historical backfill: {{status}}',
+
   // Misc
   'Cancel',
   'Status',
@@ -511,4 +524,13 @@ export const STATIC_I18N_KEYS = [
   'Failed to load',
   'Expired at',
   'Cancelled at',
+
+  // Notification center dynamic labels
+  'New pending invoice order',
+  'Triggered when a new invoice request is ready to issue.',
+
+  // Independent token groups
+  'Independent',
+  'Independent group',
+  'Independent groups must be selected alone.',
 ] as const

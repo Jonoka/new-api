@@ -668,8 +668,8 @@ export const getLogsColumns = ({
           record.type === 5 ||
           record.type === 6
         ) {
-          if (record.group) {
-            return <>{renderGroup(record.group)}</>;
+          if (record.group_name || record.group) {
+            return <>{renderGroup(record.group_name || record.group)}</>;
           } else {
             let other = null;
             try {
@@ -683,8 +683,8 @@ export const getLogsColumns = ({
             if (other === null) {
               return <></>;
             }
-            if (other.group !== undefined) {
-              return <>{renderGroup(other.group)}</>;
+            if (record.group_name || other.group !== undefined) {
+              return <>{renderGroup(record.group_name || other.group)}</>;
             } else {
               return <></>;
             }

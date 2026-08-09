@@ -89,6 +89,15 @@ const renderStatus = (text, record, t) => {
 
 // Render group column
 const renderGroupColumn = (text, record, t, groupRatios = {}) => {
+  const groupDetails = Array.isArray(record?.group_details)
+    ? record.group_details
+    : [];
+  const groupLabels = groupDetails.reduce((labels, group) => {
+    if (group?.code && group?.name && group.name !== group.code) {
+      labels[group.code] = group.name;
+    }
+    return labels;
+  }, {});
   if (text === 'auto') {
     return (
       <Tooltip
@@ -113,14 +122,14 @@ const renderGroupColumn = (text, record, t, groupRatios = {}) => {
         content={
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {groupList.map((g, i) => (
-              <span key={g}>{i + 1}. {g}</span>
+              <span key={g}>{i + 1}. {groupLabels[g] || g}</span>
             ))}
           </div>
         }
         position='top'
       >
         <span className='flex items-center gap-1'>
-          {renderGroup(groupList[0])}
+          {renderGroup(groupList[0], groupLabels)}
           {firstRatio !== undefined && (
             <Tag size='small' color='green' shape='circle'>
               {firstRatio}x
@@ -138,7 +147,7 @@ const renderGroupColumn = (text, record, t, groupRatios = {}) => {
   const ratio = groupRatios[text];
   return (
     <span className='flex items-center gap-1'>
-      {renderGroup(text)}
+      {renderGroup(text, groupLabels)}
       {ratio !== undefined && (
         <Tag size='small' color='green' shape='circle'>
           {ratio}x

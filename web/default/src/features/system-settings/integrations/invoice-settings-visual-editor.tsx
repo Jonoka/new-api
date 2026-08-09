@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import * as React from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -38,7 +39,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { cn } from '@/lib/utils'
 
 type InvoiceFeeRuleType = 'fixed' | 'percent'
 
@@ -52,12 +52,15 @@ type InvoiceFeeRule = {
 
 type InvoiceSettingsVisualEditorProps = {
   typesValue: string
+  kindsValue: string
   feeRulesValue: string
   onTypesChange: (value: string) => void
+  onKindsChange: (value: string) => void
   onFeeRulesChange: (value: string) => void
 }
 
 const DEFAULT_TYPES = ['personal', 'company']
+const DEFAULT_KINDS = ['normal']
 const DEFAULT_RULES: InvoiceFeeRule[] = [
   { min: 0, max: 500, type: 'fixed', value: 50 },
   { min: 501, max: 2000, type: 'fixed', value: 100 },
@@ -78,24 +81,39 @@ function parseTypes(value: string): string[] {
   }
 }
 
+function parseKinds(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value || '[]')
+    if (!Array.isArray(parsed)) return DEFAULT_KINDS
+    const kinds = parsed.filter(
+      (item): item is string => item === 'normal' || item === 'special'
+    )
+    return kinds.length > 0 ? kinds : DEFAULT_KINDS
+  } catch {
+    return DEFAULT_KINDS
+  }
+}
+
 function parseRules(value: string): InvoiceFeeRule[] {
   try {
     const parsed = JSON.parse(value || '[]')
     if (!Array.isArray(parsed)) return DEFAULT_RULES
     const rules = parsed
-      .map((item): InvoiceFeeRule => ({
-        min: Number(item?.min ?? 0),
-        max:
-          item?.max === undefined || item?.max === ''
-            ? undefined
-            : Number(item.max),
-        type: item?.type === 'percent' ? 'percent' : 'fixed',
-        value: Number(item?.value ?? 0),
-        max_fee:
-          item?.max_fee === undefined || item?.max_fee === ''
-            ? undefined
-            : Number(item.max_fee),
-      }))
+      .map(
+        (item): InvoiceFeeRule => ({
+          min: Number(item?.min ?? 0),
+          max:
+            item?.max === undefined || item?.max === ''
+              ? undefined
+              : Number(item.max),
+          type: item?.type === 'percent' ? 'percent' : 'fixed',
+          value: Number(item?.value ?? 0),
+          max_fee:
+            item?.max_fee === undefined || item?.max_fee === ''
+              ? undefined
+              : Number(item.max_fee),
+        })
+      )
       .filter(
         (rule) =>
           Number.isFinite(rule.min) &&
@@ -114,11 +132,17 @@ function serializeTypes(types: string[]) {
   return JSON.stringify(types.length > 0 ? types : ['personal'], null, 2)
 }
 
+function serializeKinds(kinds: string[]) {
+  return JSON.stringify(kinds.length > 0 ? kinds : DEFAULT_KINDS, null, 2)
+}
+
 function serializeRules(rules: InvoiceFeeRule[]) {
   const normalized = rules
     .map((rule) => ({
       min: Number(rule.min) || 0,
-      ...(rule.max !== undefined && rule.max > 0 ? { max: Number(rule.max) } : {}),
+      ...(rule.max !== undefined && rule.max > 0
+        ? { max: Number(rule.max) }
+        : {}),
       type: rule.type === 'percent' ? 'percent' : 'fixed',
       value: Number(rule.value) || 0,
       ...(rule.type === 'percent' &&
@@ -133,12 +157,15 @@ function serializeRules(rules: InvoiceFeeRule[]) {
 
 export function InvoiceSettingsVisualEditor({
   typesValue,
+  kindsValue,
   feeRulesValue,
   onTypesChange,
+  onKindsChange,
   onFeeRulesChange,
 }: InvoiceSettingsVisualEditorProps) {
   const { t } = useTranslation()
   const types = React.useMemo(() => parseTypes(typesValue), [typesValue])
+  const kinds = React.useMemo(() => parseKinds(kindsValue), [kindsValue])
   const rules = React.useMemo(() => parseRules(feeRulesValue), [feeRulesValue])
 
   const toggleType = (type: string, checked: boolean) => {
@@ -146,6 +173,13 @@ export function InvoiceSettingsVisualEditor({
       ? Array.from(new Set([...types, type]))
       : types.filter((item) => item !== type)
     onTypesChange(serializeTypes(next.length > 0 ? next : [type]))
+  }
+
+  const toggleKind = (kind: string, checked: boolean) => {
+    const next = checked
+      ? Array.from(new Set([...kinds, kind]))
+      : kinds.filter((item) => item !== kind)
+    onKindsChange(serializeKinds(next.length > 0 ? next : [kind]))
   }
 
   const patchRule = (
@@ -195,16 +229,15 @@ export function InvoiceSettingsVisualEditor({
   return (
     <div className='space-y-4'>
       <div className='rounded-lg border p-4'>
-        <div className='mb-3 text-sm font-medium'>{t('Invoice types')}</div>
+        <div className='mb-3 text-sm font-medium'>
+          {t('Invoice title types')}
+        </div>
         <div className='flex flex-wrap gap-4'>
           {[
             { value: 'personal', label: t('Personal invoice') },
             { value: 'company', label: t('Company invoice') },
           ].map((item) => (
-            <label
-              key={item.value}
-              className='flex items-center gap-2 text-sm'
-            >
+            <label key={item.value} className='flex items-center gap-2 text-sm'>
               <Checkbox
                 checked={types.includes(item.value)}
                 onCheckedChange={(checked) =>
@@ -217,14 +250,37 @@ export function InvoiceSettingsVisualEditor({
         </div>
       </div>
 
+      <div className='rounded-lg border p-4'>
+        <div className='mb-3 text-sm font-medium'>{t('Invoice kinds')}</div>
+        <div className='flex flex-wrap gap-4'>
+          {[
+            { value: 'normal', label: t('VAT general invoice') },
+            { value: 'special', label: t('VAT special invoice') },
+          ].map((item) => (
+            <label key={item.value} className='flex items-center gap-2 text-sm'>
+              <Checkbox
+                checked={kinds.includes(item.value)}
+                onCheckedChange={(checked) =>
+                  toggleKind(item.value, checked === true)
+                }
+              />
+              {item.label}
+            </label>
+          ))}
+        </div>
+        <p className='text-muted-foreground mt-2 text-xs'>
+          {t('VAT general invoice is enabled by default.')}
+        </p>
+      </div>
+
       <div className='rounded-lg border'>
         <div className='flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between'>
           <div>
-            <div className='text-sm font-medium'>
-              {t('Invoice fee rules')}
-            </div>
+            <div className='text-sm font-medium'>{t('Invoice fee rules')}</div>
             <p className='text-muted-foreground mt-1 text-xs'>
-              {t('Rules match invoice amount in CNY. Leave max empty for no upper limit.')}
+              {t(
+                'Rules match invoice amount in CNY. Leave max empty for no upper limit.'
+              )}
             </p>
           </div>
           <Button type='button' size='sm' onClick={addRule}>
@@ -307,7 +363,9 @@ export function InvoiceSettingsVisualEditor({
                     <Input
                       type='number'
                       min={0}
-                      value={rule.type === 'percent' ? (rule.max_fee ?? '') : ''}
+                      value={
+                        rule.type === 'percent' ? (rule.max_fee ?? '') : ''
+                      }
                       placeholder={t('No cap')}
                       disabled={rule.type !== 'percent'}
                       onChange={(event) =>

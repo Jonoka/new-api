@@ -3,10 +3,12 @@ package controller
 import (
 	"bytes"
 	"crypto/md5"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -75,6 +77,12 @@ type bepusdtNotifyPayload struct {
 	Status             int         `json:"status"`
 }
 
+type bepusdtParsedNotify struct {
+	Payload bepusdtNotifyPayload
+	Params  map[string]string
+	Body    []byte
+}
+
 // generateBepusdtSignature 按 bepusdt 规范生成 MD5 签名
 // 1. 收集所有非空、非 signature 参数
 // 2. 按 key ASCII 排序
@@ -136,6 +144,154 @@ func verifyBepusdtNotifySignature(payload *bepusdtNotifyPayload, authToken strin
 
 	expected := generateBepusdtSignature(params, authToken)
 	return strings.EqualFold(expected, payload.Signature)
+}
+
+func verifyBepusdtNotifyParamsSignature(params map[string]string, authToken string) bool {
+	signature := strings.TrimSpace(params["signature"])
+	if signature == "" {
+		return false
+	}
+	expected := generateBepusdtSignature(params, authToken)
+	return strings.EqualFold(expected, signature)
+}
+
+func bepusdtPayloadFromParams(params map[string]string) bepusdtNotifyPayload {
+	status, _ := strconv.Atoi(strings.TrimSpace(params["status"]))
+	return bepusdtNotifyPayload{
+		TradeId:            strings.TrimSpace(params["trade_id"]),
+		OrderId:            strings.TrimSpace(params["order_id"]),
+		Amount:             strings.TrimSpace(params["amount"]),
+		ActualAmount:       strings.TrimSpace(params["actual_amount"]),
+		Token:              strings.TrimSpace(params["token"]),
+		BlockTransactionId: strings.TrimSpace(params["block_transaction_id"]),
+		Signature:          strings.TrimSpace(params["signature"]),
+		Status:             status,
+	}
+}
+
+func setBepusdtJSONParam(params map[string]string, key string, raw json.RawMessage) {
+	key = strings.TrimSpace(key)
+	if key == "" || key == "signature" {
+		return
+	}
+	value := strings.TrimSpace(common.JsonRawMessageToString(raw))
+	if value == "" {
+		return
+	}
+	params[key] = value
+}
+
+func parseBepusdtJSONNotify(body []byte) (bepusdtParsedNotify, error) {
+	var raw map[string]json.RawMessage
+	if err := common.Unmarshal(body, &raw); err != nil {
+		return bepusdtParsedNotify{}, err
+	}
+
+	params := make(map[string]string)
+	for key, value := range raw {
+		if key == "signature" {
+			params[key] = strings.TrimSpace(common.JsonRawMessageToString(value))
+			continue
+		}
+		setBepusdtJSONParam(params, key, value)
+	}
+
+	payload := bepusdtPayloadFromParams(params)
+	return bepusdtParsedNotify{
+		Payload: payload,
+		Params:  params,
+		Body:    body,
+	}, nil
+}
+
+func bepusdtParamsFromValues(values url.Values) map[string]string {
+	params := make(map[string]string)
+	for key := range values {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		value := strings.TrimSpace(values.Get(key))
+		if value == "" {
+			continue
+		}
+		params[key] = value
+	}
+	return params
+}
+
+func parseBepusdtNotifyPayload(c *gin.Context) (bepusdtParsedNotify, error) {
+	values := c.Request.URL.Query()
+
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return bepusdtParsedNotify{}, err
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+	contentType := strings.ToLower(c.GetHeader("Content-Type"))
+	if strings.Contains(contentType, "multipart/form-data") {
+		if err := c.Request.ParseMultipartForm(32 << 20); err != nil {
+			return bepusdtParsedNotify{Body: bodyBytes}, err
+		}
+		for key, itemValues := range c.Request.PostForm {
+			values[key] = itemValues
+		}
+		if c.Request.MultipartForm != nil {
+			for key, itemValues := range c.Request.MultipartForm.Value {
+				values[key] = itemValues
+			}
+		}
+		params := bepusdtParamsFromValues(values)
+		c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		return bepusdtParsedNotify{Payload: bepusdtPayloadFromParams(params), Params: params, Body: bodyBytes}, nil
+	}
+
+	trimmedBody := bytes.TrimSpace(bodyBytes)
+	if len(trimmedBody) > 0 {
+		if trimmedBody[0] == '{' {
+			parsed, err := parseBepusdtJSONNotify(trimmedBody)
+			if err != nil {
+				return bepusdtParsedNotify{Body: bodyBytes}, err
+			}
+			for key, value := range bepusdtParamsFromValues(values) {
+				if _, exists := parsed.Params[key]; !exists {
+					parsed.Params[key] = value
+				}
+			}
+			parsed.Payload = bepusdtPayloadFromParams(parsed.Params)
+			parsed.Body = bodyBytes
+			c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			return parsed, nil
+		}
+
+		bodyValues, err := url.ParseQuery(string(trimmedBody))
+		if err != nil {
+			return bepusdtParsedNotify{Body: bodyBytes}, err
+		}
+		for key, itemValues := range bodyValues {
+			values[key] = itemValues
+		}
+	}
+
+	params := bepusdtParamsFromValues(values)
+	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	return bepusdtParsedNotify{Payload: bepusdtPayloadFromParams(params), Params: params, Body: bodyBytes}, nil
+}
+
+func validateBepusdtCallbackAmount(payload *bepusdtNotifyPayload, expected float64) error {
+	if payload == nil || payload.Amount == nil {
+		return errors.New("回调缺少支付金额")
+	}
+	actual, err := decimal.NewFromString(strings.TrimSpace(fmt.Sprintf("%v", payload.Amount)))
+	if err != nil {
+		return fmt.Errorf("回调支付金额无效: %w", err)
+	}
+	expectedAmount := decimal.NewFromFloat(expected)
+	if actual.Sub(expectedAmount).Abs().GreaterThan(decimal.NewFromFloat(0.01)) {
+		return fmt.Errorf("回调支付金额不匹配: expected=%s actual=%s", expectedAmount.StringFixed(2), actual.String())
+	}
+	return nil
 }
 
 // getBepusdtPayMoney 计算 bepusdt 支付金额（CNY）
@@ -311,6 +467,7 @@ func RequestBepusdtPay(c *gin.Context) {
 		TradeNo:         tradeNo,
 		PaymentMethod:   model.PaymentMethodBepusdt,
 		PaymentProvider: model.PaymentProviderBepusdt,
+		RequestIP:       c.ClientIP(),
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}
@@ -332,7 +489,7 @@ func RequestBepusdtPay(c *gin.Context) {
 			return
 		}
 		if completedNow {
-			model.RecordTopupLog(completedTopUp.UserId, fmt.Sprintf("使用优惠码充值成功，充值金额: %v，支付金额：0.00", logger.LogQuota(quotaToAdd)), c.ClientIP(), completedTopUp.PaymentMethod, "promo")
+			model.RecordTopupOrderLog(completedTopUp, fmt.Sprintf("使用优惠码充值成功，充值金额: %v，支付金额：0.00", logger.LogQuota(quotaToAdd)), "promo")
 		}
 		c.JSON(http.StatusOK, freeTopUpResponse(completedTopUp, quotaToAdd, discount))
 		return
@@ -459,6 +616,7 @@ func SubscriptionRequestBepusdtPay(c *gin.Context) {
 		TradeNo:         tradeNo,
 		PaymentMethod:   model.PaymentMethodBepusdt,
 		PaymentProvider: model.PaymentProviderBepusdt,
+		RequestIP:       c.ClientIP(),
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}
@@ -515,6 +673,14 @@ func SubscriptionRequestBepusdtPay(c *gin.Context) {
 
 // createBepusdtTransaction 调用 bepusdt API 创建交易订单
 func createBepusdtTransaction(c *gin.Context, orderId string, amountCNY float64, tradeType string, notifyUrl string, redirectUrl string, names ...string) (string, error) {
+	result, err := createBepusdtTransactionDetails(c, orderId, amountCNY, tradeType, notifyUrl, redirectUrl, names...)
+	if err != nil {
+		return "", err
+	}
+	return result.Data.PaymentUrl, nil
+}
+
+func createBepusdtTransactionDetails(c *gin.Context, orderId string, amountCNY float64, tradeType string, notifyUrl string, redirectUrl string, names ...string) (*bepusdtCreateTransactionResp, error) {
 	apiUrl := strings.TrimRight(setting.BepusdtApiUrl, "/") + "/api/v1/order/create-transaction"
 	name := fmt.Sprintf("TopUp-%s", orderId)
 	if len(names) > 0 && strings.TrimSpace(names[0]) != "" {
@@ -551,48 +717,48 @@ func createBepusdtTransaction(c *gin.Context, orderId string, amountCNY float64,
 
 	jsonData, err := common.Marshal(jsonBody)
 	if err != nil {
-		return "", fmt.Errorf("序列化请求失败: %v", err)
+		return nil, fmt.Errorf("序列化请求失败: %v", err)
 	}
 
 	req, err := http.NewRequest("POST", apiUrl, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return "", fmt.Errorf("创建请求失败: %v", err)
+		return nil, fmt.Errorf("创建请求失败: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("请求 bepusdt 失败: %v", err)
+		return nil, fmt.Errorf("请求 bepusdt 失败: %v", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("读取响应失败: %v", err)
+		return nil, fmt.Errorf("读取响应失败: %v", err)
 	}
 
 	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Bepusdt API 响应 order_id=%s status_code=%d body=%q", orderId, resp.StatusCode, string(body)))
 
 	if resp.StatusCode/100 != 2 {
-		return "", fmt.Errorf("bepusdt API HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("bepusdt API HTTP %d", resp.StatusCode)
 	}
 
 	var result bepusdtCreateTransactionResp
 	err = common.Unmarshal(body, &result)
 	if err != nil {
-		return "", fmt.Errorf("解析响应失败: %v", err)
+		return nil, fmt.Errorf("解析响应失败: %v", err)
 	}
 
 	if result.StatusCode != 200 {
-		return "", fmt.Errorf("bepusdt API 错误: %s", result.Message)
+		return nil, fmt.Errorf("bepusdt API 错误: %s", result.Message)
 	}
 
 	if result.Data.PaymentUrl == "" {
-		return "", fmt.Errorf("bepusdt 未返回 payment_url")
+		return nil, fmt.Errorf("bepusdt 未返回 payment_url")
 	}
 
-	return result.Data.PaymentUrl, nil
+	return &result, nil
 }
 
 // BepusdtNotify 处理 bepusdt 回调通知
@@ -603,27 +769,25 @@ func BepusdtNotify(c *gin.Context) {
 		return
 	}
 
-	bodyBytes, err := io.ReadAll(c.Request.Body)
+	parsed, err := parseBepusdtNotifyPayload(c)
 	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Bepusdt webhook 读取请求体失败 path=%q client_ip=%s error=%q", c.Request.RequestURI, c.ClientIP(), err.Error()))
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Bepusdt webhook 解析失败 path=%q method=%s content_type=%q client_ip=%s error=%q body=%q", c.Request.RequestURI, c.Request.Method, c.GetHeader("Content-Type"), c.ClientIP(), err.Error(), string(parsed.Body)))
 		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
+	payload := parsed.Payload
 
-	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Bepusdt webhook 收到请求 path=%q client_ip=%s body=%q", c.Request.RequestURI, c.ClientIP(), string(bodyBytes)))
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Bepusdt webhook 收到请求 path=%q method=%s content_type=%q client_ip=%s params=%q body=%q", c.Request.RequestURI, c.Request.Method, c.GetHeader("Content-Type"), c.ClientIP(), common.GetJsonString(parsed.Params), string(parsed.Body)))
 
-	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-
-	var payload bepusdtNotifyPayload
-	if err := c.ShouldBindJSON(&payload); err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Bepusdt webhook 解析失败 path=%q client_ip=%s error=%q body=%q", c.Request.RequestURI, c.ClientIP(), err.Error(), string(bodyBytes)))
+	if len(parsed.Params) == 0 {
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Bepusdt webhook 参数为空 path=%q method=%s client_ip=%s", c.Request.RequestURI, c.Request.Method, c.ClientIP()))
 		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
 
 	// 验证签名
-	if !verifyBepusdtNotifySignature(&payload, setting.BepusdtAuthToken) {
-		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Bepusdt webhook 验签失败 path=%q client_ip=%s order_id=%s trade_id=%s signature=%q", c.Request.RequestURI, c.ClientIP(), payload.OrderId, payload.TradeId, payload.Signature))
+	if !verifyBepusdtNotifyParamsSignature(parsed.Params, setting.BepusdtAuthToken) {
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Bepusdt webhook 验签失败 path=%q method=%s client_ip=%s order_id=%s trade_id=%s signature=%q params=%q", c.Request.RequestURI, c.Request.Method, c.ClientIP(), payload.OrderId, payload.TradeId, payload.Signature, common.GetJsonString(parsed.Params)))
 		c.AbortWithStatus(http.StatusUnauthorized)
 		return
 	}
@@ -668,25 +832,36 @@ func handleBepusdtPaymentSuccess(c *gin.Context, payload *bepusdtNotifyPayload) 
 
 	topUp := model.GetTopUpByTradeNo(tradeNo)
 	if topUp == nil {
+		order := model.GetSubscriptionOrderByTradeNo(tradeNo)
+		if order == nil {
+			logger.LogWarn(c.Request.Context(), fmt.Sprintf("Bepusdt 充值/订阅订单不存在 trade_no=%s trade_id=%s", tradeNo, payload.TradeId))
+			c.AbortWithStatus(http.StatusBadRequest)
+			return
+		}
+		if err := validateBepusdtCallbackAmount(payload, order.Money); err != nil {
+			logger.LogWarn(c.Request.Context(), fmt.Sprintf("Bepusdt 订阅回调金额校验失败 trade_no=%s trade_id=%s error=%q", tradeNo, payload.TradeId, err.Error()))
+			c.AbortWithStatus(http.StatusBadRequest)
+			return
+		}
 		err := model.CompleteSubscriptionOrder(tradeNo, common.GetJsonString(payload), model.PaymentProviderBepusdt, model.PaymentMethodBepusdt)
 		if err == nil {
 			logger.LogInfo(c.Request.Context(), fmt.Sprintf("Bepusdt USDT 订阅购买成功 trade_no=%s trade_id=%s actual_amount=%v block_tx=%s client_ip=%s", tradeNo, payload.TradeId, payload.ActualAmount, payload.BlockTransactionId, c.ClientIP()))
 			_, _ = c.Writer.Write([]byte("ok"))
 			return
 		}
-		if !errors.Is(err, model.ErrSubscriptionOrderNotFound) {
-			logger.LogError(c.Request.Context(), fmt.Sprintf("Bepusdt 订阅处理失败 trade_no=%s trade_id=%s client_ip=%s error=%q", tradeNo, payload.TradeId, c.ClientIP(), err.Error()))
-			c.AbortWithStatus(http.StatusInternalServerError)
-			return
-		}
-		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Bepusdt 充值/订阅订单不存在 trade_no=%s trade_id=%s", tradeNo, payload.TradeId))
-		c.AbortWithStatus(http.StatusBadRequest)
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Bepusdt 订阅处理失败 trade_no=%s trade_id=%s client_ip=%s error=%q", tradeNo, payload.TradeId, c.ClientIP(), err.Error()))
+		c.AbortWithStatus(http.StatusInternalServerError)
 		return
 	}
 
-	if topUp.Status != common.TopUpStatusPending {
-		logger.LogInfo(c.Request.Context(), fmt.Sprintf("Bepusdt 充值订单状态非 pending，忽略处理 trade_no=%s status=%s trade_id=%s", tradeNo, topUp.Status, payload.TradeId))
+	if topUp.Status == common.TopUpStatusSuccess {
+		logger.LogInfo(c.Request.Context(), fmt.Sprintf("Bepusdt 充值订单已完成，幂等返回 trade_no=%s trade_id=%s", tradeNo, payload.TradeId))
 		_, _ = c.Writer.Write([]byte("ok"))
+		return
+	}
+	if err := validateBepusdtCallbackAmount(payload, topUp.Money); err != nil {
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Bepusdt 充值回调金额校验失败 trade_no=%s trade_id=%s error=%q", tradeNo, payload.TradeId, err.Error()))
+		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
 

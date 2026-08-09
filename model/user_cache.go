@@ -13,13 +13,15 @@ import (
 	"github.com/bytedance/gopkg/util/gopool"
 )
 
-// UserBase struct remains the same as it represents the cached data structure
+// UserBase is the compact user snapshot stored in cache and request context.
 type UserBase struct {
 	Id       int    `json:"id"`
 	Group    string `json:"group"`
+	GroupId  int    `json:"group_id"`
 	Email    string `json:"email"`
 	Quota    int    `json:"quota"`
 	Status   int    `json:"status"`
+	Role     int    `json:"role"`
 	Username string `json:"username"`
 	Setting  string `json:"setting"`
 }
@@ -98,7 +100,10 @@ func GetUserCache(userId int) (userCache *UserBase, err error) {
 	// Try getting from Redis first
 	userCache, err = cacheGetUserBase(userId)
 	if err == nil {
-		return userCache, nil
+		if userCache.Role != common.RoleGuestUser && common.IsValidateRole(userCache.Role) {
+			return userCache, nil
+		}
+		_ = invalidateUserCache(userId)
 	}
 
 	// If Redis fails, get from DB
@@ -112,8 +117,10 @@ func GetUserCache(userId int) (userCache *UserBase, err error) {
 	userCache = &UserBase{
 		Id:       user.Id,
 		Group:    user.Group,
+		GroupId:  user.GroupId,
 		Quota:    user.Quota,
 		Status:   user.Status,
+		Role:     user.Role,
 		Username: user.Username,
 		Setting:  user.Setting,
 		Email:    user.Email,

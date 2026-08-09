@@ -23,10 +23,13 @@ import {
   showError,
   showSuccess,
   timestamp2string,
-  renderGroupOption,
   getCurrencyConfig,
   getModelCategories,
   selectFilter,
+  buildGroupSelectionPayload,
+  createUserGroupOptions,
+  includeSelectedGroupOptions,
+  resolveGroupCodes,
 } from '../../../../helpers';
 import {
   quotaToDisplayAmount,
@@ -59,10 +62,9 @@ import {
   IconKey,
   IconPlus,
   IconDelete,
-  IconChevronUp,
-  IconChevronDown,
   IconSearch,
 } from '@douyinfe/semi-icons';
+import { GripVertical } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { StatusContext } from '../../../../context/Status';
 
@@ -82,14 +84,21 @@ const GroupMultiPicker = ({
 }) => {
   const [popVisible, setPopVisible] = useState(false);
   const [searchText, setSearchText] = useState('');
+  const [draggedGroup, setDraggedGroup] = useState(null);
+  const [dragOverGroup, setDragOverGroup] = useState(null);
 
   const isAutoSelected = selectedGroups.includes('auto');
+  const isExclusiveSelected = groups.some(
+    (group) => group.exclusive === true && selectedGroups.includes(group.value),
+  );
 
   const availableGroups = groups.filter((g) => {
+    if (isExclusiveSelected) return false;
     if (selectedGroups.includes(g.value)) return false;
     if (isAutoSelected && g.value !== 'auto') return false;
     if (g.value === 'auto' && selectedGroups.length > 0 && !isAutoSelected)
       return false;
+    if (g.exclusive === true && selectedGroups.length > 0) return false;
     if (searchText) {
       const q = searchText.toLowerCase();
       return (
@@ -101,7 +110,10 @@ const GroupMultiPicker = ({
   });
 
   const handleAdd = (value) => {
-    if (value === 'auto') {
+    const selectedOption = groups.find((group) => group.value === value);
+    if (selectedOption?.exclusive === true) {
+      onChange([value]);
+    } else if (value === 'auto') {
       onChange(['auto']);
     } else {
       onChange([...selectedGroups.filter((v) => v !== 'auto'), value]);
@@ -122,6 +134,47 @@ const GroupMultiPicker = ({
       newGroups[index],
     ];
     onChange(newGroups);
+  };
+
+  const resetDragState = () => {
+    setDraggedGroup(null);
+    setDragOverGroup(null);
+  };
+
+  const handleDragStart = (event, value) => {
+    setDraggedGroup(value);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', value);
+  };
+
+  const handleDragOver = (event, value) => {
+    event.preventDefault();
+    if (!draggedGroup || draggedGroup === value) return;
+    event.dataTransfer.dropEffect = 'move';
+    setDragOverGroup(value);
+  };
+
+  const handleDrop = (event, targetValue) => {
+    event.preventDefault();
+    const sourceValue =
+      draggedGroup || event.dataTransfer.getData('text/plain');
+    if (!sourceValue || sourceValue === targetValue) {
+      resetDragState();
+      return;
+    }
+
+    const sourceIndex = selectedGroups.indexOf(sourceValue);
+    const targetIndex = selectedGroups.indexOf(targetValue);
+    if (sourceIndex < 0 || targetIndex < 0) {
+      resetDragState();
+      return;
+    }
+
+    const reorderedGroups = [...selectedGroups];
+    const [movedGroup] = reorderedGroups.splice(sourceIndex, 1);
+    reorderedGroups.splice(targetIndex, 0, movedGroup);
+    onChange(reorderedGroups);
+    resetDragState();
   };
 
   const groupMap = {};
@@ -152,43 +205,56 @@ const GroupMultiPicker = ({
         >
           {selectedGroups.map((value, index) => {
             const info = groupMap[value];
+            const displayName = info?.label || value;
             return (
               <div
                 key={value}
+                onDragOver={(event) => handleDragOver(event, value)}
+                onDrop={(event) => handleDrop(event, value)}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: 8,
                   padding: '6px 10px',
                   borderRadius: 8,
-                  border: '1px solid var(--semi-color-border)',
+                  border:
+                    dragOverGroup === value
+                      ? '1px solid var(--semi-color-primary)'
+                      : '1px solid var(--semi-color-border)',
                   backgroundColor: 'var(--semi-color-bg-2)',
+                  opacity: draggedGroup === value ? 0.55 : 1,
+                  transition: 'border-color 0.15s, opacity 0.15s',
                 }}
               >
-                {/* Order controls */}
+                {/* 拖拽手柄；键盘上下键同时提供无障碍排序能力 */}
                 {selectedGroups.length > 1 && (
-                  <div
-                    style={{ display: 'flex', flexDirection: 'column', gap: 0 }}
+                  <span
+                    draggable
+                    role='button'
+                    tabIndex={0}
+                    aria-label={t('排序')}
+                    title={t('排序')}
+                    onDragStart={(event) => handleDragStart(event, value)}
+                    onDragEnd={resetDragState}
+                    onKeyDown={(event) => {
+                      if (event.key === 'ArrowUp') {
+                        event.preventDefault();
+                        handleMove(index, -1);
+                      } else if (event.key === 'ArrowDown') {
+                        event.preventDefault();
+                        handleMove(index, 1);
+                      }
+                    }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      color: 'var(--semi-color-text-2)',
+                      cursor: 'grab',
+                      flexShrink: 0,
+                    }}
                   >
-                    <Button
-                      icon={<IconChevronUp size='extra-small' />}
-                      size='small'
-                      theme='borderless'
-                      type='tertiary'
-                      disabled={index === 0}
-                      onClick={() => handleMove(index, -1)}
-                      style={{ padding: 0, height: 16 }}
-                    />
-                    <Button
-                      icon={<IconChevronDown size='extra-small' />}
-                      size='small'
-                      theme='borderless'
-                      type='tertiary'
-                      disabled={index === selectedGroups.length - 1}
-                      onClick={() => handleMove(index, 1)}
-                      style={{ padding: 0, height: 16 }}
-                    />
-                  </div>
+                    <GripVertical size={16} />
+                  </span>
                 )}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div
@@ -200,18 +266,23 @@ const GroupMultiPicker = ({
                       ellipsis={{ showTooltip: true }}
                       style={{ maxWidth: 200 }}
                     >
-                      {value}
+                      {displayName}
                     </Text>
                     {info && renderRatioBadge(info.ratio)}
+                    {info?.exclusive && (
+                      <Tag size='small' color='purple' shape='circle'>
+                        {t('独立')}
+                      </Tag>
+                    )}
                   </div>
-                  {info && info.label && (
+                  {info?.description && (
                     <Text
                       type='tertiary'
                       size='small'
                       ellipsis={{ showTooltip: true }}
                       style={{ maxWidth: 300 }}
                     >
-                      {info.label}
+                      {info.description}
                     </Text>
                   )}
                 </div>
@@ -304,33 +375,51 @@ const GroupMultiPicker = ({
                 >
                   <div>
                     <Text strong size='small'>
-                      {g.value}
+                      {g.label || g.value}
                     </Text>
-                    {g.label && (
+                    {g.description && (
                       <div>
                         <Text type='tertiary' size='small'>
-                          {g.label}
+                          {g.description}
                         </Text>
                       </div>
                     )}
                   </div>
                   {renderRatioBadge(g.ratio)}
+                  {g.exclusive && (
+                    <Tag size='small' color='purple' shape='circle'>
+                      {t('独立')}
+                    </Tag>
+                  )}
                 </div>
               ))
             )}
           </div>
         }
       >
-        <Button icon={<IconPlus />} theme='light' type='tertiary' size='small'>
+        <Button
+          icon={<IconPlus />}
+          theme='light'
+          type='tertiary'
+          size='small'
+          disabled={isAutoSelected || isExclusiveSelected}
+        >
           {selectedGroups.length === 0 ? t('选择分组') : t('添加分组')}
         </Button>
       </Popover>
 
       {/* Hint */}
-      {selectedGroups.length > 1 && !isAutoSelected && (
+      {selectedGroups.length > 1 && !isAutoSelected && !isExclusiveSelected && (
         <div style={{ marginTop: 6 }}>
           <Text type='tertiary' size='small'>
             {t('多个分组包含相同模型时，将按排列顺序依次尝试')}
+          </Text>
+        </div>
+      )}
+      {selectedGroups.length > 1 && isExclusiveSelected && (
+        <div style={{ marginTop: 6 }}>
+          <Text type='danger' size='small'>
+            {t('独立分组必须单独选择')}
           </Text>
         </div>
       )}
@@ -344,7 +433,7 @@ const GroupMultiPicker = ({
 
 const EditTokenModal = (props) => {
   const { t } = useTranslation();
-  const [statusState, statusDispatch] = useContext(StatusContext);
+  const [statusState] = useContext(StatusContext);
   const [loading, setLoading] = useState(false);
   const isMobile = useIsMobile();
   const formApiRef = useRef(null);
@@ -481,61 +570,79 @@ const EditTokenModal = (props) => {
   };
 
   const loadGroups = async () => {
-    let res = await API.get(`/api/user/self/groups`);
-    const { success, message, data } = res.data;
-    if (success) {
-      let localGroupOptions = Object.entries(data).map(([group, info]) => ({
-        label: info.desc,
-        value: group,
-        ratio: info.ratio,
-      }));
-      if (defaultUseAutoGroup) {
-        if (localGroupOptions.some((group) => group.value === 'auto')) {
-          localGroupOptions.sort((a, b) => (a.value === 'auto' ? -1 : 1));
+    try {
+      const res = await API.get(`/api/user/self/groups`);
+      if (!res?.data) return groups;
+      const { success, message, data } = res.data;
+      if (success) {
+        const localGroupOptions = createUserGroupOptions(data);
+        if (defaultUseAutoGroup) {
+          if (localGroupOptions.some((group) => group.value === 'auto')) {
+            localGroupOptions.sort((a, b) =>
+              a.value === 'auto' ? -1 : b.value === 'auto' ? 1 : 0,
+            );
+          }
         }
+        setGroups(localGroupOptions);
+        return localGroupOptions;
+      } else {
+        showError(t(message));
+        return groups;
       }
-      setGroups(localGroupOptions);
-    } else {
-      showError(t(message));
+    } catch (error) {
+      showError(error?.message || t('加载分组失败'));
+      return groups;
     }
   };
 
   const loadToken = async () => {
     setLoading(true);
-    let res = await API.get(`/api/token/${props.editingToken.id}`);
-    const { success, message, data } = res.data;
-    if (success) {
-      if (data.expired_time !== -1) {
-        data.expired_time = timestamp2string(data.expired_time);
-      }
-      if (data.model_limits !== '') {
-        data.model_limits = data.model_limits.split(',');
+    try {
+      const [availableGroups, res] = await Promise.all([
+        loadGroups(),
+        API.get(`/api/token/${props.editingToken.id}`),
+      ]);
+      if (!res?.data) return;
+      const { success, message, data } = res.data;
+      if (success) {
+        if (data.expired_time !== -1) {
+          data.expired_time = timestamp2string(data.expired_time);
+        }
+        if (data.model_limits !== '') {
+          data.model_limits = data.model_limits.split(',');
+        } else {
+          data.model_limits = [];
+        }
+        data.remain_amount = Number(
+          quotaToDisplayAmount(data.remain_quota || 0).toFixed(6),
+        );
+        const resolvedGroups = resolveGroupCodes(data, availableGroups);
+        const mergedGroupOptions = includeSelectedGroupOptions(
+          availableGroups,
+          resolvedGroups,
+          data.group_details,
+        );
+        setGroups(mergedGroupOptions);
+        setSelectedGroups(resolvedGroups);
+        setGroupRatioLimits(parseGroupRatioLimits(data.group_ratio_limits));
+        // 分组由独立选择器维护，避免表单回传服务端旧值。
+        const formData = { ...data };
+        delete formData.group;
+        delete formData.group_ids;
+        delete formData.group_mode;
+        delete formData.group_details;
+        delete formData.group_ratio_limits;
+        if (formApiRef.current) {
+          formApiRef.current.setValues({ ...getInitValues(), ...formData });
+        }
       } else {
-        data.model_limits = [];
+        showError(message);
       }
-      data.remain_amount = Number(
-        quotaToDisplayAmount(data.remain_quota || 0).toFixed(6),
-      );
-      // Parse group string into selectedGroups array
-      const groupStr = data.group || '';
-      setSelectedGroups(
-        groupStr
-          ? groupStr
-              .split(',')
-              .map((g) => g.trim())
-              .filter(Boolean)
-          : [],
-      );
-      setGroupRatioLimits(parseGroupRatioLimits(data.group_ratio_limits));
-      // Remove group from form data since we manage it separately
-      const { group: _g, group_ratio_limits: _grl, ...formData } = data;
-      if (formApiRef.current) {
-        formApiRef.current.setValues({ ...getInitValues(), ...formData });
-      }
-    } else {
-      showError(message);
+    } catch (error) {
+      showError(error?.message || t('加载令牌失败'));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => {
@@ -547,7 +654,6 @@ const EditTokenModal = (props) => {
       }
     }
     loadModels();
-    loadGroups();
   }, [props.editingToken.id]);
 
   useEffect(() => {
@@ -555,6 +661,7 @@ const EditTokenModal = (props) => {
       if (isEdit) {
         loadToken();
       } else {
+        loadGroups();
         formApiRef.current?.setValues(getInitValues());
         onSelectedGroupsChange(defaultUseAutoGroup ? ['auto'] : []);
         setGroupRatioLimits({});
@@ -580,8 +687,7 @@ const EditTokenModal = (props) => {
 
   const submit = async (values) => {
     setLoading(true);
-    // Inject group from selectedGroups state
-    const groupStr = selectedGroups.join(',');
+    const groupSelection = buildGroupSelectionPayload(selectedGroups, groups);
     const isMultiGroup = selectedGroups.length > 1;
     const isAuto = selectedGroups.length === 1 && selectedGroups[0] === 'auto';
     const cleanedGroupRatioLimits = cleanGroupRatioLimits(groupRatioLimits);
@@ -592,7 +698,7 @@ const EditTokenModal = (props) => {
 
     if (isEdit) {
       let { tokenCount: _tc, ...localInputs } = values;
-      localInputs.group = groupStr;
+      Object.assign(localInputs, groupSelection);
       localInputs.group_ratio_limits = groupRatioLimitsJSON;
       localInputs.cross_group_retry = isMultiGroup
         ? true
@@ -635,7 +741,7 @@ const EditTokenModal = (props) => {
       let successCount = 0;
       for (let i = 0; i < count; i++) {
         let { tokenCount: _tc, ...localInputs } = values;
-        localInputs.group = groupStr;
+        Object.assign(localInputs, groupSelection);
         localInputs.group_ratio_limits = groupRatioLimitsJSON;
         localInputs.cross_group_retry = isMultiGroup
           ? true

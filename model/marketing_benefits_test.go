@@ -343,7 +343,7 @@ func TestPurchaseSubscriptionWithBalance_AffiliateRewardUsesDiscountedPaidAmount
 	}
 	require.NoError(t, promo.Insert())
 
-	require.NoError(t, PurchaseSubscriptionWithBalance(812, plan.Id, "BALHALF"))
+	require.NoError(t, PurchaseSubscriptionWithBalance(812, plan.Id, "BALHALF", ""))
 
 	var order SubscriptionOrder
 	require.NoError(t, DB.Where("user_id = ? AND plan_id = ?", 812, plan.Id).First(&order).Error)
@@ -392,7 +392,7 @@ func TestPurchaseSubscriptionWithBalance_EnforcesPromoUseLimit(t *testing.T) {
 	}
 	require.NoError(t, promo.Insert())
 
-	err := PurchaseSubscriptionWithBalance(831, plan.Id, "USEDUP")
+	err := PurchaseSubscriptionWithBalance(831, plan.Id, "USEDUP", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "优惠码不可用")
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -88,10 +90,56 @@ func rateLimitFactory(maxRequestNum int, duration int64, mark string) func(c *gi
 }
 
 func GlobalWebRateLimit() func(c *gin.Context) {
+	return globalWebRateLimit(nil)
+}
+
+// GlobalWebRateLimitWithAssetChecker 为已经接入静态文件中间件的网页路由提供
+// 文件存在性判断。这样只有确实会被静态文件中间件处理的资源才跳过限流，
+// 不存在的 .js/.css 路径仍然受到网页限流保护。
+func GlobalWebRateLimitWithAssetChecker(checker func(*http.Request) bool) func(c *gin.Context) {
+	return globalWebRateLimit(checker)
+}
+
+func globalWebRateLimit(assetChecker func(*http.Request) bool) func(c *gin.Context) {
 	if common.GlobalWebRateLimitEnable {
-		return rateLimitFactory(common.GlobalWebRateLimitNum, common.GlobalWebRateLimitDuration, "GW")
+		limiter := rateLimitFactory(common.GlobalWebRateLimitNum, common.GlobalWebRateLimitDuration, "GW")
+		return func(c *gin.Context) {
+			if assetChecker != nil {
+				if c != nil && c.Request != nil && assetChecker(c.Request) {
+					c.Next()
+					return
+				}
+			} else if isStaticWebAssetRequest(c) {
+				c.Next()
+				return
+			}
+			limiter(c)
+		}
 	}
 	return defNext
+}
+
+func isStaticWebAssetRequest(c *gin.Context) bool {
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return false
+	}
+	if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
+		return false
+	}
+
+	requestPath := strings.ToLower(c.Request.URL.Path)
+	if strings.HasPrefix(requestPath, "/assets/") {
+		return true
+	}
+
+	switch path.Ext(requestPath) {
+	case ".avif", ".css", ".gif", ".ico", ".jpeg", ".jpg", ".js", ".json", ".map",
+		".mp3", ".mp4", ".ogg", ".png", ".svg", ".txt", ".wasm", ".wav", ".webm",
+		".webmanifest", ".webp", ".woff", ".woff2":
+		return true
+	default:
+		return false
+	}
 }
 
 func GlobalAPIRateLimit() func(c *gin.Context) {

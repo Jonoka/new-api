@@ -28,6 +28,8 @@ import { AffiliateSettingsSection } from './affiliate-settings-section'
 
 const getModelDefaults = (settings: BillingSettings) => ({
   ModelPrice: settings.ModelPrice,
+  ModelPriceUnit: settings.ModelPriceUnit,
+  ModelPriceVariants: settings.ModelPriceVariants,
   ModelRatio: settings.ModelRatio,
   CacheRatio: settings.CacheRatio,
   CreateCacheRatio: settings.CreateCacheRatio,
@@ -92,6 +94,8 @@ const BILLING_SECTIONS = [
             quota_display_type: parseCurrencyDisplayType(
               settings['general_setting.quota_display_type']
             ),
+            auto_usd_exchange_rate:
+              settings['general_setting.auto_usd_exchange_rate'] ?? true,
             custom_currency_symbol:
               settings['general_setting.custom_currency_symbol'] ?? '¤',
             custom_currency_exchange_rate:
@@ -142,8 +146,14 @@ const BILLING_SECTIONS = [
           PayMethods: settings.PayMethods,
           AmountOptions: settings['payment_setting.amount_options'],
           AmountDiscount: settings['payment_setting.amount_discount'],
+          BalanceSubscriptionEnabled:
+            settings['payment_setting.balance_subscription_enabled'] ?? true,
+          BalanceSubscriptionPromoEnabled:
+            settings['payment_setting.balance_subscription_promo_enabled'] ??
+            true,
           InvoiceEnabled: settings.InvoiceEnabled ?? false,
           InvoiceTypes: settings.InvoiceTypes ?? '["personal","company"]',
+          InvoiceKinds: settings.InvoiceKinds ?? '["normal"]',
           InvoiceFeeRules:
             settings.InvoiceFeeRules ??
             '[{"min":0,"max":500,"type":"fixed","value":50},{"min":501,"max":2000,"type":"fixed","value":100},{"min":2001,"max":5000,"type":"fixed","value":175},{"min":5000,"type":"percent","value":5}]',
@@ -173,6 +183,12 @@ const BILLING_SECTIONS = [
           OkpayRateApiUrl:
             settings.OkpayRateApiUrl ??
             'https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=cny&include_last_updated_at=true',
+          OkpayRateSource: settings.OkpayRateSource ?? 'coingecko',
+          OkpayOkxSide: settings.OkpayOkxSide ?? 'buy',
+          OkpayOkxTier: settings.OkpayOkxTier ?? 3,
+          OkpayRateAdjustmentType:
+            settings.OkpayRateAdjustmentType ?? 'absolute',
+          OkpayRateAdjustmentValue: settings.OkpayRateAdjustmentValue ?? 0,
           OkpayMinTopUp: settings.OkpayMinTopUp ?? 1,
           OkpayCoin: settings.OkpayCoin ?? 'USDT',
         }}

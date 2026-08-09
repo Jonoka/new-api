@@ -25,7 +25,10 @@ jobs:
       - name: Check out
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
+
+      - name: Check merge diff
+        run: git diff --check HEAD^1 HEAD
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -33,9 +36,25 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Run targeted async image tests
+      - name: Run Go tests
+        run: go test ./... -count=1
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Check and build default frontend
+        working-directory: web/default
         run: |
-          go test ./controller ./dto ./model ./relay ./relay/channel/openai ./relay/channel/task/sora ./service ./service/openaicompat ./setting/reasoning
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun run build
+
+      - name: Check and build classic frontend
+        working-directory: web/classic
+        run: |
+          bun install --frozen-lockfile
+          bun run lint
+          bun run build
 
       - name: Resolve image tags
         id: tags

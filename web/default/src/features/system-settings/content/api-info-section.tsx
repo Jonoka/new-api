@@ -20,10 +20,11 @@ import { useEffect, useState } from 'react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus, Edit, Trash2, Save } from 'lucide-react'
+import { Plus, Edit, Trash2, Save, GripVertical } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { getBgColorClass } from '@/lib/colors'
+import { cn } from '@/lib/utils'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -127,6 +128,8 @@ export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [editingApiInfo, setEditingApiInfo] = useState<ApiInfo | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<'single' | 'batch'>('single')
+  const [draggedApiId, setDraggedApiId] = useState<number | null>(null)
+  const [dragOverApiId, setDragOverApiId] = useState<number | null>(null)
 
   const form = useForm<ApiInfoFormValues>({
     resolver: zodResolver(apiInfoSchema),
@@ -272,6 +275,30 @@ export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
     )
   }
 
+  const reorderApiInfo = (sourceId: number | null, targetId: number) => {
+    if (sourceId === null || sourceId === targetId) return
+
+    setApiInfoList((currentList) => {
+      const sourceIndex = currentList.findIndex((item) => item.id === sourceId)
+      const targetIndex = currentList.findIndex((item) => item.id === targetId)
+      if (sourceIndex < 0 || targetIndex < 0) return currentList
+
+      const reordered = [...currentList]
+      const [movedApi] = reordered.splice(sourceIndex, 1)
+      reordered.splice(targetIndex, 0, movedApi)
+      return reordered
+    })
+    setHasChanges(true)
+  }
+
+  const moveApiInfoByOffset = (sourceId: number, offset: number) => {
+    const sourceIndex = apiInfoList.findIndex((item) => item.id === sourceId)
+    const targetIndex = sourceIndex + offset
+    if (sourceIndex < 0 || targetIndex < 0 || targetIndex >= apiInfoList.length)
+      return
+    reorderApiInfo(sourceId, apiInfoList[targetIndex].id)
+  }
+
   const getColorClass = (color: string) => getBgColorClass(color)
 
   return (
@@ -315,6 +342,7 @@ export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className='w-12 text-center'>{t('Sort')}</TableHead>
                 <TableHead className='w-12'>
                   <Checkbox
                     checked={
@@ -334,13 +362,71 @@ export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
             <TableBody>
               {apiInfoList.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className='h-24 text-center'>
+                  <TableCell colSpan={7} className='h-24 text-center'>
                     {t('No API Domains yet. Click "Add API" to create one.')}
                   </TableCell>
                 </TableRow>
               ) : (
                 apiInfoList.map((apiInfo) => (
-                  <TableRow key={apiInfo.id}>
+                  <TableRow
+                    key={apiInfo.id}
+                    className={cn(
+                      dragOverApiId === apiInfo.id && 'bg-muted/70'
+                    )}
+                    onDragOver={(event) => {
+                      if (draggedApiId === null || draggedApiId === apiInfo.id)
+                        return
+                      event.preventDefault()
+                      event.dataTransfer.dropEffect = 'move'
+                    }}
+                    onDragEnter={() => {
+                      if (
+                        draggedApiId !== null &&
+                        draggedApiId !== apiInfo.id
+                      ) {
+                        setDragOverApiId(apiInfo.id)
+                      }
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault()
+                      reorderApiInfo(draggedApiId, apiInfo.id)
+                      setDraggedApiId(null)
+                      setDragOverApiId(null)
+                    }}
+                  >
+                    <TableCell className='text-center'>
+                      <span
+                        draggable
+                        role='button'
+                        tabIndex={0}
+                        aria-label={t('Sort')}
+                        title={t('Sort')}
+                        className='text-muted-foreground inline-flex cursor-grab items-center justify-center active:cursor-grabbing'
+                        onDragStart={(event) => {
+                          setDraggedApiId(apiInfo.id)
+                          event.dataTransfer.effectAllowed = 'move'
+                          event.dataTransfer.setData(
+                            'text/plain',
+                            String(apiInfo.id)
+                          )
+                        }}
+                        onDragEnd={() => {
+                          setDraggedApiId(null)
+                          setDragOverApiId(null)
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'ArrowUp') {
+                            event.preventDefault()
+                            moveApiInfoByOffset(apiInfo.id, -1)
+                          } else if (event.key === 'ArrowDown') {
+                            event.preventDefault()
+                            moveApiInfoByOffset(apiInfo.id, 1)
+                          }
+                        }}
+                      >
+                        <GripVertical className='size-4' />
+                      </span>
+                    </TableCell>
                     <TableCell>
                       <Checkbox
                         checked={selectedIds.includes(apiInfo.id)}

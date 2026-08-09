@@ -20,17 +20,30 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Avatar, Typography, Table, Tag } from '@douyinfe/semi-ui';
 import { IconCoinMoneyStroked } from '@douyinfe/semi-icons';
-import { calculateModelPrice, getModelPriceItems } from '../../../../../helpers';
+import {
+  calculateModelPrice,
+  getGroupDisplayName,
+  getModelPriceItems,
+  isModelPriceUnitSecond,
+} from '../../../../../helpers';
+import {
+  getBillingDiscountColor,
+  getBillingDiscountText,
+  getBillingFactors,
+} from '../../billing/utils';
 
 const { Text } = Typography;
 
 const ModelPricingTable = ({
   modelData,
   groupRatio,
+  groupNames = {},
   currency,
   siteDisplayType,
   tokenUnit,
   displayPrice,
+  priceRate,
+  usdExchangeRate,
   showRatio,
   usableGroup,
   autoGroups = [],
@@ -63,22 +76,33 @@ const ModelPricingTable = ({
         : { inputPrice: '-', outputPrice: '-', price: '-' };
 
       // 获取分组倍率
-      const groupRatioValue =
-        groupRatio && groupRatio[group] ? groupRatio[group] : 1;
+      const groupRatioValue = groupRatio?.[group] ?? 1;
+      const discountFactor = getBillingFactors({
+        groupRatio: groupRatioValue,
+        priceRate,
+        usdExchangeRate,
+      }).compositeFactor;
 
       return {
         key: group,
-        group: group,
+        group: getGroupDisplayName(group, groupNames),
         ratio: groupRatioValue,
+        discountFactor,
         billingType:
           modelData?.billing_mode === 'tiered_expr'
             ? t('动态计费')
             : modelData?.quota_type === 0
               ? t('按量计费')
               : modelData?.quota_type === 1
-                ? t('按次计费')
+                ? t(
+                    isModelPriceUnitSecond(modelData.model_price_unit)
+                      ? '按秒计费'
+                      : '按次计费',
+                  )
                 : '-',
-        priceItems: getModelPriceItems(priceData, t, siteDisplayType),
+        priceItems: getModelPriceItems(priceData, t, siteDisplayType, {
+          includeVariantRules: true,
+        }),
       };
     });
 
@@ -118,6 +142,7 @@ const ModelPricingTable = ({
         let color = 'white';
         if (text === t('按量计费')) color = 'violet';
         else if (text === t('按次计费')) color = 'teal';
+        else if (text === t('按秒计费')) color = 'teal';
         else if (text === t('动态计费')) color = 'amber';
         return (
           <Tag color={color} size='small' shape='circle'>
@@ -159,6 +184,21 @@ const ModelPricingTable = ({
       },
     });
 
+    columns.push({
+      title: t('综合折扣'),
+      dataIndex: 'discountFactor',
+      width: 104,
+      render: (factor) => (
+        <Tag
+          className='!rounded !px-1.5'
+          color={getBillingDiscountColor(factor)}
+          size='small'
+        >
+          {getBillingDiscountText(factor, t)}
+        </Tag>
+      ),
+    });
+
     return (
       <Table
         dataSource={tableData}
@@ -191,7 +231,7 @@ const ModelPricingTable = ({
           {autoChain.map((g, idx) => (
             <React.Fragment key={g}>
               <Tag color='white' size='small' shape='circle'>
-                {g}
+                {getGroupDisplayName(g, groupNames)}
                 {t('分组')}
               </Tag>
               {idx < autoChain.length - 1 && <span className='text-sm'>→</span>}

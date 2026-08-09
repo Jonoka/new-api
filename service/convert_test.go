@@ -159,6 +159,21 @@ func TestBuildClaudeUsageFromOpenAIUsageClampsNegativeInputTokens(t *testing.T) 
 	require.Equal(t, 20, usage.OutputTokens)
 }
 
+func TestBuildClaudeUsageFromOpenAIUsageReadsNativeCacheWriteTokens(t *testing.T) {
+	usage := buildClaudeUsageFromOpenAIUsage(&dto.Usage{
+		PromptTokens: 100,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:     80,
+			CacheWriteTokens: 30,
+		},
+	})
+
+	require.NotNil(t, usage)
+	require.Equal(t, 0, usage.InputTokens)
+	require.Equal(t, 80, usage.CacheReadInputTokens)
+	require.Equal(t, 30, usage.CacheCreationInputTokens)
+}
+
 func TestClaudeToOpenAIRequestMapsMetadataUserIDToPromptCacheKey(t *testing.T) {
 	req := dto.ClaudeRequest{
 		Model:    "gpt-5.5",

@@ -40,6 +40,11 @@ export default function SettingsPaymentGatewayOkpay(props) {
     OkpayUsdtCnyRate: 7.2,
     OkpayRateApiUrl:
       'https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=cny&include_last_updated_at=true',
+    OkpayRateSource: 'coingecko',
+    OkpayOkxSide: 'buy',
+    OkpayOkxTier: 3,
+    OkpayRateAdjustmentType: 'absolute',
+    OkpayRateAdjustmentValue: 0,
     OkpayMinTopUp: 1,
     OkpayCoin: 'USDT',
   });
@@ -67,6 +72,18 @@ export default function SettingsPaymentGatewayOkpay(props) {
         OkpayRateApiUrl:
           props.options.OkpayRateApiUrl ||
           'https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=cny&include_last_updated_at=true',
+        OkpayRateSource: props.options.OkpayRateSource || 'coingecko',
+        OkpayOkxSide: props.options.OkpayOkxSide || 'buy',
+        OkpayOkxTier:
+          props.options.OkpayOkxTier !== undefined
+            ? parseInt(props.options.OkpayOkxTier)
+            : 3,
+        OkpayRateAdjustmentType:
+          props.options.OkpayRateAdjustmentType || 'absolute',
+        OkpayRateAdjustmentValue:
+          props.options.OkpayRateAdjustmentValue !== undefined
+            ? parseFloat(props.options.OkpayRateAdjustmentValue)
+            : 0,
         OkpayMinTopUp:
           props.options.OkpayMinTopUp !== undefined
             ? parseInt(props.options.OkpayMinTopUp)
@@ -125,6 +142,30 @@ export default function SettingsPaymentGatewayOkpay(props) {
         key: 'OkpayRateApiUrl',
         value: removeTrailingSlash(inputs.OkpayRateApiUrl || ''),
       });
+      options.push({
+        key: 'OkpayRateSource',
+        value: inputs.OkpayRateSource || 'coingecko',
+      });
+      options.push({
+        key: 'OkpayOkxSide',
+        value: inputs.OkpayOkxSide || 'buy',
+      });
+      if (inputs.OkpayOkxTier !== '') {
+        options.push({
+          key: 'OkpayOkxTier',
+          value: inputs.OkpayOkxTier.toString(),
+        });
+      }
+      options.push({
+        key: 'OkpayRateAdjustmentType',
+        value: inputs.OkpayRateAdjustmentType || 'absolute',
+      });
+      if (inputs.OkpayRateAdjustmentValue !== '') {
+        options.push({
+          key: 'OkpayRateAdjustmentValue',
+          value: inputs.OkpayRateAdjustmentValue.toString(),
+        });
+      }
       if (inputs.OkpayMinTopUp !== '') {
         options.push({
           key: 'OkpayMinTopUp',
@@ -153,6 +194,24 @@ export default function SettingsPaymentGatewayOkpay(props) {
       }
     } catch (error) {
       showError(t('更新失败'));
+    }
+    setLoading(false);
+  };
+
+  const previewOkpayRate = async () => {
+    setLoading(true);
+    try {
+      const res = await API.get('/api/option/okpay/rate-preview');
+      const { success, message, data } = res.data;
+      if (!success) {
+        showError(message || t('获取汇率失败'));
+      } else {
+        showSuccess(
+          `${t('当前汇率')}: ${data.adjusted_rate} CNY/USDT (${data.source})`,
+        );
+      }
+    } catch (error) {
+      showError(t('获取汇率失败'));
     }
     setLoading(false);
   };
@@ -242,9 +301,104 @@ export default function SettingsPaymentGatewayOkpay(props) {
               />
             </Col>
           </Row>
-          <Button onClick={submitOkpaySetting} style={{ marginTop: 16 }}>
-            {t('更新 OKPay 设置')}
-          </Button>
+          <Row
+            gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
+            style={{ marginTop: 16 }}
+          >
+            <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+              <Form.Select
+                field='OkpayRateSource'
+                label={t('汇率来源')}
+                placeholder={t('选择汇率来源')}
+              >
+                <Form.Select.Option value='coingecko'>
+                  CoinGecko
+                </Form.Select.Option>
+                <Form.Select.Option value='okx-alipay-tier'>
+                  OKX 支付宝直连档位
+                </Form.Select.Option>
+                <Form.Select.Option value='okx-alipay-rate-module'>
+                  OKX 支付宝汇率模块
+                </Form.Select.Option>
+              </Form.Select>
+            </Col>
+          </Row>
+          {inputs.OkpayRateSource === 'okx-alipay-tier' && (
+            <>
+              <Row
+                gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
+                style={{ marginTop: 16 }}
+              >
+                <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+                  <Form.Select
+                    field='OkpayOkxSide'
+                    label={t('OKX 方向')}
+                    placeholder={t('选择 OKX 方向')}
+                  >
+                    <Form.Select.Option value='buy'>
+                      {t('收款档位（buy）')}
+                    </Form.Select.Option>
+                    <Form.Select.Option value='sell'>
+                      {t('付款档位（sell）')}
+                    </Form.Select.Option>
+                  </Form.Select>
+                </Col>
+                <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+                  <Form.InputNumber
+                    field='OkpayOkxTier'
+                    label={t('OKX 档位')}
+                    min={1}
+                    precision={0}
+                    placeholder={t('例如：3')}
+                  />
+                </Col>
+              </Row>
+              <Row
+                gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
+                style={{ marginTop: 16 }}
+              >
+                <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+                  <Form.Select
+                    field='OkpayRateAdjustmentType'
+                    label={t('汇率调价方式')}
+                    placeholder={t('选择调价方式')}
+                  >
+                    <Form.Select.Option value='absolute'>
+                      {t('固定偏移（元）')}
+                    </Form.Select.Option>
+                    <Form.Select.Option value='percent'>
+                      {t('百分比')}
+                    </Form.Select.Option>
+                  </Form.Select>
+                </Col>
+                <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+                  <Form.InputNumber
+                    field='OkpayRateAdjustmentValue'
+                    precision={4}
+                    label={t('汇率调价值')}
+                    placeholder={t('例如：-0.2 表示下浮 0.2 元')}
+                  />
+                </Col>
+              </Row>
+            </>
+          )}
+          {inputs.OkpayRateSource === 'okx-alipay-rate-module' && (
+            <div style={{ marginTop: 16, color: 'var(--semi-color-text-1)' }}>
+              {t(
+                'OKPay 将使用 OKX 支付宝汇率模块提供的最终汇率，档位和上浮下浮请到扩展模块里的 OKX 支付宝汇率页面配置。',
+              )}
+            </div>
+          )}
+          <div style={{ marginTop: 16 }}>
+            <Button onClick={submitOkpaySetting}>{t('更新 OKPay 设置')}</Button>
+            <Button
+              theme='light'
+              onClick={previewOkpayRate}
+              style={{ marginLeft: 8 }}
+            >
+              {t('测试已保存汇率')}
+            </Button>
+          </div>
         </Form.Section>
       </Form>
     </Spin>

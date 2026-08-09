@@ -33,6 +33,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { formatLogQuota, formatTokens } from '@/lib/format'
+import { MODEL_PRICE_UNITS } from '@/lib/model-price-unit'
 import { cn } from '@/lib/utils'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { Button } from '@/components/ui/button'
@@ -145,6 +146,8 @@ function BillingBreakdown(props: {
   const { t } = useTranslation()
   const { log, other, isAdmin } = props
   const isPerCall = isPerCallBilling(other.model_price)
+  const isPerSecond =
+    isPerCall && other.model_price_unit === MODEL_PRICE_UNITS.SECOND
   const isClaude = other.claude === true
   const isTieredExpr = other.billing_mode === 'tiered_expr'
   const tieredSummary = getTieredBillingSummary(other)
@@ -179,11 +182,51 @@ function BillingBreakdown(props: {
       })
     }
   } else if (isPerCall) {
-    rows.push({ label: t('Billing Mode'), value: t('Per-call') })
+    rows.push({
+      label: t('Billing Mode'),
+      value: isPerSecond ? t('Per-second') : t('Per-call'),
+    })
     if (other.model_price != null) {
       rows.push({
         label: t('Model Price'),
-        value: fmtPrice(other.model_price),
+        value: `${fmtPrice(other.model_price)}${isPerSecond ? `/${t('second')}` : ''}`,
+      })
+    }
+    const variantStatus = other.billing_variant_price_status
+    if (other.billing_resolution) {
+      rows.push({
+        label:
+          variantStatus === 'disabled'
+            ? t('Requested resolution')
+            : t('Billing resolution'),
+        value: other.billing_resolution,
+      })
+    }
+    if (other.billing_quality) {
+      rows.push({
+        label:
+          variantStatus === 'disabled'
+            ? t('Requested quality')
+            : t('Billing quality'),
+        value: other.billing_quality,
+      })
+    }
+    if (variantStatus) {
+      const statusLabels: Record<typeof variantStatus, string> = {
+        matched: 'Matched specification price',
+        fallback: 'Fallback price',
+        legacy: 'Legacy specification multiplier',
+        disabled: 'Specification pricing disabled',
+      }
+      rows.push({
+        label: t('Specification price status'),
+        value: t(statusLabels[variantStatus]),
+      })
+    }
+    if (isPerSecond && other.seconds != null) {
+      rows.push({
+        label: t('Seconds'),
+        value: String(other.seconds),
       })
     }
   } else {
@@ -426,6 +469,10 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const topupAuditFields =
     isTopup && props.isAdmin && adminInfo
       ? ([
+          adminInfo.trade_no && {
+            label: t('Order Number'),
+            value: adminInfo.trade_no,
+          },
           adminInfo.payment_method && {
             label: t('Order Payment Method'),
             value: adminInfo.payment_method,
@@ -434,21 +481,25 @@ export function DetailsDialog(props: DetailsDialogProps) {
             label: t('Callback Payment Method'),
             value: adminInfo.callback_payment_method,
           },
-          adminInfo.caller_ip && {
-            label: t('Callback Caller IP'),
-            value: adminInfo.caller_ip,
+          (adminInfo.request_ip || adminInfo.caller_ip) && {
+            label: t('Payment Request IP'),
+            value: adminInfo.request_ip || adminInfo.caller_ip,
           },
-          adminInfo.server_ip && {
-            label: t('Server IP'),
-            value: adminInfo.server_ip,
+          adminInfo.balance_before != null && {
+            label: t('Balance Before'),
+            value: formatLogQuota(adminInfo.balance_before),
           },
-          adminInfo.node_name && {
-            label: t('Node Name'),
-            value: adminInfo.node_name,
+          adminInfo.credited_quota != null && {
+            label: t('Credited Quota'),
+            value: formatLogQuota(adminInfo.credited_quota),
           },
-          adminInfo.version && {
-            label: t('System Version'),
-            value: adminInfo.version,
+          adminInfo.balance_after != null && {
+            label: t('Balance After'),
+            value: formatLogQuota(adminInfo.balance_after),
+          },
+          adminInfo.paid_amount_cny != null && {
+            label: t('Actual Payment (CNY)'),
+            value: `¥${Number(adminInfo.paid_amount_cny).toFixed(2)}`,
           },
         ].filter(Boolean) as Array<{ label: string; value: string }>)
       : []
@@ -559,10 +610,15 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 />
               )}
 
-              {(props.log.group || other?.group) && (
+              {(props.log.group_name || props.log.group || other?.group) && (
                 <DetailRow
                   label={t('Group')}
-                  value={props.log.group || other?.group || ''}
+                  value={
+                    props.log.group_name ||
+                    props.log.group ||
+                    other?.group ||
+                    ''
+                  }
                   mono
                 />
               )}
@@ -734,7 +790,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
                     />
                     <span>
                       {t(
-                        'This record was written by a pre-upgrade instance and lacks audit info. Upgrade the instance to record server IP, callback IP, payment method and system version.'
+                        'This record was written before recharge audit details were added, so its order and balance snapshot are unavailable.'
                       )}
                     </span>
                   </div>

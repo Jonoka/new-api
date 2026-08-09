@@ -50,16 +50,7 @@ func resolveClaudePromptCacheKey(claudeRequest dto.ClaudeRequest, info *relaycom
 	if info == nil {
 		return ""
 	}
-	for _, key := range []string{
-		"X-Claude-Code-Session-Id", "x-claude-code-session-id",
-		"Session_id", "session_id",
-		"X-Client-Request-Id", "x-client-request-id",
-	} {
-		if value := strings.TrimSpace(info.RequestHeaders[key]); value != "" {
-			return value
-		}
-	}
-	return ""
+	return resolveStableOpenAISessionHeaderFromMap(info.RequestHeaders)
 }
 
 func mapClaudeEffortToOpenAIReasoningEffort(effort string) string {
@@ -297,19 +288,20 @@ func buildClaudeUsageFromOpenAIUsage(oaiUsage *dto.Usage) *dto.ClaudeUsage {
 	if oaiUsage == nil {
 		return nil
 	}
+	cacheCreationTokens := oaiUsage.GetCacheCreationTokens()
 	cacheCreation5m, cacheCreation1h := NormalizeCacheCreationSplit(
-		oaiUsage.PromptTokensDetails.CachedCreationTokens,
+		cacheCreationTokens,
 		oaiUsage.ClaudeCacheCreation5mTokens,
 		oaiUsage.ClaudeCacheCreation1hTokens,
 	)
 	inputTokens := lo.Max([]int{
-		oaiUsage.PromptTokens - oaiUsage.PromptTokensDetails.CachedTokens - oaiUsage.PromptTokensDetails.CachedCreationTokens,
+		oaiUsage.PromptTokens - oaiUsage.PromptTokensDetails.CachedTokens - cacheCreationTokens,
 		0,
 	})
 	usage := &dto.ClaudeUsage{
 		InputTokens:              inputTokens,
 		OutputTokens:             oaiUsage.CompletionTokens,
-		CacheCreationInputTokens: oaiUsage.PromptTokensDetails.CachedCreationTokens,
+		CacheCreationInputTokens: cacheCreationTokens,
 		CacheReadInputTokens:     oaiUsage.PromptTokensDetails.CachedTokens,
 	}
 	if cacheCreation5m > 0 || cacheCreation1h > 0 {
@@ -911,9 +903,9 @@ func ResponseOpenAI2Gemini(openAIResponse *dto.OpenAITextResponse, info *relayco
 	geminiResponse := &dto.GeminiChatResponse{
 		Candidates: make([]dto.GeminiChatCandidate, 0, len(openAIResponse.Choices)),
 		UsageMetadata: dto.GeminiUsageMetadata{
-			PromptTokenCount:     openAIResponse.PromptTokens,
-			CandidatesTokenCount: openAIResponse.CompletionTokens,
-			TotalTokenCount:      openAIResponse.PromptTokens + openAIResponse.CompletionTokens,
+			PromptTokenCount:     openAIResponse.Usage.PromptTokens,
+			CandidatesTokenCount: openAIResponse.Usage.CompletionTokens,
+			TotalTokenCount:      openAIResponse.Usage.PromptTokens + openAIResponse.Usage.CompletionTokens,
 		},
 	}
 

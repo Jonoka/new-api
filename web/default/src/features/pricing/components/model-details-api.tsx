@@ -45,6 +45,7 @@ import {
   CodeBlock,
   CodeBlockCopyButton,
 } from '@/components/ai-elements/code-block'
+import { getGroupDisplayName } from '../lib/group-names'
 import {
   buildRateLimits,
   buildSupportedParameters,
@@ -53,7 +54,7 @@ import {
 } from '../lib/mock-stats'
 import { replaceModelInPath } from '../lib/model-helpers'
 import { inferApiInfo } from '../lib/model-metadata'
-import type { PricingModel } from '../types'
+import type { GroupNameMap, PricingModel } from '../types'
 
 // ---------------------------------------------------------------------------
 // Code-sample registry
@@ -662,7 +663,10 @@ function ParamRangeCell(props: { param: SupportedParameter }) {
 // Rate-limits table
 // ---------------------------------------------------------------------------
 
-function RateLimitsSection(props: { model: PricingModel }) {
+function RateLimitsSection(props: {
+  model: PricingModel
+  groupNames: GroupNameMap
+}) {
   const { t } = useTranslation()
   const limits = useMemo(() => buildRateLimits(props.model), [props.model])
 
@@ -684,7 +688,9 @@ function RateLimitsSection(props: { model: PricingModel }) {
           <TableBody>
             {limits.map((l) => (
               <TableRow key={l.group} className='hover:bg-muted/20'>
-                <TableCell className='py-2 font-mono'>{l.group}</TableCell>
+                <TableCell className='py-2 font-medium'>
+                  {getGroupDisplayName(l.group, props.groupNames)}
+                </TableCell>
                 <TableCell className='py-2 text-right font-mono'>
                   {formatRateLimit(l.rpm)}
                 </TableCell>
@@ -849,13 +855,14 @@ function AuthSection() {
 export function ModelDetailsApi(props: {
   model: PricingModel
   endpointMap: Record<string, { path?: string; method?: string }>
+  groupNames: GroupNameMap
 }) {
   return (
     <div className='space-y-6'>
       <CodeSamplesSection model={props.model} endpointMap={props.endpointMap} />
       <AuthSection />
       <SupportedParametersSection model={props.model} />
-      <RateLimitsSection model={props.model} />
+      <RateLimitsSection model={props.model} groupNames={props.groupNames} />
     </div>
   )
 }

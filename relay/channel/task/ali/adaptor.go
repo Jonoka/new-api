@@ -357,7 +357,7 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	}
 
 	otherRatios := map[string]float64{
-		"seconds": float64(aliReq.Parameters.Duration),
+		"seconds": float64(min(aliReq.Parameters.Duration, relaycommon.MaxTaskDurationSeconds)),
 	}
 	ratios, err := ProcessAliOtherRatios(aliReq)
 	if err != nil {
@@ -367,6 +367,25 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 		otherRatios[k] = v
 	}
 	return otherRatios
+}
+
+func (a *TaskAdaptor) EstimateTaskBillingSpec(c *gin.Context, info *relaycommon.RelayInfo) channel.TaskBillingSpec {
+	taskReq, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return channel.TaskBillingSpec{}
+	}
+	aliReq, err := a.convertToAliRequest(info, taskReq)
+	if err != nil || aliReq.Parameters == nil {
+		return channel.TaskBillingSpec{}
+	}
+	resolution := taskcommon.NormalizeVideoResolution(aliReq.Parameters.Resolution)
+	if resolution == "" {
+		return channel.TaskBillingSpec{}
+	}
+	return channel.TaskBillingSpec{
+		Dimensions:      map[string]string{"resolution": resolution},
+		LegacyRatioKeys: []string{"resolution"},
+	}
 }
 
 // DoRequest delegates to common helper

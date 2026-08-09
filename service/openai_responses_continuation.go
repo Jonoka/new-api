@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -64,7 +65,11 @@ func resolveOpenAIResponsesContinuationSessionID(info *relaycommon.RelayInfo, re
 	}
 	headers := relaycommon.GetEffectiveHeaderOverride(info)
 	for _, key := range []string{"session_id", "conversation_id"} {
-		if value := strings.TrimSpace(fmt.Sprintf("%v", headers[key])); value != "" {
+		raw, exists := headers[key]
+		if !exists || raw == nil {
+			continue
+		}
+		if value := strings.TrimSpace(fmt.Sprintf("%v", raw)); value != "" {
 			return relaycommon.NormalizeOpenAIBridgeSessionIDForCache(info, value)
 		}
 	}
@@ -140,12 +145,42 @@ func AttachOpenAIResponsesContinuation(info *relaycommon.RelayInfo, req *dto.Ope
 	}
 	if normalizeOpenAIResponsesPreviousResponseID(req.PreviousResponseID) != "" {
 		req.PreviousResponseID = normalizeOpenAIResponsesPreviousResponseID(req.PreviousResponseID)
-		return false
+		return canReplayOpenAIResponsesWithoutPreviousResponse(req.Input)
 	}
 	// 默认不自动注入 previous_response_id。
 	// 大多数 OpenAI 兼容上游只支持 prompt_cache_key / session_id 亲和，
 	// 并不支持 Responses continuation 续链语义。
 	return false
+}
+
+func canReplayOpenAIResponsesWithoutPreviousResponse(input json.RawMessage) bool {
+	if common.GetJsonType(input) != "array" {
+		return false
+	}
+
+	items := gjson.ParseBytes(input)
+	if !items.IsArray() || len(items.Array()) == 0 {
+		return false
+	}
+	hasPriorAssistantOutput := false
+	replayable := true
+	items.ForEach(func(_, item gjson.Result) bool {
+		if !item.IsObject() {
+			replayable = false
+			return false
+		}
+		itemType := strings.TrimSpace(item.Get("type").String())
+		if itemType == "item_reference" || strings.HasSuffix(itemType, "_call_output") {
+			replayable = false
+			return false
+		}
+		if strings.TrimSpace(item.Get("role").String()) == "assistant" ||
+			itemType == "function_call" || itemType == "custom_tool_call" {
+			hasPriorAssistantOutput = true
+		}
+		return true
+	})
+	return replayable && hasPriorAssistantOutput
 }
 
 func DropOpenAIResponsesPreviousResponseID(req *dto.OpenAIResponsesRequest) {
@@ -174,6 +209,158 @@ func RemoveOpenAIResponsesPreviousResponseIDFromJSON(data []byte) []byte {
 		}
 	}
 	return updated
+}
+
+// NormalizeOpenAIResponsesInputHistoryForUpstream 清理无状态历史中无法跨上游携带的输出元数据。
+func NormalizeOpenAIResponsesInputHistoryForUpstream(req *dto.OpenAIResponsesRequest) (int, error) {
+	if req == nil || len(req.Input) == 0 || common.GetJsonType(req.Input) != "array" {
+		return 0, nil
+	}
+
+	var items []json.RawMessage
+	if err := common.Unmarshal(req.Input, &items); err != nil {
+		return 0, fmt.Errorf("invalid Responses input array: %w", err)
+	}
+
+	normalized := 0
+	for index, rawItem := range items {
+		if common.GetJsonType(rawItem) != "object" {
+			continue
+		}
+
+		var item map[string]json.RawMessage
+		if err := common.Unmarshal(rawItem, &item); err != nil {
+			return 0, fmt.Errorf("invalid Responses input item %d: %w", index, err)
+		}
+		messageItem := isOpenAIResponsesMessageHistoryItem(item)
+		if !messageItem && !isOpenAIResponsesPortableToolHistoryItem(item) {
+			continue
+		}
+
+		changed := false
+		for _, field := range []string{"id", "status", "namespace"} {
+			if _, exists := item[field]; !exists {
+				continue
+			}
+			delete(item, field)
+			changed = true
+		}
+		if messageItem {
+			contentChanged, err := normalizeOpenAIResponsesMessageHistoryContent(item)
+			if err != nil {
+				return 0, fmt.Errorf("normalize Responses message item %d: %w", index, err)
+			}
+			changed = changed || contentChanged
+		}
+		if !changed {
+			continue
+		}
+
+		updated, err := common.Marshal(item)
+		if err != nil {
+			return 0, fmt.Errorf("marshal normalized Responses input item %d: %w", index, err)
+		}
+		items[index] = updated
+		normalized++
+	}
+	if normalized == 0 {
+		return 0, nil
+	}
+
+	updatedInput, err := common.Marshal(items)
+	if err != nil {
+		return 0, fmt.Errorf("marshal normalized Responses input: %w", err)
+	}
+	req.Input = updatedInput
+	return normalized, nil
+}
+
+func isOpenAIResponsesMessageHistoryItem(item map[string]json.RawMessage) bool {
+	itemType := openAIResponsesHistoryString(item, "type")
+	return itemType == "message" || (itemType == "" && openAIResponsesHistoryString(item, "role") != "")
+}
+
+func isOpenAIResponsesPortableToolHistoryItem(item map[string]json.RawMessage) bool {
+	switch openAIResponsesHistoryString(item, "type") {
+	case "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeOpenAIResponsesMessageHistoryContent(item map[string]json.RawMessage) (bool, error) {
+	rawContent, exists := item["content"]
+	if !exists || common.GetJsonType(rawContent) != "array" {
+		return false, nil
+	}
+
+	var parts []json.RawMessage
+	if err := common.Unmarshal(rawContent, &parts); err != nil {
+		return false, err
+	}
+
+	changed := false
+	for index, rawPart := range parts {
+		if common.GetJsonType(rawPart) != "object" {
+			continue
+		}
+		var part map[string]json.RawMessage
+		if err := common.Unmarshal(rawPart, &part); err != nil {
+			return false, err
+		}
+
+		partType := openAIResponsesHistoryString(part, "type")
+		textField := ""
+		switch partType {
+		case "output_text":
+			textField = "text"
+		case "refusal":
+			textField = "refusal"
+		default:
+			continue
+		}
+		text, exists := part[textField]
+		if !exists || common.GetJsonType(text) != "string" {
+			continue
+		}
+		if len(part) == 2 {
+			continue
+		}
+
+		normalizedPart := map[string]json.RawMessage{
+			"type":    part["type"],
+			textField: text,
+		}
+		updated, err := common.Marshal(normalizedPart)
+		if err != nil {
+			return false, fmt.Errorf("marshal normalized content item %d: %w", index, err)
+		}
+		parts[index] = updated
+		changed = true
+	}
+	if !changed {
+		return false, nil
+	}
+
+	updatedContent, err := common.Marshal(parts)
+	if err != nil {
+		return false, fmt.Errorf("marshal normalized message content: %w", err)
+	}
+	item["content"] = updatedContent
+	return true, nil
+}
+
+func openAIResponsesHistoryString(item map[string]json.RawMessage, field string) string {
+	raw, exists := item[field]
+	if !exists || common.GetJsonType(raw) != "string" {
+		return ""
+	}
+	var value string
+	if err := common.Unmarshal(raw, &value); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(value)
 }
 
 func RemoveIncompleteOpenAIResponsesReasoningHistoryFromJSON(data []byte) ([]byte, bool) {
@@ -296,12 +483,16 @@ func expandOpenAIResponsesInputToolCallStart(items []map[string]any, start int) 
 }
 
 func IsOpenAIResponsesPreviousResponseRetryable(statusCode int, message string) bool {
-	if statusCode != 400 && statusCode != 404 {
+	if statusCode != 400 && statusCode != 404 && statusCode != 409 {
 		return false
 	}
 	lower := strings.ToLower(strings.TrimSpace(message))
 	if lower == "" {
 		return false
+	}
+	if statusCode == 409 && strings.Contains(lower, "compact continuation") &&
+		(strings.Contains(lower, "unknown") || strings.Contains(lower, "expired")) {
+		return true
 	}
 	if strings.Contains(lower, "previous_response_not_found") ||
 		(strings.Contains(lower, "previous response") && strings.Contains(lower, "not found")) {

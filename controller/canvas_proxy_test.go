@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -121,16 +122,70 @@ func TestBuildCanvasImageTaskResponsePreservesStructuredFailure(t *testing.T) {
 	require.Equal(t, "lite_pool_exhausted", errorPayload["code"])
 }
 
+func TestBuildAPIImageTaskResponseReturnsRegularContentURLs(t *testing.T) {
+	task := &model.Task{
+		TaskID:   "task_api",
+		Status:   model.TaskStatusSuccess,
+		Progress: "100%",
+		Data:     json.RawMessage(`{"data":[{"b64_json":"abc"}]}`),
+	}
+
+	response := buildAPIImageTaskResponse(task)
+
+	result, ok := response["result"].(gin.H)
+	require.True(t, ok)
+	encoded, err := json.Marshal(result)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"data":[{"url":"/v1/images/tasks/task_api/content/0"}]}`, string(encoded))
+}
+
+func TestBuildAPIImageTaskResponsePrefersStableContentURLWhenBase64Exists(t *testing.T) {
+	task := &model.Task{
+		TaskID:   "task_api_with_cdn",
+		Status:   model.TaskStatusSuccess,
+		Progress: "100%",
+		Data:     json.RawMessage(`{"data":[{"url":"https://cdn.example.com/image.png","b64_json":"abc"}]}`),
+	}
+
+	response := buildAPIImageTaskResponse(task)
+
+	result, ok := response["result"].(gin.H)
+	require.True(t, ok)
+	encoded, err := json.Marshal(result)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"data":[{"url":"/v1/images/tasks/task_api_with_cdn/content/0"}]}`, string(encoded))
+}
+
+func TestBuildAPIImageTaskResponseMarksExpiredData(t *testing.T) {
+	previous := common.GetImageTaskDataRetentionHours()
+	common.SetImageTaskDataRetentionHours(1)
+	t.Cleanup(func() { common.SetImageTaskDataRetentionHours(previous) })
+
+	task := &model.Task{
+		TaskID:     "task_expired",
+		Status:     model.TaskStatusSuccess,
+		Progress:   "100%",
+		FinishTime: time.Now().Add(-2 * time.Hour).Unix(),
+		Data:       json.RawMessage(`{"data":[{"b64_json":"abc"}]}`),
+	}
+
+	response := buildAPIImageTaskResponse(task)
+	require.Equal(t, true, response["result_expired"])
+	require.NotContains(t, response, "result")
+	require.Equal(t, task.FinishTime+3600, response["expires_at"])
+}
+
 func TestCanvasImageTaskContentReturnsStoredBase64Image(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	setupCanvasImageTaskTestDB(t)
-	imageBytes := []byte("fake image bytes")
+	imageBytes := testPNGImageBytes
 
 	require.NoError(t, (&model.Task{
-		TaskID: "task_image",
-		UserId: 1,
-		Status: model.TaskStatusSuccess,
-		Data:   json.RawMessage(`{"data":[{"b64_json":"` + base64.StdEncoding.EncodeToString(imageBytes) + `"}]}`),
+		TaskID:   "task_image",
+		Platform: constant.TaskPlatformCanvasImage,
+		UserId:   1,
+		Status:   model.TaskStatusSuccess,
+		Data:     json.RawMessage(`{"data":[{"b64_json":"` + base64.StdEncoding.EncodeToString(imageBytes) + `"}]}`),
 	}).Insert())
 
 	recorder := httptest.NewRecorder()
@@ -146,6 +201,34 @@ func TestCanvasImageTaskContentReturnsStoredBase64Image(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Equal(t, "image/png", recorder.Header().Get("Content-Type"))
 	require.Equal(t, imageBytes, recorder.Body.Bytes())
+}
+
+func TestImageTaskContentReturnsGoneAfterRetentionExpires(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupCanvasImageTaskTestDB(t)
+	previous := common.GetImageTaskDataRetentionHours()
+	common.SetImageTaskDataRetentionHours(1)
+	t.Cleanup(func() { common.SetImageTaskDataRetentionHours(previous) })
+
+	require.NoError(t, (&model.Task{
+		TaskID:     "task_expired_content",
+		Platform:   constant.TaskPlatformImage,
+		UserId:     1,
+		Status:     model.TaskStatusSuccess,
+		FinishTime: time.Now().Add(-2 * time.Hour).Unix(),
+		Data:       json.RawMessage(`{"data":[{"b64_json":"aW1hZ2U="}]}`),
+	}).Insert())
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("id", 1)
+	ctx.Params = gin.Params{{Key: "task_id", Value: "task_expired_content"}, {Key: "index", Value: "0"}}
+	ctx.Request = httptest.NewRequest("GET", "/v1/images/tasks/task_expired_content/content/0", nil)
+
+	ImageTaskContent(ctx)
+
+	require.Equal(t, http.StatusGone, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "image task data has expired")
 }
 
 func TestCanvasImageTaskFetchRejectsOtherUsersTask(t *testing.T) {
@@ -169,6 +252,52 @@ func TestCanvasImageTaskFetchRejectsOtherUsersTask(t *testing.T) {
 
 	require.Equal(t, http.StatusNotFound, recorder.Code)
 	require.Contains(t, recorder.Body.String(), "task not found")
+}
+
+func TestImageTaskFetchRejectsNonImageTask(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupCanvasImageTaskTestDB(t)
+
+	require.NoError(t, (&model.Task{
+		TaskID:   "task_video",
+		Platform: constant.TaskPlatform("video"),
+		UserId:   1,
+		Status:   model.TaskStatusSuccess,
+	}).Insert())
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("id", 1)
+	ctx.Params = gin.Params{{Key: "task_id", Value: "task_video"}}
+	ctx.Request = httptest.NewRequest("GET", "/v1/images/tasks/task_video", nil)
+
+	ImageTaskFetch(ctx)
+
+	require.Equal(t, http.StatusNotFound, recorder.Code)
+}
+
+func TestImageTaskFetchAcceptsGenericImageTask(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupCanvasImageTaskTestDB(t)
+
+	require.NoError(t, (&model.Task{
+		TaskID:   "task_api_image",
+		Platform: constant.TaskPlatformImage,
+		UserId:   1,
+		Status:   model.TaskStatusQueued,
+		Progress: "0%",
+	}).Insert())
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("id", 1)
+	ctx.Params = gin.Params{{Key: "task_id", Value: "task_api_image"}}
+	ctx.Request = httptest.NewRequest("GET", "/v1/images/tasks/task_api_image", nil)
+
+	ImageTaskFetch(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Contains(t, recorder.Body.String(), `"task_id":"task_api_image"`)
 }
 
 func TestFinishCanvasImageTaskStoresSuccessfulRelayResponse(t *testing.T) {
@@ -266,11 +395,40 @@ func TestFinishCanvasImageTaskRefundsImmediateTerminalFailure(t *testing.T) {
 	require.NoError(t, task.Insert())
 	relayInfo := &relaycommon.RelayInfo{Billing: spy, ChannelMeta: &relaycommon.ChannelMeta{ChannelOtherSettings: dto.ChannelOtherSettings{ImageAsyncMode: dto.ImageAsyncModeTasksEndpoint}}}
 	finishCanvasImageTask(task, 34, recorder, relayInfo)
+
 	reloaded, exists, err := model.GetByTaskId(1, task.TaskID)
 	require.NoError(t, err)
 	require.True(t, exists)
 	require.EqualValues(t, model.TaskStatusFailure, reloaded.Status)
 	require.Equal(t, 1, spy.refunds)
+}
+
+func TestFinishCanvasImageTaskDoesNotOverwriteTimedOutTask(t *testing.T) {
+	setupCanvasImageTaskTestDB(t)
+	task := &model.Task{TaskID: "task_timeout_race", UserId: 1, Status: model.TaskStatusInProgress, Progress: "10%"}
+	require.NoError(t, task.Insert())
+
+	timedOut, exists, err := model.GetByTaskId(1, task.TaskID)
+	require.NoError(t, err)
+	require.True(t, exists)
+	timedOut.Status = model.TaskStatusFailure
+	timedOut.Progress = "100%"
+	timedOut.FailReason = "image generation timed out"
+	won, err := timedOut.UpdateWithStatus(model.TaskStatusInProgress)
+	require.NoError(t, err)
+	require.True(t, won)
+
+	recorder := httptest.NewRecorder()
+	recorder.WriteHeader(http.StatusOK)
+	_, err = recorder.WriteString(`{"data":[{"url":"https://example.com/late.png"}]}`)
+	require.NoError(t, err)
+	finishCanvasImageTask(task, 12, recorder, nil)
+
+	reloaded, exists, err := model.GetByTaskId(1, task.TaskID)
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.EqualValues(t, model.TaskStatusFailure, reloaded.Status)
+	require.Equal(t, "image generation timed out", reloaded.FailReason)
 }
 
 func TestExecuteCanvasImageRelayRoutesEditTasks(t *testing.T) {
@@ -342,10 +500,105 @@ func TestRelayImageTaskResponseSignsCanvasImageContentURL(t *testing.T) {
 	require.Contains(t, urlValue, "token=")
 }
 
+func TestExecuteAPIImageRelayUsesRegularRequestPath(t *testing.T) {
+	relayReq := canvasImageTaskRelayRequest{
+		Action:      canvasImageTaskActionGenerations,
+		RelayPrefix: apiImageTaskRelayPrefix,
+		Body:        []byte(`{"model":"gpt-image-1","prompt":"test"}`),
+		Header:      http.Header{"Content-Type": []string{"application/json"}},
+	}
+
+	recorder, _, _ := executeCanvasImageRelayWithHandler(relayReq, func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"path": c.Request.URL.Path})
+	})
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.JSONEq(t, `{"path":"/v1/images/generations"}`, recorder.Body.String())
+}
+
+func TestExecuteCanvasImageRelayPropagatesTaskCancellation(t *testing.T) {
+	requestContext, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	relayReq := canvasImageTaskRelayRequest{
+		Action:  canvasImageTaskActionGenerations,
+		Body:    []byte(`{"model":"grok-imagine-image","prompt":"test"}`),
+		Context: requestContext,
+	}
+	contextCanceled := false
+
+	executeCanvasImageRelayWithHandler(relayReq, func(c *gin.Context) {
+		contextCanceled = errors.Is(c.Request.Context().Err(), context.Canceled)
+		c.Status(http.StatusGatewayTimeout)
+	})
+
+	require.True(t, contextCanceled)
+}
+
+func TestRunCanvasImageTaskRelayMarksBlockedTaskFailedAfterTimeout(t *testing.T) {
+	setupCanvasImageTaskTestDB(t)
+	task := &model.Task{
+		TaskID:   "task_blocked_timeout",
+		UserId:   1,
+		Platform: constant.TaskPlatformImage,
+		Status:   model.TaskStatusQueued,
+		Progress: "0%",
+	}
+	require.NoError(t, task.Insert())
+
+	relayReq := canvasImageTaskRelayRequest{
+		TaskID: task.TaskID,
+		Keys: map[string]any{
+			string(constant.ContextKeyUserId): 1,
+		},
+	}
+	runCanvasImageTaskRelayWithExecutor(relayReq, 20*time.Millisecond, func(req canvasImageTaskRelayRequest) (*httptest.ResponseRecorder, int, *relaycommon.RelayInfo) {
+		<-req.Context.Done()
+		recorder := httptest.NewRecorder()
+		recorder.WriteHeader(http.StatusGatewayTimeout)
+		return recorder, 0, nil
+	})
+
+	reloaded, exists, err := model.GetByTaskId(1, task.TaskID)
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.EqualValues(t, model.TaskStatusFailure, reloaded.Status)
+	require.Equal(t, "100%", reloaded.Progress)
+	require.Equal(t, "image generation timed out", reloaded.FailReason)
+	require.NotZero(t, reloaded.FinishTime)
+}
+
 func TestNormalizeCanvasImageTaskActionAcceptsShortEditAction(t *testing.T) {
 	require.Equal(t, canvasImageTaskActionEdits, normalizeCanvasImageTaskAction("edits"))
 	require.Equal(t, canvasImageTaskActionEdits, normalizeCanvasImageTaskAction("images/edits"))
 	require.Equal(t, canvasImageTaskActionGenerations, normalizeCanvasImageTaskAction(""))
+	_, ok := parseImageTaskAction("unsupported")
+	require.False(t, ok)
+}
+
+func TestImageTaskRelayRawQueryDropsControlAction(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("POST", "/v1/images/tasks?action=edits&response_format=b64_json", nil)
+
+	require.Equal(t, "response_format=b64_json", imageTaskRelayRawQuery(ctx))
+}
+
+func TestAPIImageTaskGroupIgnoresUntrustedQueryOverride(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("POST", "/v1/images/tasks?group=untrusted", nil)
+	common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "token-group")
+
+	require.Equal(t, "token-group", imageTaskGroup(ctx, apiImageTaskRelayPrefix))
+	require.Equal(t, "untrusted", imageTaskGroup(ctx, canvasImageTaskRelayPrefix))
+}
+
+func TestImageTaskContentMaxAgeUsesRemainingRetention(t *testing.T) {
+	previous := common.GetImageTaskDataRetentionHours()
+	common.SetImageTaskDataRetentionHours(1)
+	t.Cleanup(func() { common.SetImageTaskDataRetentionHours(previous) })
+
+	task := &model.Task{FinishTime: 1000}
+	require.EqualValues(t, 3000, imageTaskContentMaxAge(task, 1600))
 }
 
 func TestCanvasImageTaskActionFallsBackToEditPath(t *testing.T) {

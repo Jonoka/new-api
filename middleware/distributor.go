@@ -31,6 +31,61 @@ type ModelRequest struct {
 
 const channelConcurrencyContextKey = "channel_concurrency_acquired_id"
 
+func displayDistributorGroupIdentifier(group string, groupNames map[string]string) string {
+	key := strings.TrimSpace(group)
+	if key == "" {
+		return group
+	}
+	if name := strings.TrimSpace(groupNames[key]); name != "" {
+		return name
+	}
+	return group
+}
+
+// groupIdentifierForMessage 只转换面向用户的分组文案，不改变鉴权使用的稳定标识。
+func groupIdentifierForMessage(group string) string {
+	groupNames, err := model.GetGroupDisplayNameMap()
+	if err != nil {
+		groupNames = nil
+	}
+	return displayDistributorGroupIdentifier(group, groupNames)
+}
+
+func displayDistributorGroupList(groups string, groupNames map[string]string) string {
+	parts := strings.Split(groups, ",")
+	for i, group := range parts {
+		parts[i] = displayDistributorGroupIdentifier(strings.TrimSpace(group), groupNames)
+	}
+	return strings.Join(parts, ",")
+}
+
+// formatDistributorGroupForMessage 仅转换错误文案，不改写运行时分组标识。
+func formatDistributorGroupForMessage(usingGroup, selectGroup string, groupNames map[string]string) string {
+	using := strings.TrimSpace(usingGroup)
+	selected := strings.TrimSpace(selectGroup)
+	if using == "auto" {
+		if selected == "" || selected == "auto" {
+			return using
+		}
+		return fmt.Sprintf("auto(%s)", displayDistributorGroupList(selected, groupNames))
+	}
+	if strings.Contains(using, ",") {
+		if selected == "" || selected == using || strings.Contains(selected, ",") {
+			selected = using
+		}
+		return fmt.Sprintf("multi(%s)", displayDistributorGroupList(selected, groupNames))
+	}
+	return displayDistributorGroupIdentifier(usingGroup, groupNames)
+}
+
+func distributorGroupForMessage(usingGroup, selectGroup string) string {
+	groupNames, err := model.GetGroupDisplayNameMap()
+	if err != nil {
+		groupNames = nil
+	}
+	return formatDistributorGroupForMessage(usingGroup, selectGroup, groupNames)
+}
+
 func Distribute() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		var channel *model.Channel
@@ -151,6 +206,7 @@ func Distribute() func(c *gin.Context) {
 									}
 									selectGroup = g
 									common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
+									common.SetContextKey(c, constant.ContextKeyUsingGroup, g)
 									channel = preferred
 									service.MarkChannelAffinityUsed(c, g, preferred.Id)
 									break
@@ -177,12 +233,7 @@ func Distribute() func(c *gin.Context) {
 						Retry:      common.GetPointer(0),
 					})
 					if err != nil {
-						showGroup := usingGroup
-						if usingGroup == "auto" {
-							showGroup = fmt.Sprintf("auto(%s)", selectGroup)
-						} else if strings.Contains(usingGroup, ",") {
-							showGroup = fmt.Sprintf("multi(%s)", selectGroup)
-						}
+						showGroup := distributorGroupForMessage(usingGroup, selectGroup)
 						message := i18n.T(c, i18n.MsgDistributorGetChannelFailed, map[string]any{"Group": showGroup, "Model": modelRequest.Model, "Error": err.Error()})
 						// 如果错误，但是渠道不为空，说明是数据库一致性问题
 						//if channel != nil {
@@ -193,9 +244,13 @@ func Distribute() func(c *gin.Context) {
 						return
 					}
 					if channel == nil {
-						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+						showGroup := distributorGroupForMessage(usingGroup, selectGroup)
+						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": showGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 						return
 					}
+				}
+				if selectGroup != "" {
+					common.SetContextKey(c, constant.ContextKeyUsingGroup, selectGroup)
 				}
 			}
 		}
@@ -221,18 +276,14 @@ func Distribute() func(c *gin.Context) {
 				Retry:      common.GetPointer(0),
 			})
 			if err != nil {
-				showGroup := usingGroup
-				if usingGroup == "auto" {
-					showGroup = fmt.Sprintf("auto(%s)", selectGroup)
-				} else if strings.Contains(usingGroup, ",") {
-					showGroup = fmt.Sprintf("multi(%s)", selectGroup)
-				}
+				showGroup := distributorGroupForMessage(usingGroup, selectGroup)
 				message := i18n.T(c, i18n.MsgDistributorGetChannelFailed, map[string]any{"Group": showGroup, "Model": modelRequest.Model, "Error": err.Error()})
 				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, message, types.ErrorCodeModelNotFound)
 				return
 			}
 			if channel == nil {
-				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+				showGroup := distributorGroupForMessage(usingGroup, selectGroup)
+				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": showGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 				return
 			}
 			newAPIError = SetupContextForSelectedChannel(c, channel, modelRequest.Model)

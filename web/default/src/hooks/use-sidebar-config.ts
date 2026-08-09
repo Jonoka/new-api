@@ -20,6 +20,12 @@ import { useMemo } from 'react'
 import { useAuthStore } from '@/stores/auth-store'
 import { ROLE } from '@/lib/roles'
 import {
+  DEFAULT_CANVAS_APP_ORIGIN,
+  DEFAULT_CANVAS_ICON,
+  normalizeCanvasIcon,
+  normalizeCanvasOrigin,
+} from '@/lib/canvas-settings'
+import {
   getSidebarCustomModuleKey,
   parseCustomNavItems,
 } from '@/lib/custom-nav'
@@ -28,7 +34,7 @@ import type { NavGroup, NavItem } from '@/components/layout/types'
 
 type SidebarSectionConfig = {
   enabled: boolean
-  [key: string]: boolean
+  [key: string]: boolean | string
 }
 
 type SidebarModulesAdminConfig = Record<string, SidebarSectionConfig>
@@ -47,6 +53,8 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     playground: true,
     canvas: true,
     chat: true,
+    canvasOrigin: DEFAULT_CANVAS_APP_ORIGIN,
+    canvasIcon: DEFAULT_CANVAS_ICON,
   },
   console: {
     enabled: true,
@@ -67,6 +75,7 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
   admin: {
     enabled: true,
     channel: true,
+    channel_observability: true,
     models: true,
     redemption: true,
     user: true,
@@ -74,6 +83,8 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     setting: true,
     subscription: true,
     invoice_admin: true,
+    notification_center: true,
+    extension_admin: true,
     game: true,
   },
 }
@@ -124,6 +135,10 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/affiliate': { section: 'personal', module: 'affiliate' },
   '/profile': { section: 'personal', module: 'personal' },
   '/channels': { section: 'admin', module: 'channel' },
+  '/channel-observability': {
+    section: 'admin',
+    module: 'channel_observability',
+  },
   '/models': { section: 'admin', module: 'models' },
   '/models/metadata': { section: 'admin', module: 'models' },
   '/models/deployments': { section: 'admin', module: 'models' },
@@ -131,6 +146,11 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/redemption-codes': { section: 'admin', module: 'redemption' },
   '/subscriptions': { section: 'admin', module: 'subscription' },
   '/invoice-management': { section: 'admin', module: 'invoice_admin' },
+  '/notification-center': {
+    section: 'admin',
+    module: 'notification_center',
+  },
+  '/extensions': { section: 'admin', module: 'extension_admin' },
   '/system-settings/billing/affiliate': {
     section: 'admin',
     module: 'affiliate_admin',
@@ -157,6 +177,10 @@ function parseSidebarConfig(
   try {
     const parsed = JSON.parse(value) as SidebarModulesAdminConfig & {
       customItems?: unknown
+    }
+    if (parsed.chat) {
+      parsed.chat.canvasOrigin = normalizeCanvasOrigin(parsed.chat.canvasOrigin)
+      parsed.chat.canvasIcon = normalizeCanvasIcon(parsed.chat.canvasIcon)
     }
     const merged = mergeWithDefaultSidebarModules(parsed)
     const customItems = parseCustomNavItems(parsed.customItems)
@@ -188,6 +212,14 @@ function parseUserSidebarConfig(
   try {
     const parsed = JSON.parse(value) as SidebarModulesAdminConfig
     if (!parsed || typeof parsed !== 'object') return null
+    Object.values(parsed).forEach((section) => {
+      if (!section || typeof section !== 'object') return
+      Object.entries(section).forEach(([key, value]) => {
+        if (key !== 'enabled' && typeof value !== 'boolean') {
+          delete section[key]
+        }
+      })
+    })
     return parsed
   } catch {
     return null
@@ -295,15 +327,18 @@ function isNavItemVisible(
   // Handle collapsible type (with sub-items)
   if ('items' in item && item.items) {
     // If has sub-items, show this collapsible item if at least one sub-item is visible
-    return item.items.some((subItem) =>
-      isModuleEnabled(
-        subItem.url as string,
-        adminConfig,
-        userConfig,
-        permissionConfig,
-        isAdmin
+		return item.items.some((subItem) => {
+      const configUrls = subItem.configUrls ?? [subItem.url]
+      return configUrls.some((url) =>
+        isModuleEnabled(
+          url as string,
+          adminConfig,
+          userConfig,
+					permissionConfig,
+					isAdmin
+				)
       )
-    )
+    })
   }
 
   return true
@@ -323,15 +358,18 @@ function filterNavItems(
     .map((item) => {
       // If collapsible item, also filter its sub-items
       if ('items' in item && item.items) {
-        const filteredSubItems = item.items.filter((subItem) =>
-          isModuleEnabled(
-            subItem.url as string,
-            adminConfig,
-            userConfig,
-            permissionConfig,
-            isAdmin
+			const filteredSubItems = item.items.filter((subItem) => {
+          const configUrls = subItem.configUrls ?? [subItem.url]
+          return configUrls.some((url) =>
+            isModuleEnabled(
+              url as string,
+              adminConfig,
+              userConfig,
+						permissionConfig,
+						isAdmin
+					)
           )
-        )
+        })
 
         return {
           ...item,

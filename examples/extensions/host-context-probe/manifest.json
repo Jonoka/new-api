@@ -1,0 +1,33 @@
+{
+  "id": "host-context-probe",
+  "name": "宿主上下文探针",
+  "version": "0.1.0",
+  "description": "轻量测试模块，用于验证扩展模块上传、启用、侧边栏入口、iframe 代理和宿主用户上下文请求头。",
+  "runtime": {
+    "type": "static",
+    "static_dir": "public",
+    "health_path": "/"
+  },
+  "ui": {
+    "nav": [
+      {
+        "title": "上下文探针",
+        "page": "index",
+        "icon": "Puzzle",
+        "section": "admin",
+        "order": 110
+      }
+    ],
+    "pages": [
+      {
+        "key": "index",
+        "title": "上下文探针",
+        "path": "/",
+        "embed": true
+      }
+    ]
+  },
+  "permissions": {
+    "roles": ["root"]
+  }
+}

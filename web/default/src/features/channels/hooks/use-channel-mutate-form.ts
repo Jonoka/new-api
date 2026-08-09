@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useMutation } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import type { GroupOption } from '@/lib/group-options'
 import { createChannel, updateChannel } from '../api'
 import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
 import {
@@ -32,6 +33,7 @@ type UseChannelMutateFormParams = {
   currentRow?: Channel | null
   isEditing: boolean
   isMultiKeyChannel: boolean
+  groupOptions: readonly GroupOption[]
   onSuccess: () => void
 }
 
@@ -68,7 +70,8 @@ export function useChannelMutateForm(props: UseChannelMutateFormParams) {
       if (props.isEditing && props.currentRow) {
         const payload = transformFormDataToUpdatePayload(
           data,
-          props.currentRow.id
+          props.currentRow.id,
+          props.groupOptions
         )
         const payloadWithKeyMode =
           props.isMultiKeyChannel && data.key_mode
@@ -88,7 +91,7 @@ export function useChannelMutateForm(props: UseChannelMutateFormParams) {
         return SUCCESS_MESSAGES.UPDATED
       }
 
-      const payload = transformFormDataToCreatePayload(data)
+      const payload = transformFormDataToCreatePayload(data, props.groupOptions)
       const response = await createChannel(payload)
       if (!response.success) {
         throw new Error(response.message || t(ERROR_MESSAGES.CREATE_FAILED))

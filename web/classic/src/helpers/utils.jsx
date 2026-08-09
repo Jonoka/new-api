@@ -18,7 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { Toast, Pagination } from '@douyinfe/semi-ui';
-import { toastConstants, BILLING_PRICING_VARS, BILLING_VAR_REGEX } from '../constants';
+import {
+  toastConstants,
+  BILLING_PRICING_VARS,
+  BILLING_VAR_REGEX,
+} from '../constants';
 import React from 'react';
 import { toast } from 'react-toastify';
 import {
@@ -27,6 +31,14 @@ import {
 } from '../constants/playground.constants';
 import { TABLE_COMPACT_MODES_KEY } from '../constants';
 import { MOBILE_BREAKPOINT } from '../hooks/common/useIsMobile';
+import {
+  isModelPriceUnitSecond,
+  normalizeModelPriceUnit,
+} from './modelPriceUnit';
+import {
+  getModelPriceVariantRange,
+  getModelPriceVariantRuleLabel,
+} from './modelPriceVariants';
 
 const HTMLToastContent = ({ htmlContent }) => {
   return <div dangerouslySetInnerHTML={{ __html: htmlContent }} />;
@@ -624,7 +636,9 @@ export const calculateModelPrice = ({
   };
 
   const stripTrailingZeros = (value) =>
-    String(value).replace(/(\.\d*?[1-9])0+$/u, '$1').replace(/\.0+$/u, '');
+    String(value)
+      .replace(/(\.\d*?[1-9])0+$/u, '$1')
+      .replace(/\.0+$/u, '');
 
   const getOriginalPriceSymbol = () => {
     if (quotaDisplayType === 'CNY') {
@@ -658,10 +672,7 @@ export const calculateModelPrice = ({
     // 在模型可用分组中选择倍率最小的分组，若无则使用 1
     let minRatio = Number.POSITIVE_INFINITY;
     const displayGroups = getDisplayGroups(record.enable_groups);
-    if (
-      Array.isArray(displayGroups) &&
-      displayGroups.length > 0
-    ) {
+    if (Array.isArray(displayGroups) && displayGroups.length > 0) {
       displayGroups.forEach((g) => {
         const r = groupRatio[g];
         if (r !== undefined && r < minRatio) {
@@ -794,7 +805,9 @@ export const calculateModelPrice = ({
         : null,
       originalCachePrice,
       createCachePrice: hasRatioValue(record.create_cache_ratio)
-        ? formatTokenPrice(inputRatioPriceUSD * Number(record.create_cache_ratio))
+        ? formatTokenPrice(
+            inputRatioPriceUSD * Number(record.create_cache_ratio),
+          )
         : null,
       originalCreateCachePrice,
       imagePrice: hasRatioValue(record.image_ratio)
@@ -829,13 +842,42 @@ export const calculateModelPrice = ({
   }
 
   if (record.quota_type === 1) {
-    // 按次计费
+    // 固定价格计费，缺省按次；仅 second 按秒展示。
     const priceUSD = parseFloat(record.model_price) * usedGroupRatio;
     const displayVal = displayPrice(priceUSD);
+    const variantRange = getModelPriceVariantRange(
+      record.model_price,
+      record.model_price_variants,
+    );
+    const variantPrices = variantRange
+      ? variantRange.rules.map((rule) => ({
+          ...rule,
+          displayPrice: displayPrice(rule.price * usedGroupRatio),
+          originalPrice: formatUsdOriginalPrice(rule.price),
+        }))
+      : [];
 
     return {
       price: displayVal,
-      originalPrice: formatUsdOriginalPrice(parseFloat(record.model_price) || 0),
+      originalPrice: formatUsdOriginalPrice(
+        parseFloat(record.model_price) || 0,
+      ),
+      modelPriceUnit: normalizeModelPriceUnit(record.model_price_unit),
+      hasPriceVariants: variantPrices.length > 0,
+      modelPriceVariants: variantRange?.config || null,
+      variantPrices,
+      variantMinPrice: variantRange
+        ? displayPrice(variantRange.minPrice * usedGroupRatio)
+        : null,
+      variantMaxPrice: variantRange
+        ? displayPrice(variantRange.maxPrice * usedGroupRatio)
+        : null,
+      originalVariantMinPrice: variantRange
+        ? formatUsdOriginalPrice(variantRange.minPrice)
+        : null,
+      originalVariantMaxPrice: variantRange
+        ? formatUsdOriginalPrice(variantRange.maxPrice)
+        : null,
       isPerToken: false,
       isTokensDisplay: false,
       usedGroup,
@@ -857,6 +899,7 @@ export const getModelPriceItems = (
   priceData,
   t,
   quotaDisplayType = 'USD',
+  { includeVariantRules = false } = {},
 ) => {
   if (priceData.isDynamicPricing) {
     return [
@@ -972,7 +1015,59 @@ export const getModelPriceItems = (
         suffix: unitSuffix,
         originalValue: priceData.originalAudioOutputPrice,
       },
-    ].filter((item) => item.value !== null && item.value !== undefined && item.value !== '');
+    ].filter(
+      (item) =>
+        item.value !== null && item.value !== undefined && item.value !== '',
+    );
+  }
+
+  const unitSuffix = ` / ${t(
+    isModelPriceUnitSecond(priceData.modelPriceUnit) ? '秒' : '次',
+  )}`;
+
+  if (priceData.hasPriceVariants) {
+    if (includeVariantRules) {
+      return [
+        ...priceData.variantPrices.map((rule, index) => ({
+          key: `variant-${index}-${rule.resolution || ''}-${rule.quality || ''}`,
+          label: getModelPriceVariantRuleLabel(
+            rule,
+            priceData.modelPriceVariants,
+            t,
+          ),
+          value: rule.displayPrice,
+          suffix: unitSuffix,
+          originalValue: rule.originalPrice,
+          isVariantRule: true,
+        })),
+        {
+          key: 'fixed-fallback',
+          label: t('未匹配规格（固定价格兜底）'),
+          value: priceData.price,
+          suffix: unitSuffix,
+          originalValue: priceData.originalPrice,
+        },
+      ];
+    }
+
+    const hasRange = priceData.variantMinPrice !== priceData.variantMaxPrice;
+    return [
+      {
+        key: 'fixed-variant-range',
+        label: t('规格价格'),
+        value: hasRange
+          ? `${priceData.variantMinPrice} ~ ${priceData.variantMaxPrice}`
+          : priceData.variantMinPrice,
+        minimumValue: priceData.variantMinPrice,
+        maximumValue: priceData.variantMaxPrice,
+        suffix: unitSuffix,
+        originalValue: hasRange
+          ? `${priceData.originalVariantMinPrice} ~ ${priceData.originalVariantMaxPrice}`
+          : priceData.originalVariantMinPrice,
+        originalMinimumValue: priceData.originalVariantMinPrice,
+        isVariantRange: true,
+      },
+    ];
   }
 
   return [
@@ -980,15 +1075,21 @@ export const getModelPriceItems = (
       key: 'fixed',
       label: t('模型价格'),
       value: priceData.price,
-      suffix: ` / ${t('次')}`,
+      suffix: unitSuffix,
       originalValue: priceData.originalPrice,
     },
-  ].filter((item) => item.value !== null && item.value !== undefined && item.value !== '');
+  ].filter(
+    (item) =>
+      item.value !== null && item.value !== undefined && item.value !== '',
+  );
 };
 
 // 格式化动态计费摘要（用于卡片视图，与 formatPriceInfo 风格统一）
 export const formatDynamicPriceSummary = (billingExpr, t, groupRatio = 1) => {
-  if (!billingExpr) return <span style={{ color: 'var(--semi-color-text-1)' }}>{t('动态计费')}</span>;
+  if (!billingExpr)
+    return (
+      <span style={{ color: 'var(--semi-color-text-1)' }}>{t('动态计费')}</span>
+    );
 
   const quotaDisplayType = localStorage.getItem('quota_display_type') || 'USD';
   let symbol = '$';
@@ -1019,7 +1120,9 @@ export const formatDynamicPriceSummary = (billingExpr, t, groupRatio = 1) => {
 
   const varLabels = BILLING_PRICING_VARS.map((v) => [v.key, v.label]);
 
-  const hasTimeCondition = /\b(?:hour|minute|weekday|month|day)\(/.test(exprBody);
+  const hasTimeCondition = /\b(?:hour|minute|weekday|month|day)\(/.test(
+    exprBody,
+  );
   const hasRequestCondition = /\b(?:param|header)\(/.test(exprBody);
 
   const tags = [];
@@ -1044,35 +1147,35 @@ export const formatDynamicPriceSummary = (billingExpr, t, groupRatio = 1) => {
         </>
       )}
       {(tierCount > 1 || hasTimeCondition || hasRequestCondition) && (
-      <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-        <span
-          style={{
-            display: 'inline-block',
-            padding: '1px 6px',
-            borderRadius: 4,
-            fontSize: 11,
-            background: 'var(--semi-color-warning-light-default)',
-            color: 'var(--semi-color-warning)',
-          }}
-        >
-          {t('动态计费')}
-        </span>
-        {tags.map((tag) => (
+        <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
           <span
-            key={tag}
             style={{
               display: 'inline-block',
               padding: '1px 6px',
               borderRadius: 4,
               fontSize: 11,
-              background: 'var(--semi-color-fill-1)',
-              color: 'var(--semi-color-text-2)',
+              background: 'var(--semi-color-warning-light-default)',
+              color: 'var(--semi-color-warning)',
             }}
           >
-            {tag}
+            {t('动态计费')}
           </span>
-        ))}
-      </span>
+          {tags.map((tag) => (
+            <span
+              key={tag}
+              style={{
+                display: 'inline-block',
+                padding: '1px 6px',
+                borderRadius: 4,
+                fontSize: 11,
+                background: 'var(--semi-color-fill-1)',
+                color: 'var(--semi-color-text-2)',
+              }}
+            >
+              {tag}
+            </span>
+          ))}
+        </span>
       )}
     </>
   );
@@ -1094,8 +1197,17 @@ export const formatPriceInfo = (priceData, t, quotaDisplayType = 'USD') => {
           }}
         >
           <span>
-            {item.label} {item.value}
-            {item.suffix}
+            {item.isVariantRange ? (
+              <>
+                {t('{{price}} 起', { price: item.minimumValue })}
+                {item.suffix}
+              </>
+            ) : (
+              <>
+                {item.label} {item.value}
+                {item.suffix}
+              </>
+            )}
           </span>
           {item.originalValue && quotaDisplayType !== 'TOKENS' && (
             <span
@@ -1105,7 +1217,10 @@ export const formatPriceInfo = (priceData, t, quotaDisplayType = 'USD') => {
                 textDecoration: 'line-through',
               }}
             >
-              {t('原价')}：{item.originalValue}
+              {t('原价')}：
+              {item.isVariantRange
+                ? t('{{price}} 起', { price: item.originalMinimumValue })
+                : item.originalValue}
               {item.suffix}
             </span>
           )}

@@ -1,0 +1,51 @@
+{
+  "id": "channel-quality",
+  "name": "渠道可观测性中心",
+  "version": "0.4.1",
+  "description": "面向运维的分组、模型、渠道多时间窗稳定性与失败链路分析中心。",
+  "host": {
+    "min": "v1.0.0-rc.10.1.10.204"
+  },
+  "runtime": {
+    "type": "static",
+    "static_dir": "public",
+    "health_path": "/compat.html"
+  },
+  "ui": {
+    "nav": [
+      {
+        "title": "渠道可观测性",
+        "page": "index",
+        "icon": "Activity",
+        "section": "admin",
+        "order": 90
+      }
+    ],
+    "pages": [
+      {
+        "key": "index",
+        "title": "渠道可观测性中心",
+        "path": "/compat.html",
+        "embed": true,
+        "render": {
+          "type": "native",
+          "sdk": "v1",
+          "targets": {
+            "default": {
+              "entry": "/native/default.mjs",
+              "styles": ["/native/default.css"]
+            },
+            "classic": {
+              "entry": "/native/classic.mjs",
+              "styles": ["/native/classic.css"]
+            }
+          }
+        }
+      }
+    ]
+  },
+  "permissions": {
+    "roles": ["admin"],
+    "capabilities": ["ui.native"]
+  }
+}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -29,33 +30,56 @@ import (
 const (
 	canvasImageTaskActionGenerations = "images/generations"
 	canvasImageTaskActionEdits       = "images/edits"
+	canvasImageTaskRelayPrefix       = "/canvas/v1"
+	apiImageTaskRelayPrefix          = "/v1"
 )
 
 var updateCanvasImageTask = func(task *model.Task) error { return task.Update() }
 
 type canvasImageTaskRelayRequest struct {
-	TaskID   string
-	Action   string
-	Body     []byte
-	Header   http.Header
-	RawQuery string
-	Keys     map[string]any
+	TaskID      string
+	Action      string
+	RelayPrefix string
+	Body        []byte
+	Header      http.Header
+	RawQuery    string
+	Keys        map[string]any
+	Context     context.Context
 }
 
 func CanvasImageTaskSubmit(c *gin.Context) {
+	submitImageTask(
+		c,
+		normalizeCanvasImageTaskAction(c.Query("action")),
+		constant.TaskPlatformCanvasImage,
+		canvasImageTaskRelayPrefix,
+	)
+}
+
+// ImageTaskSubmit 为令牌 API 提供与 Canvas 相同的异步图片任务能力。
+func ImageTaskSubmit(c *gin.Context) {
+	action, ok := parseImageTaskAction(c.Query("action"))
+	if !ok {
+		abortCanvasRequest(c, http.StatusBadRequest, "unsupported image task action")
+		return
+	}
+	submitImageTask(c, action, constant.TaskPlatformImage, apiImageTaskRelayPrefix)
+}
+
+func submitImageTask(c *gin.Context, action string, platform constant.TaskPlatform, relayPrefix string) {
 	body, err := readCanvasImageTaskBody(c)
 	if err != nil {
 		abortCanvasRequest(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	action := canvasImageTaskAction(c)
+	group := imageTaskGroup(c, relayPrefix)
 
 	now := time.Now().Unix()
 	task := &model.Task{
 		TaskID:     model.GenerateTaskID(),
-		Platform:   constant.TaskPlatformCanvasImage,
+		Platform:   platform,
 		UserId:     c.GetInt("id"),
-		Group:      strings.TrimSpace(c.Query("group")),
+		Group:      group,
 		Action:     action,
 		Status:     model.TaskStatusQueued,
 		Progress:   "0%",
@@ -67,12 +91,13 @@ func CanvasImageTaskSubmit(c *gin.Context) {
 	}
 
 	relayReq := canvasImageTaskRelayRequest{
-		TaskID:   task.TaskID,
-		Action:   action,
-		Body:     append([]byte(nil), body...),
-		Header:   c.Request.Header.Clone(),
-		RawQuery: c.Request.URL.RawQuery,
-		Keys:     cloneCanvasImageTaskKeys(c.Keys),
+		TaskID:      task.TaskID,
+		Action:      action,
+		RelayPrefix: relayPrefix,
+		Body:        append([]byte(nil), body...),
+		Header:      c.Request.Header.Clone(),
+		RawQuery:    imageTaskRelayRawQuery(c),
+		Keys:        cloneCanvasImageTaskKeys(c.Keys),
 	}
 	go runCanvasImageTaskRelay(relayReq)
 
@@ -83,21 +108,39 @@ func CanvasImageTaskSubmit(c *gin.Context) {
 }
 
 func CanvasImageTaskFetch(c *gin.Context) {
+	fetchImageTask(c, constant.TaskPlatformCanvasImage, canvasImageTaskRelayPrefix)
+}
+
+// ImageTaskFetch 查询令牌 API 提交的异步图片任务。
+func ImageTaskFetch(c *gin.Context) {
+	fetchImageTask(c, constant.TaskPlatformImage, apiImageTaskRelayPrefix)
+}
+
+func fetchImageTask(c *gin.Context, platform constant.TaskPlatform, responsePrefix string) {
 	taskID := strings.TrimSpace(c.Param("task_id"))
 	task, exists, err := model.GetByTaskId(c.GetInt("id"), taskID)
 	if err != nil {
 		abortCanvasRequest(c, http.StatusInternalServerError, "failed to load image task")
 		return
 	}
-	if !exists {
+	if !exists || task.Platform != platform {
 		abortCanvasRequest(c, http.StatusNotFound, "task not found")
 		return
 	}
 
-	c.JSON(http.StatusOK, buildCanvasImageTaskResponse(task))
+	c.JSON(http.StatusOK, buildImageTaskResponse(task, responsePrefix))
 }
 
 func CanvasImageTaskContent(c *gin.Context) {
+	serveImageTaskContent(c, constant.TaskPlatformCanvasImage)
+}
+
+// ImageTaskContent 返回令牌 API 异步图片任务中暂存的图片内容。
+func ImageTaskContent(c *gin.Context) {
+	serveImageTaskContent(c, constant.TaskPlatformImage)
+}
+
+func serveImageTaskContent(c *gin.Context, platform constant.TaskPlatform) {
 	taskID := strings.TrimSpace(c.Param("task_id"))
 	index, err := strconv.Atoi(strings.TrimSpace(c.Param("index")))
 	if taskID == "" || err != nil || index < 0 {
@@ -116,12 +159,20 @@ func CanvasImageTaskContent(c *gin.Context) {
 		abortCanvasRequest(c, http.StatusInternalServerError, "failed to load image task")
 		return
 	}
-	if !exists {
+	if !exists || task.Platform != platform {
 		abortCanvasRequest(c, http.StatusNotFound, "task not found")
 		return
 	}
+	writeImageTaskContent(c, task, index)
+}
+
+func writeImageTaskContent(c *gin.Context, task *model.Task, index int) {
 	if task.Status != model.TaskStatusSuccess {
 		abortCanvasRequest(c, http.StatusBadRequest, "image task is not completed")
+		return
+	}
+	if imageTaskDataExpired(task, time.Now().Unix()) || len(bytes.TrimSpace(task.Data)) == 0 {
+		abortCanvasRequest(c, http.StatusGone, "image task data has expired")
 		return
 	}
 
@@ -131,8 +182,23 @@ func CanvasImageTaskContent(c *gin.Context) {
 		return
 	}
 
-	c.Header("Cache-Control", "private, max-age=86400")
+	c.Header("Cache-Control", fmt.Sprintf("private, max-age=%d", imageTaskContentMaxAge(task, time.Now().Unix())))
+	c.Header("Content-Security-Policy", "default-src 'none'; sandbox")
+	c.Header("X-Content-Type-Options", "nosniff")
 	c.Data(http.StatusOK, mimeType, image)
+}
+
+func imageTaskRelayRawQuery(c *gin.Context) string {
+	query := c.Request.URL.Query()
+	query.Del("action")
+	return query.Encode()
+}
+
+func imageTaskGroup(c *gin.Context, relayPrefix string) string {
+	if relayPrefix == canvasImageTaskRelayPrefix {
+		return strings.TrimSpace(c.Query("group"))
+	}
+	return common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 }
 
 func readCanvasImageTaskBody(c *gin.Context) ([]byte, error) {
@@ -155,6 +221,15 @@ func cloneCanvasImageTaskKeys(keys map[string]any) map[string]any {
 }
 
 func runCanvasImageTaskRelay(relayReq canvasImageTaskRelayRequest) {
+	timeout := time.Duration(constant.ImageTaskTimeoutMinutes) * time.Minute
+	runCanvasImageTaskRelayWithExecutor(relayReq, timeout, executeCanvasImageRelay)
+}
+
+func runCanvasImageTaskRelayWithExecutor(
+	relayReq canvasImageTaskRelayRequest,
+	timeout time.Duration,
+	execute func(canvasImageTaskRelayRequest) (*httptest.ResponseRecorder, int, *relaycommon.RelayInfo),
+) {
 	task, exists, err := model.GetByTaskId(canvasImageTaskUserID(relayReq.Keys), relayReq.TaskID)
 	if err != nil || !exists {
 		return
@@ -167,14 +242,41 @@ func runCanvasImageTaskRelay(relayReq canvasImageTaskRelayRequest) {
 	}()
 
 	now := time.Now().Unix()
+	expectedStatus := task.Status
 	task.Status = model.TaskStatusInProgress
 	task.StartTime = now
 	task.UpdatedAt = now
 	task.Progress = "10%"
-	_ = task.Update()
+	won, err := task.UpdateWithStatus(expectedStatus)
+	if err != nil {
+		common.SysError(fmt.Sprintf("failed to start image task %s: %v", task.TaskID, err))
+		return
+	}
+	if !won {
+		return
+	}
 
-	recorder, channelID, relayInfo := executeCanvasImageRelay(relayReq)
+	if timeout > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		relayReq.Context = ctx
+	} else {
+		relayReq.Context = context.Background()
+	}
+
+	recorder, channelID, relayInfo := execute(relayReq)
+	if errors.Is(relayReq.Context.Err(), context.DeadlineExceeded) {
+		failCanvasImageTask(task, imageTaskTimeoutReason(timeout), nil)
+		return
+	}
 	finishCanvasImageTask(task, channelID, recorder, relayInfo)
+}
+
+func imageTaskTimeoutReason(timeout time.Duration) string {
+	if timeout >= time.Minute && timeout%time.Minute == 0 {
+		return fmt.Sprintf("image generation timed out after %d minutes", int(timeout/time.Minute))
+	}
+	return "image generation timed out"
 }
 
 func executeCanvasImageRelay(relayReq canvasImageTaskRelayRequest) (*httptest.ResponseRecorder, int, *relaycommon.RelayInfo) {
@@ -187,7 +289,11 @@ func executeCanvasImageRelayWithHandler(relayReq canvasImageTaskRelayRequest, ha
 	channelID := 0
 	var relayInfo *relaycommon.RelayInfo
 	action := normalizeCanvasImageTaskAction(relayReq.Action)
-	targetPath := "/canvas/v1/" + action
+	relayPrefix := strings.TrimRight(strings.TrimSpace(relayReq.RelayPrefix), "/")
+	if relayPrefix == "" {
+		relayPrefix = canvasImageTaskRelayPrefix
+	}
+	targetPath := relayPrefix + "/" + action
 
 	engine.Use(func(c *gin.Context) {
 		for key, value := range relayReq.Keys {
@@ -217,7 +323,11 @@ func executeCanvasImageRelayWithHandler(relayReq canvasImageTaskRelayRequest, ha
 	if relayReq.RawQuery != "" {
 		targetURL += "?" + relayReq.RawQuery
 	}
-	request := httptest.NewRequest(http.MethodPost, targetURL, bytes.NewReader(relayReq.Body))
+	requestContext := relayReq.Context
+	if requestContext == nil {
+		requestContext = context.Background()
+	}
+	request := httptest.NewRequest(http.MethodPost, targetURL, bytes.NewReader(relayReq.Body)).WithContext(requestContext)
 	request.Header = relayReq.Header.Clone()
 	request.ContentLength = int64(len(relayReq.Body))
 	engine.ServeHTTP(recorder, request)
@@ -236,15 +346,26 @@ func canvasImageTaskAction(c *gin.Context) string {
 }
 
 func normalizeCanvasImageTaskAction(action string) string {
+	normalized, ok := parseImageTaskAction(action)
+	if ok {
+		return normalized
+	}
+	return canvasImageTaskActionGenerations
+}
+
+func parseImageTaskAction(action string) (string, bool) {
 	switch strings.Trim(strings.TrimSpace(action), "/") {
+	case "", "generations", canvasImageTaskActionGenerations:
+		return canvasImageTaskActionGenerations, true
 	case "edits", canvasImageTaskActionEdits:
-		return canvasImageTaskActionEdits
+		return canvasImageTaskActionEdits, true
 	default:
-		return canvasImageTaskActionGenerations
+		return "", false
 	}
 }
 
 func finishCanvasImageTask(task *model.Task, channelID int, recorder *httptest.ResponseRecorder, relayInfo *relaycommon.RelayInfo) {
+	expectedStatus := task.Status
 	body := bytes.TrimSpace(recorder.Body.Bytes())
 	if recorder.Code >= http.StatusOK && recorder.Code < http.StatusMultipleChoices && relayInfo != nil && relayInfo.ChannelOtherSettings.ImageAsyncMode == dto.ImageAsyncModeTasksEndpoint {
 		_, upstreamTaskID, status, progress := parseImageTaskSubmitResponseBody(body)
@@ -296,9 +417,15 @@ func finishCanvasImageTask(task *model.Task, channelID int, recorder *httptest.R
 		task.Status = model.TaskStatusSuccess
 		task.Data = json.RawMessage(append([]byte(nil), body...))
 		task.FailReason = ""
-		_ = task.Update()
-		settleCanvasImageSubmit(relayInfo, task.Quota)
-		recalculateCanvasImageTaskQuota(task, body, relayInfo)
+		won, err := task.UpdateWithStatus(expectedStatus)
+		if err != nil {
+			common.SysError(fmt.Sprintf("failed to finish image task %s: %v", task.TaskID, err))
+			return
+		}
+		if won {
+			settleCanvasImageSubmit(relayInfo, task.Quota)
+			recalculateCanvasImageTaskQuota(task, body, relayInfo)
+		}
 		return
 	}
 
@@ -435,6 +562,7 @@ func buildCanvasImageActualBillingInput(snap *billingexpr.BillingSnapshot, body 
 }
 
 func failCanvasImageTask(task *model.Task, reason string, body []byte) {
+	expectedStatus := task.Status
 	task.Status = model.TaskStatusFailure
 	task.Progress = "100%"
 	task.FinishTime = time.Now().Unix()
@@ -443,7 +571,7 @@ func failCanvasImageTask(task *model.Task, reason string, body []byte) {
 	if len(body) > 0 {
 		task.Data = json.RawMessage(append([]byte(nil), body...))
 	}
-	_ = task.Update()
+	_, _ = task.UpdateWithStatus(expectedStatus)
 }
 
 func extractCanvasImageRelayError(body []byte) string {
@@ -466,13 +594,28 @@ func extractCanvasImageRelayError(body []byte) string {
 }
 
 func buildCanvasImageTaskResponse(task *model.Task) gin.H {
+	return buildImageTaskResponse(task, canvasImageTaskRelayPrefix)
+}
+
+func buildAPIImageTaskResponse(task *model.Task) gin.H {
+	return buildImageTaskResponse(task, apiImageTaskRelayPrefix)
+}
+
+func buildImageTaskResponse(task *model.Task, responsePrefix string) gin.H {
 	response := gin.H{
 		"task_id":  task.TaskID,
 		"status":   mapCanvasImageTaskStatus(task.Status),
 		"progress": task.Progress,
 	}
-	if task.Status == model.TaskStatusSuccess && len(bytes.TrimSpace(task.Data)) > 0 {
-		response["result"] = buildCanvasImageTaskResult(task)
+	if expiresAt, ok := imageTaskDataExpiresAt(task); ok {
+		response["expires_at"] = expiresAt
+	}
+	expired := imageTaskDataExpired(task, time.Now().Unix())
+	if task.Status == model.TaskStatusSuccess && !expired && len(bytes.TrimSpace(task.Data)) > 0 {
+		response["result"] = buildImageTaskResult(task, responsePrefix)
+	}
+	if task.Status == model.TaskStatusSuccess && (expired || len(bytes.TrimSpace(task.Data)) == 0) {
+		response["result_expired"] = true
 	}
 	if task.Status == model.TaskStatusFailure {
 		if structured := canvasImageTaskFailurePayload(task.Data); structured != nil {
@@ -509,7 +652,36 @@ func canvasImageTaskFailurePayload(data []byte) gin.H {
 	return result
 }
 
+func imageTaskDataExpiresAt(task *model.Task) (int64, bool) {
+	retentionHours := common.GetImageTaskDataRetentionHours()
+	if retentionHours <= 0 || task.FinishTime <= 0 {
+		return 0, false
+	}
+	return task.FinishTime + int64(retentionHours)*int64(time.Hour/time.Second), true
+}
+
+func imageTaskDataExpired(task *model.Task, nowUnix int64) bool {
+	expiresAt, ok := imageTaskDataExpiresAt(task)
+	return ok && nowUnix >= expiresAt
+}
+
+func imageTaskContentMaxAge(task *model.Task, nowUnix int64) int64 {
+	expiresAt, ok := imageTaskDataExpiresAt(task)
+	if !ok {
+		return int64((24 * time.Hour) / time.Second)
+	}
+	remaining := expiresAt - nowUnix
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
+
 func buildCanvasImageTaskResult(task *model.Task) gin.H {
+	return buildImageTaskResult(task, canvasImageTaskRelayPrefix)
+}
+
+func buildImageTaskResult(task *model.Task, responsePrefix string) gin.H {
 	var payload struct {
 		Created any `json:"created,omitempty"`
 		Data    []struct {
@@ -525,11 +697,16 @@ func buildCanvasImageTaskResult(task *model.Task) gin.H {
 	items := make([]gin.H, 0, len(payload.Data))
 	for index, item := range payload.Data {
 		next := gin.H{}
+		itemURL := strings.TrimSpace(item.URL)
 		switch {
-		case strings.TrimSpace(item.URL) != "":
-			next["url"] = item.URL
-		case strings.TrimSpace(item.B64JSON) != "":
-			next["url"] = signedCanvasImageTaskContentPath(task, index)
+		case strings.TrimSpace(item.B64JSON) != "" || isCanvasImageDataURL(itemURL):
+			if responsePrefix == canvasImageTaskRelayPrefix {
+				next["url"] = signedCanvasImageTaskContentPath(task, index)
+			} else {
+				next["url"] = imageTaskContentPath(responsePrefix, task.TaskID, index)
+			}
+		case itemURL != "":
+			next["url"] = itemURL
 		default:
 			continue
 		}
@@ -547,7 +724,15 @@ func buildCanvasImageTaskResult(task *model.Task) gin.H {
 }
 
 func canvasImageTaskContentPath(taskID string, index int) string {
-	return fmt.Sprintf("/canvas/v1/images/tasks/%s/content/%d", url.PathEscape(taskID), index)
+	return imageTaskContentPath(canvasImageTaskRelayPrefix, taskID, index)
+}
+
+func imageTaskContentPath(responsePrefix string, taskID string, index int) string {
+	responsePrefix = strings.TrimRight(strings.TrimSpace(responsePrefix), "/")
+	if responsePrefix == "" {
+		responsePrefix = canvasImageTaskRelayPrefix
+	}
+	return fmt.Sprintf("%s/images/tasks/%s/content/%d", responsePrefix, url.PathEscape(taskID), index)
 }
 
 func readCanvasImageTaskContent(task *model.Task, index int) ([]byte, string, error) {
@@ -563,16 +748,20 @@ func readCanvasImageTaskContent(task *model.Task, index int) ([]byte, string, er
 	if index < 0 || index >= len(payload.Data) {
 		return nil, "", fmt.Errorf("image index out of range")
 	}
-	item := payload.Data[index]
-	if strings.HasPrefix(strings.TrimSpace(item.URL), "data:") {
-		return decodeCanvasImageData(item.URL)
+	value := payload.Data[index].B64JSON
+	if strings.TrimSpace(value) == "" && isCanvasImageDataURL(payload.Data[index].URL) {
+		value = payload.Data[index].URL
 	}
-	return decodeCanvasImageData(item.B64JSON)
+	return decodeCanvasImageData(value)
+}
+
+func isCanvasImageDataURL(value string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(value)), "data:image/")
 }
 
 func decodeCanvasImageData(value string) ([]byte, string, error) {
 	value = strings.TrimSpace(value)
-	mimeType := "image/png"
+	declaredMIMEType := ""
 	if strings.HasPrefix(value, "data:") {
 		parts := strings.SplitN(value, ",", 2)
 		if len(parts) != 2 {
@@ -582,10 +771,7 @@ func decodeCanvasImageData(value string) ([]byte, string, error) {
 		if !strings.Contains(header, ";base64") {
 			return nil, "", fmt.Errorf("unsupported image data url")
 		}
-		mimeType = strings.TrimSuffix(header, ";base64")
-		if mimeType == "" {
-			mimeType = "image/png"
-		}
+		declaredMIMEType = strings.TrimSpace(strings.TrimSuffix(header, ";base64"))
 		value = parts[1]
 	}
 	if value == "" {
@@ -598,7 +784,49 @@ func decodeCanvasImageData(value string) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	return image, mimeType, nil
+
+	detectedContentType := http.DetectContentType(image)
+	detectedMIMEType, detectErr := normalizeCanvasImageMIMEType(detectedContentType)
+	if declaredMIMEType == "" {
+		if detectErr != nil {
+			return nil, "", detectErr
+		}
+		return image, detectedMIMEType, nil
+	}
+
+	declaredMIMEType, err = normalizeCanvasImageMIMEType(declaredMIMEType)
+	if err != nil {
+		return nil, "", err
+	}
+	if detectErr == nil {
+		if declaredMIMEType != detectedMIMEType {
+			return nil, "", fmt.Errorf("image MIME type does not match content")
+		}
+		return image, detectedMIMEType, nil
+	}
+	// net/http 暂时无法识别部分现代图片格式（例如 AVIF）。只有在内容
+	// 未被识别为其他类型时，才接受白名单内的声明类型。
+	if detectedContentType == "application/octet-stream" {
+		return image, declaredMIMEType, nil
+	}
+	return nil, "", detectErr
+}
+
+func normalizeCanvasImageMIMEType(mimeType string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(mimeType)) {
+	case "image/png":
+		return "image/png", nil
+	case "image/jpeg", "image/jpg":
+		return "image/jpeg", nil
+	case "image/webp":
+		return "image/webp", nil
+	case "image/gif":
+		return "image/gif", nil
+	case "image/avif":
+		return "image/avif", nil
+	default:
+		return "", fmt.Errorf("unsupported image MIME type")
+	}
 }
 
 func mapCanvasImageTaskStatus(status model.TaskStatus) string {

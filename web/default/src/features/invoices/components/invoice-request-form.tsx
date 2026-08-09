@@ -34,6 +34,7 @@ import {
   createEmptyInvoiceRequest,
   normalizeInvoiceConfig,
   type InvoiceConfig,
+  type InvoiceKind,
   type InvoiceRequest,
   type InvoiceType,
 } from '../types'
@@ -44,10 +45,17 @@ interface InvoiceRequestFormProps {
   onChange: (value: InvoiceRequest) => void
   invoiceFee?: number
   disabled?: boolean
+  showRequiredToggle?: boolean
 }
 
 function getTypeLabel(type: InvoiceType, t: (key: string) => string) {
   return type === 'company' ? t('Company invoice') : t('Personal invoice')
+}
+
+function getKindLabel(kind: InvoiceKind, t: (key: string) => string) {
+  return kind === 'special'
+    ? t('VAT special invoice')
+    : t('VAT general invoice')
 }
 
 export function InvoiceRequestForm({
@@ -56,23 +64,36 @@ export function InvoiceRequestForm({
   onChange,
   invoiceFee = 0,
   disabled = false,
+  showRequiredToggle = true,
 }: InvoiceRequestFormProps) {
   const { t } = useTranslation()
   const invoiceConfig = normalizeInvoiceConfig(config)
   const invoice =
-    value || createEmptyInvoiceRequest(invoiceConfig.types[0] || 'personal')
+    value ||
+    createEmptyInvoiceRequest(
+      invoiceConfig.types[0] || 'personal',
+      invoiceConfig.kinds[0] || 'normal'
+    )
   const currentType = invoiceConfig.types.includes(invoice.type)
     ? invoice.type
     : invoiceConfig.types[0] || 'personal'
+  const currentKind = invoiceConfig.kinds.includes(invoice.kind)
+    ? invoice.kind
+    : invoiceConfig.kinds[0] || 'normal'
   const invoiceTypeItems = invoiceConfig.types.map((type) => ({
     value: type,
     label: getTypeLabel(type, t),
+  }))
+  const invoiceKindItems = invoiceConfig.kinds.map((kind) => ({
+    value: kind,
+    label: getKindLabel(kind, t),
   }))
 
   const patchInvoice = (patch: Partial<InvoiceRequest>) => {
     onChange({
       ...invoice,
       type: currentType,
+      kind: currentKind,
       ...patch,
     })
   }
@@ -94,23 +115,33 @@ export function InvoiceRequestForm({
   return (
     <div className='space-y-3 rounded-lg border p-3'>
       <div className='flex items-start gap-2'>
-        <Checkbox
-          checked={invoice.required}
-          disabled={disabled}
-          onCheckedChange={(checked) =>
-            patchInvoice({
-              required: Boolean(checked),
-              type: currentType,
-            })
-          }
-          className='mt-0.5'
-        />
+        {showRequiredToggle && (
+          <Checkbox
+            checked={invoice.required}
+            disabled={disabled}
+            onCheckedChange={(checked) =>
+              patchInvoice({
+                required: Boolean(checked),
+                type: currentType,
+                kind: currentKind,
+              })
+            }
+            className='mt-0.5'
+          />
+        )}
         <div className='min-w-0 flex-1'>
           <div className='text-sm font-medium'>{t('Need invoice')}</div>
           <p className='text-muted-foreground text-xs'>
             {t('Invoice service is available for {{types}}.', {
               types: invoiceConfig.types
                 .map((type) => getTypeLabel(type, t))
+                .join(' / '),
+            })}
+          </p>
+          <p className='text-muted-foreground mt-1 text-xs'>
+            {t('Available invoice kinds: {{kinds}}.', {
+              kinds: invoiceConfig.kinds
+                .map((kind) => getKindLabel(kind, t))
                 .join(' / '),
             })}
           </p>
@@ -126,7 +157,33 @@ export function InvoiceRequestForm({
       {invoice.required && (
         <div className='grid gap-3'>
           <div className='grid gap-2'>
-            <Label>{t('Invoice type')}</Label>
+            <Label>{t('Invoice kind')}</Label>
+            <Select
+              items={invoiceKindItems}
+              value={currentKind}
+              onValueChange={(nextKind) => {
+                if (!nextKind) return
+                patchInvoice({ kind: nextKind as InvoiceKind })
+              }}
+              disabled={disabled || invoiceConfig.kinds.length <= 1}
+            >
+              <SelectTrigger>
+                <SelectValue>{getKindLabel(currentKind, t)}</SelectValue>
+              </SelectTrigger>
+              <SelectContent alignItemWithTrigger={false}>
+                <SelectGroup>
+                  {invoiceConfig.kinds.map((kind) => (
+                    <SelectItem key={kind} value={kind}>
+                      {getKindLabel(kind, t)}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className='grid gap-2'>
+            <Label>{t('Invoice title type')}</Label>
             <Select
               items={invoiceTypeItems}
               value={currentType}
@@ -165,9 +222,7 @@ export function InvoiceRequestForm({
             <Label>{t('Tax number')}</Label>
             <Input
               value={invoice.tax_no}
-              onChange={(event) =>
-                patchInvoice({ tax_no: event.target.value })
-              }
+              onChange={(event) => patchInvoice({ tax_no: event.target.value })}
               disabled={disabled}
               placeholder={t('Enter taxpayer identification number')}
             />

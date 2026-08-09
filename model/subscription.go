@@ -267,11 +267,13 @@ type SubscriptionOrder struct {
 	OriginalMoney        float64 `json:"original_money"`
 	DiscountMoney        float64 `json:"discount_money"`
 	ActualMoney          float64 `json:"actual_money"`
+	PaidAmountCNY        float64 `json:"paid_amount_cny"`
 	PromoCodeId          int     `json:"promo_code_id" gorm:"index"`
 	PromoCode            string  `json:"promo_code" gorm:"type:varchar(64);default:''"`
 	AffiliateSourceQuota int     `json:"affiliate_source_quota"`
 	InvoiceRequired      bool    `json:"invoice_required"`
 	InvoiceType          string  `json:"invoice_type" gorm:"type:varchar(32);default:''"`
+	InvoiceKind          string  `json:"invoice_kind" gorm:"type:varchar(32);default:''"`
 	InvoiceTitle         string  `json:"invoice_title" gorm:"type:varchar(255);default:''"`
 	InvoiceTaxNo         string  `json:"invoice_tax_no" gorm:"type:varchar(128);default:''"`
 	InvoiceEmail         string  `json:"invoice_email" gorm:"type:varchar(255);default:''"`
@@ -281,12 +283,16 @@ type SubscriptionOrder struct {
 	InvoiceFeeAmount     float64 `json:"invoice_fee_amount"`
 	InvoiceStatus        string  `json:"invoice_status" gorm:"type:varchar(32);default:''"`
 
-	TradeNo         string `json:"trade_no" gorm:"unique;type:varchar(255);index"`
-	PaymentMethod   string `json:"payment_method" gorm:"type:varchar(50)"`
-	PaymentProvider string `json:"payment_provider" gorm:"type:varchar(50);default:''"`
-	Status          string `json:"status"`
-	CreateTime      int64  `json:"create_time"`
-	CompleteTime    int64  `json:"complete_time"`
+	TradeNo          string `json:"trade_no" gorm:"unique;type:varchar(255);index"`
+	PaymentMethod    string `json:"payment_method" gorm:"type:varchar(50)"`
+	PaymentProvider  string `json:"payment_provider" gorm:"type:varchar(50);default:''"`
+	RequestIP        string `json:"request_ip" gorm:"type:varchar(64);default:''"`
+	ProviderOrderId  string `json:"provider_order_id" gorm:"type:varchar(128);default:'';index"`
+	ProviderAmount   string `json:"provider_amount" gorm:"type:varchar(64);default:''"`
+	ProviderCurrency string `json:"provider_currency" gorm:"type:varchar(32);default:''"`
+	Status           string `json:"status"`
+	CreateTime       int64  `json:"create_time"`
+	CompleteTime     int64  `json:"complete_time"`
 
 	ProviderPayload string `json:"provider_payload" gorm:"type:text"`
 }
@@ -306,11 +312,18 @@ func normalizeSubscriptionOrderMoneySnapshot(order *SubscriptionOrder) {
 	if order.OriginalMoney == 0 {
 		order.OriginalMoney = order.Money
 	}
-	if order.ActualMoney == 0 && order.Money > 0 {
+	if order.ActualMoney == 0 && order.Money > 0 && order.PromoCodeId == 0 {
 		order.ActualMoney = order.Money
 	}
 	if order.Money == 0 && order.ActualMoney > 0 {
 		order.Money = order.ActualMoney
+	}
+	if order.PaidAmountCNY <= 0 {
+		paidAmount := invoiceOrderPaidAmount(order.Money, order.ActualMoney, order.PromoCodeId)
+		if paidAmount > 0 {
+			provider := invoiceOrderPaymentProvider(order.PaymentProvider, order.PaymentMethod)
+			order.PaidAmountCNY = invoiceOrderAmountCNY(paidAmount, provider)
+		}
 	}
 }
 
@@ -327,6 +340,44 @@ func GetSubscriptionOrderByTradeNo(tradeNo string) *SubscriptionOrder {
 		return nil
 	}
 	return &order
+}
+
+func GetSubscriptionOrderByProviderOrderId(paymentProvider string, providerOrderId string) *SubscriptionOrder {
+	paymentProvider = strings.TrimSpace(paymentProvider)
+	providerOrderId = strings.TrimSpace(providerOrderId)
+	if paymentProvider == "" || providerOrderId == "" {
+		return nil
+	}
+	var order SubscriptionOrder
+	if err := DB.Where("payment_provider = ? AND provider_order_id = ?", paymentProvider, providerOrderId).First(&order).Error; err != nil {
+		return nil
+	}
+	return &order
+}
+
+func UpdateSubscriptionOrderProviderSnapshot(tradeNo string, expectedPaymentProvider string, providerOrderId string, providerAmount string, providerCurrency string) error {
+	tradeNo = strings.TrimSpace(tradeNo)
+	expectedPaymentProvider = strings.TrimSpace(expectedPaymentProvider)
+	providerOrderId = strings.TrimSpace(providerOrderId)
+	providerAmount = strings.TrimSpace(providerAmount)
+	providerCurrency = strings.ToUpper(strings.TrimSpace(providerCurrency))
+	if tradeNo == "" || expectedPaymentProvider == "" || providerOrderId == "" || providerAmount == "" || providerCurrency == "" {
+		return errors.New("支付网关订单快照不完整")
+	}
+	result := DB.Model(&SubscriptionOrder{}).
+		Where("trade_no = ? AND payment_provider = ? AND status = ?", tradeNo, expectedPaymentProvider, common.TopUpStatusPending).
+		Updates(map[string]interface{}{
+			"provider_order_id": providerOrderId,
+			"provider_amount":   providerAmount,
+			"provider_currency": providerCurrency,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrSubscriptionOrderStatusInvalid
+	}
+	return nil
 }
 
 // User subscription instance
@@ -678,7 +729,7 @@ func expireDueSubscriptionsForUserTx(tx *gorm.DB, userId int, now int64) (int, s
 		return 0, "", errors.New("invalid userId")
 	}
 	var dueSubs []UserSubscription
-	if err := tx.Set("gorm:query_option", "FOR UPDATE").
+	if err := lockForUpdate(tx).
 		Where("user_id = ? AND status = ? AND end_time > 0 AND end_time <= ?", userId, "active", now).
 		Order("end_time asc, id asc").
 		Find(&dueSubs).Error; err != nil {
@@ -817,10 +868,13 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 	var logPlanTitle string
 	var logMoney float64
 	var logPaymentMethod string
+	var logRequestIP string
+	var logTradeNo string
+	var logPaidAmountCNY float64
 	var upgradeGroup string
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var order SubscriptionOrder
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(&order).Error; err != nil {
+		if err := lockForUpdate(tx).Where(refCol+" = ?", tradeNo).First(&order).Error; err != nil {
 			return ErrSubscriptionOrderNotFound
 		}
 		if expectedPaymentProvider != "" && order.PaymentProvider != expectedPaymentProvider {
@@ -829,7 +883,9 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 		if order.Status == common.TopUpStatusSuccess {
 			return nil
 		}
-		if order.Status != common.TopUpStatusPending {
+		if order.Status != common.TopUpStatusPending &&
+			order.Status != common.TopUpStatusFailed &&
+			order.Status != common.TopUpStatusExpired {
 			return ErrSubscriptionOrderStatusInvalid
 		}
 		plan, err := getSubscriptionPlanByIdTx(tx, order.PlanId)
@@ -871,6 +927,9 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 		logPlanTitle = plan.Title
 		logMoney = order.Money
 		logPaymentMethod = order.PaymentMethod
+		logRequestIP = order.RequestIP
+		logTradeNo = order.TradeNo
+		logPaidAmountCNY = order.PaidAmountCNY
 		return nil
 	})
 	if err != nil {
@@ -881,7 +940,14 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 	}
 	if logUserId > 0 {
 		msg := fmt.Sprintf("订阅购买成功，套餐: %s，支付金额: %.2f，支付方式: %s", logPlanTitle, logMoney, logPaymentMethod)
-		RecordLog(logUserId, LogTypeTopup, msg)
+		RecordTopupLogWithDetails(logUserId, msg, TopupLogDetails{
+			RequestIP:             logRequestIP,
+			PaymentMethod:         logPaymentMethod,
+			CallbackPaymentMethod: expectedPaymentProvider,
+			TradeNo:               logTradeNo,
+			PaidAmountCNY:         logPaidAmountCNY,
+			HasPaidAmountSnapshot: true,
+		})
 	}
 	return nil
 }
@@ -898,10 +964,13 @@ func CompleteFreeSubscriptionOrder(tradeNo string, expectedPaymentProvider strin
 	var logPlanTitle string
 	var logMoney float64
 	var logPaymentMethod string
+	var logRequestIP string
+	var logTradeNo string
+	var logPaidAmountCNY float64
 	var upgradeGroup string
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var order SubscriptionOrder
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(&order).Error; err != nil {
+		if err := lockForUpdate(tx).Where(refCol+" = ?", tradeNo).First(&order).Error; err != nil {
 			return ErrSubscriptionOrderNotFound
 		}
 		if expectedPaymentProvider != "" && order.PaymentProvider != expectedPaymentProvider {
@@ -945,6 +1014,9 @@ func CompleteFreeSubscriptionOrder(tradeNo string, expectedPaymentProvider strin
 		logPlanTitle = plan.Title
 		logMoney = order.Money
 		logPaymentMethod = order.PaymentMethod
+		logRequestIP = order.RequestIP
+		logTradeNo = order.TradeNo
+		logPaidAmountCNY = order.PaidAmountCNY
 		return nil
 	})
 	if err != nil {
@@ -955,7 +1027,14 @@ func CompleteFreeSubscriptionOrder(tradeNo string, expectedPaymentProvider strin
 	}
 	if logUserId > 0 {
 		msg := fmt.Sprintf("订阅购买成功，套餐: %s，支付金额: %.2f，支付方式: %s", logPlanTitle, logMoney, logPaymentMethod)
-		RecordLog(logUserId, LogTypeTopup, msg)
+		RecordTopupLogWithDetails(logUserId, msg, TopupLogDetails{
+			RequestIP:             logRequestIP,
+			PaymentMethod:         logPaymentMethod,
+			CallbackPaymentMethod: expectedPaymentProvider,
+			TradeNo:               logTradeNo,
+			PaidAmountCNY:         logPaidAmountCNY,
+			HasPaidAmountSnapshot: true,
+		})
 	}
 	return nil
 }
@@ -975,11 +1054,13 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 				OriginalMoney:        order.OriginalMoney,
 				DiscountMoney:        order.DiscountMoney,
 				ActualMoney:          order.ActualMoney,
+				PaidAmountCNY:        order.PaidAmountCNY,
 				PromoCodeId:          order.PromoCodeId,
 				PromoCode:            order.PromoCode,
 				AffiliateSourceQuota: order.AffiliateSourceQuota,
 				InvoiceRequired:      order.InvoiceRequired,
 				InvoiceType:          order.InvoiceType,
+				InvoiceKind:          order.InvoiceKind,
 				InvoiceTitle:         order.InvoiceTitle,
 				InvoiceTaxNo:         order.InvoiceTaxNo,
 				InvoiceEmail:         order.InvoiceEmail,
@@ -991,6 +1072,7 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 				TradeNo:              order.TradeNo,
 				PaymentMethod:        order.PaymentMethod,
 				PaymentProvider:      order.PaymentProvider,
+				RequestIP:            order.RequestIP,
 				CreateTime:           order.CreateTime,
 				CompleteTime:         now,
 				Status:               common.TopUpStatusSuccess,
@@ -1003,11 +1085,13 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 	topup.OriginalMoney = order.OriginalMoney
 	topup.DiscountMoney = order.DiscountMoney
 	topup.ActualMoney = order.ActualMoney
+	topup.PaidAmountCNY = order.PaidAmountCNY
 	topup.PromoCodeId = order.PromoCodeId
 	topup.PromoCode = order.PromoCode
 	topup.AffiliateSourceQuota = order.AffiliateSourceQuota
 	topup.InvoiceRequired = order.InvoiceRequired
 	topup.InvoiceType = order.InvoiceType
+	topup.InvoiceKind = order.InvoiceKind
 	topup.InvoiceTitle = order.InvoiceTitle
 	topup.InvoiceTaxNo = order.InvoiceTaxNo
 	topup.InvoiceEmail = order.InvoiceEmail
@@ -1016,6 +1100,7 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 	topup.InvoiceBaseAmount = order.InvoiceBaseAmount
 	topup.InvoiceFeeAmount = order.InvoiceFeeAmount
 	topup.InvoiceStatus = order.InvoiceStatus
+	topup.RequestIP = order.RequestIP
 	if topup.PaymentMethod == "" {
 		topup.PaymentMethod = order.PaymentMethod
 	} else if topup.PaymentMethod != order.PaymentMethod {
@@ -1039,7 +1124,7 @@ func ExpireSubscriptionOrder(tradeNo string, expectedPaymentProvider string) err
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
 		var order SubscriptionOrder
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(&order).Error; err != nil {
+		if err := lockForUpdate(tx).Where(refCol+" = ?", tradeNo).First(&order).Error; err != nil {
 			return ErrSubscriptionOrderNotFound
 		}
 		if expectedPaymentProvider != "" && order.PaymentProvider != expectedPaymentProvider {
@@ -1092,9 +1177,17 @@ func calcSubscriptionBalanceQuota(priceAmount float64) (int, error) {
 }
 
 // PurchaseSubscriptionWithBalance creates a subscription by deducting the user's wallet quota.
-func PurchaseSubscriptionWithBalance(userId int, planId int, promoCode string, invoiceReq ...InvoiceRequest) error {
+func PurchaseSubscriptionWithBalance(userId int, planId int, promoCode string, requestIP string, invoiceReq ...InvoiceRequest) error {
 	if userId <= 0 || planId <= 0 {
 		return errors.New("invalid userId or planId")
+	}
+	paymentSetting := operation_setting.GetPaymentSetting()
+	if !paymentSetting.BalanceSubscriptionEnabled {
+		return errors.New("余额购买订阅已关闭")
+	}
+	promoCode = strings.TrimSpace(promoCode)
+	if promoCode != "" && !paymentSetting.BalanceSubscriptionPromoEnabled {
+		return errors.New("余额购买订阅暂不支持优惠码")
 	}
 	req := InvoiceRequest{}
 	if len(invoiceReq) > 0 {
@@ -1105,6 +1198,10 @@ func PurchaseSubscriptionWithBalance(userId int, planId int, promoCode string, i
 	var logMoney float64
 	var chargedQuota int
 	var upgradeGroup string
+	var logTradeNo string
+	var balanceBefore int
+	var balanceAfter int
+	var paidAmountCNY float64
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		plan, err := getSubscriptionPlanByIdTx(tx, planId)
 		if err != nil {
@@ -1149,7 +1246,7 @@ func PurchaseSubscriptionWithBalance(userId int, planId int, promoCode string, i
 		totalRequiredQuota := requiredQuota + invoiceQuota
 
 		var user User
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id = ?", userId).First(&user).Error; err != nil {
+		if err := lockForUpdate(tx).Where("id = ?", userId).First(&user).Error; err != nil {
 			return err
 		}
 		if totalRequiredQuota > 0 && user.Quota < totalRequiredQuota {
@@ -1161,6 +1258,8 @@ func PurchaseSubscriptionWithBalance(userId int, planId int, promoCode string, i
 				return err
 			}
 		}
+		balanceBefore = user.Quota
+		balanceAfter = user.Quota - totalRequiredQuota
 
 		if _, err := CreateUserSubscriptionFromPlanTx(tx, userId, plan, PaymentMethodBalance); err != nil {
 			return err
@@ -1172,9 +1271,11 @@ func PurchaseSubscriptionWithBalance(userId int, planId int, promoCode string, i
 			UserId:          userId,
 			PlanId:          plan.Id,
 			Money:           planPriceUSD,
+			PaidAmountCNY:   invoiceBaseCNY,
 			TradeNo:         tradeNo,
 			PaymentMethod:   PaymentMethodBalance,
 			PaymentProvider: PaymentProviderBalance,
+			RequestIP:       strings.TrimSpace(requestIP),
 			Status:          common.TopUpStatusSuccess,
 			CreateTime:      now,
 			CompleteTime:    now,
@@ -1188,6 +1289,7 @@ func PurchaseSubscriptionWithBalance(userId int, planId int, promoCode string, i
 			AddInvoiceSnapshotToSubscriptionOrder(order, normalizedInvoiceReq, invoiceBaseCNY, invoiceFeeCNY)
 			order.Money = decimal.NewFromFloat(businessPaidUSD).Add(decimal.NewFromFloat(invoiceFeeUSD)).Round(2).InexactFloat64()
 		}
+		normalizeSubscriptionOrderMoneySnapshot(order)
 		if err := tx.Create(order).Error; err != nil {
 			return err
 		}
@@ -1203,6 +1305,8 @@ func PurchaseSubscriptionWithBalance(userId int, planId int, promoCode string, i
 
 		logPlanTitle = plan.Title
 		logMoney = order.Money
+		logTradeNo = order.TradeNo
+		paidAmountCNY = order.PaidAmountCNY
 		chargedQuota = totalRequiredQuota
 		upgradeGroup = strings.TrimSpace(plan.UpgradeGroup)
 		return nil
@@ -1220,7 +1324,18 @@ func PurchaseSubscriptionWithBalance(userId int, planId int, promoCode string, i
 		_ = UpdateUserGroupCache(userId, upgradeGroup)
 	}
 	msg := fmt.Sprintf("使用余额购买订阅成功，套餐: %s，支付金额: %.2f，扣除额度: %d", logPlanTitle, logMoney, chargedQuota)
-	RecordLog(userId, LogTypeTopup, msg)
+	RecordTopupLogWithDetails(userId, msg, TopupLogDetails{
+		RequestIP:             requestIP,
+		PaymentMethod:         PaymentMethodBalance,
+		CallbackPaymentMethod: PaymentProviderBalance,
+		TradeNo:               logTradeNo,
+		BalanceBefore:         balanceBefore,
+		BalanceAfter:          balanceAfter,
+		CreditedQuota:         -chargedQuota,
+		PaidAmountCNY:         paidAmountCNY,
+		HasBalanceSnapshot:    true,
+		HasPaidAmountSnapshot: true,
+	})
 	return nil
 }
 
@@ -1296,7 +1411,7 @@ func AdminInvalidateUserSubscription(userSubscriptionId int) (string, error) {
 	var userId int
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var sub UserSubscription
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").
+		if err := lockForUpdate(tx).
 			Where("id = ?", userSubscriptionId).First(&sub).Error; err != nil {
 			return err
 		}
@@ -1341,7 +1456,7 @@ func AdminDeleteUserSubscription(userSubscriptionId int) (string, error) {
 	var userId int
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var sub UserSubscription
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").
+		if err := lockForUpdate(tx).
 			Where("id = ?", userSubscriptionId).First(&sub).Error; err != nil {
 			return err
 		}
@@ -1527,7 +1642,7 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 		}
 
 		var subs []UserSubscription
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").
+		if err := lockForUpdate(tx).
 			Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now).
 			Order("end_time asc, id asc").
 			Find(&subs).Error; err != nil {
@@ -1600,7 +1715,7 @@ func RefundSubscriptionPreConsume(requestId string) error {
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
 		var record SubscriptionPreConsumeRecord
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").
+		if err := lockForUpdate(tx).
 			Where("request_id = ?", requestId).First(&record).Error; err != nil {
 			return err
 		}
@@ -1644,7 +1759,7 @@ func ResetDueSubscriptions(limit int) (int, error) {
 		}
 		err = DB.Transaction(func(tx *gorm.DB) error {
 			var locked UserSubscription
-			if err := tx.Set("gorm:query_option", "FOR UPDATE").
+			if err := lockForUpdate(tx).
 				Where("id = ? AND next_reset_time > 0 AND next_reset_time <= ?", subCopy.Id, now).
 				First(&locked).Error; err != nil {
 				return nil
@@ -1716,7 +1831,7 @@ func postConsumeUserSubscriptionDeltaTx(tx *gorm.DB, userSubscriptionId int, del
 		return nil
 	}
 	var sub UserSubscription
-	if err := tx.Set("gorm:query_option", "FOR UPDATE").
+	if err := lockForUpdate(tx).
 		Where("id = ?", userSubscriptionId).
 		First(&sub).Error; err != nil {
 		return err

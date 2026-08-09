@@ -4,6 +4,7 @@ import {
   getCustomNavIcon,
   getSidebarCustomModuleKey,
   parseCustomNavItems,
+  parseTopNavCustomItems,
 } from './custom-nav'
 
 describe('custom navigation helpers', () => {
@@ -81,5 +82,85 @@ describe('custom navigation helpers', () => {
   test('resolves only whitelisted lucide icons', () => {
     assert.ok(getCustomNavIcon('Brush'))
     assert.equal(getCustomNavIcon('NotReal'), undefined)
+  })
+
+  test('places sidebar-managed header items in top navigation only', () => {
+    const items = parseTopNavCustomItems(
+      [],
+      [
+        {
+          id: 'header-docs',
+          title: 'API Docs',
+          url: 'https://docs.example.com',
+          enabled: true,
+          order: 20,
+          section: 'header',
+          openInNewTab: true,
+        },
+        {
+          id: 'sidebar-canvas',
+          title: 'Canvas',
+          url: '/canvas',
+          enabled: true,
+          order: 10,
+          section: 'chat',
+        },
+        {
+          id: 'disabled-header',
+          title: 'Disabled',
+          url: '/disabled',
+          enabled: false,
+          order: 5,
+          section: 'header',
+        },
+      ]
+    )
+
+    assert.deepEqual(
+      items.map((item) => item.id),
+      ['header-docs']
+    )
+    assert.equal(items[0].section, 'header')
+    assert.equal(items[0].external, true)
+  })
+
+  test('merges and orders both top navigation sources without duplicate IDs', () => {
+    const items = parseTopNavCustomItems(
+      [
+        {
+          id: 'shared',
+          title: 'Header managed',
+          url: '/header-managed',
+          enabled: true,
+          order: 30,
+        },
+      ],
+      [
+        {
+          id: 'placed-first',
+          title: 'Placed first',
+          url: '/placed-first',
+          enabled: true,
+          order: 10,
+          section: 'header',
+        },
+        {
+          id: 'shared',
+          title: 'Sidebar managed duplicate',
+          url: '/duplicate',
+          enabled: true,
+          order: 5,
+          section: 'header',
+        },
+      ]
+    )
+
+    assert.deepEqual(
+      items.map((item) => [item.id, item.url]),
+      [
+        ['placed-first', '/placed-first'],
+        ['shared', '/header-managed'],
+      ]
+    )
   })
 })

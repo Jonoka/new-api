@@ -16,12 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQuery } from '@tanstack/react-query'
 import {
   Activity,
+  BellRing,
   Box,
   Brush,
   CreditCard,
   ExternalLink,
+  Puzzle,
   Gamepad2,
   FileText,
   FlaskConical,
@@ -39,14 +42,18 @@ import {
   Wallet,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useAuthStore } from '@/stores/auth-store'
+import { getCanvasSettingsFromSidebarModules } from '@/lib/canvas-settings'
 import {
   getCustomNavIcon,
   getSidebarCustomModuleKey,
   parseCustomNavItems,
 } from '@/lib/custom-nav'
 import { parseSidebarModulesFromStatus } from '@/lib/nav-modules'
+import { ROLE } from '@/lib/roles'
 import { useStatus } from '@/hooks/use-status'
 import { type SidebarData } from '@/components/layout/types'
+import { getExtensions } from '@/features/extensions/api'
 
 /**
  * Root navigation groups for the application sidebar.
@@ -57,10 +64,60 @@ import { type SidebarData } from '@/components/layout/types'
 export function useSidebarData(): SidebarData {
   const { t } = useTranslation()
   const { status } = useStatus()
+  const user = useAuthStore((state) => state.auth.user)
+  const { data: extensionData } = useQuery({
+    queryKey: ['extensions'],
+    queryFn: () => getExtensions(),
+    enabled: Boolean(user),
+    staleTime: 30_000,
+  })
   const sidebarModules = parseSidebarModulesFromStatus(
     status as Record<string, unknown> | null
   )
+  const canvasSettings = getCanvasSettingsFromSidebarModules(
+    (status as Record<string, unknown> | null)?.SidebarModulesAdmin
+  )
+  const CanvasIcon = getCustomNavIcon(canvasSettings.canvasIcon) ?? Brush
   const customItems = parseCustomNavItems(sidebarModules.customItems)
+
+  const enabledExtensionNavItems =
+    extensionData?.modules
+      ?.filter((module) => module.enabled)
+      .flatMap((module) =>
+        (module.ui?.nav ?? []).map((navItem, index) => ({
+          module,
+          navItem,
+          index,
+        }))
+      )
+      .sort((a, b) => {
+        const left = a.navItem.order ?? a.index
+        const right = b.navItem.order ?? b.index
+        if (left !== right) return left - right
+        return a.module.id.localeCompare(b.module.id)
+      }) ?? []
+
+  const extensionMenuItems = [
+    ...(user && user.role >= ROLE.SUPER_ADMIN
+      ? [
+          {
+            title: t('Module Management'),
+            url: '/extensions',
+            icon: Settings,
+            configUrls: ['/extensions'],
+          },
+        ]
+      : []),
+    ...enabledExtensionNavItems.map(({ module, navItem }) => ({
+      title: navItem.title,
+      url: `/extensions/${module.id}/${navItem.page}`,
+      icon: getCustomNavIcon(navItem.icon) ?? Puzzle,
+      configUrls:
+        module.id === 'channel-quality' && navItem.page === 'index'
+          ? ['/channel-observability']
+          : [`extension:${module.id}:${navItem.page}`],
+    })),
+  ]
 
   const sidebarData: SidebarData = {
     navGroups: [
@@ -76,7 +133,7 @@ export function useSidebarData(): SidebarData {
           {
             title: t('Infinite Canvas'),
             url: '/canvas',
-            icon: Brush,
+            icon: CanvasIcon,
           },
           {
             title: t('Chat'),
@@ -184,6 +241,15 @@ export function useSidebarData(): SidebarData {
             url: '/invoice-management',
             icon: ReceiptText,
           },
+          ...(user && user.role >= ROLE.SUPER_ADMIN
+            ? [
+                {
+                  title: t('Notification Center'),
+                  url: '/notification-center',
+                  icon: BellRing,
+                },
+              ]
+            : []),
           {
             title: t('Affiliate Commission'),
             url: '/system-settings/billing/affiliate',
@@ -219,6 +285,46 @@ export function useSidebarData(): SidebarData {
       configUrls: [getSidebarCustomModuleKey(item.id)],
     })
   })
+
+  const adminGroup = sidebarData.navGroups.find(
+    (navGroup) => navGroup.id === 'admin'
+  )
+  const systemSettingsItem = adminGroup?.items.find(
+    (item) => 'url' in item && item.url === '/system-settings/site'
+  )
+
+  const isAdminUser = Boolean(user && user.role >= ROLE.ADMIN)
+
+  if (adminGroup && isAdminUser && extensionMenuItems.length > 0) {
+    const systemSettingsIndex = systemSettingsItem
+      ? adminGroup.items.indexOf(systemSettingsItem)
+      : adminGroup.items.length
+
+    adminGroup.items.splice(systemSettingsIndex, 0, {
+      title: t('Extension Modules'),
+      icon: Puzzle,
+      items: extensionMenuItems,
+    })
+  } else if (extensionMenuItems.length > 0) {
+    sidebarData.navGroups.push({
+      id: 'extensions',
+      title: t('Modules'),
+      items: [
+        {
+          title: t('Extension Modules'),
+          icon: Puzzle,
+          items: extensionMenuItems,
+        },
+      ],
+    })
+  }
+
+  if (adminGroup && systemSettingsItem) {
+    adminGroup.items = [
+      ...adminGroup.items.filter((item) => item !== systemSettingsItem),
+      systemSettingsItem,
+    ]
+  }
 
   return sidebarData
 }

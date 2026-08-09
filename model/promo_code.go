@@ -22,11 +22,17 @@ const (
 	PromoCodeTargetSubscription = "subscription"
 )
 
+const (
+	promoCodeLegacyCodeIndex = "idx_promo_codes_code"
+	promoCodeUniqueIndex     = "idx_promo_codes_code_deleted_id"
+)
+
 type PromoCode struct {
 	Id                       int            `json:"id"`
 	UserId                   int            `json:"user_id"`
 	Name                     string         `json:"name" gorm:"index"`
-	Code                     string         `json:"code" gorm:"type:varchar(64);uniqueIndex"`
+	Code                     string         `json:"code" gorm:"type:varchar(64);uniqueIndex:idx_promo_codes_code_deleted_id,priority:1"`
+	DeletedId                int            `json:"-" gorm:"not null;default:0;uniqueIndex:idx_promo_codes_code_deleted_id,priority:2"`
 	Status                   int            `json:"status" gorm:"default:1"`
 	DiscountType             string         `json:"discount_type" gorm:"type:varchar(16)"`
 	DiscountValue            int64          `json:"discount_value" gorm:"type:bigint;not null;default:0"`
@@ -153,31 +159,106 @@ func validatePromoCode(promo *PromoCode) error {
 	return nil
 }
 
+func migratePromoCodeDeletionKey(db *gorm.DB) error {
+	if db == nil {
+		return errors.New("数据库连接为空")
+	}
+	if !db.Migrator().HasColumn(&PromoCode{}, "DeletedId") {
+		if err := db.Migrator().AddColumn(&PromoCode{}, "DeletedId"); err != nil {
+			return fmt.Errorf("添加优惠码删除标识失败: %w", err)
+		}
+	}
+	if err := db.Unscoped().Model(&PromoCode{}).
+		Where("deleted_at IS NOT NULL AND deleted_id = ?", 0).
+		UpdateColumn("deleted_id", gorm.Expr("id")).Error; err != nil {
+		return fmt.Errorf("回填优惠码删除标识失败: %w", err)
+	}
+	if !db.Migrator().HasIndex(&PromoCode{}, promoCodeUniqueIndex) {
+		if err := db.Migrator().CreateIndex(&PromoCode{}, promoCodeUniqueIndex); err != nil {
+			return fmt.Errorf("创建优惠码组合唯一索引失败: %w", err)
+		}
+	}
+	if err := dropPromoCodeLegacyUniqueKey(db); err != nil {
+		return fmt.Errorf("删除优惠码旧唯一键失败: %w", err)
+	}
+	return nil
+}
+
+func dropPromoCodeLegacyUniqueKey(db *gorm.DB) error {
+	migrator := db.Migrator()
+	// PostgreSQL 的旧版本可能把 uniqueIndex 落成同名 UNIQUE CONSTRAINT。
+	// 约束的支撑索引不能直接 DROP INDEX，必须先删除约束。
+	if db.Dialector.Name() == "postgres" && migrator.HasConstraint(&PromoCode{}, promoCodeLegacyCodeIndex) {
+		if err := migrator.DropConstraint(&PromoCode{}, promoCodeLegacyCodeIndex); err != nil {
+			return fmt.Errorf("删除 PostgreSQL 唯一约束失败: %w", err)
+		}
+	}
+	if migrator.HasIndex(&PromoCode{}, promoCodeLegacyCodeIndex) {
+		if err := migrator.DropIndex(&PromoCode{}, promoCodeLegacyCodeIndex); err != nil {
+			return fmt.Errorf("删除唯一索引失败: %w", err)
+		}
+	}
+	return nil
+}
+
+// preparePromoCodeForWriteTx 兼容旧版本只写 deleted_at、deleted_id 仍为 0 的记录。
+// 活动冲突仍被拒绝；历史软删除冲突则补齐 deleted_id，释放活动唯一键。
+func preparePromoCodeForWriteTx(tx *gorm.DB, code string, currentId int) error {
+	var existing PromoCode
+	query := lockForUpdate(tx).Unscoped().Where("code = ? AND deleted_id = ?", code, 0)
+	if currentId > 0 {
+		query = query.Where("id <> ?", currentId)
+	}
+	err := query.First(&existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !existing.DeletedAt.Valid {
+		return errors.New("优惠码已存在")
+	}
+	return tx.Unscoped().Model(&PromoCode{}).
+		Where("id = ? AND deleted_id = ?", existing.Id, 0).
+		UpdateColumn("deleted_id", existing.Id).Error
+}
+
 func (promo *PromoCode) Insert() error {
 	if err := validatePromoCode(promo); err != nil {
 		return err
 	}
-	return DB.Create(promo).Error
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := preparePromoCodeForWriteTx(tx, promo.Code, 0); err != nil {
+			return err
+		}
+		return tx.Create(promo).Error
+	})
 }
 
 func (promo *PromoCode) Update() error {
 	if err := validatePromoCode(promo); err != nil {
 		return err
 	}
-	return DB.Model(promo).Select(
-		"name",
-		"code",
-		"status",
-		"discount_type",
-		"discount_value",
-		"applies_to_topup",
-		"applies_to_all_subscription",
-		"subscription_plan_ids",
-		"max_redeem_count",
-		"redeemed_count",
-		"updated_time",
-		"expired_time",
-	).Updates(promo).Error
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := preparePromoCodeForWriteTx(tx, promo.Code, promo.Id); err != nil {
+			return err
+		}
+		return tx.Model(promo).Select(
+			"name",
+			"code",
+			"status",
+			"discount_type",
+			"discount_value",
+			"applies_to_topup",
+			"applies_to_all_subscription",
+			"subscription_plan_ids",
+			"max_redeem_count",
+			"redeemed_count",
+			"updated_time",
+			"expired_time",
+		).Updates(promo).Error
+	})
 }
 
 func GetPromoCodeById(id int) (*PromoCode, error) {
@@ -219,7 +300,20 @@ func DeletePromoCodeById(id int) error {
 	if id <= 0 {
 		return errors.New("id 为空")
 	}
-	return DB.Delete(&PromoCode{}, id).Error
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var promo PromoCode
+		err := lockForUpdate(tx).Where("id = ?", id).First(&promo).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := tx.Model(&promo).UpdateColumn("deleted_id", promo.Id).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&promo).Error
+	})
 }
 
 func promoAppliesToTarget(promo *PromoCode, target string, planId int) bool {
@@ -367,7 +461,7 @@ func recordPromoCodeUsageTx(tx *gorm.DB, promoCodeId int, userId int, orderType 
 		return err
 	}
 	var promo PromoCode
-	query := tx.Set("gorm:query_option", "FOR UPDATE")
+	query := lockForUpdate(tx)
 	if !enforceLimit {
 		query = query.Unscoped()
 	}

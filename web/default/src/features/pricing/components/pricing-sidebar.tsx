@@ -20,6 +20,7 @@ import type { ReactNode } from 'react'
 import { ChevronDown, RotateCcw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getLobeIcon } from '@/lib/lobe-icon'
+import { MODEL_PRICE_UNITS } from '@/lib/model-price-unit'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -36,7 +37,9 @@ import {
   getQuotaTypeLabels,
 } from '../constants'
 import { parseTags } from '../lib/filters'
-import type { PricingModel, PricingVendor } from '../types'
+import { getGroupDisplayName } from '../lib/group-names'
+import { getModelPriceUnit } from '../lib/model-helpers'
+import type { GroupNameMap, PricingModel, PricingVendor } from '../types'
 
 type FilterOption = {
   value: string
@@ -67,6 +70,7 @@ export interface PricingSidebarProps {
   vendors: PricingVendor[]
   groups: string[]
   groupRatios?: Record<string, number>
+  groupNames: GroupNameMap
   tags: string[]
   models: PricingModel[]
   hasActiveFilters: boolean
@@ -185,7 +189,7 @@ export function PricingSidebar(props: PricingSidebarProps) {
     },
     ...props.groups.map((group) => ({
       value: group,
-      label: group,
+      label: getGroupDisplayName(group, props.groupNames),
       suffix: formatGroupRatio(props.groupRatios?.[group]),
     })),
   ]
@@ -204,7 +208,22 @@ export function PricingSidebar(props: PricingSidebarProps) {
     {
       value: QUOTA_TYPES.REQUEST,
       label: quotaTypeLabels[QUOTA_TYPES.REQUEST],
-      count: countBy(props.models, (model) => model.quota_type === 1),
+      count: countBy(
+        props.models,
+        (model) =>
+          model.quota_type === 1 &&
+          getModelPriceUnit(model) === MODEL_PRICE_UNITS.REQUEST
+      ),
+    },
+    {
+      value: QUOTA_TYPES.SECOND,
+      label: quotaTypeLabels[QUOTA_TYPES.SECOND],
+      count: countBy(
+        props.models,
+        (model) =>
+          model.quota_type === 1 &&
+          getModelPriceUnit(model) === MODEL_PRICE_UNITS.SECOND
+      ),
     },
   ]
 

@@ -19,7 +19,13 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { API, showError, showSuccess } from '../../helpers';
+import {
+  API,
+  createGroupOptions,
+  extractGroupDetailsResponse,
+  showError,
+  showSuccess,
+} from '../../helpers';
 import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
 
@@ -46,7 +52,9 @@ export const useUsersData = () => {
   // Form initial values
   const formInitValues = {
     searchKeyword: '',
+    searchType: 'username',
     searchGroup: '',
+    searchRole: '',
   };
 
   // Form API reference
@@ -57,7 +65,9 @@ export const useUsersData = () => {
     const formValues = formApi ? formApi.getValues() : {};
     return {
       searchKeyword: formValues.searchKeyword || '',
+      searchType: formValues.searchType || 'username',
       searchGroup: formValues.searchGroup || '',
+      searchRole: formValues.searchRole || '',
     };
   };
 
@@ -85,28 +95,37 @@ export const useUsersData = () => {
     setLoading(false);
   };
 
-  // Search users with keyword and group
+  // Search users with keyword, group and role
   const searchUsers = async (
     startIdx,
     pageSize,
     searchKeyword = null,
     searchGroup = null,
+    searchRole = null,
+    searchType = null,
   ) => {
     // If no parameters passed, get values from form
-    if (searchKeyword === null || searchGroup === null) {
+    if (
+      searchKeyword === null ||
+      searchGroup === null ||
+      searchRole === null ||
+      searchType === null
+    ) {
       const formValues = getFormValues();
       searchKeyword = formValues.searchKeyword;
       searchGroup = formValues.searchGroup;
+      searchRole = formValues.searchRole;
+      searchType = formValues.searchType;
     }
 
-    if (searchKeyword === '' && searchGroup === '') {
+    if (searchKeyword === '' && searchGroup === '' && searchRole === '') {
       // If keyword is blank, load files instead
       await loadUsers(startIdx, pageSize);
       return;
     }
     setSearching(true);
     const res = await API.get(
-      `/api/user/search?keyword=${searchKeyword}&group=${searchGroup}&p=${startIdx}&page_size=${pageSize}`,
+      `/api/user/search?keyword=${encodeURIComponent(searchKeyword)}&search_type=${encodeURIComponent(searchType)}&group=${encodeURIComponent(searchGroup)}&role=${encodeURIComponent(searchRole)}&p=${startIdx}&page_size=${pageSize}`,
     );
     const { success, message, data } = res.data;
     if (success) {
@@ -191,11 +210,17 @@ export const useUsersData = () => {
   // Handle page change
   const handlePageChange = (page) => {
     setActivePage(page);
-    const { searchKeyword, searchGroup } = getFormValues();
-    if (searchKeyword === '' && searchGroup === '') {
+    const { searchKeyword, searchGroup, searchRole } = getFormValues();
+    if (searchKeyword === '' && searchGroup === '' && searchRole === '') {
       loadUsers(page, pageSize).then();
     } else {
-      searchUsers(page, pageSize, searchKeyword, searchGroup).then();
+      searchUsers(
+        page,
+        pageSize,
+        searchKeyword,
+        searchGroup,
+        searchRole,
+      ).then();
     }
   };
 
@@ -204,11 +229,14 @@ export const useUsersData = () => {
     localStorage.setItem('page-size', size + '');
     setPageSize(size);
     setActivePage(1);
-    loadUsers(activePage, size)
-      .then()
-      .catch((reason) => {
-        showError(reason);
-      });
+    const { searchKeyword, searchGroup, searchRole } = getFormValues();
+    const request =
+      searchKeyword === '' && searchGroup === '' && searchRole === ''
+        ? loadUsers(1, size)
+        : searchUsers(1, size, searchKeyword, searchGroup, searchRole);
+    request.then().catch((reason) => {
+      showError(reason);
+    });
   };
 
   // Handle table row styling for disabled/deleted users
@@ -226,29 +254,23 @@ export const useUsersData = () => {
 
   // Refresh data
   const refresh = async (page = activePage) => {
-    const { searchKeyword, searchGroup } = getFormValues();
-    if (searchKeyword === '' && searchGroup === '') {
+    const { searchKeyword, searchGroup, searchRole } = getFormValues();
+    if (searchKeyword === '' && searchGroup === '' && searchRole === '') {
       await loadUsers(page, pageSize);
     } else {
-      await searchUsers(page, pageSize, searchKeyword, searchGroup);
+      await searchUsers(page, pageSize, searchKeyword, searchGroup, searchRole);
     }
   };
 
   // Fetch groups data
   const fetchGroups = async () => {
     try {
-      let res = await API.get(`/api/group/`);
-      if (res === undefined) {
-        return;
-      }
-      setGroupOptions(
-        res.data.data.map((group) => ({
-          label: group,
-          value: group,
-        })),
-      );
+      const res = await API.get('/api/group/details');
+      if (res === undefined) return;
+      const groups = extractGroupDetailsResponse(res.data);
+      setGroupOptions(createGroupOptions(groups || []));
     } catch (error) {
-      showError(error.message);
+      showError(error?.message || t('刷新失败'));
     }
   };
 

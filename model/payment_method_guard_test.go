@@ -102,6 +102,96 @@ func TestRechargeWaffoPancake_RejectsMismatchedPaymentMethod(t *testing.T) {
 	assert.Equal(t, 0, getUserQuotaForPaymentGuardTest(t, 101))
 }
 
+func TestCryptoTopUpLateSuccessUpdatesQuotaAndCacheOnce(t *testing.T) {
+	testCases := []struct {
+		name     string
+		provider string
+		complete func(string, string) error
+	}{
+		{name: "bepusdt", provider: PaymentProviderBepusdt, complete: RechargeBepusdt},
+		{name: "okpay", provider: PaymentProviderOkpay, complete: RechargeOkpay},
+	}
+
+	for index, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			truncateTables(t)
+			userID := 1200 + index
+			tradeNo := testCase.name + "-late-success"
+			insertUserForPaymentGuardTest(t, userID, 0)
+			insertTopUpForPaymentGuardTest(t, tradeNo, userID, testCase.provider)
+			require.NoError(t, DB.Model(&TopUp{}).Where("trade_no = ?", tradeNo).Update("status", common.TopUpStatusExpired).Error)
+
+			originalCacheUpdater := increaseCryptoTopUpCache
+			cacheCalls := 0
+			var cacheDelta int64
+			increaseCryptoTopUpCache = func(gotUserID int, delta int64) error {
+				assert.Equal(t, userID, gotUserID)
+				cacheCalls++
+				cacheDelta += delta
+				return nil
+			}
+			t.Cleanup(func() { increaseCryptoTopUpCache = originalCacheUpdater })
+
+			require.NoError(t, testCase.complete(tradeNo, "127.0.0.1"))
+			require.NoError(t, testCase.complete(tradeNo, "127.0.0.1"))
+
+			assert.Equal(t, common.TopUpStatusSuccess, getTopUpStatusForPaymentGuardTest(t, tradeNo))
+			expectedQuota := int(2 * common.QuotaPerUnit)
+			assert.Equal(t, expectedQuota, getUserQuotaForPaymentGuardTest(t, userID))
+			assert.Equal(t, 1, cacheCalls)
+			assert.Equal(t, int64(expectedQuota), cacheDelta)
+		})
+	}
+}
+
+func TestCompleteSubscriptionOrderAllowsLateVerifiedSuccess(t *testing.T) {
+	truncateTables(t)
+	insertUserForPaymentGuardTest(t, 1210, 0)
+	plan := insertSubscriptionPlanForPaymentGuardTest(t, 1210)
+	insertSubscriptionOrderForPaymentGuardTest(t, "subscription-late-success", 1210, plan.Id, PaymentProviderOkpay)
+	require.NoError(t, DB.Model(&SubscriptionOrder{}).Where("trade_no = ?", "subscription-late-success").Update("status", common.TopUpStatusExpired).Error)
+
+	require.NoError(t, CompleteSubscriptionOrder("subscription-late-success", `{}`, PaymentProviderOkpay, PaymentMethodOkpay))
+
+	order := GetSubscriptionOrderByTradeNo("subscription-late-success")
+	require.NotNil(t, order)
+	assert.Equal(t, common.TopUpStatusSuccess, order.Status)
+	assert.EqualValues(t, 1, countUserSubscriptionsForPaymentGuardTest(t, 1210))
+}
+
+func TestUpdateOkpayProviderSnapshots(t *testing.T) {
+	truncateTables(t)
+	insertUserForPaymentGuardTest(t, 1220, 0)
+	plan := insertSubscriptionPlanForPaymentGuardTest(t, 1220)
+	insertTopUpForPaymentGuardTest(t, "okpay-topup-snapshot", 1220, PaymentProviderOkpay)
+	insertSubscriptionOrderForPaymentGuardTest(t, "okpay-subscription-snapshot", 1220, plan.Id, PaymentProviderOkpay)
+
+	require.NoError(t, UpdateTopUpProviderSnapshot(
+		"okpay-topup-snapshot",
+		PaymentProviderOkpay,
+		"provider-topup-1220",
+		"10.12345678",
+		"USDT",
+	))
+	require.NoError(t, UpdateSubscriptionOrderProviderSnapshot(
+		"okpay-subscription-snapshot",
+		PaymentProviderOkpay,
+		"provider-subscription-1220",
+		"20.00000000",
+		"USDT",
+	))
+
+	topUp := GetTopUpByProviderOrderId(PaymentProviderOkpay, "provider-topup-1220")
+	require.NotNil(t, topUp)
+	assert.Equal(t, "10.12345678", topUp.ProviderAmount)
+	assert.Equal(t, "USDT", topUp.ProviderCurrency)
+
+	order := GetSubscriptionOrderByProviderOrderId(PaymentProviderOkpay, "provider-subscription-1220")
+	require.NotNil(t, order)
+	assert.Equal(t, "20.00000000", order.ProviderAmount)
+	assert.Equal(t, "USDT", order.ProviderCurrency)
+}
+
 func TestUpdatePendingTopUpStatus_RejectsMismatchedPaymentProvider(t *testing.T) {
 	testCases := []struct {
 		name                    string

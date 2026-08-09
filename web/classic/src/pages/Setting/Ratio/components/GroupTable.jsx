@@ -1,3 +1,22 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
 import React, { useState, useCallback, useMemo, useRef } from 'react';
 import {
   Button,
@@ -7,194 +26,255 @@ import {
   Typography,
   Popconfirm,
 } from '@douyinfe/semi-ui';
-import { IconPlus, IconDelete } from '@douyinfe/semi-icons';
+import {
+  IconArrowRight,
+  IconPlus,
+  IconDelete,
+  IconRefresh,
+} from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 import CardTable from '../../../../components/common/ui/CardTable';
+import { createTemporaryGroupCode } from '../../../../helpers';
 
 const { Text } = Typography;
 
-let _idCounter = 0;
-const uid = () => `gr_${++_idCounter}`;
+let rowIdCounter = 0;
+const createRowId = () => `gr_${++rowIdCounter}`;
 
-function parseJSON(str, fallback) {
-  if (!str || !str.trim()) return fallback;
-  try {
-    return JSON.parse(str);
-  } catch {
-    return fallback;
-  }
-}
-
-function buildRows(groupRatioStr, userUsableGroupsStr) {
-  const ratioMap = parseJSON(groupRatioStr, {});
-  const usableMap = parseJSON(userUsableGroupsStr, {});
-
-  const allNames = new Set([
-    ...Object.keys(ratioMap),
-    ...Object.keys(usableMap),
-  ]);
-
-  return Array.from(allNames).map((name) => ({
-    _id: uid(),
-    name,
-    ratio: ratioMap[name] ?? 1,
-    selectable: name in usableMap,
-    description: usableMap[name] ?? '',
+const buildRows = (groups) =>
+  (Array.isArray(groups) ? groups : []).map((group) => ({
+    ...group,
+    _rowId: group.id ? `group_${group.id}` : createRowId(),
   }));
-}
 
-export function serializeGroupTable(rows) {
-  const groupRatio = {};
-  const userUsableGroups = {};
+const serializeRows = (rows) => rows.map(({ _rowId, ...group }) => group);
 
-  rows.forEach((row) => {
-    if (!row.name) return;
-    groupRatio[row.name] = row.ratio;
-    if (row.selectable) {
-      userUsableGroups[row.name] = row.description;
-    }
-  });
-
-  return {
-    GroupRatio: JSON.stringify(groupRatio, null, 2),
-    UserUsableGroups: JSON.stringify(userUsableGroups, null, 2),
-  };
-}
-
-export default function GroupTable({ groupRatio, userUsableGroups, onChange }) {
+export default function GroupTable({
+  groups,
+  autoGroup,
+  onChange,
+  onAutoGroupChange,
+  autoSelectableLocked = false,
+  onMigrate,
+  onMigrateCodes,
+  disabled = false,
+}) {
   const { t } = useTranslation();
-
-  const [rows, setRows] = useState(() =>
-    buildRows(groupRatio, userUsableGroups),
+  const [rows, setRows] = useState(() => buildRows(groups));
+  const reservedCodesRef = useRef(
+    new Set(
+      (Array.isArray(groups) ? groups : [])
+        .map((group) => String(group.code || '').trim())
+        .filter(Boolean),
+    ),
+  );
+  const displayRows = useMemo(
+    () => [
+      {
+        _rowId: 'virtual_auto',
+        _virtualAuto: true,
+        id: null,
+        name: t('自动选择') + ' (auto)',
+        ratio: t('自动'),
+        user_selectable: autoGroup?.user_selectable === true,
+        exclusive: false,
+        description: autoGroup?.description || '',
+      },
+      ...rows,
+    ],
+    [autoGroup, rows, t],
   );
 
-  // Use functional setRows to keep updateRow/addRow/removeRow referentially
-  // stable, preventing columns useMemo from rebuilding on every keystroke
-  // which causes the Input cursor to jump to end (cursor reset bug).
+  // 通过 ref 读取最新回调，避免输入时重建列定义导致光标跳动。
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const autoGroupRef = useRef(autoGroup);
+  autoGroupRef.current = autoGroup;
+  const onAutoGroupChangeRef = useRef(onAutoGroupChange);
+  onAutoGroupChangeRef.current = onAutoGroupChange;
 
   const emitAndSet = useCallback((updater) => {
-    setRows((prev) => {
-      const next = typeof updater === 'function' ? updater(prev) : updater;
-      onChangeRef.current?.(serializeGroupTable(next));
-      return next;
+    setRows((previousRows) => {
+      const nextRows =
+        typeof updater === 'function' ? updater(previousRows) : updater;
+      onChangeRef.current?.(serializeRows(nextRows));
+      return nextRows;
     });
   }, []);
 
   const updateRow = useCallback(
-    (id, field, value) => {
-      emitAndSet((prev) =>
-        prev.map((r) => (r._id === id ? { ...r, [field]: value } : r)),
+    (rowId, field, value) => {
+      emitAndSet((previousRows) =>
+        previousRows.map((row) => {
+          if (row._rowId !== rowId) return row;
+          return { ...row, [field]: value };
+        }),
       );
     },
     [emitAndSet],
   );
 
   const addRow = useCallback(() => {
-    emitAndSet((prev) => {
-      const existingNames = new Set(prev.map((r) => r.name));
-      let counter = 1;
-      let newName = `group_${counter}`;
-      while (existingNames.has(newName)) {
-        counter++;
-        newName = `group_${counter}`;
-      }
+    emitAndSet((previousRows) => {
+      const code = createTemporaryGroupCode(reservedCodesRef.current);
+      reservedCodesRef.current.add(code);
+
       return [
-        ...prev,
+        ...previousRows,
         {
-          _id: uid(),
-          name: newName,
-          ratio: 1,
-          selectable: true,
+          _rowId: createRowId(),
+          id: null,
+          code,
+          name: '',
           description: '',
+          ratio: 1,
+          user_selectable: true,
+          exclusive: false,
+          status: 1,
+          auto_enabled: false,
+          auto_order: 0,
         },
       ];
     });
   }, [emitAndSet]);
 
   const removeRow = useCallback(
-    (id) => {
-      emitAndSet((prev) => prev.filter((r) => r._id !== id));
+    (rowId) => {
+      emitAndSet((previousRows) =>
+        previousRows.filter((row) => row._rowId !== rowId),
+      );
     },
     [emitAndSet],
   );
 
-  const groupNames = useMemo(() => rows.map((r) => r.name), [rows]);
-
-  const duplicateNames = useMemo(() => {
-    const counts = {};
-    groupNames.forEach((n) => {
-      counts[n] = (counts[n] || 0) + 1;
-    });
-    return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
-  }, [groupNames]);
-
-  // Use ref so column render functions always read the latest duplicate set
-  // without adding duplicateNames to columns deps (which would break cursor).
-  const duplicateNamesRef = useRef(duplicateNames);
-  duplicateNamesRef.current = duplicateNames;
-
   const columns = useMemo(
     () => [
+      {
+        title: t('ID'),
+        dataIndex: 'id',
+        key: 'id',
+        width: 72,
+        render: (_, record) => (
+          <Text type={record.id ? 'primary' : 'tertiary'}>
+            {record.id || '-'}
+          </Text>
+        ),
+      },
       {
         title: t('分组名称'),
         dataIndex: 'name',
         key: 'name',
         width: 180,
-        render: (_, record) => (
-          <Input
-            size='small'
-            value={record.name}
-            status={
-              duplicateNamesRef.current.has(record.name) ? 'warning' : undefined
-            }
-            onChange={(v) => updateRow(record._id, 'name', v)}
-          />
-        ),
+        render: (_, record) =>
+          record._virtualAuto ? (
+            <Text strong>{record.name}</Text>
+          ) : (
+            <Input
+              size='small'
+              value={record.name}
+              disabled={disabled}
+              placeholder={t('请输入分组名称')}
+              onChange={(value) => updateRow(record._rowId, 'name', value)}
+            />
+          ),
       },
       {
         title: t('倍率'),
         dataIndex: 'ratio',
         key: 'ratio',
         width: 120,
-        render: (_, record) => (
-          <InputNumber
-            size='small'
-            min={0}
-            step={0.1}
-            value={record.ratio}
-            style={{ width: '100%' }}
-            onChange={(v) => updateRow(record._id, 'ratio', v ?? 0)}
-          />
-        ),
+        render: (_, record) =>
+          record._virtualAuto ? (
+            <Text type='tertiary'>{record.ratio}</Text>
+          ) : (
+            <InputNumber
+              size='small'
+              min={0}
+              step={0.1}
+              value={record.ratio}
+              disabled={disabled}
+              style={{ width: '100%' }}
+              onChange={(value) =>
+                updateRow(record._rowId, 'ratio', value ?? 0)
+              }
+            />
+          ),
       },
       {
         title: t('用户可选'),
-        dataIndex: 'selectable',
-        key: 'selectable',
+        dataIndex: 'user_selectable',
+        key: 'user_selectable',
         width: 90,
         align: 'center',
         render: (_, record) => (
           <Checkbox
-            checked={record.selectable}
-            onChange={(e) =>
-              updateRow(record._id, 'selectable', e.target.checked)
-            }
+            checked={record.user_selectable}
+            disabled={disabled || (record._virtualAuto && autoSelectableLocked)}
+            onChange={(event) => {
+              if (record._virtualAuto) {
+                onAutoGroupChangeRef.current?.({
+                  ...autoGroupRef.current,
+                  user_selectable: event.target.checked,
+                });
+                return;
+              }
+              updateRow(record._rowId, 'user_selectable', event.target.checked);
+            }}
           />
         ),
+      },
+      {
+        title: t('独立分组'),
+        dataIndex: 'exclusive',
+        key: 'exclusive',
+        width: 90,
+        align: 'center',
+        render: (_, record) =>
+          record._virtualAuto ? (
+            <Text type='tertiary'>-</Text>
+          ) : (
+            <Checkbox
+              checked={record.exclusive === true}
+              disabled={disabled}
+              onChange={(event) => {
+                const exclusive = event.target.checked;
+                emitAndSet((previousRows) =>
+                  previousRows.map((row) =>
+                    row._rowId === record._rowId
+                      ? {
+                          ...row,
+                          exclusive,
+                          auto_enabled: exclusive ? false : row.auto_enabled,
+                          auto_order: exclusive ? 0 : row.auto_order,
+                        }
+                      : row,
+                  ),
+                );
+              }}
+            />
+          ),
       },
       {
         title: t('描述'),
         dataIndex: 'description',
         key: 'description',
         render: (_, record) =>
-          record.selectable ? (
+          record._virtualAuto || record.user_selectable ? (
             <Input
               size='small'
               value={record.description}
+              disabled={disabled}
               placeholder={t('分组描述')}
-              onChange={(v) => updateRow(record._id, 'description', v)}
+              onChange={(value) => {
+                if (record._virtualAuto) {
+                  onAutoGroupChangeRef.current?.({
+                    ...autoGroupRef.current,
+                    description: value,
+                  });
+                  return;
+                }
+                updateRow(record._rowId, 'description', value);
+              }}
             />
           ) : (
             <Text type='tertiary' size='small'>
@@ -206,46 +286,68 @@ export default function GroupTable({ groupRatio, userUsableGroups, onChange }) {
         title: '',
         key: 'actions',
         width: 50,
-        render: (_, record) => (
-          <Popconfirm
-            title={t('确认删除该分组？')}
-            onConfirm={() => removeRow(record._id)}
-            position='left'
-          >
-            <Button
-              icon={<IconDelete />}
-              type='danger'
-              theme='borderless'
-              size='small'
-            />
-          </Popconfirm>
-        ),
+        render: (_, record) =>
+          record._virtualAuto ? null : (
+            <Popconfirm
+              title={t(
+                '确认标记删除该分组？保存时绑定令牌会自动切换为 auto；渠道、用户等其他引用仍会阻止删除。',
+              )}
+              onConfirm={() => removeRow(record._rowId)}
+              position='left'
+              disabled={disabled}
+            >
+              <Button
+                icon={<IconDelete />}
+                type='danger'
+                theme='borderless'
+                size='small'
+                disabled={disabled}
+              />
+            </Popconfirm>
+          ),
       },
     ],
-    [t, updateRow, removeRow],
+    [autoSelectableLocked, disabled, emitAndSet, removeRow, t, updateRow],
   );
 
   return (
     <div>
       <CardTable
         columns={columns}
-        dataSource={rows}
-        rowKey='_id'
+        dataSource={displayRows}
+        rowKey='_rowId'
         hidePagination
         size='small'
         empty={<Text type='tertiary'>{t('暂无分组，点击下方按钮添加')}</Text>}
       />
-      <div className='mt-3 flex justify-center'>
-        <Button icon={<IconPlus />} theme='outline' onClick={addRow}>
+      <div className='mt-3 flex flex-wrap justify-center gap-2'>
+        <Button
+          icon={<IconRefresh />}
+          theme='outline'
+          disabled={disabled}
+          onClick={onMigrateCodes}
+        >
+          {t('迁移旧标识')}
+        </Button>
+        <Button
+          icon={<IconArrowRight />}
+          theme='outline'
+          disabled={
+            disabled || rows.filter((row) => Number(row.id) > 0).length < 1
+          }
+          onClick={onMigrate}
+        >
+          {t('迁移令牌')}
+        </Button>
+        <Button
+          icon={<IconPlus />}
+          theme='outline'
+          disabled={disabled}
+          onClick={addRow}
+        >
           {t('添加分组')}
         </Button>
       </div>
-      {duplicateNames.size > 0 && (
-        <Text type='warning' size='small' className='mt-2 block'>
-          {t('存在重复的分组名称：')}
-          {Array.from(duplicateNames).join(', ')}
-        </Text>
-      )}
     </div>
   );
 }

@@ -28,19 +28,15 @@ func OaiResponsesCompactionHandler(c *gin.Context, resp *http.Response) (*dto.Us
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
 
-	service.IOCopyBytesGracefully(c, resp, responseBody)
-
 	usage := dto.Usage{}
 	if compactResp.Usage != nil {
-		usage.PromptTokens = compactResp.Usage.InputTokens
-		usage.CompletionTokens = compactResp.Usage.OutputTokens
-		usage.TotalTokens = compactResp.Usage.TotalTokens
-		if compactResp.Usage.InputTokensDetails != nil {
-			usage.PromptTokensDetails.CachedTokens = compactResp.Usage.InputTokensDetails.CachedTokens
-			usage.PromptTokensDetails.CachedCreationTokens = compactResp.Usage.InputTokensDetails.CachedCreationTokens
-			usage.PromptTokensDetails.CachedCreationTokensPresent = compactResp.Usage.InputTokensDetails.CachedCreationTokensPresent
-		}
+		applyResponsesUsageToOpenAIUsage(&usage, &dto.OpenAIResponsesResponse{
+			Model: compactResp.Model,
+			Usage: compactResp.Usage,
+		})
 	}
+	responseBody = []byte(patchResponsesUsageCacheCreationFields(string(responseBody), &usage))
+	service.IOCopyBytesGracefully(c, resp, responseBody)
 
 	return &usage, nil
 }

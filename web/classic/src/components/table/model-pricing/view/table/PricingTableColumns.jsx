@@ -26,6 +26,7 @@ import {
   calculateModelPrice,
   getModelPriceItems,
   getLobeHubIcon,
+  isModelPriceUnitSecond,
 } from '../../../../../helpers';
 import {
   renderLimitedItems,
@@ -33,12 +34,17 @@ import {
 } from '../../../../common/ui/RenderUtils';
 import { useIsMobile } from '../../../../../hooks/common/useIsMobile';
 
-function renderQuotaType(type, t) {
+function renderQuotaType(record, t) {
+  const type = Number(record.quota_type);
   switch (type) {
     case 1:
       return (
         <Tag color='teal' shape='circle'>
-          {t('按次计费')}
+          {t(
+            isModelPriceUnitSecond(record.model_price_unit)
+              ? '按秒计费'
+              : '按次计费',
+          )}
         </Tag>
       );
     case 0:
@@ -160,7 +166,7 @@ export const getPricingTableColumns = ({
     title: t('计费类型'),
     dataIndex: 'quota_type',
     render: (text, record, index) => {
-      return renderQuotaType(parseInt(text), t);
+      return renderQuotaType(record, t);
     },
     sorter: (a, b) => a.quota_type - b.quota_type,
   };

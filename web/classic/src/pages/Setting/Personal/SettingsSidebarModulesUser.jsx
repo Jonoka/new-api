@@ -97,6 +97,7 @@ export default function SettingsSidebarModulesUser() {
         enabled: true,
         topup: isSidebarModuleAllowed('personal', 'topup'),
         affiliate: isSidebarModuleAllowed('personal', 'affiliate'),
+        invoice: isSidebarModuleAllowed('personal', 'invoice'),
         personal: isSidebarModuleAllowed('personal', 'personal'),
       };
     }
@@ -109,9 +110,12 @@ export default function SettingsSidebarModulesUser() {
         models: isSidebarModuleAllowed('admin', 'models'),
         deployment: isSidebarModuleAllowed('admin', 'deployment'),
         redemption: isSidebarModuleAllowed('admin', 'redemption'),
+        subscription: isSidebarModuleAllowed('admin', 'subscription'),
         game_management: isSidebarModuleAllowed('admin', 'game_management'),
         user: isSidebarModuleAllowed('admin', 'user'),
+        invoice_admin: isSidebarModuleAllowed('admin', 'invoice_admin'),
         affiliate_admin: isSidebarModuleAllowed('admin', 'affiliate_admin'),
+        extension_admin: isSidebarModuleAllowed('admin', 'extension_admin'),
         setting: isSidebarModuleAllowed('admin', 'setting'),
       };
     }
@@ -346,6 +350,11 @@ export default function SettingsSidebarModulesUser() {
           description: t('邀请返佣与提现管理'),
         },
         {
+          key: 'invoice',
+          title: t('发票中心'),
+          description: t('发票申请与记录'),
+        },
+        {
           key: 'personal',
           title: t('个人设置'),
           description: t('个人信息设置'),
@@ -370,15 +379,30 @@ export default function SettingsSidebarModulesUser() {
           description: t('兑换码和优惠码管理'),
         },
         {
+          key: 'subscription',
+          title: t('订阅管理'),
+          description: t('订阅套餐管理'),
+        },
+        {
           key: 'game_management',
           title: t('游戏管理'),
           description: t('预测局创建与结算'),
         },
         { key: 'user', title: t('用户管理'), description: t('用户账户管理') },
         {
+          key: 'invoice_admin',
+          title: t('发票管理'),
+          description: t('审核和处理发票工单'),
+        },
+        {
           key: 'affiliate_admin',
           title: t('返佣分成设置'),
           description: t('返佣配置与提现审核'),
+        },
+        {
+          key: 'extension_admin',
+          title: t('模块管理'),
+          description: t('扩展模块管理与启停'),
         },
         {
           key: 'setting',

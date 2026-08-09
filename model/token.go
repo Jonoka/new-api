@@ -12,24 +12,27 @@ import (
 )
 
 type Token struct {
-	Id                 int            `json:"id"`
-	UserId             int            `json:"user_id" gorm:"index"`
-	Key                string         `json:"key" gorm:"type:varchar(128);uniqueIndex"`
-	Status             int            `json:"status" gorm:"default:1"`
-	Name               string         `json:"name" gorm:"index" `
-	CreatedTime        int64          `json:"created_time" gorm:"bigint"`
-	AccessedTime       int64          `json:"accessed_time" gorm:"bigint"`
-	ExpiredTime        int64          `json:"expired_time" gorm:"bigint;default:-1"` // -1 means never expired
-	RemainQuota        int            `json:"remain_quota" gorm:"default:0"`
-	UnlimitedQuota     bool           `json:"unlimited_quota"`
-	ModelLimitsEnabled bool           `json:"model_limits_enabled"`
-	ModelLimits        string         `json:"model_limits" gorm:"type:text"`
-	AllowIps           *string        `json:"allow_ips" gorm:"default:''"`
-	UsedQuota          int            `json:"used_quota" gorm:"default:0"` // used quota
-	Group              string         `json:"group" gorm:"default:''"`
-	GroupRatioLimits   string         `json:"group_ratio_limits" gorm:"type:text;default:''"`
-	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
-	DeletedAt          gorm.DeletedAt `gorm:"index"`
+	Id                 int              `json:"id"`
+	UserId             int              `json:"user_id" gorm:"index"`
+	Key                string           `json:"key" gorm:"type:varchar(128);uniqueIndex"`
+	Status             int              `json:"status" gorm:"default:1"`
+	Name               string           `json:"name" gorm:"index" `
+	CreatedTime        int64            `json:"created_time" gorm:"bigint"`
+	AccessedTime       int64            `json:"accessed_time" gorm:"bigint"`
+	ExpiredTime        int64            `json:"expired_time" gorm:"bigint;default:-1"` // -1 means never expired
+	RemainQuota        int              `json:"remain_quota" gorm:"default:0"`
+	UnlimitedQuota     bool             `json:"unlimited_quota"`
+	ModelLimitsEnabled bool             `json:"model_limits_enabled"`
+	ModelLimits        string           `json:"model_limits" gorm:"type:text"`
+	AllowIps           *string          `json:"allow_ips" gorm:"default:''"`
+	UsedQuota          int              `json:"used_quota" gorm:"default:0"` // used quota
+	Group              string           `json:"group" gorm:"default:''"`
+	GroupMode          string           `json:"group_mode" gorm:"type:varchar(16);default:'inherit'"`
+	GroupIds           []int            `json:"group_ids,omitempty" gorm:"-"`
+	GroupDetails       []GroupReference `json:"group_details,omitempty" gorm:"-"`
+	GroupRatioLimits   string           `json:"group_ratio_limits" gorm:"type:text;default:''"`
+	CrossGroupRetry    bool             `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
+	DeletedAt          gorm.DeletedAt   `gorm:"index"`
 }
 
 func (token *Token) Clean() {
@@ -83,6 +86,9 @@ func GetAllUserTokens(userId int, startIdx int, num int) ([]*Token, error) {
 	var tokens []*Token
 	var err error
 	err = DB.Where("user_id = ?", userId).Order("id desc").Limit(num).Offset(startIdx).Find(&tokens).Error
+	if err == nil {
+		err = HydrateTokenGroupBindings(DB, tokens)
+	}
 	return tokens, err
 }
 
@@ -183,6 +189,9 @@ func SearchUserTokens(userId int, keyword string, token string, offset int, limi
 		common.SysError("failed to search tokens: " + err.Error())
 		return nil, 0, errors.New("搜索令牌失败")
 	}
+	if err = HydrateTokenGroupBindings(DB, tokens); err != nil {
+		return nil, 0, err
+	}
 	return tokens, total, nil
 }
 
@@ -233,6 +242,9 @@ func GetTokenByIds(id int, userId int) (*Token, error) {
 	token := Token{Id: id, UserId: userId}
 	var err error = nil
 	err = DB.First(&token, "id = ? and user_id = ?", id, userId).Error
+	if err == nil {
+		err = HydrateTokenGroupBindings(DB, []*Token{&token})
+	}
 	return &token, err
 }
 
@@ -243,9 +255,13 @@ func GetTokenById(id int) (*Token, error) {
 	token := Token{Id: id}
 	var err error = nil
 	err = DB.First(&token, "id = ?", id).Error
+	if err == nil {
+		err = HydrateTokenGroupBindings(DB, []*Token{&token})
+	}
 	if shouldUpdateRedis(true, err) {
+		tokenID, tokenKey := token.Id, token.Key
 		gopool.Go(func() {
-			if err := cacheSetToken(token); err != nil {
+			if err := cacheRefreshToken(tokenID, tokenKey, true); err != nil {
 				common.SysLog("failed to update user status cache: " + err.Error())
 			}
 		})
@@ -257,8 +273,9 @@ func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
 	defer func() {
 		// Update Redis cache asynchronously on successful DB read
 		if shouldUpdateRedis(fromDB, err) && token != nil {
+			tokenID, tokenKey := token.Id, token.Key
 			gopool.Go(func() {
-				if err := cacheSetToken(*token); err != nil {
+				if err := cacheRefreshToken(tokenID, tokenKey, true); err != nil {
 					common.SysLog("failed to update user status cache: " + err.Error())
 				}
 			})
@@ -268,43 +285,83 @@ func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
 		// Try Redis first
 		token, err := cacheGetTokenByKey(key)
 		if err == nil {
+			if len(token.GroupIds) == 0 {
+				if err = HydrateTokenGroupBindings(DB, []*Token{token}); err != nil {
+					return nil, err
+				}
+			}
 			return token, nil
 		}
 		// Don't return error - fall through to DB
 	}
 	fromDB = true
 	err = DB.Where(commonKeyCol+" = ?", key).First(&token).Error
+	if err == nil {
+		err = HydrateTokenGroupBindings(DB, []*Token{token})
+	}
 	return token, err
 }
 
 func (token *Token) Insert() error {
-	var err error
-	err = DB.Create(token).Error
-	return err
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := PrepareTokenGroupBindings(tx, token); err != nil {
+			return err
+		}
+		if err := lockTokenGroupBindingGroups(tx, token); err != nil {
+			return err
+		}
+		if err := ValidateTokenExclusiveGroupBinding(tx, token); err != nil {
+			return err
+		}
+		if err := tx.Create(token).Error; err != nil {
+			return err
+		}
+		return writeTokenGroupBindings(tx, token)
+	})
 }
 
 // Update Make sure your token's fields is completed, because this will update non-zero values
 func (token *Token) Update() (err error) {
 	defer func() {
 		if shouldUpdateRedis(true, err) {
+			tokenID, tokenKey := token.Id, token.Key
 			gopool.Go(func() {
-				err := cacheSetToken(*token)
+				err := cacheRefreshToken(tokenID, tokenKey, false)
 				if err != nil {
 					common.SysLog("failed to update token cache: " + err.Error())
 				}
 			})
 		}
 	}()
-	err = DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
-		"model_limits_enabled", "model_limits", "allow_ips", "group", "group_ratio_limits", "cross_group_retry").Updates(token).Error
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := PrepareTokenGroupBindingsForUpdate(tx, token); err != nil {
+			return err
+		}
+		if err := lockTokenGroupBindingGroups(tx, token); err != nil {
+			return err
+		}
+		if err := ValidateTokenExclusiveGroupBinding(tx, token); err != nil {
+			return err
+		}
+		var locked Token
+		if err := lockForUpdate(tx).Select("id").First(&locked, "id = ?", token.Id).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
+			"model_limits_enabled", "model_limits", "allow_ips", "group", "group_mode", "group_ratio_limits", "cross_group_retry").Updates(token).Error; err != nil {
+			return err
+		}
+		return writeTokenGroupBindings(tx, token)
+	})
 	return err
 }
 
 func (token *Token) SelectUpdate() (err error) {
 	defer func() {
 		if shouldUpdateRedis(true, err) {
+			tokenID, tokenKey := token.Id, token.Key
 			gopool.Go(func() {
-				err := cacheSetToken(*token)
+				err := cacheRefreshToken(tokenID, tokenKey, true)
 				if err != nil {
 					common.SysLog("failed to update token cache: " + err.Error())
 				}
@@ -326,7 +383,16 @@ func (token *Token) Delete() (err error) {
 			})
 		}
 	}()
-	err = DB.Delete(token).Error
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		var locked Token
+		if err := lockForUpdate(tx).Select("id").First(&locked, "id = ?", token.Id).Error; err != nil {
+			return err
+		}
+		if err := deleteTokenGroupBindings(tx, []int{token.Id}); err != nil {
+			return err
+		}
+		return tx.Delete(token).Error
+	})
 	return err
 }
 
@@ -500,9 +566,23 @@ func BatchDeleteTokens(ids []int, userId int) (int, error) {
 	}
 
 	tx := DB.Begin()
+	if tx.Error != nil {
+		return 0, tx.Error
+	}
 
 	var tokens []Token
-	if err := tx.Where("user_id = ? AND id IN (?)", userId, ids).Find(&tokens).Error; err != nil {
+	if err := lockForUpdate(tx).
+		Where("user_id = ? AND id IN (?)", userId, ids).
+		Order("id ASC").
+		Find(&tokens).Error; err != nil {
+		tx.Rollback()
+		return 0, err
+	}
+	tokenIDs := make([]int, 0, len(tokens))
+	for _, token := range tokens {
+		tokenIDs = append(tokenIDs, token.Id)
+	}
+	if err := deleteTokenGroupBindings(tx, tokenIDs); err != nil {
 		tx.Rollback()
 		return 0, err
 	}
@@ -551,6 +631,13 @@ func InvalidateUserTokensCache(userId int) error {
 		Where("user_id = ?", userId).
 		Find(&tokens).Error; err != nil {
 		return err
+	}
+	return invalidateTokensCache(tokens)
+}
+
+func invalidateTokensCache(tokens []Token) error {
+	if !common.RedisEnabled {
+		return nil
 	}
 	var firstErr error
 	for _, t := range tokens {

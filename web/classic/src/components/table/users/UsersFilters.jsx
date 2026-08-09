@@ -61,11 +61,28 @@ const UsersFilters = ({
       className='w-full md:w-auto order-1 md:order-2'
     >
       <div className='flex flex-col md:flex-row items-center gap-2 w-full md:w-auto'>
+        <div className='w-full md:w-32'>
+          <Form.Select
+            field='searchType'
+            optionList={[
+              { label: t('用户 ID'), value: 'id' },
+              { label: t('用户名'), value: 'username' },
+            ]}
+            onChange={() => {
+              setTimeout(() => {
+                searchUsers(1, pageSize);
+              }, 100);
+            }}
+            className='w-full'
+            pure
+            size='small'
+          />
+        </div>
         <div className='relative w-full md:w-64'>
           <Form.Input
             field='searchKeyword'
             prefix={<IconSearch />}
-            placeholder={t('支持搜索用户的 ID、用户名、显示名称和邮箱地址')}
+            placeholder={t('请输入搜索内容')}
             showClear
             pure
             size='small'
@@ -78,6 +95,26 @@ const UsersFilters = ({
             optionList={groupOptions}
             onChange={(value) => {
               // Group change triggers automatic search
+              setTimeout(() => {
+                searchUsers(1, pageSize);
+              }, 100);
+            }}
+            className='w-full'
+            showClear
+            pure
+            size='small'
+          />
+        </div>
+        <div className='w-full md:w-40'>
+          <Form.Select
+            field='searchRole'
+            placeholder={t('角色')}
+            optionList={[
+              { label: t('普通用户'), value: '1' },
+              { label: t('管理员'), value: '10' },
+              { label: t('超级管理员'), value: '100' },
+            ]}
+            onChange={() => {
               setTimeout(() => {
                 searchUsers(1, pageSize);
               }, 100);

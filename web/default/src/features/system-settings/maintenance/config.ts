@@ -17,6 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
+  DEFAULT_CANVAS_APP_ORIGIN,
+  DEFAULT_CANVAS_ICON,
+  normalizeCanvasIcon,
+  normalizeCanvasOrigin,
+} from '@/lib/canvas-settings'
+import {
   parseCustomNavItems,
   type CustomMenuItemConfig,
 } from '@/lib/custom-nav'
@@ -39,7 +45,7 @@ export type HeaderNavModulesConfig = {
 
 export type SidebarSectionConfig = {
   enabled: boolean
-  [key: string]: boolean
+  [key: string]: boolean | string
 }
 
 export type SidebarModulesAdminConfig = Record<
@@ -71,6 +77,8 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
     playground: true,
     canvas: true,
     chat: true,
+    canvasOrigin: DEFAULT_CANVAS_APP_ORIGIN,
+    canvasIcon: DEFAULT_CANVAS_ICON,
   },
   console: {
     enabled: true,
@@ -91,6 +99,7 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
   admin: {
     enabled: true,
     channel: true,
+    channel_observability: true,
     models: true,
     redemption: true,
     user: true,
@@ -98,6 +107,8 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
     setting: true,
     subscription: true,
     invoice_admin: true,
+    notification_center: true,
+    extension_admin: true,
     game: true,
   },
   customItems: [],
@@ -244,9 +255,19 @@ export function parseSidebarModulesAdmin(
       Object.entries(raw as Record<string, unknown>).forEach(
         ([moduleKey, moduleValue]) => {
           if (moduleKey === 'enabled') return
+          if (sectionKey === 'chat' && moduleKey === 'canvasOrigin') {
+            sectionConfig.canvasOrigin = normalizeCanvasOrigin(moduleValue)
+            return
+          }
+          if (sectionKey === 'chat' && moduleKey === 'canvasIcon') {
+            sectionConfig.canvasIcon = normalizeCanvasIcon(moduleValue)
+            return
+          }
           sectionConfig[moduleKey] = toBoolean(
             moduleValue,
-            defaultSection[moduleKey] ?? true
+            typeof defaultSection[moduleKey] === 'boolean'
+              ? defaultSection[moduleKey]
+              : true
           )
         }
       )

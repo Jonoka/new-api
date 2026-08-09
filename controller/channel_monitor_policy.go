@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"errors"
+	"fmt"
 	"math"
 	"time"
 
@@ -49,14 +51,19 @@ type channelMonitorDecision struct {
 func newChannelMonitorPolicy(channel *model.Channel, settings dto.ChannelOtherSettings, monitorSetting *operation_setting.MonitorSetting) channelMonitorPolicy {
 	policy := channelMonitorPolicy{
 		channel:                     channel,
-		monitorEnabled:              true,
+		monitorEnabled:              false,
 		autoDisableEnabled:          common.AutomaticDisableChannelEnabled,
 		autoEnableEnabled:           common.AutomaticEnableChannelEnabled,
-		disableThreshold:            monitorSetting.AutoDisableThreshold,
-		enableThreshold:             monitorSetting.AutoEnableThreshold,
+		disableThreshold:            1,
+		enableThreshold:             1,
 		responseTimeThresholdMillis: int64(common.ChannelDisableThreshold * 1000),
-		channelTestIntervalSeconds:  monitorIntervalSeconds(monitorSetting.AutoTestChannelMinutes),
 		lastTestTime:                settings.MonitorLastTestTime,
+	}
+	if monitorSetting != nil {
+		policy.monitorEnabled = monitorSetting.AutoTestChannelEnabled
+		policy.disableThreshold = monitorSetting.AutoDisableThreshold
+		policy.enableThreshold = monitorSetting.AutoEnableThreshold
+		policy.channelTestIntervalSeconds = monitorIntervalSeconds(monitorSetting.AutoTestChannelMinutes)
 	}
 
 	if settings.MonitorEnabled != nil {
@@ -138,8 +145,51 @@ func (policy channelMonitorPolicy) applyResult(settings *dto.ChannelOtherSetting
 }
 
 func saveChannelMonitorSettings(channel *model.Channel, settings dto.ChannelOtherSettings) error {
-	channel.SetOtherSettings(settings)
-	return model.DB.Model(&model.Channel{}).
-		Where("id = ?", channel.Id).
-		Update("settings", channel.OtherSettings).Error
+	if channel == nil || channel.Id == 0 {
+		return errors.New("channel is required")
+	}
+
+	// 监控任务只拥有运行态字段。配置字段可能在测试请求执行期间被管理员修改，
+	// 因此必须基于数据库中的最新配置合并，不能把任务启动时的旧 JSON 整段写回。
+	const maxAttempts = 5
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		var current struct {
+			OtherSettings string `gorm:"column:settings"`
+		}
+		if err := model.DB.Model(&model.Channel{}).
+			Select("settings").
+			Where("id = ?", channel.Id).
+			Take(&current).Error; err != nil {
+			return err
+		}
+
+		latest := dto.ChannelOtherSettings{}
+		if current.OtherSettings != "" {
+			if err := common.UnmarshalJsonStr(current.OtherSettings, &latest); err != nil {
+				return fmt.Errorf("failed to parse channel monitor settings: %w", err)
+			}
+		}
+		latest.MonitorLastTestTime = settings.MonitorLastTestTime
+		latest.MonitorConsecutiveFailures = settings.MonitorConsecutiveFailures
+		latest.MonitorConsecutiveSuccesses = settings.MonitorConsecutiveSuccesses
+
+		updated := &model.Channel{Id: channel.Id}
+		updated.SetOtherSettings(latest)
+		query := model.DB.Model(&model.Channel{}).Where("id = ?", channel.Id)
+		if current.OtherSettings == "" {
+			query = query.Where("(settings = ? OR settings IS NULL)", "")
+		} else {
+			query = query.Where("settings = ?", current.OtherSettings)
+		}
+		result := query.Update("settings", updated.OtherSettings)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 1 {
+			channel.OtherSettings = updated.OtherSettings
+			return nil
+		}
+	}
+
+	return errors.New("channel monitor settings changed too frequently")
 }

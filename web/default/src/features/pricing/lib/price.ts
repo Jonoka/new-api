@@ -17,8 +17,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { formatCurrencyFromUSD } from '@/lib/currency'
+import { getModelPriceVariantRange } from '@/lib/model-price-variants'
 import { QUOTA_TYPE_VALUES, TOKEN_UNIT_DIVISORS } from '../constants'
 import type { PricingModel, TokenUnit, PriceType } from '../types'
+
+export type FixedPriceDisplay = {
+  formatted: string
+  formattedMaximum: string
+  hasVariants: boolean
+}
 
 // ----------------------------------------------------------------------------
 // Price Calculation Utilities
@@ -240,25 +247,126 @@ export function formatFixedPrice(
   usdExchangeRate = 1,
   groupRatio: Record<string, number>
 ): string {
-  if (model.quota_type !== QUOTA_TYPE_VALUES.REQUEST) {
-    return '-'
-  }
+  return formatFixedPriceDisplay(
+    model,
+    group,
+    showWithRecharge,
+    priceRate,
+    usdExchangeRate,
+    groupRatio
+  ).formatted
+}
 
-  const ratio = groupRatio[group] || 1
-  let priceInUSD = (model.model_price || 0) * ratio
-
-  priceInUSD = applyRechargeRate(
+function formatFixedPriceAmount(
+  priceInUSD: number,
+  showWithRecharge: boolean,
+  priceRate: number,
+  usdExchangeRate: number
+): string {
+  const displayPrice = applyRechargeRate(
     priceInUSD,
     showWithRecharge,
     priceRate,
     usdExchangeRate
   )
-
-  return formatCurrencyFromUSD(priceInUSD, {
+  return formatCurrencyFromUSD(displayPrice, {
     digitsLarge: 4,
     digitsSmall: 4,
     abbreviate: false,
   })
+}
+
+/** 格式化一个规格规则的最终固定单价。 */
+export function formatVariantRulePrice(
+  priceInUSD: number,
+  showWithRecharge = false,
+  priceRate = 1,
+  usdExchangeRate = 1,
+  groupRatio = 1
+): string {
+  return formatFixedPriceAmount(
+    priceInUSD * groupRatio,
+    showWithRecharge,
+    priceRate,
+    usdExchangeRate
+  )
+}
+
+/**
+ * 格式化指定分组下的固定价格。存在规格规则时 formatted 为全部可能价格的最低值。
+ */
+export function formatFixedPriceDisplay(
+  model: PricingModel,
+  group: string,
+  showWithRecharge = false,
+  priceRate = 1,
+  usdExchangeRate = 1,
+  groupRatio: Record<string, number>
+): FixedPriceDisplay {
+  if (model.quota_type !== QUOTA_TYPE_VALUES.REQUEST) {
+    return { formatted: '-', formattedMaximum: '-', hasVariants: false }
+  }
+
+  const ratio = groupRatio[group] || 1
+  const range = getModelPriceVariantRange(
+    model.model_price,
+    model.model_price_variants
+  )
+  return {
+    formatted: formatFixedPriceAmount(
+      range.minimum * ratio,
+      showWithRecharge,
+      priceRate,
+      usdExchangeRate
+    ),
+    formattedMaximum: formatFixedPriceAmount(
+      range.maximum * ratio,
+      showWithRecharge,
+      priceRate,
+      usdExchangeRate
+    ),
+    hasVariants: range.hasVariants,
+  }
+}
+
+/**
+ * 格式化所有可用分组中的最低固定价格，供卡片和列表统一展示。
+ */
+export function formatRequestPriceDisplay(
+  model: PricingModel,
+  showWithRecharge = false,
+  priceRate = 1,
+  usdExchangeRate = 1
+): FixedPriceDisplay {
+  if (model.quota_type !== QUOTA_TYPE_VALUES.REQUEST) {
+    return { formatted: '-', formattedMaximum: '-', hasVariants: false }
+  }
+
+  const enableGroups = Array.isArray(model.enable_groups)
+    ? model.enable_groups
+    : []
+  const groupRatio = model.group_ratio || {}
+  const minRatio = getMinGroupRatio(enableGroups, groupRatio)
+  const range = getModelPriceVariantRange(
+    model.model_price,
+    model.model_price_variants
+  )
+
+  return {
+    formatted: formatFixedPriceAmount(
+      range.minimum * minRatio,
+      showWithRecharge,
+      priceRate,
+      usdExchangeRate
+    ),
+    formattedMaximum: formatFixedPriceAmount(
+      range.maximum * minRatio,
+      showWithRecharge,
+      priceRate,
+      usdExchangeRate
+    ),
+    hasVariants: range.hasVariants,
+  }
 }
 
 /**
@@ -270,28 +378,10 @@ export function formatRequestPrice(
   priceRate = 1,
   usdExchangeRate = 1
 ): string {
-  if (model.quota_type !== QUOTA_TYPE_VALUES.REQUEST) {
-    return '-'
-  }
-
-  const enableGroups = Array.isArray(model.enable_groups)
-    ? model.enable_groups
-    : []
-  const groupRatio = model.group_ratio || {}
-  const minRatio = getMinGroupRatio(enableGroups, groupRatio)
-
-  let priceInUSD = (model.model_price || 0) * minRatio
-
-  priceInUSD = applyRechargeRate(
-    priceInUSD,
+  return formatRequestPriceDisplay(
+    model,
     showWithRecharge,
     priceRate,
     usdExchangeRate
-  )
-
-  return formatCurrencyFromUSD(priceInUSD, {
-    digitsLarge: 4,
-    digitsSmall: 4,
-    abbreviate: false,
-  })
+  ).formatted
 }

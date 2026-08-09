@@ -1,6 +1,8 @@
 package model
 
 import (
+	"errors"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -52,11 +54,47 @@ func GetPerfMetrics(modelName string, group string, startTs int64, endTs int64) 
 	var metrics []PerfMetric
 	query := DB.Model(&PerfMetric{}).
 		Where("model_name = ? AND bucket_ts >= ? AND bucket_ts <= ?", modelName, startTs, endTs)
+	canonicalGroup := strings.TrimSpace(group)
 	if group != "" {
-		query = query.Where(commonGroupCol+" = ?", group)
+		identifiers := []string{canonicalGroup}
+		if !isVirtualAutoCode(canonicalGroup) {
+			resolved, err := ResolveGroupLogIdentifiers(canonicalGroup)
+			if err == nil {
+				identifiers = resolved
+				if entity, resolveErr := GetGroupByCodeOrAlias(canonicalGroup); resolveErr == nil {
+					canonicalGroup = entity.Code
+				}
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, err
+			}
+		}
+		query = query.Where(commonGroupCol+" IN ?", identifiers)
 	}
-	err := query.Order("bucket_ts ASC").Find(&metrics).Error
-	return metrics, err
+	if err := query.Order("bucket_ts ASC").Find(&metrics).Error; err != nil {
+		return nil, err
+	}
+
+	canonicalByIdentifier := make(map[string]string)
+	for index := range metrics {
+		if canonicalGroup != "" {
+			metrics[index].Group = canonicalGroup
+			continue
+		}
+		identifier := metrics[index].Group
+		if canonical, exists := canonicalByIdentifier[identifier]; exists {
+			metrics[index].Group = canonical
+			continue
+		}
+		canonical := identifier
+		if !isVirtualAutoCode(identifier) {
+			if entity, err := GetGroupByCodeOrAlias(identifier); err == nil {
+				canonical = entity.Code
+			}
+		}
+		canonicalByIdentifier[identifier] = canonical
+		metrics[index].Group = canonical
+	}
+	return metrics, nil
 }
 
 type PerfMetricSummary struct {
@@ -64,6 +102,19 @@ type PerfMetricSummary struct {
 	RequestCount   int64  `json:"request_count"`
 	SuccessCount   int64  `json:"success_count"`
 	TotalLatencyMs int64  `json:"total_latency_ms"`
+	OutputTokens   int64  `json:"output_tokens"`
+	GenerationMs   int64  `json:"generation_ms"`
+}
+
+type PerfMetricSummaryBucket struct {
+	ModelName      string `json:"model_name"`
+	Group          string `json:"group" gorm:"column:group"`
+	BucketTs       int64  `json:"bucket_ts"`
+	RequestCount   int64  `json:"request_count"`
+	SuccessCount   int64  `json:"success_count"`
+	TotalLatencyMs int64  `json:"total_latency_ms"`
+	TtftSumMs      int64  `json:"ttft_sum_ms"`
+	TtftCount      int64  `json:"ttft_count"`
 	OutputTokens   int64  `json:"output_tokens"`
 	GenerationMs   int64  `json:"generation_ms"`
 }
@@ -82,6 +133,25 @@ func GetPerfMetricsSummaryAll(startTs int64, endTs int64, groups []string) ([]Pe
 	err := query.
 		Group("model_name").
 		Having("SUM(request_count) > 0").
+		Find(&summaries).Error
+	return summaries, err
+}
+
+func GetPerfMetricsSummaryBucketsAll(startTs int64, endTs int64, groups []string) ([]PerfMetricSummaryBucket, error) {
+	var summaries []PerfMetricSummaryBucket
+	query := DB.Model(&PerfMetric{}).
+		Select("model_name, "+commonGroupCol+" AS "+commonGroupCol+", bucket_ts, SUM(request_count) AS request_count, SUM(success_count) AS success_count, SUM(total_latency_ms) AS total_latency_ms, SUM(ttft_sum_ms) AS ttft_sum_ms, SUM(ttft_count) AS ttft_count, SUM(output_tokens) AS output_tokens, SUM(generation_ms) AS generation_ms").
+		Where("bucket_ts >= ? AND bucket_ts <= ?", startTs, endTs)
+	if groups != nil {
+		if len(groups) == 0 {
+			return summaries, nil
+		}
+		query = query.Where(commonGroupCol+" IN ?", groups)
+	}
+	err := query.
+		Group("model_name, " + commonGroupCol + ", bucket_ts").
+		Having("SUM(request_count) > 0").
+		Order("bucket_ts ASC").
 		Find(&summaries).Error
 	return summaries, err
 }

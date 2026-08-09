@@ -16,10 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { memo, useCallback, useState } from 'react'
+import { memo, useCallback, useEffect, useState } from 'react'
 import { type UseFormReturn } from 'react-hook-form'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Code2, Eye, HelpCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import {
   Accordion,
   AccordionContent,
@@ -50,13 +52,19 @@ import {
   sideDrawerFormClassName,
   sideDrawerHeaderClassName,
 } from '@/components/drawer-layout'
+import { getGroupDetails, updateGroupDetails } from '../api'
 import {
   SettingsForm,
   SettingsSwitchContent,
   SettingsSwitchItem,
 } from '../components/settings-form-layout'
 import { SettingsPageActionsPortal } from '../components/settings-page-context'
-import { GroupRatioVisualEditor } from './group-ratio-visual-editor'
+import type { AutoGroupConfig, GroupDetail, GroupDetailInput } from '../types'
+import { reserveGroupCodes } from './group-identity'
+import {
+  GroupRatioVisualEditor,
+  type EditableGroupDetail,
+} from './group-ratio-visual-editor'
 import { GroupSpecialUsableRulesEditor } from './group-special-usable-editor'
 
 type GroupFormValues = {
@@ -71,8 +79,67 @@ type GroupFormValues = {
 
 type GroupRatioFormProps = {
   form: UseFormReturn<GroupFormValues>
-  onSave: (values: GroupFormValues) => Promise<void>
+  onSave: (values: GroupFormValues) => Record<string, string>
   isSaving: boolean
+}
+
+const groupDetailsQueryKey = ['system-settings', 'group-details'] as const
+
+let editableGroupKeyCounter = 0
+
+function createEditableGroup(group: GroupDetail): EditableGroupDetail {
+  editableGroupKeyCounter += 1
+  const code = String(group.code ?? '').trim()
+  const ratio = Number(group.ratio)
+  const autoOrder = Number(group.auto_order)
+
+  return {
+    id: Number(group.id),
+    code,
+    name: String(group.name ?? '').trim(),
+    description: String(group.description ?? ''),
+    ratio: Number.isFinite(ratio) && ratio >= 0 ? ratio : 1,
+    user_selectable: group.user_selectable === true,
+    exclusive: group.exclusive === true,
+    status: Number(group.status) === 0 ? 0 : 1,
+    auto_enabled: group.auto_enabled === true,
+    auto_order: Number.isInteger(autoOrder) && autoOrder >= 0 ? autoOrder : 0,
+    _key:
+      group.id > 0
+        ? `group_${group.id}`
+        : `loaded_group_${editableGroupKeyCounter}`,
+  }
+}
+
+function createGroupDetailsPayload(
+  groups: EditableGroupDetail[]
+): GroupDetailInput[] {
+  const autoOrderByKey = new Map(
+    groups
+      .filter((group) => group.auto_enabled)
+      .sort((a, b) => a.auto_order - b.auto_order)
+      .map((group, index) => [group._key, index])
+  )
+
+  return groups.map((group) => {
+    const autoOrder = autoOrderByKey.get(group._key)
+    const input: GroupDetailInput = {
+      code: group.code.trim(),
+      name: group.name.trim(),
+      description: group.description,
+      ratio: group.ratio,
+      user_selectable: group.user_selectable,
+      exclusive: group.exclusive,
+      status: group.status,
+      auto_enabled: autoOrder !== undefined,
+      auto_order: autoOrder ?? 0,
+    }
+
+    if (group.id && group.id > 0) {
+      input.id = group.id
+    }
+    return input
+  })
 }
 
 export const GroupRatioForm = memo(function GroupRatioForm({
@@ -81,8 +148,42 @@ export const GroupRatioForm = memo(function GroupRatioForm({
   isSaving,
 }: GroupRatioFormProps) {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
   const [editMode, setEditMode] = useState<'visual' | 'json'>('visual')
   const [guideOpen, setGuideOpen] = useState(false)
+  const [groups, setGroups] = useState<EditableGroupDetail[]>([])
+  const [autoGroup, setAutoGroup] = useState<AutoGroupConfig>({
+    user_selectable: false,
+    description: '',
+  })
+  const [reservedGroupCodes, setReservedGroupCodes] = useState<Set<string>>(
+    () => new Set()
+  )
+  const [deletedGroupIds, setDeletedGroupIds] = useState<number[]>([])
+
+  const groupDetailsQuery = useQuery({
+    queryKey: groupDetailsQueryKey,
+    queryFn: getGroupDetails,
+    refetchOnWindowFocus: false,
+  })
+
+  const { mutateAsync: saveGroupDetails, isPending: isSavingGroupDetails } =
+    useMutation({
+      mutationFn: updateGroupDetails,
+    })
+
+  useEffect(() => {
+    if (!groupDetailsQuery.data) return
+    setGroups(groupDetailsQuery.data.groups.map(createEditableGroup))
+    setAutoGroup(groupDetailsQuery.data.autoGroup)
+    setReservedGroupCodes((current) =>
+      reserveGroupCodes(
+        current,
+        groupDetailsQuery.data.groups.map((group) => group.code)
+      )
+    )
+    setDeletedGroupIds([])
+  }, [groupDetailsQuery.data])
 
   const handleFieldChange = useCallback(
     (field: keyof GroupFormValues, value: string) => {
@@ -94,9 +195,139 @@ export const GroupRatioForm = memo(function GroupRatioForm({
     [form]
   )
 
+  const handleGroupsChange = useCallback(
+    (nextGroups: EditableGroupDetail[]) => {
+      const nextIds = new Set(
+        nextGroups
+          .map((group) => group.id)
+          .filter((id): id is number => Boolean(id && id > 0))
+      )
+      const removedIds = groups
+        .map((group) => group.id)
+        .filter((id): id is number => Boolean(id && id > 0 && !nextIds.has(id)))
+
+      setDeletedGroupIds((current) =>
+        Array.from(new Set([...current, ...removedIds])).filter(
+          (id) => !nextIds.has(id)
+        )
+      )
+      setReservedGroupCodes((current) =>
+        reserveGroupCodes(
+          current,
+          nextGroups.map((group) => group.code)
+        )
+      )
+      setGroups(nextGroups)
+    },
+    [groups]
+  )
+
+  const handleSave = useCallback(
+    async (values: GroupFormValues) => {
+      if (!groupDetailsQuery.data || groupDetailsQuery.isError) {
+        toast.error(t('Load group details before saving.'))
+        return
+      }
+
+      const names = groups.map((group) => group.name.trim())
+      if (names.some((name) => !name)) {
+        toast.error(`${t('Group name')}: ${t('Required')}`)
+        return
+      }
+      if (new Set(names).size !== names.length) {
+        toast.error(t('Group names must be unique.'))
+        return
+      }
+
+      // 稳定标识由系统生成并保持不可编辑；异常时仅返回通用保存错误，
+      // 不把内部标识暴露给管理员。
+      const codes = groups.map((group) => group.code.trim())
+      if (codes.some((code) => !code) || new Set(codes).size !== codes.length) {
+        toast.error(t('Failed to save'))
+        return
+      }
+      if (
+        groups.some((group) => !Number.isFinite(group.ratio) || group.ratio < 0)
+      ) {
+        toast.error(t('Group ratios must be non-negative numbers.'))
+        return
+      }
+
+      try {
+        const optionUpdates = onSave(values)
+        const response = await saveGroupDetails({
+          groups: createGroupDetailsPayload(groups),
+          deleted_ids: deletedGroupIds,
+          option_updates: optionUpdates,
+          auto_group: autoGroup,
+        })
+        if (!response.success) return
+        const saveWarning = response.message?.trim()
+
+        const savedDetails = response.data
+          ? {
+              groups: response.data,
+              autoGroup: response.auto_group ?? autoGroup,
+            }
+          : await getGroupDetails()
+        queryClient.setQueryData(groupDetailsQueryKey, savedDetails)
+        queryClient.setQueryData(['channels', 'group-details'], {
+          success: true,
+          data: savedDetails.groups,
+        })
+        setGroups(savedDetails.groups.map(createEditableGroup))
+        setAutoGroup(savedDetails.autoGroup)
+        setDeletedGroupIds([])
+
+        // 分组名称会显示在模型广场；立即使五分钟缓存失效。
+        await queryClient.invalidateQueries({ queryKey: ['pricing'] })
+        try {
+          window.localStorage.removeItem('status')
+        } catch {
+          // 无可用存储时仍继续刷新查询缓存。
+        }
+
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['system-options'] }),
+          queryClient.invalidateQueries({ queryKey: ['status'] }),
+          queryClient.invalidateQueries({ queryKey: ['channels'] }),
+          queryClient.invalidateQueries({ queryKey: ['groups'] }),
+          queryClient.invalidateQueries({ queryKey: ['keys'] }),
+          queryClient.invalidateQueries({ queryKey: ['user-groups'] }),
+          queryClient.invalidateQueries({ queryKey: ['user-self-groups'] }),
+          queryClient.invalidateQueries({ queryKey: ['playground-groups'] }),
+          queryClient.invalidateQueries({ queryKey: ['canvas-groups'] }),
+        ])
+        if (saveWarning) {
+          toast.warning(saveWarning)
+        } else {
+          toast.success(t('Group settings saved successfully'))
+        }
+      } catch {
+        // 请求层负责展示具体错误。
+      }
+    },
+    [
+      deletedGroupIds,
+      autoGroup,
+      groupDetailsQuery.data,
+      groupDetailsQuery.isError,
+      groups,
+      onSave,
+      queryClient,
+      saveGroupDetails,
+      t,
+    ]
+  )
+
   const toggleEditMode = useCallback(() => {
     setEditMode((prev) => (prev === 'visual' ? 'json' : 'visual'))
   }, [])
+
+  const isSavingAll = isSaving || isSavingGroupDetails
+  const groupLoadError = groupDetailsQuery.isError
+    ? groupDetailsQuery.error.message || t('Failed to load groups')
+    : null
 
   return (
     <div className='space-y-6'>
@@ -127,20 +358,32 @@ export const GroupRatioForm = memo(function GroupRatioForm({
           <Button
             type='button'
             size='sm'
-            onClick={form.handleSubmit(onSave)}
-            disabled={isSaving}
+            onClick={form.handleSubmit(handleSave)}
+            disabled={
+              isSavingAll ||
+              groupDetailsQuery.isPending ||
+              groupDetailsQuery.isError
+            }
           >
-            {isSaving ? t('Saving...') : t('Save group ratios')}
+            {isSavingAll ? t('Saving...') : t('Save group ratios')}
           </Button>
         </SettingsPageActionsPortal>
         {editMode === 'visual' ? (
           <div className='space-y-6'>
             <GroupRatioVisualEditor
-              groupRatio={form.watch('GroupRatio')}
+              groups={groups}
+              autoGroup={autoGroup}
+              autoSelectableLocked={form.watch('DefaultUseAutoGroup')}
+              reservedGroupCodes={reservedGroupCodes}
+              isLoadingGroups={groupDetailsQuery.isPending}
+              groupLoadError={groupLoadError}
               topupGroupRatio={form.watch('TopupGroupRatio')}
-              userUsableGroups={form.watch('UserUsableGroups')}
               groupGroupRatio={form.watch('GroupGroupRatio')}
-              autoGroups={form.watch('AutoGroups')}
+              onGroupsChange={handleGroupsChange}
+              onAutoGroupChange={setAutoGroup}
+              onRetryGroups={() => {
+                void groupDetailsQuery.refetch()
+              }}
               onChange={(field, value) =>
                 handleFieldChange(field as keyof GroupFormValues, value)
               }
@@ -169,7 +412,15 @@ export const GroupRatioForm = memo(function GroupRatioForm({
                   <FormControl>
                     <Switch
                       checked={field.value}
-                      onCheckedChange={field.onChange}
+                      onCheckedChange={(checked) => {
+                        field.onChange(checked)
+                        if (checked) {
+                          setAutoGroup((current) => ({
+                            ...current,
+                            user_selectable: true,
+                          }))
+                        }
+                      }}
                     />
                   </FormControl>
                 </SettingsSwitchItem>
@@ -177,26 +428,12 @@ export const GroupRatioForm = memo(function GroupRatioForm({
             />
           </div>
         ) : (
-          <SettingsForm onSubmit={form.handleSubmit(onSave)}>
-            <FormField
-              control={form.control}
-              name='GroupRatio'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('Group ratios')}</FormLabel>
-                  <FormControl>
-                    <Textarea rows={8} {...field} />
-                  </FormControl>
-                  <FormDescription>
-                    {t(
-                      'JSON map of group → ratio applied when the user selects the group explicitly.'
-                    )}
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
+          <SettingsForm onSubmit={form.handleSubmit(handleSave)}>
+            <div className='bg-muted/30 text-muted-foreground rounded-lg border p-3 text-sm'>
+              {t(
+                'Pricing groups and auto assignment are managed in Visual mode through the structured group interface.'
               )}
-            />
-
+            </div>
             <FormField
               control={form.control}
               name='TopupGroupRatio'
@@ -219,25 +456,6 @@ export const GroupRatioForm = memo(function GroupRatioForm({
 
             <FormField
               control={form.control}
-              name='UserUsableGroups'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('Selectable groups')}</FormLabel>
-                  <FormControl>
-                    <Textarea rows={6} {...field} />
-                  </FormControl>
-                  <FormDescription>
-                    {t(
-                      'JSON map of group → description exposed when users create API keys.'
-                    )}
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
               name='GroupGroupRatio'
               render={({ field }) => (
                 <FormItem>
@@ -250,25 +468,6 @@ export const GroupRatioForm = memo(function GroupRatioForm({
                     {`{ targetGroup: ratio }`}{' '}
                     {t(
                       'to override billing when a user in one group uses a token of another group.'
-                    )}
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name='AutoGroups'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('Auto assignment order')}</FormLabel>
-                  <FormControl>
-                    <Textarea rows={6} {...field} />
-                  </FormControl>
-                  <FormDescription>
-                    {t(
-                      'JSON array of group identifiers. When enabled below, new tokens rotate through this list.'
                     )}
                   </FormDescription>
                   <FormMessage />
@@ -311,7 +510,15 @@ export const GroupRatioForm = memo(function GroupRatioForm({
                   <FormControl>
                     <Switch
                       checked={field.value}
-                      onCheckedChange={field.onChange}
+                      onCheckedChange={(checked) => {
+                        field.onChange(checked)
+                        if (checked) {
+                          setAutoGroup((current) => ({
+                            ...current,
+                            user_selectable: true,
+                          }))
+                        }
+                      }}
                     />
                   </FormControl>
                 </SettingsSwitchItem>

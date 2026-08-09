@@ -32,6 +32,8 @@ import type {
   AffiliateTransferResponse,
   BillingHistoryResponse,
   CompleteOrderRequest,
+  RetryTopupPaymentRequest,
+  RetryTopupPaymentResponse,
   CreemPaymentRequest,
   CreemPaymentResponse,
   WaffoPaymentRequest,
@@ -296,4 +298,19 @@ export async function completeOrder(
 ): Promise<ApiResponse> {
   const res = await api.post('/api/user/topup/complete', request)
   return res.data
+}
+
+/**
+ * 重新拉起待支付充值订单
+ */
+export async function retryTopupPayment(
+  request: RetryTopupPaymentRequest
+): Promise<RetryTopupPaymentResponse> {
+  const res = await api.post('/api/user/topup/retry', request, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return {
+    ...res.data,
+    url: res.data.url || (res as unknown as { url?: string }).url,
+  }
 }

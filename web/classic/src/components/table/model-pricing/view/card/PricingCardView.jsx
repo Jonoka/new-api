@@ -35,16 +35,21 @@ import {
   IllustrationNoResultDark,
 } from '@douyinfe/semi-illustrations';
 import {
-  stringToColor,
   calculateModelPrice,
   formatPriceInfo,
   formatDynamicPriceSummary,
   getLobeHubIcon,
+  isModelPriceUnitSecond,
 } from '../../../../../helpers';
 import PricingCardSkeleton from './PricingCardSkeleton';
+import ModelPerformanceBadge from './ModelPerformanceBadge';
 import { useMinimumLoadingTime } from '../../../../../hooks/common/useMinimumLoadingTime';
-import { renderLimitedItems } from '../../../../common/ui/RenderUtils';
 import { useIsMobile } from '../../../../../hooks/common/useIsMobile';
+import {
+  getBillingDiscountColor,
+  getBillingDiscountText,
+  getBillingFactors,
+} from '../../billing/utils';
 
 const CARD_STYLES = {
   container:
@@ -71,11 +76,14 @@ const PricingCardView = ({
   siteDisplayType,
   tokenUnit,
   displayPrice,
+  priceRate,
+  usdExchangeRate,
   showRatio,
   t,
   selectedRowKeys = [],
   setSelectedRowKeys,
   openModelDetail,
+  performanceMap = {},
 }) => {
   const showSkeleton = useMinimumLoadingTime(loading);
   const startIndex = (currentPage - 1) * pageSize;
@@ -147,14 +155,8 @@ const PricingCardView = ({
     );
   };
 
-  // 获取模型描述
-  const getModelDescription = (record) => {
-    return record.description || '';
-  };
-
-  // 渲染标签
-  const renderTags = (record) => {
-    // 计费类型标签（左边）
+  // 卡片不展示模型描述与模型标签，底部只保留计费类型和性能状态。
+  const renderBillingTag = (record) => {
     let billingTag = (
       <Tag key='billing' shape='circle' color='white' size='small'>
         -
@@ -163,7 +165,11 @@ const PricingCardView = ({
     if (record.quota_type === 1) {
       billingTag = (
         <Tag key='billing' shape='circle' color='teal' size='small'>
-          {t('按次计费')}
+          {t(
+            isModelPriceUnitSecond(record.model_price_unit)
+              ? '按秒计费'
+              : '按次计费',
+          )}
         </Tag>
       );
     } else if (record.quota_type === 0) {
@@ -174,40 +180,7 @@ const PricingCardView = ({
       );
     }
 
-    // 自定义标签（右边）
-    const customTags = [];
-    if (record.tags) {
-      const tagArr = record.tags.split(',').filter(Boolean);
-      tagArr.forEach((tg, idx) => {
-        customTags.push(
-          <Tag
-            key={`custom-${idx}`}
-            shape='circle'
-            color={stringToColor(tg)}
-            size='small'
-          >
-            {tg}
-          </Tag>,
-        );
-      });
-    }
-
-    return (
-      <div className='flex items-center justify-between'>
-        <div className='flex items-center gap-2'>{billingTag}</div>
-        <div className='flex items-center gap-1'>
-          {customTags.length > 0 &&
-            renderLimitedItems({
-              items: customTags.map((tag, idx) => ({
-                key: `custom-${idx}`,
-                element: tag,
-              })),
-              renderItem: (item, idx) => item.element,
-              maxDisplay: 3,
-            })}
-        </div>
-      </div>
-    );
+    return billingTag;
   };
 
   // 显示骨架屏
@@ -216,6 +189,7 @@ const PricingCardView = ({
       <PricingCardSkeleton
         rowSelection={!!rowSelection}
         showRatio={showRatio}
+        isMobile={isMobile}
       />
     );
   }
@@ -236,7 +210,7 @@ const PricingCardView = ({
 
   return (
     <div className='px-2 pt-2'>
-      <div className='grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-4'>
+      <div className='grid grid-cols-1 items-start gap-4 xl:grid-cols-2 min-[1800px]:grid-cols-3'>
         {paginatedModels.map((model, index) => {
           const modelKey = getModelKey(model);
           const isSelected = selectedRowKeys.includes(modelKey);
@@ -250,29 +224,49 @@ const PricingCardView = ({
             currency,
             quotaDisplayType: siteDisplayType,
           });
+          const discountFactor = getBillingFactors({
+            groupRatio: priceData.usedGroupRatio,
+            priceRate,
+            usdExchangeRate,
+          }).compositeFactor;
 
           return (
             <Card
               key={modelKey || index}
-              className={`!rounded-2xl transition-all duration-200 hover:shadow-lg border cursor-pointer ${isSelected ? CARD_STYLES.selected : CARD_STYLES.default}`}
-              bodyStyle={{ height: '100%' }}
+              className={`w-full self-start !rounded-2xl transition-all duration-200 hover:shadow-lg border cursor-pointer ${isSelected ? CARD_STYLES.selected : CARD_STYLES.default}`}
+              bodyStyle={{
+                minHeight: isMobile ? undefined : 152,
+                display: 'flex',
+                flexDirection: 'column',
+              }}
               onClick={() => openModelDetail && openModelDetail(model)}
             >
-              <div className='flex flex-col h-full'>
+              <div className='flex min-h-0 flex-1 flex-col'>
                 {/* 头部：图标 + 模型名称 + 操作按钮 */}
                 <div className='flex items-start justify-between mb-3'>
                   <div className='flex items-start space-x-3 flex-1 min-w-0'>
                     {getModelIcon(model)}
                     <div className='flex-1 min-w-0'>
-                      <h3 className='text-lg font-bold text-gray-900 truncate'>
-                        {model.model_name}
-                      </h3>
+                      <div className='flex min-w-0 items-center gap-2'>
+                        <h3 className='min-w-0 truncate text-lg font-bold text-gray-900'>
+                          {model.model_name}
+                        </h3>
+                        <Tag
+                          className='shrink-0 !rounded !px-1.5'
+                          color={getBillingDiscountColor(discountFactor)}
+                          size='small'
+                        >
+                          {getBillingDiscountText(discountFactor, t)}
+                        </Tag>
+                      </div>
                       <div className='flex flex-col gap-1 text-xs mt-1'>
-                        {priceData.isDynamicPricing ? (
-                          formatDynamicPriceSummary(priceData.billingExpr, t, priceData.usedGroupRatio)
-                        ) : (
-                          formatPriceInfo(priceData, t, siteDisplayType)
-                        )}
+                        {priceData.isDynamicPricing
+                          ? formatDynamicPriceSummary(
+                              priceData.billingExpr,
+                              t,
+                              priceData.usedGroupRatio,
+                            )
+                          : formatPriceInfo(priceData, t, siteDisplayType)}
                       </div>
                     </div>
                   </div>
@@ -303,20 +297,23 @@ const PricingCardView = ({
                   </div>
                 </div>
 
-                {/* 模型描述 - 占据剩余空间 */}
-                <div className='flex-1 mb-4'>
-                  <p
-                    className='text-xs line-clamp-2 leading-relaxed'
-                    style={{ color: 'var(--semi-color-text-2)' }}
-                  >
-                    {getModelDescription(model)}
-                  </p>
-                </div>
-
                 {/* 底部区域 */}
                 <div className='mt-auto'>
-                  {/* 标签区域 */}
-                  {renderTags(model)}
+                  {/* 计费类型与性能状态 */}
+                  <div
+                    className={`flex min-h-[32px] min-w-0 gap-3 ${
+                      isMobile
+                        ? 'flex-col items-start'
+                        : 'items-end justify-between'
+                    }`}
+                  >
+                    <div className='shrink-0'>{renderBillingTag(model)}</div>
+                    <ModelPerformanceBadge
+                      performance={performanceMap[model.model_name]}
+                      t={t}
+                      isMobile={isMobile}
+                    />
+                  </div>
 
                   {/* 倍率信息（可选） */}
                   {showRatio && (

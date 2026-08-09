@@ -21,6 +21,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, AlertCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import {
+  buildGroupSelectionPayload,
+  createGroupOptions,
+  includeSelectedGroupOptions,
+} from '@/lib/group-options'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -40,7 +45,7 @@ import {
   getTagModels,
   editTagChannels,
   getAllModels,
-  getGroups,
+  getGroupDetails,
 } from '../../api'
 import { channelsQueryKeys } from '../../lib'
 import type { TagOperationParams } from '../../types'
@@ -70,19 +75,15 @@ export function TagBatchEditDialog({
 
   // Fetch available groups
   const { data: groupsData, isLoading: isLoadingGroups } = useQuery({
-    queryKey: ['groups'],
-    queryFn: getGroups,
+    queryKey: ['channels', 'group-details'],
+    queryFn: getGroupDetails,
   })
 
   // Transform groups to multi-select options
   const groupOptions = useMemo(() => {
-    if (!groupsData?.data) return []
-    const allGroups = new Set([...groupsData.data, ...groups])
-    return Array.from(allGroups).map((group) => ({
-      value: group,
-      label: group,
-    }))
-  }, [groupsData, groups])
+    const availableGroups = createGroupOptions(groupsData?.data)
+    return includeSelectedGroupOptions(availableGroups, groups)
+  }, [groupsData?.data, groups])
 
   useEffect(() => {
     if (open && currentTag) {
@@ -134,7 +135,7 @@ export function TagBatchEditDialog({
 
     setIsSaving(true)
     try {
-      const params: Record<string, string | undefined> = {
+      const params: TagOperationParams = {
         tag: currentTag,
       }
 
@@ -151,7 +152,9 @@ export function TagBatchEditDialog({
       }
 
       if (groups.length > 0) {
-        params.groups = groups.join(',')
+        const groupSelection = buildGroupSelectionPayload(groups, groupOptions)
+        params.groups = groupSelection.group
+        params.group_ids = groupSelection.group_ids
       }
 
       // Check if there are any changes
@@ -160,9 +163,7 @@ export function TagBatchEditDialog({
         return
       }
 
-      const response = await editTagChannels(
-        params as unknown as TagOperationParams
-      )
+      const response = await editTagChannels(params)
       if (response.success) {
         toast.success(t('Tag updated successfully'))
         queryClient.invalidateQueries({ queryKey: channelsQueryKeys.lists() })

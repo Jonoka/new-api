@@ -12,9 +12,9 @@ func TestStreamStatus_SetEndReason_FirstWins(t *testing.T) {
 	t.Parallel()
 	s := NewStreamStatus()
 
-	s.SetEndReason(StreamEndReasonDone, nil)
-	s.SetEndReason(StreamEndReasonTimeout, nil)
-	s.SetEndReason(StreamEndReasonClientGone, fmt.Errorf("context canceled"))
+	assert.True(t, s.SetEndReason(StreamEndReasonDone, nil))
+	assert.False(t, s.SetEndReason(StreamEndReasonTimeout, nil))
+	assert.False(t, s.SetEndReason(StreamEndReasonClientGone, fmt.Errorf("context canceled")))
 
 	assert.Equal(t, StreamEndReasonDone, s.EndReason)
 	assert.Nil(t, s.EndError)
@@ -34,7 +34,7 @@ func TestStreamStatus_SetEndReason_WithError(t *testing.T) {
 func TestStreamStatus_SetEndReason_NilSafe(t *testing.T) {
 	t.Parallel()
 	var s *StreamStatus
-	s.SetEndReason(StreamEndReasonDone, nil)
+	assert.False(t, s.SetEndReason(StreamEndReasonDone, nil))
 }
 
 func TestStreamStatus_SetEndReason_Concurrent(t *testing.T) {
@@ -53,16 +53,23 @@ func TestStreamStatus_SetEndReason_Concurrent(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
+	winners := 0
+	var winnersMu sync.Mutex
 	for _, r := range reasons {
 		wg.Add(1)
 		go func(reason StreamEndReason) {
 			defer wg.Done()
-			s.SetEndReason(reason, nil)
+			if s.SetEndReason(reason, nil) {
+				winnersMu.Lock()
+				winners++
+				winnersMu.Unlock()
+			}
 		}(r)
 	}
 	wg.Wait()
 
 	assert.NotEqual(t, StreamEndReasonNone, s.EndReason)
+	assert.Equal(t, 1, winners)
 }
 
 func TestStreamStatus_RecordError_Basic(t *testing.T) {

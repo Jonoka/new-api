@@ -2,9 +2,11 @@ package model
 
 import (
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/stretchr/testify/require"
 )
 
@@ -41,4 +43,220 @@ func TestInitOptionMapMigratesLegacyAutomaticRetryStatusCodes(t *testing.T) {
 	common.OptionMapRWMutex.RUnlock()
 	require.True(t, operation_setting.ShouldRetryByStatusCode(504))
 	require.True(t, operation_setting.ShouldRetryByStatusCode(524))
+}
+
+func TestValidateOptionValueModelPriceUnit(t *testing.T) {
+	require.NoError(t, validateOptionValue("ModelPriceUnit", `{"video":"second","image":"request"}`))
+	require.Error(t, validateOptionValue("ModelPriceUnit", `{"video":"minute"}`))
+}
+
+func TestValidateOptionValueModelPriceVariants(t *testing.T) {
+	require.NoError(t, validateOptionValue("ModelPriceVariants", `{
+		"video":{"resolution_enabled":true,"rules":[{"resolution":"720p","price":0.07}]}
+	}`))
+	require.Error(t, validateOptionValue("ModelPriceVariants", `{
+		"video":{"resolution_enabled":true,"rules":[{"resolution":"","price":0.07}]}
+	}`))
+}
+
+func TestUpdateModelPriceUnitInvalidatesPricingCache(t *testing.T) {
+	originalOptionMap := common.OptionMap
+	originalUnits := ratio_setting.ModelPriceUnit2JSONString()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptionMap
+		common.OptionMapRWMutex.Unlock()
+		require.NoError(t, ratio_setting.UpdateModelPriceUnitByJSONString(originalUnits))
+		InvalidatePricingCache()
+	})
+
+	common.OptionMapRWMutex.Lock()
+	common.OptionMap = make(map[string]string)
+	common.OptionMapRWMutex.Unlock()
+	pricingMap = []Pricing{{ModelName: "cached-model"}}
+	lastGetPricingTime = time.Now()
+
+	require.NoError(t, updateOptionMap("ModelPriceUnit", `{"video":"second"}`))
+	require.Empty(t, pricingMap)
+	require.True(t, lastGetPricingTime.IsZero())
+}
+
+func TestUpdateModelPriceReturnsEffectiveDefaultsToAdmin(t *testing.T) {
+	originalOptionMap := common.OptionMap
+	originalPrices := ratio_setting.ModelPrice2JSONString()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptionMap
+		common.OptionMapRWMutex.Unlock()
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(originalPrices))
+		InvalidatePricingCache()
+	})
+
+	common.OptionMapRWMutex.Lock()
+	common.OptionMap = make(map[string]string)
+	common.OptionMapRWMutex.Unlock()
+	pricingMap = []Pricing{{ModelName: "cached-model"}}
+	lastGetPricingTime = time.Now()
+
+	require.NoError(t, updateOptionMap("ModelPrice", `{"custom-video":0.12}`))
+
+	common.OptionMapRWMutex.RLock()
+	effective := common.OptionMap["ModelPrice"]
+	common.OptionMapRWMutex.RUnlock()
+	var prices map[string]float64
+	require.NoError(t, common.UnmarshalJsonStr(effective, &prices))
+	require.Equal(t, 0.12, prices["custom-video"])
+	require.Equal(t, 0.08, prices["grok-imagine-video-1.5"])
+	require.Empty(t, pricingMap)
+	require.True(t, lastGetPricingTime.IsZero())
+}
+
+func TestUpdateGroupSpecialUsableGroupRefreshesRuntimeSetting(t *testing.T) {
+	originalOptionMap := common.OptionMap
+	originalSpecialGroups := ratio_setting.GroupSpecialUsableGroup2JSONString()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptionMap
+		common.OptionMapRWMutex.Unlock()
+		require.NoError(t, ratio_setting.UpdateGroupSpecialUsableGroupByJSONString(originalSpecialGroups))
+		InvalidatePricingCache()
+	})
+
+	common.OptionMapRWMutex.Lock()
+	common.OptionMap = make(map[string]string)
+	common.OptionMapRWMutex.Unlock()
+	pricingMap = []Pricing{{ModelName: "cached-model"}}
+	lastGetPricingTime = time.Now()
+
+	require.NoError(t, updateOptionMap("group_ratio_setting.group_special_usable_group", `{"vip":{"+:exclusive":"专属分组","-:default":"remove"}}`))
+
+	specialGroups, ok := ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.Get("vip")
+	require.True(t, ok)
+	require.Equal(t, "专属分组", specialGroups["+:exclusive"])
+	require.Equal(t, "remove", specialGroups["-:default"])
+	require.Empty(t, pricingMap)
+	require.True(t, lastGetPricingTime.IsZero())
+}
+
+func TestUpdateGroupSpecialUsableGroupRejectsInvalidJSON(t *testing.T) {
+	originalSpecialGroups := ratio_setting.GroupSpecialUsableGroup2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateGroupSpecialUsableGroupByJSONString(originalSpecialGroups))
+	})
+
+	require.NoError(t, ratio_setting.UpdateGroupSpecialUsableGroupByJSONString(`{"vip":{"+:exclusive":"专属分组"}}`))
+
+	err := updateOptionMap("group_ratio_setting.group_special_usable_group", `{invalid`)
+	require.Error(t, err)
+
+	specialGroups, ok := ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.Get("vip")
+	require.True(t, ok)
+	require.Equal(t, "专属分组", specialGroups["+:exclusive"])
+}
+
+func TestUpdateGroupGroupRatioMirrorsRuntimeOptionKeys(t *testing.T) {
+	originalOptionMap := common.OptionMap
+	originalRatios := ratio_setting.GroupGroupRatio2JSONString()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptionMap
+		common.OptionMapRWMutex.Unlock()
+		require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(originalRatios))
+		InvalidatePricingCache()
+	})
+
+	common.OptionMapRWMutex.Lock()
+	common.OptionMap = make(map[string]string)
+	common.OptionMapRWMutex.Unlock()
+	pricingMap = []Pricing{{ModelName: "cached-model"}}
+	lastGetPricingTime = time.Now()
+
+	value := `{"vip":{"default":0.25}}`
+	require.NoError(t, updateOptionMap(layeredGroupGroupRatioOptionKey, value))
+
+	ratio, ok := ratio_setting.GetGroupGroupRatio("vip", "default")
+	require.True(t, ok)
+	require.Equal(t, 0.25, ratio)
+	common.OptionMapRWMutex.RLock()
+	require.Equal(t, value, common.OptionMap[groupGroupRatioOptionKey])
+	require.Equal(t, value, common.OptionMap[layeredGroupGroupRatioOptionKey])
+	common.OptionMapRWMutex.RUnlock()
+	require.Empty(t, pricingMap)
+	require.True(t, lastGetPricingTime.IsZero())
+
+	require.NoError(t, updateOptionMap(groupGroupRatioOptionKey, `{}`))
+	_, ok = ratio_setting.GetGroupGroupRatio("vip", "default")
+	require.False(t, ok)
+	common.OptionMapRWMutex.RLock()
+	require.Equal(t, `{}`, common.OptionMap[groupGroupRatioOptionKey])
+	require.Equal(t, `{}`, common.OptionMap[layeredGroupGroupRatioOptionKey])
+	common.OptionMapRWMutex.RUnlock()
+}
+
+func TestUpdateOptionsBulkMirrorsGroupGroupRatioKeys(t *testing.T) {
+	setupGroupBindingsTest(t)
+	originalOptionMap := common.OptionMap
+	originalRatios := ratio_setting.GroupGroupRatio2JSONString()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptionMap
+		common.OptionMapRWMutex.Unlock()
+		require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(originalRatios))
+	})
+	common.OptionMapRWMutex.Lock()
+	common.OptionMap = make(map[string]string)
+	common.OptionMapRWMutex.Unlock()
+
+	value := `{"vip":{"default":0.25}}`
+	require.NoError(t, UpdateOptionsBulk(map[string]string{groupGroupRatioOptionKey: value}))
+
+	var options []Option
+	require.NoError(t, DB.Where(commonKeyCol+" IN ?", []string{groupGroupRatioOptionKey, layeredGroupGroupRatioOptionKey}).Find(&options).Error)
+	byKey := make(map[string]string, len(options))
+	for _, option := range options {
+		byKey[option.Key] = option.Value
+	}
+	require.Equal(t, value, byKey[groupGroupRatioOptionKey])
+	require.Equal(t, value, byKey[layeredGroupGroupRatioOptionKey])
+	ratio, ok := ratio_setting.GetGroupGroupRatio("vip", "default")
+	require.True(t, ok)
+	require.Equal(t, 0.25, ratio)
+}
+
+func TestLoadOptionsFromDatabasePrefersLegacyGroupGroupRatioMirror(t *testing.T) {
+	setupGroupBindingsTest(t)
+	originalOptionMap := common.OptionMap
+	originalRatios := ratio_setting.GroupGroupRatio2JSONString()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptionMap
+		common.OptionMapRWMutex.Unlock()
+		require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(originalRatios))
+	})
+	common.OptionMapRWMutex.Lock()
+	common.OptionMap = make(map[string]string)
+	common.OptionMapRWMutex.Unlock()
+
+	require.NoError(t, DB.Create(&[]Option{
+		{Key: groupGroupRatioOptionKey, Value: `{}`},
+		{Key: layeredGroupGroupRatioOptionKey, Value: `{"vip":{"default":0.15}}`},
+	}).Error)
+	require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(`{"vip":{"default":0.15}}`))
+
+	loadOptionsFromDatabase()
+
+	var options []Option
+	require.NoError(t, DB.Where(commonKeyCol+" IN ?", []string{groupGroupRatioOptionKey, layeredGroupGroupRatioOptionKey}).Find(&options).Error)
+	byKey := make(map[string]string, len(options))
+	for _, option := range options {
+		byKey[option.Key] = option.Value
+	}
+	require.Equal(t, `{}`, byKey[groupGroupRatioOptionKey])
+	require.Equal(t, `{}`, byKey[layeredGroupGroupRatioOptionKey])
+	_, ok := ratio_setting.GetGroupGroupRatio("vip", "default")
+	require.False(t, ok)
+	common.OptionMapRWMutex.RLock()
+	require.Equal(t, `{}`, common.OptionMap[groupGroupRatioOptionKey])
+	require.Equal(t, `{}`, common.OptionMap[layeredGroupGroupRatioOptionKey])
+	common.OptionMapRWMutex.RUnlock()
 }

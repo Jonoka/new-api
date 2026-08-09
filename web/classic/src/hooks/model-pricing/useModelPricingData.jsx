@@ -19,7 +19,16 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { useState, useEffect, useContext, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { API, copy, showError, showInfo, showSuccess } from '../../helpers';
+import {
+  API,
+  copy,
+  getGroupDisplayName,
+  matchesModelPricingQuotaFilter,
+  normalizeModelPriceVariantsConfig,
+  showError,
+  showInfo,
+  showSuccess,
+} from '../../helpers';
 import { Modal } from '@douyinfe/semi-ui';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
@@ -35,7 +44,7 @@ export const useModelPricingData = () => {
   const [showModelDetail, setShowModelDetail] = useState(false);
   const [selectedModel, setSelectedModel] = useState(null);
   const [filterGroup, setFilterGroup] = useState('all'); // 用于 Table 的可用分组筛选，"all" 表示不过滤
-  const [filterQuotaType, setFilterQuotaType] = useState('all'); // 计费类型筛选: 'all' | 0 | 1
+  const [filterQuotaType, setFilterQuotaType] = useState('all'); // 计费类型筛选: 'all' | 0 | 1 | 'second'
   const [filterEndpointType, setFilterEndpointType] = useState('all'); // 端点类型筛选: 'all' | string
   const [filterVendor, setFilterVendor] = useState('all'); // 供应商筛选: 'all' | 'unknown' | string
   const [filterTag, setFilterTag] = useState('all'); // 模型标签筛选: 'all' | string
@@ -48,9 +57,11 @@ export const useModelPricingData = () => {
   const [vendorsMap, setVendorsMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [groupRatio, setGroupRatio] = useState({});
+  const [groupNames, setGroupNames] = useState({});
   const [usableGroup, setUsableGroup] = useState({});
   const [endpointMap, setEndpointMap] = useState({});
   const [autoGroups, setAutoGroups] = useState([]);
+  const [performanceMap, setPerformanceMap] = useState({});
 
   const [statusState] = useContext(StatusContext);
   const [userState] = useContext(UserContext);
@@ -107,7 +118,9 @@ export const useModelPricingData = () => {
 
     // 计费类型筛选
     if (filterQuotaType !== 'all') {
-      result = result.filter((model) => model.quota_type === filterQuotaType);
+      result = result.filter((model) =>
+        matchesModelPricingQuotaFilter(model, filterQuotaType),
+      );
     }
 
     // 端点类型筛选
@@ -197,6 +210,9 @@ export const useModelPricingData = () => {
       const m = models[i];
       m.key = m.model_name;
       m.group_ratio = groupRatio[m.model_name];
+      m.model_price_variants = normalizeModelPriceVariantsConfig(
+        m.model_price_variants,
+      );
 
       if (m.vendor_id && vendorMap[m.vendor_id]) {
         const vendor = vendorMap[m.vendor_id];
@@ -235,12 +251,20 @@ export const useModelPricingData = () => {
       data,
       vendors,
       group_ratio,
+      group_names,
       usable_group,
       supported_endpoint,
       auto_groups,
     } = res.data;
     if (success) {
       setGroupRatio(group_ratio);
+      setGroupNames(
+        group_names &&
+          typeof group_names === 'object' &&
+          !Array.isArray(group_names)
+          ? group_names
+          : {},
+      );
       setUsableGroup(usable_group);
       setSelectedGroup('all');
       // 构建供应商 Map 方便查找
@@ -258,6 +282,32 @@ export const useModelPricingData = () => {
       showError(message);
     }
     setLoading(false);
+  };
+
+  // 性能摘要独立加载，接口不可用或暂无数据时不影响模型价格列表。
+  const loadPerformance = async () => {
+    try {
+      const res = await API.get('/api/perf-metrics/summary', {
+        params: { hours: 24 },
+        skipErrorHandler: true,
+      });
+      const models = res.data?.success ? res.data?.data?.models : [];
+      if (!Array.isArray(models)) {
+        setPerformanceMap({});
+        return;
+      }
+
+      const nextMap = {};
+      models.forEach((model) => {
+        if (model?.model_name) {
+          nextMap[model.model_name] = model;
+        }
+      });
+      setPerformanceMap(nextMap);
+    } catch (_error) {
+      // 旧后端、权限限制或性能统计未启用时，卡片不展示伪造数据。
+      setPerformanceMap({});
+    }
   };
 
   const refresh = async () => {
@@ -296,7 +346,7 @@ export const useModelPricingData = () => {
     } else {
       showInfo(
         t('当前查看的分组为：{{group}}，倍率为：{{ratio}}', {
-          group: group,
+          group: getGroupDisplayName(group, groupNames),
           ratio: groupRatio[group] ?? 1,
         }),
       );
@@ -317,6 +367,7 @@ export const useModelPricingData = () => {
 
   useEffect(() => {
     refresh().then();
+    loadPerformance().then();
   }, []);
 
   // 当筛选条件变化时重置到第一页
@@ -371,13 +422,17 @@ export const useModelPricingData = () => {
     models,
     loading,
     groupRatio,
+    groupNames,
     usableGroup,
     endpointMap,
     autoGroups,
+    performanceMap,
 
     // 计算属性
     priceRate,
     usdExchangeRate,
+    customExchangeRate,
+    customCurrencySymbol,
     filteredModels,
     rowSelection,
 

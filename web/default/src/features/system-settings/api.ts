@@ -21,7 +21,17 @@ import type {
   ConfirmPaymentComplianceResponse,
   DeleteLogsResponse,
   FetchUpstreamRatiosRequest,
+  GroupDetailsData,
+  GroupDetailsResponse,
+  GroupCodeMigrationResponse,
+  GroupCodeMigrationSummary,
+  OkpayRatePreviewResponse,
   SystemOptionsResponse,
+  TokenGroupMigrationRequest,
+  TokenGroupMigrationResponse,
+  TokenGroupMigrationSummary,
+  UpdateGroupDetailsRequest,
+  UpdateGroupDetailsResponse,
   UpdateOptionRequest,
   UpdateOptionResponse,
   UpstreamChannelsResponse,
@@ -38,10 +48,96 @@ export async function updateSystemOption(request: UpdateOptionRequest) {
   return res.data
 }
 
+export async function getGroupDetails(): Promise<GroupDetailsData> {
+  const res = await api.get<GroupDetailsResponse>('/api/group/details')
+  if (Array.isArray(res.data)) {
+    return {
+      groups: res.data,
+      autoGroup: { user_selectable: false, description: '' },
+    }
+  }
+  if (!res.data.success) {
+    throw new Error(res.data.message || 'Failed to load groups')
+  }
+  return {
+    groups: res.data.data,
+    autoGroup: res.data.auto_group ?? {
+      user_selectable: false,
+      description: '',
+    },
+  }
+}
+
+export async function updateGroupDetails(
+  request: UpdateGroupDetailsRequest
+): Promise<UpdateGroupDetailsResponse> {
+  const res = await api.put<UpdateGroupDetailsResponse>(
+    '/api/group/details',
+    request
+  )
+  return res.data
+}
+
+export async function previewTokenGroupMigration(
+  request: TokenGroupMigrationRequest
+): Promise<TokenGroupMigrationSummary> {
+  const res = await api.post<TokenGroupMigrationResponse>(
+    '/api/group/token-migration/preview',
+    request
+  )
+  if (!res.data.success || !res.data.data) {
+    throw new Error(res.data.message || 'Failed to preview token migration')
+  }
+  return res.data.data
+}
+
+export async function migrateTokenGroup(
+  request: TokenGroupMigrationRequest
+): Promise<TokenGroupMigrationSummary> {
+  const res = await api.post<TokenGroupMigrationResponse>(
+    '/api/group/token-migration',
+    request
+  )
+  if (!res.data.success || !res.data.data) {
+    throw new Error(res.data.message || 'Failed to migrate tokens')
+  }
+  return res.data.data
+}
+
+export async function previewGroupCodeMigration(): Promise<GroupCodeMigrationSummary> {
+  const res = await api.post<GroupCodeMigrationResponse>(
+    '/api/group/code-migration/preview'
+  )
+  if (!res.data.success || !res.data.data) {
+    throw new Error(
+      res.data.message || 'Failed to preview group code migration'
+    )
+  }
+  return res.data.data
+}
+
+export async function migrateGroupCodes(): Promise<GroupCodeMigrationSummary> {
+  const res = await api.post<GroupCodeMigrationResponse>(
+    '/api/group/code-migration',
+    { confirm: true }
+  )
+  if (!res.data.success || !res.data.data) {
+    throw new Error(res.data.message || 'Failed to migrate group codes')
+  }
+  return res.data.data
+}
+
 export async function confirmPaymentCompliance() {
   const res = await api.post<ConfirmPaymentComplianceResponse>(
     '/api/option/payment_compliance',
     { confirmed: true }
+  )
+  return res.data
+}
+
+export async function previewOkpayRate() {
+  const res = await api.get<OkpayRatePreviewResponse>(
+    '/api/option/okpay/rate-preview'
   )
   return res.data
 }

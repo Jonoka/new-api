@@ -107,6 +107,7 @@ const TopUp = () => {
   const [invoiceConfig, setInvoiceConfig] = useState({
     enabled: false,
     types: ['personal', 'company'],
+    kinds: ['normal'],
     currency: 'CNY',
   });
   const [invoiceRequest, setInvoiceRequest] = useState(
@@ -133,6 +134,8 @@ const TopUp = () => {
   const [topupInfo, setTopupInfo] = useState({
     amount_options: [],
     discount: {},
+    enable_balance_subscription: true,
+    enable_balance_subscription_promo: true,
     enable_redemption: true,
     payment_compliance_confirmed: true,
   });
@@ -169,6 +172,17 @@ const TopUp = () => {
     if (!invoiceConfig?.enabled) {
       return false;
     }
+    const types =
+      Array.isArray(invoiceConfig?.types) && invoiceConfig.types.length > 0
+        ? invoiceConfig.types
+        : ['personal', 'company'];
+    const kinds =
+      Array.isArray(invoiceConfig?.kinds) && invoiceConfig.kinds.length > 0
+        ? invoiceConfig.kinds
+        : ['normal'];
+    if (!types.includes(request.type) || !kinds.includes(request.kind)) {
+      return false;
+    }
     if (!request.title?.trim()) {
       return false;
     }
@@ -187,7 +201,12 @@ const TopUp = () => {
         ? invoiceConfig.types
         : ['personal', 'company'];
     const invoiceType = types.includes(request.type) ? request.type : types[0];
-    return types.includes(invoiceType);
+    const kinds =
+      Array.isArray(invoiceConfig?.kinds) && invoiceConfig.kinds.length > 0
+        ? invoiceConfig.kinds
+        : ['normal'];
+    const invoiceKind = kinds.includes(request.kind) ? request.kind : kinds[0];
+    return types.includes(invoiceType) && kinds.includes(invoiceKind);
   };
 
   const buildInvoicePayload = (
@@ -841,6 +860,10 @@ const TopUp = () => {
           setTopUpLink(data.topup_link || '');
           setTopupInfo((prev) => ({
             ...prev,
+            enable_balance_subscription:
+              data.enable_balance_subscription !== false,
+            enable_balance_subscription_promo:
+              data.enable_balance_subscription_promo !== false,
             enable_redemption: data.enable_redemption !== false,
             invoice: data.invoice || { enabled: false },
             payment_compliance_confirmed:
@@ -1148,6 +1171,7 @@ const TopUp = () => {
           payMethods={confirmPayMethods}
           enableBepusdtTopUp={enableBepusdtTopUp}
           bepusdtChains={bepusdtChains}
+          enableOkpayTopUp={enableOkpayTopUp}
           preTopUp={preTopUp}
           paymentLoading={paymentLoading}
           payWay={payWay}
@@ -1169,6 +1193,7 @@ const TopUp = () => {
           activeSubscriptions={activeSubscriptions}
           allSubscriptions={allSubscriptions}
           reloadSubscriptionSelf={getSubscriptionSelf}
+          reloadUserQuota={getUserQuota}
           invoiceConfig={invoiceConfig}
           enableRedemption={topupInfo.enable_redemption !== false}
         />

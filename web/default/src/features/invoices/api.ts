@@ -19,9 +19,16 @@ For commercial licensing, please contact support@quantumnous.com
 import { api } from '@/lib/api'
 import type {
   AdminUpdateInvoiceRequest,
+  CreateOrderInvoiceRequest,
+  CreateOrderInvoicePaymentRequest,
   InvoiceApiResponse,
   InvoiceConfig,
+  InvoiceEligibleOrderList,
+  InvoiceOrderPreview,
+  InvoiceOrderSelectionRequest,
   InvoicePageData,
+  InvoiceRecord,
+  InvoiceSubmissionResult,
 } from './types'
 
 export async function getInvoiceConfig(): Promise<
@@ -40,6 +47,43 @@ export async function getUserInvoices(
     page_size: String(pageSize),
   })
   const res = await api.get(`/api/user/invoice/self?${params.toString()}`)
+  return res.data
+}
+
+export async function getInvoiceEligibleOrders(): Promise<
+  InvoiceApiResponse<InvoiceEligibleOrderList>
+> {
+  const res = await api.get('/api/user/invoice/orders')
+  return res.data
+}
+
+export async function previewOrderInvoice(
+  request: InvoiceOrderSelectionRequest
+): Promise<InvoiceApiResponse<InvoiceOrderPreview>> {
+  const res = await api.post('/api/user/invoice/preview', request)
+  return res.data
+}
+
+export async function createOrderInvoice(
+  request: CreateOrderInvoiceRequest
+): Promise<InvoiceApiResponse<InvoiceRecord>> {
+  const res = await api.post('/api/user/invoice/request', request)
+  return res.data
+}
+
+export async function createOrderInvoicePayment(
+  request: CreateOrderInvoicePaymentRequest
+): Promise<InvoiceApiResponse<InvoiceSubmissionResult>> {
+  const res = await api.post('/api/user/invoice/payment', request)
+  return res.data
+}
+
+export async function cancelOrderInvoicePayment(
+  tradeNo: string
+): Promise<InvoiceApiResponse<InvoiceRecord>> {
+  const res = await api.post(
+    `/api/user/invoice/payment/${encodeURIComponent(tradeNo)}/cancel`
+  )
   return res.data
 }
 

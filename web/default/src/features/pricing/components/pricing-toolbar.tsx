@@ -51,7 +51,12 @@ import {
   type SortOption,
   type ViewMode,
 } from '../constants'
-import type { PricingModel, PricingVendor, TokenUnit } from '../types'
+import type {
+  GroupNameMap,
+  PricingModel,
+  PricingVendor,
+  TokenUnit,
+} from '../types'
 import { PricingSidebar } from './pricing-sidebar'
 
 type SegmentOption = {
@@ -85,6 +90,7 @@ export interface PricingToolbarProps {
   vendors: PricingVendor[]
   groups: string[]
   groupRatios?: Record<string, number>
+  groupNames: GroupNameMap
   tags: string[]
   models: PricingModel[]
   hasActiveFilters: boolean
@@ -297,6 +303,7 @@ export function PricingToolbar(props: PricingToolbarProps) {
               vendors={props.vendors}
               groups={props.groups}
               groupRatios={props.groupRatios}
+              groupNames={props.groupNames}
               tags={props.tags}
               models={props.models}
               hasActiveFilters={props.hasActiveFilters}

@@ -167,3 +167,57 @@ func TestEpayWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
 	operation_setting.PayMethods = nil
 	require.False(t, isEpayWebhookEnabled())
 }
+
+func TestBepusdtWebhookEnabledOnlyRequiresAuthToken(t *testing.T) {
+	paymentSetting := operation_setting.GetPaymentSetting()
+	originalConfirmed := paymentSetting.ComplianceConfirmed
+	originalTermsVersion := paymentSetting.ComplianceTermsVersion
+	originalApiUrl := setting.BepusdtApiUrl
+	originalAuthToken := setting.BepusdtAuthToken
+	originalChains := setting.BepusdtChains
+	t.Cleanup(func() {
+		paymentSetting.ComplianceConfirmed = originalConfirmed
+		paymentSetting.ComplianceTermsVersion = originalTermsVersion
+		setting.BepusdtApiUrl = originalApiUrl
+		setting.BepusdtAuthToken = originalAuthToken
+		setting.BepusdtChains = originalChains
+	})
+
+	paymentSetting.ComplianceConfirmed = false
+	paymentSetting.ComplianceTermsVersion = ""
+	setting.BepusdtApiUrl = ""
+	setting.BepusdtAuthToken = ""
+	setting.BepusdtChains = "[]"
+	require.False(t, isBepusdtWebhookEnabled())
+
+	setting.BepusdtAuthToken = "bepusdt-token"
+	require.True(t, isBepusdtWebhookEnabled())
+	require.False(t, isBepusdtTopUpEnabled())
+}
+
+func TestOkpayWebhookEnabledOnlyRequiresMerchantToken(t *testing.T) {
+	paymentSetting := operation_setting.GetPaymentSetting()
+	originalConfirmed := paymentSetting.ComplianceConfirmed
+	originalTermsVersion := paymentSetting.ComplianceTermsVersion
+	originalGatewayUrl := setting.OkpayGatewayUrl
+	originalMerchantId := setting.OkpayMerchantId
+	originalMerchantToken := setting.OkpayMerchantToken
+	t.Cleanup(func() {
+		paymentSetting.ComplianceConfirmed = originalConfirmed
+		paymentSetting.ComplianceTermsVersion = originalTermsVersion
+		setting.OkpayGatewayUrl = originalGatewayUrl
+		setting.OkpayMerchantId = originalMerchantId
+		setting.OkpayMerchantToken = originalMerchantToken
+	})
+
+	paymentSetting.ComplianceConfirmed = false
+	paymentSetting.ComplianceTermsVersion = ""
+	setting.OkpayGatewayUrl = ""
+	setting.OkpayMerchantId = ""
+	setting.OkpayMerchantToken = ""
+	require.False(t, isOkpayWebhookEnabled())
+
+	setting.OkpayMerchantToken = "okpay-token"
+	require.True(t, isOkpayWebhookEnabled())
+	require.False(t, isOkpayTopUpEnabled())
+}

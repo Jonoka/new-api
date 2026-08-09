@@ -76,6 +76,7 @@ const RechargeCard = ({
   payMethods,
   enableBepusdtTopUp = false,
   bepusdtChains = [],
+  enableOkpayTopUp = false,
   preTopUp,
   paymentLoading,
   payWay,
@@ -99,6 +100,7 @@ const RechargeCard = ({
   activeSubscriptions = [],
   allSubscriptions = [],
   reloadSubscriptionSelf,
+  reloadUserQuota,
   invoiceConfig,
   enableRedemption = true,
 }) => {
@@ -111,6 +113,14 @@ const RechargeCard = ({
   const shouldShowSubscription =
     !subscriptionLoading && subscriptionPlans.length > 0;
   const regularPayMethods = payMethods || [];
+  const hasAmountTopUp =
+    enableOnlineTopUp ||
+    enableStripeTopUp ||
+    enableWaffoTopUp ||
+    enableWaffoPancakeTopUp ||
+    enableBepusdtTopUp ||
+    enableOkpayTopUp;
+  const hasOnlineTopUp = hasAmountTopUp || enableCreemTopUp;
 
   useEffect(() => {
     if (initialTabSetRef.current) return;
@@ -126,6 +136,22 @@ const RechargeCard = ({
   }, [shouldShowSubscription, activeTab]);
   const topupContent = (
     <Space vertical style={{ width: '100%' }}>
+      {topupInfo?.enable_balance_subscription === false && (
+        <Banner
+          type='info'
+          description={
+            <div>
+              <div>
+                {t('充值余额仅用于 API 调用消耗，不可用于购买订阅套餐。')}
+              </div>
+              <div>{t('订阅套餐请在「订阅套餐」页面单独购买。')}</div>
+            </div>
+          }
+          closeIcon={null}
+          className='!rounded-xl'
+        />
+      )}
+
       {/* 统计数据 */}
       <Card
         className='!rounded-xl w-full'
@@ -233,31 +259,19 @@ const RechargeCard = ({
           <div className='py-8 flex justify-center'>
             <Spin size='large' />
           </div>
-        ) : enableOnlineTopUp ||
-          enableStripeTopUp ||
-          enableCreemTopUp ||
-          enableWaffoTopUp ||
-          enableWaffoPancakeTopUp ? (
+        ) : hasOnlineTopUp ? (
           <Form
             getFormApi={(api) => (onlineFormApiRef.current = api)}
             initValues={{ topUpCount: topUpCount }}
           >
             <div className='space-y-6'>
-              {(enableOnlineTopUp ||
-                enableStripeTopUp ||
-                enableWaffoTopUp ||
-                enableWaffoPancakeTopUp) && (
+              {hasAmountTopUp && (
                 <Row gutter={12}>
                   <Col xs={24} sm={24} md={24} lg={10} xl={10}>
                     <Form.InputNumber
                       field='topUpCount'
                       label={t('充值数量')}
-                      disabled={
-                        !enableOnlineTopUp &&
-                        !enableStripeTopUp &&
-                        !enableWaffoTopUp &&
-                        !enableWaffoPancakeTopUp
-                      }
+                      disabled={!hasAmountTopUp}
                       placeholder={
                         t('充值数量，最低 ') + renderQuotaWithAmount(minTopUp)
                       }
@@ -322,14 +336,20 @@ const RechargeCard = ({
                               payMethod.type.startsWith('waffo:');
                             const isWaffoPancake =
                               payMethod.type === 'waffo_pancake';
+                            const isBepusdt = payMethod.type === 'bepusdt';
+                            const isOkpay = payMethod.type === 'okpay';
                             const disabled =
                               (!enableOnlineTopUp &&
                                 !isStripe &&
                                 !isWaffo &&
-                                !isWaffoPancake) ||
+                                !isWaffoPancake &&
+                                !isBepusdt &&
+                                !isOkpay) ||
                               (!enableStripeTopUp && isStripe) ||
                               (!enableWaffoTopUp && isWaffo) ||
                               (!enableWaffoPancakeTopUp && isWaffoPancake) ||
+                              (!enableBepusdtTopUp && isBepusdt) ||
+                              (!enableOkpayTopUp && isOkpay) ||
                               minTopupVal > Number(topUpCount || 0);
 
                             const buttonEl = (
@@ -434,7 +454,7 @@ const RechargeCard = ({
                 </Row>
               )}
 
-              {(enableOnlineTopUp || enableStripeTopUp || enableWaffoTopUp) && (
+              {hasAmountTopUp && (
                 <Form.Slot
                   label={
                     <div className='flex items-center gap-2'>
@@ -707,14 +727,23 @@ const RechargeCard = ({
                 payMethods={payMethods}
                 enableBepusdtTopUp={enableBepusdtTopUp}
                 bepusdtChains={bepusdtChains}
+                enableOkpayTopUp={enableOkpayTopUp}
                 enableOnlineTopUp={enableOnlineTopUp}
                 enableStripeTopUp={enableStripeTopUp}
                 enableCreemTopUp={enableCreemTopUp}
+                enableBalanceSubscription={
+                  topupInfo?.enable_balance_subscription !== false
+                }
+                enableBalanceSubscriptionPromo={
+                  topupInfo?.enable_balance_subscription_promo !== false
+                }
+                userQuota={userState?.user?.quota || 0}
                 billingPreference={billingPreference}
                 onChangeBillingPreference={onChangeBillingPreference}
                 activeSubscriptions={activeSubscriptions}
                 allSubscriptions={allSubscriptions}
                 reloadSubscriptionSelf={reloadSubscriptionSelf}
+                reloadUserQuota={reloadUserQuota}
                 invoiceConfig={invoiceConfig}
                 withCard={false}
               />

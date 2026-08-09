@@ -18,6 +18,8 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -310,8 +312,29 @@ func (a *Adaptor) ConvertEmbeddingRequest(c *gin.Context, info *relaycommon.Rela
 }
 
 func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) (any, error) {
-	// TODO implement me
-	return nil, errors.New("not implemented")
+	chatRequest, err := service.ResponsesRequestToChatCompletionsRequest(&request)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateClaudeResponsesChatTools(chatRequest); err != nil {
+		return nil, err
+	}
+	converted, err := a.ConvertOpenAIRequest(c, info, chatRequest)
+	if err != nil {
+		return nil, err
+	}
+	claudeRequest, ok := converted.(*dto.ClaudeRequest)
+	if !ok {
+		return nil, fmt.Errorf("expected Claude request, got %T", converted)
+	}
+	restoreChatCacheControlToClaude(chatRequest, claudeRequest)
+	if info != nil {
+		if info.ReasoningEffort == "" {
+			info.ReasoningEffort = chatRequest.ReasoningEffort
+		}
+		info.FinalRequestRelayFormat = types.RelayFormatClaude
+	}
+	return claudeRequest, nil
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
@@ -320,6 +343,12 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
 	info.FinalRequestRelayFormat = types.RelayFormatClaude
+	if info.RelayMode == relayconstant.RelayModeResponses {
+		if info.IsStream {
+			return ClaudeMessagesToResponsesStreamHandler(c, info, resp)
+		}
+		return ClaudeMessagesToResponsesHandler(c, info, resp)
+	}
 	if info.IsStream {
 		return ClaudeStreamHandler(c, resp, info)
 	} else {

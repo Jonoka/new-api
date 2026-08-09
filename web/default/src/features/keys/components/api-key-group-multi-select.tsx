@@ -17,8 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMemo, useState } from 'react'
-import { Reorder, useDragControls } from 'motion/react'
 import { Check, GripVertical, Plus, X } from 'lucide-react'
+import { Reorder, useDragControls } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
@@ -55,6 +55,7 @@ function ReorderGroupCard({
   onRemove: () => void
   ratioLabel: string
 }) {
+  const { t } = useTranslation()
   const controls = useDragControls()
   const ratioText = formatGroupRatio(option.ratio, ratioLabel)
 
@@ -95,6 +96,12 @@ function ReorderGroupCard({
         </Badge>
       )}
 
+      {option.exclusive && (
+        <Badge variant='secondary' className='shrink-0 text-[10px] sm:text-xs'>
+          {t('Independent')}
+        </Badge>
+      )}
+
       <button
         type='button'
         onClick={onRemove}
@@ -131,14 +138,19 @@ export function ApiKeyGroupMultiSelect({
 
   const selectedSet = useMemo(() => new Set(value), [value])
   const isAutoSelected = selectedSet.has('auto')
+  const isExclusiveSelected = options.some(
+    (option) => option.exclusive && selectedSet.has(option.value)
+  )
 
   // Options available for selection (not yet selected)
   const availableOptions = useMemo(() => {
     const search = searchValue.trim().toLowerCase()
     return options.filter((option) => {
+      if (isExclusiveSelected) return false
       if (isAutoSelected && option.value !== 'auto') return false
       if (option.value === 'auto' && value.length > 0 && !isAutoSelected)
         return false
+      if (option.exclusive && value.length > 0) return false
       if (selectedSet.has(option.value)) return false
       if (!search) return true
       return (
@@ -147,7 +159,14 @@ export function ApiKeyGroupMultiSelect({
         option.desc?.toLowerCase().includes(search)
       )
     })
-  }, [options, searchValue, selectedSet, isAutoSelected, value.length])
+  }, [
+    options,
+    searchValue,
+    selectedSet,
+    isAutoSelected,
+    isExclusiveSelected,
+    value.length,
+  ])
 
   // Map value to option for rendering selected cards
   const optionMap = useMemo(() => {
@@ -159,7 +178,12 @@ export function ApiKeyGroupMultiSelect({
   }, [options])
 
   const handleSelect = (selectedValue: string) => {
-    if (selectedValue === 'auto') {
+    const selectedOption = options.find(
+      (option) => option.value === selectedValue
+    )
+    if (selectedOption?.exclusive) {
+      onValueChange([selectedValue])
+    } else if (selectedValue === 'auto') {
       onValueChange(['auto'])
     } else {
       const filtered = value.filter((v) => v !== 'auto')
@@ -175,7 +199,13 @@ export function ApiKeyGroupMultiSelect({
   const canAddMore =
     !disabled &&
     !isAutoSelected &&
-    options.some((o) => !selectedSet.has(o.value) && o.value !== 'auto')
+    !isExclusiveSelected &&
+    options.some(
+      (option) =>
+        !selectedSet.has(option.value) &&
+        option.value !== 'auto' &&
+        (!option.exclusive || value.length === 0)
+    )
   const canSelectAuto = !disabled && value.length === 0
   const showAddButton = canAddMore || canSelectAuto || value.length === 0
 
@@ -215,7 +245,7 @@ export function ApiKeyGroupMultiSelect({
                 variant='outline'
                 disabled={disabled}
                 className={cn(
-                  'border-dashed text-muted-foreground hover:text-foreground h-auto gap-1.5 px-3 py-2 text-sm',
+                  'text-muted-foreground hover:text-foreground h-auto gap-1.5 border-dashed px-3 py-2 text-sm',
                   value.length === 0 &&
                     'border-input bg-muted/40 hover:bg-muted/55 min-h-14 justify-start border-solid sm:min-h-16'
                 )}
@@ -278,6 +308,14 @@ export function ApiKeyGroupMultiSelect({
                           {formatGroupRatio(option.ratio, t('Ratio'))}
                         </Badge>
                       )}
+                      {option.exclusive && (
+                        <Badge
+                          variant='secondary'
+                          className='shrink-0 text-[10px] sm:text-xs'
+                        >
+                          {t('Independent')}
+                        </Badge>
+                      )}
                     </CommandItem>
                   ))}
                 </CommandGroup>
@@ -288,11 +326,16 @@ export function ApiKeyGroupMultiSelect({
       )}
 
       {/* Hint text */}
-      {value.length > 1 && !isAutoSelected && (
+      {value.length > 1 && !isAutoSelected && !isExclusiveSelected && (
         <p className='text-muted-foreground text-[11px] sm:text-xs'>
           {t(
             'Drag to reorder. When multiple groups have the same model, they will be tried in order.'
           )}
+        </p>
+      )}
+      {value.length > 1 && isExclusiveSelected && (
+        <p className='text-destructive text-[11px] sm:text-xs'>
+          {t('Independent groups must be selected alone.')}
         </p>
       )}
     </div>

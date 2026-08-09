@@ -46,6 +46,8 @@ i18n
       vi: viTranslation,
     },
     fallbackLng: 'zh-CN',
+    // 空占位翻译视为缺失，避免新增页面在非中文语言下出现空标题。
+    returnEmptyString: false,
     nsSeparator: false,
     interpolation: {
       escapeValue: false,

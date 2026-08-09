@@ -33,6 +33,30 @@ func syncResponsesStreamStateFromBody(c *gin.Context, info *relaycommon.RelayInf
 	common.SetContextKey(c, appconstant.ContextKeyIsStream, info.IsStream)
 }
 
+func responsesRequestFromRelayInput(request any) (*dto.OpenAIResponsesRequest, error) {
+	switch req := request.(type) {
+	case *dto.OpenAIResponsesRequest:
+		return req, nil
+	case *dto.OpenAIResponsesCompactionRequest:
+		return &dto.OpenAIResponsesRequest{
+			Model:                req.Model,
+			Input:                req.Input,
+			Instructions:         req.Instructions,
+			PreviousResponseID:   req.PreviousResponseID,
+			Tools:                req.Tools,
+			ParallelToolCalls:    req.ParallelToolCalls,
+			Reasoning:            req.Reasoning,
+			ServiceTier:          req.ServiceTier,
+			PromptCacheKey:       req.PromptCacheKey,
+			PromptCacheOptions:   req.PromptCacheOptions,
+			PromptCacheRetention: req.PromptCacheRetention,
+			Text:                 req.Text,
+		}, nil
+	default:
+		return nil, fmt.Errorf("invalid request type, expected dto.OpenAIResponsesRequest or dto.OpenAIResponsesCompactionRequest, got %T", request)
+	}
+}
+
 func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
 	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
@@ -48,20 +72,10 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		}
 	}
 
-	var responsesReq *dto.OpenAIResponsesRequest
-	switch req := info.Request.(type) {
-	case *dto.OpenAIResponsesRequest:
-		responsesReq = req
-	case *dto.OpenAIResponsesCompactionRequest:
-		responsesReq = &dto.OpenAIResponsesRequest{
-			Model:              req.Model,
-			Input:              req.Input,
-			Instructions:       req.Instructions,
-			PreviousResponseID: req.PreviousResponseID,
-		}
-	default:
+	responsesReq, err := responsesRequestFromRelayInput(info.Request)
+	if err != nil {
 		return types.NewErrorWithStatusCode(
-			fmt.Errorf("invalid request type, expected dto.OpenAIResponsesRequest or dto.OpenAIResponsesCompactionRequest, got %T", info.Request),
+			err,
 			types.ErrorCodeInvalidRequest,
 			http.StatusBadRequest,
 			types.ErrOptionWithSkipRetry(),
@@ -73,7 +87,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		return types.NewError(fmt.Errorf("failed to copy request to GeneralOpenAIRequest: %w", err), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
 	attachedPreviousResponseID := false
-	if info.RelayMode == relayconstant.RelayModeResponses {
+	if info.RelayMode == relayconstant.RelayModeResponses || info.RelayMode == relayconstant.RelayModeResponsesCompact {
 		attachedPreviousResponseID = service.AttachOpenAIResponsesContinuation(info, request)
 	}
 
@@ -96,6 +110,14 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		}
 		requestBody = common.ReaderOnly(storage)
 	} else {
+		normalizedItems, err := service.NormalizeOpenAIResponsesInputHistoryForUpstream(request)
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		if normalizedItems > 0 {
+			logger.LogDebug(c, "normalized %d Responses history item(s) for upstream compatibility", normalizedItems)
+		}
+
 		convertedRequest, err := adaptor.ConvertOpenAIResponsesRequest(c, info, *request)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
@@ -128,7 +150,8 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		syncResponsesStreamStateFromBody(c, info, jsonData)
 		retryJSONData := append([]byte(nil), jsonData...)
 		retryWithoutPreviousResponse = func(statusCode int, message string) (*dto.Usage, *types.NewAPIError) {
-			if info.RelayMode != relayconstant.RelayModeResponses || !attachedPreviousResponseID || !service.IsOpenAIResponsesPreviousResponseRetryable(statusCode, message) {
+			if (info.RelayMode != relayconstant.RelayModeResponses && info.RelayMode != relayconstant.RelayModeResponsesCompact) ||
+				!attachedPreviousResponseID || !service.IsOpenAIResponsesPreviousResponseRetryable(statusCode, message) {
 				return nil, nil
 			}
 			service.DeleteOpenAIResponsesContinuationResponseID(info, request)

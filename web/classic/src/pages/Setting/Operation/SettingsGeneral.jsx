@@ -35,6 +35,7 @@ import {
   showError,
   showSuccess,
   showWarning,
+  toBoolean,
 } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
 
@@ -50,6 +51,7 @@ export default function GeneralSettings(props) {
     'general_setting.quota_display_type': 'USD',
     'general_setting.custom_currency_symbol': '¤',
     'general_setting.custom_currency_exchange_rate': '',
+    'general_setting.auto_usd_exchange_rate': true,
     QuotaPerUnit: '',
     RetryTimes: '',
     USDExchangeRate: '',
@@ -142,6 +144,10 @@ export default function GeneralSettings(props) {
   }, [props.options]);
 
   const quotaDisplayType = inputs['general_setting.quota_display_type'];
+  const autoUsdExchangeRate =
+    inputs['general_setting.auto_usd_exchange_rate'] === undefined
+      ? true
+      : toBoolean(inputs['general_setting.auto_usd_exchange_rate']);
 
   const quotaDisplayTypeDesc = useMemo(() => {
     const descMap = {
@@ -154,11 +160,13 @@ export default function GeneralSettings(props) {
   }, [quotaDisplayType, t]);
 
   const rateLabel = useMemo(() => {
-    if (quotaDisplayType === 'CNY') return t('汇率');
+    if (quotaDisplayType === 'CNY') {
+      return autoUsdExchangeRate ? t('USDT/CNY 兜底汇率') : t('汇率');
+    }
     if (quotaDisplayType === 'TOKENS') return t('每美元对应 Token 数');
     if (quotaDisplayType === 'CUSTOM') return t('汇率');
     return '';
-  }, [quotaDisplayType, t]);
+  }, [quotaDisplayType, autoUsdExchangeRate, t]);
 
   const rateSuffix = useMemo(() => {
     if (quotaDisplayType === 'CNY') return 'CNY (¥)';
@@ -227,6 +235,12 @@ export default function GeneralSettings(props) {
       currentInputs['general_setting.custom_currency_exchange_rate'] =
         props.options['general_setting.custom_currency_exchange_rate'];
     }
+    const autoUsdExchangeRateOption =
+      props.options['general_setting.auto_usd_exchange_rate'];
+    currentInputs['general_setting.auto_usd_exchange_rate'] =
+      autoUsdExchangeRateOption === undefined
+        ? true
+        : toBoolean(autoUsdExchangeRateOption);
     setInputs(currentInputs);
     setInputsRow(structuredClone(currentInputs));
     refForm.current.setValues(currentInputs);
@@ -282,12 +296,8 @@ export default function GeneralSettings(props) {
                     'general_setting.quota_display_type',
                   )}
                 >
-                  <Form.Select.Option value='USD'>
-                    USD ($)
-                  </Form.Select.Option>
-                  <Form.Select.Option value='CNY'>
-                    CNY (¥)
-                  </Form.Select.Option>
+                  <Form.Select.Option value='USD'>USD ($)</Form.Select.Option>
+                  <Form.Select.Option value='CNY'>CNY (¥)</Form.Select.Option>
                   {showTokensOption && (
                     <Form.Select.Option value='TOKENS'>
                       Tokens
@@ -298,6 +308,20 @@ export default function GeneralSettings(props) {
                   </Form.Select.Option>
                 </Form.Select>
               </Col>
+              {quotaDisplayType === 'CNY' && (
+                <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                  <Form.Switch
+                    field='general_setting.auto_usd_exchange_rate'
+                    label={t('自动获取 USDT/CNY 汇率')}
+                    size='default'
+                    checkedText='｜'
+                    uncheckedText='〇'
+                    onChange={handleFieldChange(
+                      'general_setting.auto_usd_exchange_rate',
+                    )}
+                  />
+                </Col>
+              )}
               {quotaDisplayType !== 'USD' && (
                 <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                   <Form.Slot label={rateLabel}>
@@ -306,7 +330,21 @@ export default function GeneralSettings(props) {
                       suffix={rateSuffix}
                       value={combinedRate}
                       onChange={onCombinedRateChange}
+                      placeholder={
+                        quotaDisplayType === 'CNY' && autoUsdExchangeRate
+                          ? t('自动汇率失败时使用')
+                          : undefined
+                      }
                     />
+                    {quotaDisplayType === 'CNY' && autoUsdExchangeRate && (
+                      <Text
+                        type='tertiary'
+                        size='small'
+                        style={{ marginTop: 4, display: 'block' }}
+                      >
+                        {t('自动汇率失败时使用')}
+                      </Text>
+                    )}
                     <Text
                       type='tertiary'
                       size='small'
@@ -398,7 +436,9 @@ export default function GeneralSettings(props) {
                   field={'token_setting.max_user_tokens'}
                   step={1}
                   min={1}
-                  extraText={t('每个用户最多可创建的令牌数量，默认 1000，设置过大可能会影响性能')}
+                  extraText={t(
+                    '每个用户最多可创建的令牌数量，默认 1000，设置过大可能会影响性能',
+                  )}
                   placeholder={'1000'}
                   onChange={handleFieldChange('token_setting.max_user_tokens')}
                 />

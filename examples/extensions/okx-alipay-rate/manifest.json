@@ -1,0 +1,36 @@
+{
+  "id": "okx-alipay-rate",
+  "name": "OKX 支付宝汇率",
+  "version": "0.2.0",
+  "description": "提供 OKPay 可接入的 OKX 支付宝档位汇率，并支持模块内配置上浮下浮。",
+  "host": {
+    "min": "v1.0.0-rc.10.1.10.155"
+  },
+  "runtime": {
+    "type": "static",
+    "static_dir": "public",
+    "health_path": "/"
+  },
+  "ui": {
+    "nav": [
+      {
+        "title": "OKX 支付宝汇率",
+        "page": "index",
+        "icon": "Globe",
+        "section": "admin",
+        "order": 120
+      }
+    ],
+    "pages": [
+      {
+        "key": "index",
+        "title": "OKX 支付宝汇率",
+        "path": "/",
+        "embed": true
+      }
+    ]
+  },
+  "permissions": {
+    "roles": ["root"]
+  }
+}

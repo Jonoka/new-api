@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { useState, useEffect, useContext, useCallback, useMemo } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
@@ -36,8 +36,9 @@ export const useHeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
   const isMobile = useIsMobile();
   const [collapsed, toggleCollapsed] = useSidebarCollapsed();
   const [logoLoaded, setLogoLoaded] = useState(false);
-  const navigate = useNavigate();
-  const [currentLang, setCurrentLang] = useState(normalizeLanguage(i18n.language));
+  const [currentLang, setCurrentLang] = useState(
+    normalizeLanguage(i18n.language),
+  );
   const location = useLocation();
 
   const loading = statusState?.status === undefined;
@@ -77,6 +78,20 @@ export const useHeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
     }
     return null;
   }, [headerNavModulesConfig]);
+
+  const sidebarNavModules = useMemo(() => {
+    const sidebarNavModulesConfig = statusState?.status?.SidebarModulesAdmin;
+    if (!sidebarNavModulesConfig) return null;
+
+    try {
+      return typeof sidebarNavModulesConfig === 'string'
+        ? JSON.parse(sidebarNavModulesConfig)
+        : sidebarNavModulesConfig;
+    } catch (error) {
+      console.error('解析侧边栏模块配置失败:', error);
+      return null;
+    }
+  }, [statusState?.status?.SidebarModulesAdmin]);
 
   // 获取模型广场权限配置
   const pricingRequireAuth = useMemo(() => {
@@ -144,8 +159,8 @@ export const useHeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
     showSuccess(t('注销成功!'));
     userDispatch({ type: 'logout' });
     localStorage.removeItem('user');
-    navigate('/login');
-  }, [navigate, t, userDispatch]);
+    window.location.href = '/login';
+  }, [t, userDispatch]);
 
   const handleLanguageChange = useCallback(
     async (lang) => {
@@ -237,6 +252,7 @@ export const useHeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
     theme,
     drawerOpen,
     headerNavModules,
+    sidebarNavModules,
     pricingRequireAuth,
 
     // Actions
@@ -244,7 +260,6 @@ export const useHeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
     handleLanguageChange,
     handleThemeToggle,
     handleMobileMenuToggle,
-    navigate,
     t,
   };
 };

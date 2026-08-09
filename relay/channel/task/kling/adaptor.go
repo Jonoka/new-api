@@ -25,6 +25,7 @@ import (
 	taskcommon "github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/types"
 )
 
 // ============================
@@ -116,6 +117,44 @@ type TaskAdaptor struct {
 	ChannelType int
 	apiKey      string
 	baseURL     string
+}
+
+func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
+	if info == nil || !info.PriceData.UsePrice || info.PriceData.ModelPriceUnit != types.ModelPriceUnitSecond {
+		return nil
+	}
+	req, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return nil
+	}
+	payload, err := a.convertToRequestPayload(&req, info)
+	if err != nil {
+		return nil
+	}
+	seconds, err := strconv.Atoi(payload.Duration)
+	if err != nil || seconds <= 0 {
+		return nil
+	}
+	return map[string]float64{"seconds": float64(seconds)}
+}
+
+func (a *TaskAdaptor) EstimateTaskBillingSpec(c *gin.Context, info *relaycommon.RelayInfo) channel.TaskBillingSpec {
+	req, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return channel.TaskBillingSpec{}
+	}
+	payload, err := a.convertToRequestPayload(&req, info)
+	if err != nil {
+		return channel.TaskBillingSpec{}
+	}
+	quality := strings.ToLower(strings.TrimSpace(payload.Mode))
+	if quality == "" {
+		return channel.TaskBillingSpec{}
+	}
+	return channel.TaskBillingSpec{
+		Dimensions:      map[string]string{"quality": quality},
+		LegacyRatioKeys: []string{"quality"},
+	}
 }
 
 func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
@@ -358,7 +397,7 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 			taskInfo.Url = video.Url
 		}
 		if tokens, err := strconv.ParseFloat(resPayload.Data.FinalUnitDeduction, 64); err == nil {
-			rounded := int(math.Ceil(tokens))
+			rounded := common.QuotaFromFloat(math.Ceil(tokens))
 			if rounded > 0 {
 				taskInfo.CompletionTokens = rounded
 				taskInfo.TotalTokens = rounded

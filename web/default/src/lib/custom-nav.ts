@@ -35,6 +35,7 @@ import {
   Link as LinkIcon,
   ListTodo,
   MessageSquare,
+  Puzzle,
   Radio,
   Settings,
   Sparkles,
@@ -45,7 +46,12 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 
-export type CustomNavSection = 'chat' | 'console' | 'personal' | 'admin'
+export type CustomNavSection =
+  | 'header'
+  | 'chat'
+  | 'console'
+  | 'personal'
+  | 'admin'
 export type CustomNavTarget = 'same' | 'blank'
 
 export type CustomMenuItemConfig = {
@@ -95,6 +101,7 @@ const CUSTOM_NAV_ICONS = {
   Link: LinkIcon,
   ListTodo,
   MessageSquare,
+  Puzzle,
   Radio,
   Settings,
   Sparkles,
@@ -110,7 +117,8 @@ export const CUSTOM_NAV_ICON_OPTIONS = Object.keys(
   CUSTOM_NAV_ICONS
 ) as CustomNavIconName[]
 
-const SIDEBAR_SECTIONS = new Set<CustomNavSection>([
+const CUSTOM_NAV_SECTIONS = new Set<CustomNavSection>([
+  'header',
   'chat',
   'console',
   'personal',
@@ -127,7 +135,9 @@ function normalizeId(value: unknown, fallback: string): string {
   return normalized || fallback
 }
 
-function normalizeUrl(value: unknown): { url: string; external: boolean } | null {
+function normalizeUrl(
+  value: unknown
+): { url: string; external: boolean } | null {
   if (typeof value !== 'string') return null
   const raw = value.trim()
   if (!raw) return null
@@ -194,7 +204,7 @@ export function parseCustomNavItems(
       const id = normalizeId(record.id, `custom-${index + 1}`)
       const section =
         typeof record.section === 'string' &&
-        SIDEBAR_SECTIONS.has(record.section as CustomNavSection)
+        CUSTOM_NAV_SECTIONS.has(record.section as CustomNavSection)
           ? (record.section as CustomNavSection)
           : undefined
       const icon = getCustomNavIcon(record.icon) ? record.icon : undefined
@@ -221,4 +231,23 @@ export function parseCustomNavItems(
         item !== null && (options.includeDisabled || item.enabled)
     )
     .sort((a, b) => a.order - b.order || a.title.localeCompare(b.title))
+}
+
+/**
+ * 合并独立顶栏配置与“显示区域”为顶栏的自定义导航项。
+ * 独立顶栏配置保持优先，避免迁移期间相同 ID 被重复展示。
+ */
+export function parseTopNavCustomItems(
+  headerItems: unknown,
+  sidebarItems: unknown
+): CustomNavItem[] {
+  const parsedHeaderItems = parseCustomNavItems(headerItems)
+  const headerItemIds = new Set(parsedHeaderItems.map((item) => item.id))
+  const placedHeaderItems = parseCustomNavItems(sidebarItems).filter(
+    (item) => item.section === 'header' && !headerItemIds.has(item.id)
+  )
+
+  return [...parsedHeaderItems, ...placedHeaderItems].sort(
+    (a, b) => a.order - b.order || a.title.localeCompare(b.title)
+  )
 }

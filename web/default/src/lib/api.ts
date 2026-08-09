@@ -20,6 +20,7 @@ import axios, { type AxiosRequestConfig } from 'axios'
 import { t } from 'i18next'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
+import type { UserGroupMap } from '@/lib/group-options'
 
 declare module 'axios' {
   export interface AxiosRequestConfig {
@@ -195,13 +196,15 @@ export async function getUserModels(): Promise<{
   return res.data
 }
 
-// Get user groups with descriptions and ratios
-export async function getUserGroups(): Promise<{
+export interface UserGroupsResponse {
   success: boolean
   message?: string
-  data?: Record<string, { desc: string; ratio: number | string }>
-}> {
-  const res = await api.get('/api/user/self/groups')
+  data?: UserGroupMap
+}
+
+// 获取带稳定身份、描述和倍率的用户可用分组
+export async function getUserGroups(): Promise<UserGroupsResponse> {
+  const res = await api.get<UserGroupsResponse>('/api/user/self/groups')
   return res.data
 }
 

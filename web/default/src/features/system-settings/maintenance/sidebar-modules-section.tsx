@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
+import { CUSTOM_NAV_ICON_OPTIONS, getCustomNavIcon } from '@/lib/custom-nav'
 import {
   Form,
   FormControl,
@@ -26,6 +27,8 @@ import {
   FormField,
   FormLabel,
 } from '@/components/ui/form'
+import { Input } from '@/components/ui/input'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Switch } from '@/components/ui/switch'
 import {
   SettingsControlChildren,
@@ -156,6 +159,12 @@ export function SidebarModulesSection({
         title: t('Channels'),
         description: t('Configure upstream providers and routing.'),
       },
+      channel_observability: {
+        title: t('Channel Observability'),
+        description: t(
+          'Analyze channel traffic, stability, failures, and cache efficiency.'
+        ),
+      },
       models: {
         title: t('Models'),
         description: t('Manage catalog visibility and pricing.'),
@@ -183,6 +192,14 @@ export function SidebarModulesSection({
       invoice_admin: {
         title: t('Invoice Management'),
         description: t('Review invoice requests and issued invoice files.'),
+      },
+      notification_center: {
+        title: t('Notification Center'),
+        description: t('Configure notification tasks and Telegram Bots.'),
+      },
+      extension_admin: {
+        title: t('Extensions'),
+        description: t('Manage extension modules and enable or disable them.'),
       },
       game: {
         title: t('Game Management'),
@@ -246,8 +263,15 @@ export function SidebarModulesSection({
             }
             if (!isSidebarSectionConfig(sectionConfig)) return null
             const modules = Object.entries(sectionConfig).filter(
-              ([moduleKey]) => moduleKey !== 'enabled'
+              ([moduleKey, moduleValue]) =>
+                moduleKey !== 'enabled' && typeof moduleValue === 'boolean'
             )
+            const selectedCanvasIcon =
+              sectionKey === 'chat' &&
+              typeof sectionConfig.canvasIcon === 'string'
+                ? sectionConfig.canvasIcon
+                : undefined
+            const CanvasIcon = getCustomNavIcon(selectedCanvasIcon)
 
             return (
               <SettingsControlGroup key={sectionKey}>
@@ -309,6 +333,95 @@ export function SidebarModulesSection({
                     )
                   })}
                 </SettingsControlChildren>
+
+                {sectionKey === 'chat' ? (
+                  <SettingsControlChildren className='grid gap-3 md:grid-cols-2'>
+                    <FormField
+                      control={form.control}
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      name={'chat.canvasOrigin' as any}
+                      render={({ field }) => (
+                        <label className='grid gap-1.5 text-sm'>
+                          <span className='font-medium'>
+                            {t('Canvas app domain')}
+                          </span>
+                          <Input
+                            value={String(field.value ?? '')}
+                            placeholder='https://canvas.example.com'
+                            onChange={field.onChange}
+                            disabled={
+                              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                              !form.watch('chat.enabled' as any) ||
+                              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                              !form.watch('chat.canvas' as any)
+                            }
+                          />
+                          <span className='text-muted-foreground text-xs'>
+                            {t(
+                              'Enter a domain or full origin, for example canvas.example.com.'
+                            )}
+                          </span>
+                        </label>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      name={'chat.canvasIcon' as any}
+                      render={({ field }) => {
+                        const Icon = getCustomNavIcon(field.value)
+                        return (
+                          <label className='grid gap-1.5 text-sm'>
+                            <span className='font-medium'>
+                              {t('Canvas icon')}
+                            </span>
+                            <div className='flex items-center gap-2'>
+                              <div className='bg-muted flex size-9 shrink-0 items-center justify-center rounded-md'>
+                                {Icon ? (
+                                  <Icon
+                                    className='text-muted-foreground size-4'
+                                    aria-hidden='true'
+                                  />
+                                ) : CanvasIcon ? (
+                                  <CanvasIcon
+                                    className='text-muted-foreground size-4'
+                                    aria-hidden='true'
+                                  />
+                                ) : null}
+                              </div>
+                              <NativeSelect
+                                className='w-full'
+                                value={String(field.value ?? '')}
+                                onChange={field.onChange}
+                                disabled={
+                                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                  !form.watch('chat.enabled' as any) ||
+                                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                  !form.watch('chat.canvas' as any)
+                                }
+                              >
+                                {CUSTOM_NAV_ICON_OPTIONS.map((iconName) => (
+                                  <NativeSelectOption
+                                    key={iconName}
+                                    value={iconName}
+                                  >
+                                    {iconName}
+                                  </NativeSelectOption>
+                                ))}
+                              </NativeSelect>
+                            </div>
+                            <span className='text-muted-foreground text-xs'>
+                              {t(
+                                'Select the sidebar and launcher icon for Infinite Canvas.'
+                              )}
+                            </span>
+                          </label>
+                        )
+                      }}
+                    />
+                  </SettingsControlChildren>
+                ) : null}
               </SettingsControlGroup>
             )
           })}

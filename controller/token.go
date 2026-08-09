@@ -313,6 +313,12 @@ func AddToken(c *gin.Context) {
 		return
 	}
 	resolvedGroup := resolveTokenGroupForCreate(token.Group, c.GetString("group"))
+	selection := model.Token{Group: resolvedGroup, GroupMode: token.GroupMode, GroupIds: token.GroupIds}
+	if err := model.PrepareTokenGroupBindings(model.DB, &selection); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	resolvedGroup = selection.Group
 	if err := validateTokenGroups(resolvedGroup); err != nil {
 		common.ApiError(c, err)
 		return
@@ -335,6 +341,9 @@ func AddToken(c *gin.Context) {
 		ModelLimits:        token.ModelLimits,
 		AllowIps:           token.AllowIps,
 		Group:              resolvedGroup,
+		GroupMode:          selection.GroupMode,
+		GroupIds:           selection.GroupIds,
+		GroupDetails:       selection.GroupDetails,
 		GroupRatioLimits:   normalizedGroupRatioLimits,
 		CrossGroupRetry:    token.CrossGroupRetry,
 	}
@@ -373,19 +382,33 @@ func UpdateToken(c *gin.Context) {
 		return
 	}
 	_, groupRatioLimitsProvided := rawFields["group_ratio_limits"]
-	if len(token.Name) > 50 {
-		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
-		return
+	_, groupProvided := rawFields["group"]
+	_, groupIdsProvided := rawFields["group_ids"]
+	_, groupModeProvided := rawFields["group_mode"]
+	if rawFields["group"] == nil {
+		groupProvided = false
 	}
-	if !token.UnlimitedQuota {
-		if token.RemainQuota < 0 {
-			common.ApiErrorI18n(c, i18n.MsgTokenQuotaNegative)
+	if rawFields["group_ids"] == nil {
+		groupIdsProvided = false
+	}
+	if rawFields["group_mode"] == nil {
+		groupModeProvided = false
+	}
+	if statusOnly == "" {
+		if len(token.Name) > 50 {
+			common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
 			return
 		}
-		maxQuotaValue := int((1000000000 * common.QuotaPerUnit))
-		if token.RemainQuota > maxQuotaValue {
-			common.ApiErrorI18n(c, i18n.MsgTokenQuotaExceedMax, map[string]any{"Max": maxQuotaValue})
-			return
+		if !token.UnlimitedQuota {
+			if token.RemainQuota < 0 {
+				common.ApiErrorI18n(c, i18n.MsgTokenQuotaNegative)
+				return
+			}
+			maxQuotaValue := int((1000000000 * common.QuotaPerUnit))
+			if token.RemainQuota > maxQuotaValue {
+				common.ApiErrorI18n(c, i18n.MsgTokenQuotaExceedMax, map[string]any{"Max": maxQuotaValue})
+				return
+			}
 		}
 	}
 	cleanToken, err := model.GetTokenByIds(token.Id, userId)
@@ -405,14 +428,39 @@ func UpdateToken(c *gin.Context) {
 	}
 	if statusOnly != "" {
 		cleanToken.Status = token.Status
+		err = cleanToken.SelectUpdate()
 	} else {
-		if err := validateTokenGroups(token.Group); err != nil {
+		groupSelectionProvided := groupProvided || groupIdsProvided || groupModeProvided
+		selection := model.Token{
+			Id:           cleanToken.Id,
+			Group:        cleanToken.Group,
+			GroupMode:    cleanToken.GroupMode,
+			GroupIds:     cleanToken.GroupIds,
+			GroupDetails: cleanToken.GroupDetails,
+		}
+		if groupSelectionProvided {
+			selection.Group = token.Group
+			selection.GroupMode = token.GroupMode
+			selection.GroupIds = token.GroupIds
+			selection.GroupDetails = nil
+			if !groupIdsProvided {
+				selection.GroupIds = nil
+			}
+			if !groupModeProvided {
+				selection.GroupMode = ""
+			}
+			if err := model.PrepareTokenGroupBindingsForUpdate(model.DB, &selection); err != nil {
+				common.ApiError(c, err)
+				return
+			}
+		}
+		if err := validateTokenGroups(selection.Group); err != nil {
 			common.ApiError(c, err)
 			return
 		}
 		normalizedGroupRatioLimits := ""
 		if groupRatioLimitsProvided {
-			normalizedGroupRatioLimits, err = normalizeTokenGroupRatioLimits(token.Group, token.GroupRatioLimits)
+			normalizedGroupRatioLimits, err = normalizeTokenGroupRatioLimits(selection.Group, token.GroupRatioLimits)
 			if err != nil {
 				common.ApiError(c, err)
 				return
@@ -426,13 +474,18 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.ModelLimitsEnabled = token.ModelLimitsEnabled
 		cleanToken.ModelLimits = token.ModelLimits
 		cleanToken.AllowIps = token.AllowIps
-		cleanToken.Group = token.Group
+		cleanToken.Group = selection.Group
+		cleanToken.GroupMode = selection.GroupMode
+		cleanToken.GroupIds = selection.GroupIds
+		cleanToken.GroupDetails = selection.GroupDetails
 		if groupRatioLimitsProvided {
 			cleanToken.GroupRatioLimits = normalizedGroupRatioLimits
+		} else if groupSelectionProvided && selection.GroupMode != model.TokenGroupModeExplicit {
+			cleanToken.GroupRatioLimits = ""
 		}
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
+		err = cleanToken.Update()
 	}
-	err = cleanToken.Update()
 	if err != nil {
 		common.ApiError(c, err)
 		return

@@ -141,7 +141,7 @@ func handleLastResponse(lastStreamData string, responseId *string, createAt *int
 	*systemFingerprint = lastStreamResponse.GetSystemFingerprint()
 	*model = lastStreamResponse.Model
 
-	if service.ValidUsage(lastStreamResponse.Usage) {
+	if normalizeAndValidateOpenAIUsage(lastStreamResponse.Usage) {
 		*containStreamUsage = true
 		*usage = lastStreamResponse.Usage
 	}
@@ -158,7 +158,7 @@ func shouldForwardOpenAIStreamData(data string, info *relaycommon.RelayInfo) boo
 	if err := common.Unmarshal(common.StringToByteSlice(data), &streamResponse); err != nil {
 		return true
 	}
-	if !service.ValidUsage(streamResponse.Usage) {
+	if !normalizeAndValidateOpenAIUsage(streamResponse.Usage) {
 		return true
 	}
 
@@ -175,7 +175,7 @@ func parseOpenAIStreamData(data string) (*dto.ChatCompletionsStreamResponse, boo
 		return nil, false, err
 	}
 	if len(streamResponse.Choices) == 0 {
-		return &streamResponse, service.ValidUsage(streamResponse.Usage), nil
+		return &streamResponse, normalizeAndValidateOpenAIUsage(streamResponse.Usage), nil
 	}
 	for _, choice := range streamResponse.Choices {
 		if choice.FinishReason != nil && *choice.FinishReason != "" {
@@ -228,5 +228,5 @@ func sendResponsesStreamData(c *gin.Context, streamResponse dto.ResponsesStreamR
 	if data == "" {
 		return
 	}
-	helper.ResponseChunkData(c, streamResponse, data)
+	_ = helper.ResponseChunkData(c, streamResponse, data)
 }

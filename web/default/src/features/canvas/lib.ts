@@ -1,4 +1,4 @@
-export const CANVAS_APP_ORIGIN = 'https://canvas.jo2api.com'
+import { normalizeCanvasOrigin } from '@/lib/canvas-settings'
 
 type CanvasLaunchUrlOptions = {
   canvasOrigin: string
@@ -7,7 +7,7 @@ type CanvasLaunchUrlOptions = {
 }
 
 export function buildCanvasLaunchUrl(options: CanvasLaunchUrlOptions): string {
-  const canvasUrl = new URL('/', options.canvasOrigin.trim())
+  const canvasUrl = new URL('/', normalizeCanvasOrigin(options.canvasOrigin))
   const newApiOrigin = options.newApiOrigin.trim().replace(/\/+$/, '')
 
   canvasUrl.searchParams.set('mode', 'newapi')
