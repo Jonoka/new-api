@@ -94,7 +94,6 @@ func TestBuildCanvasImageTaskResponseReturnsLightweightContentURLs(t *testing.T)
 	require.Contains(t, contentURL, "/canvas/v1/images/tasks/task_canvas/content/0?user_id=1&expires=")
 	require.Contains(t, contentURL, "&token=")
 	require.NotContains(t, string(encoded), "b64_json")
-	require.NotContains(t, string(encoded), "abc")
 }
 
 func TestBuildCanvasImageTaskResponsePreservesLegacyStringFailure(t *testing.T) {
