@@ -379,9 +379,7 @@ const ModelSelectModal = ({
       />
 
       <Spin
-        spinning={
-          !models || (models.length === 0 && removedModels.length === 0)
-        }
+        spinning={!models || (models.length === 0 && removedModels.length === 0)}
       >
         <div style={{ maxHeight: 400, overflowY: 'auto', paddingRight: 8 }}>
           {filteredModels.length === 0 && removedModels.length === 0 ? (

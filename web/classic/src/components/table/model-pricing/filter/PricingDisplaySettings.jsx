@@ -85,8 +85,7 @@ const PricingDisplaySettings = ({
 
   const getActiveValues = () => {
     const activeValues = [];
-    if (supportsCurrencyDisplay && showWithRecharge)
-      activeValues.push('recharge');
+    if (supportsCurrencyDisplay && showWithRecharge) activeValues.push('recharge');
     if (showRatio) activeValues.push('ratio');
     if (viewMode === 'table') activeValues.push('tableView');
     if (tokenUnit === 'K') activeValues.push('tokenUnit');

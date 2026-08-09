@@ -115,19 +115,14 @@ const renderGroupColumn = (text, record, t, groupRatios = {}) => {
   }
   // Multi-group: show first group + count badge with tooltip
   if (text && text.includes(',')) {
-    const groupList = text
-      .split(',')
-      .map((g) => g.trim())
-      .filter(Boolean);
+    const groupList = text.split(',').map((g) => g.trim()).filter(Boolean);
     const firstRatio = groupRatios[groupList[0]];
     return (
       <Tooltip
         content={
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {groupList.map((g, i) => (
-              <span key={g}>
-                {i + 1}. {groupLabels[g] || g}
-              </span>
+              <span key={g}>{i + 1}. {groupLabels[g] || g}</span>
             ))}
           </div>
         }

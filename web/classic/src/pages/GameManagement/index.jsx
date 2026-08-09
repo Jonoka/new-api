@@ -19,7 +19,12 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { API, showError, showSuccess, timestamp2string } from '../../helpers';
+import {
+  API,
+  showError,
+  showSuccess,
+  timestamp2string,
+} from '../../helpers';
 import {
   Button,
   Card,
@@ -364,9 +369,7 @@ const GameManagement = () => {
             <Form.Select.Option value='manual'>
               {t('手动判定')}
             </Form.Select.Option>
-            <Form.Select.Option value='auto'>
-              {t('自动判定')}
-            </Form.Select.Option>
+            <Form.Select.Option value='auto'>{t('自动判定')}</Form.Select.Option>
           </Form.Select>
         </Form>
       </SideSheet>

@@ -156,13 +156,10 @@ const GameCenter = () => {
       showError(t('请输入有效数量'));
       return;
     }
-    const res = await API.post(
-      `/api/game/predictions/${betPrediction.id}/bets`,
-      {
-        option_id: betOptionId,
-        amount: Math.trunc(betAmount),
-      },
-    );
+    const res = await API.post(`/api/game/predictions/${betPrediction.id}/bets`, {
+      option_id: betOptionId,
+      amount: Math.trunc(betAmount),
+    });
     if (res?.data?.success) {
       showSuccess(t('下注成功'));
       setBetVisible(false);

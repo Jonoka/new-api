@@ -81,8 +81,7 @@ function AffiliateApplicationGate({
     const label =
       condition.type === 'account_age_days'
         ? t('账号注册天数')
-        : condition.type === 'recharge_amount' ||
-            condition.type === 'recharge_quota'
+        : condition.type === 'recharge_amount' || condition.type === 'recharge_quota'
           ? t('累计成功充值')
           : t('申请条件');
     const formatValue = (value) => {

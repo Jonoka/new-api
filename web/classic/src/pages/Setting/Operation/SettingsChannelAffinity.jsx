@@ -1319,9 +1319,7 @@ export default function SettingsChannelAffinity(props) {
                     label={t('固定多 Key 索引')}
                   />
                   <Text type='tertiary' size='small'>
-                    {t(
-                      '开启后，命中亲和规则时会固定复用同一 multi_key_index。',
-                    )}
+                    {t('开启后，命中亲和规则时会固定复用同一 multi_key_index。')}
                   </Text>
                 </Col>
               </Row>

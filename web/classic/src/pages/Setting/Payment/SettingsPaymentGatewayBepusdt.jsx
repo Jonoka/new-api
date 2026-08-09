@@ -18,16 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useEffect, useState, useRef } from 'react';
-import {
-  Button,
-  Form,
-  Row,
-  Col,
-  Spin,
-  Space,
-  Typography,
-  Card,
-} from '@douyinfe/semi-ui';
+import { Button, Form, Row, Col, Spin, Space, Typography, Card } from '@douyinfe/semi-ui';
 import { IconPlus, IconDelete } from '@douyinfe/semi-icons';
 import {
   API,
@@ -108,10 +99,7 @@ export default function SettingsPaymentGatewayBepusdt(props) {
       showError(t('该链已添加'));
       return;
     }
-    setChains([
-      ...chains,
-      { name: preset.name, trade_type: preset.trade_type },
-    ]);
+    setChains([...chains, { name: preset.name, trade_type: preset.trade_type }]);
   };
 
   const addCustomChain = () => {
@@ -138,14 +126,8 @@ export default function SettingsPaymentGatewayBepusdt(props) {
         },
       ];
 
-      if (
-        inputs.BepusdtAuthToken !== undefined &&
-        inputs.BepusdtAuthToken !== ''
-      ) {
-        options.push({
-          key: 'BepusdtAuthToken',
-          value: inputs.BepusdtAuthToken,
-        });
+      if (inputs.BepusdtAuthToken !== undefined && inputs.BepusdtAuthToken !== '') {
+        options.push({ key: 'BepusdtAuthToken', value: inputs.BepusdtAuthToken });
       }
       if (inputs.BepusdtUnitPrice !== '') {
         options.push({
@@ -168,7 +150,7 @@ export default function SettingsPaymentGatewayBepusdt(props) {
 
       // 过滤掉不完整的链
       const validChains = chains.filter(
-        (c) => c.name.trim() !== '' && c.trade_type.trim() !== '',
+        (c) => c.name.trim() !== '' && c.trade_type.trim() !== ''
       );
       options.push({
         key: 'BepusdtChains',
@@ -257,11 +239,7 @@ export default function SettingsPaymentGatewayBepusdt(props) {
             <Text strong style={{ display: 'block', marginBottom: 8 }}>
               {t('支持的链')}
             </Text>
-            <Text
-              type='tertiary'
-              size='small'
-              style={{ display: 'block', marginBottom: 12 }}
-            >
+            <Text type='tertiary' size='small' style={{ display: 'block', marginBottom: 12 }}>
               {t('点击快捷按钮添加常用链，或手动添加自定义链')}
             </Text>
 
@@ -269,7 +247,7 @@ export default function SettingsPaymentGatewayBepusdt(props) {
             <Space wrap style={{ marginBottom: 12 }}>
               {PRESET_CHAINS.map((preset) => {
                 const exists = chains.some(
-                  (c) => c.trade_type === preset.trade_type,
+                  (c) => c.trade_type === preset.trade_type
                 );
                 return (
                   <Button

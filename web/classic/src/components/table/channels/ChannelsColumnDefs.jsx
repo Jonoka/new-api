@@ -475,13 +475,10 @@ export const getChannelsColumns = ({
                 const groupDetails = Array.isArray(record.group_details)
                   ? record.group_details
                   : [];
-                const detail = groupDetails.find(
-                  (group) => group.code === item,
-                );
-                const labels =
-                  detail?.name && detail.name !== item
-                    ? { [item]: detail.name }
-                    : {};
+                const detail = groupDetails.find((group) => group.code === item);
+                const labels = detail?.name && detail.name !== item
+                  ? { [item]: detail.name }
+                  : {};
                 return renderGroup(item, labels);
               })}
           </Space>

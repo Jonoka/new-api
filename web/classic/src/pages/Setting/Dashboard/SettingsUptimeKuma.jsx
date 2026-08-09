@@ -562,7 +562,9 @@ const SettingsUptimeKuma = ({ options, refresh }) => {
               setUptimeForm({
                 ...uptimeForm,
                 timeWindowHours:
-                  typeof value === 'number' ? value : DEFAULT_TIME_WINDOW_HOURS,
+                  typeof value === 'number'
+                    ? value
+                    : DEFAULT_TIME_WINDOW_HOURS,
               })
             }
             extraText={t(

@@ -30,7 +30,9 @@ const PromoteUserModal = ({ visible, onCancel, onConfirm, user, t }) => {
       type='warning'
     >
       <div>{t('此操作将提升用户的权限级别')}</div>
-      <strong>{user?.role === 10 ? t('超级管理员') : t('管理员')}</strong>
+      <strong>
+        {user?.role === 10 ? t('超级管理员') : t('管理员')}
+      </strong>
     </Modal>
   );
 };

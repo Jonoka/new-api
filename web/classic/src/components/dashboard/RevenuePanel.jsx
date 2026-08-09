@@ -22,8 +22,7 @@ function formatTimeLabel(timestamp, granularity) {
 }
 
 function quotaToLocalCurrency(quota) {
-  let quotaPerUnit =
-    parseFloat(localStorage.getItem('quota_per_unit')) || 500000;
+  let quotaPerUnit = parseFloat(localStorage.getItem('quota_per_unit')) || 500000;
   const quotaDisplayType = localStorage.getItem('quota_display_type') || 'USD';
   const usdRate = parseFloat(localStorage.getItem('usd_exchange_rate')) || 1;
   const amountUSD = quota / quotaPerUnit;
@@ -49,7 +48,9 @@ const StatMiniCard = ({ icon: Icon, label, value, sub, loading }) => (
           <div className='truncate text-base font-semibold tabular-nums'>
             {value}
           </div>
-          {sub && <div className='truncate text-xs text-gray-500'>{sub}</div>}
+          {sub && (
+            <div className='truncate text-xs text-gray-500'>{sub}</div>
+          )}
         </>
       )}
     </div>
@@ -68,17 +69,12 @@ const RevenuePanel = ({ CARD_PROPS, CHART_CONFIG }) => {
     setLoading(true);
     try {
       const now = new Date();
-      const todayStart = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        now.getDate(),
-      );
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const end = Math.floor(todayStart.getTime() / 1000) + 86400 - 1;
-      const start =
-        Math.floor(todayStart.getTime() / 1000) - (selectedDays - 1) * 86400;
+      const start = Math.floor(todayStart.getTime() / 1000) - (selectedDays - 1) * 86400;
       const tzOffset = now.getTimezoneOffset() * -60;
       const res = await API.get(
-        `/api/data/revenue?start_timestamp=${start}&end_timestamp=${end}&granularity=${granularity}&timezone_offset=${tzOffset}`,
+        `/api/data/revenue?start_timestamp=${start}&end_timestamp=${end}&granularity=${granularity}&timezone_offset=${tzOffset}`
       );
       const { success, message, data } = res.data;
       if (success) {

@@ -30,7 +30,9 @@ const DemoteUserModal = ({ visible, onCancel, onConfirm, user, t }) => {
       type='warning'
     >
       <div>{t('此操作将降低用户的权限级别')}</div>
-      <strong>{user?.role === 100 ? t('管理员') : t('普通用户')}</strong>
+      <strong>
+        {user?.role === 100 ? t('管理员') : t('普通用户')}
+      </strong>
     </Modal>
   );
 };

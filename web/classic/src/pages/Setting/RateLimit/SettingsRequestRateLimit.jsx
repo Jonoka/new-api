@@ -17,13 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
   Col,
@@ -69,9 +63,7 @@ function normalizeLimitPair(value, fallback = [0, 1]) {
   const maxRequests = Number(value[0]);
   const maxSuccess = Number(value[1]);
   return [
-    Number.isFinite(maxRequests) && maxRequests >= 0
-      ? maxRequests
-      : fallback[0],
+    Number.isFinite(maxRequests) && maxRequests >= 0 ? maxRequests : fallback[0],
     Number.isFinite(maxSuccess) && maxSuccess >= 1 ? maxSuccess : fallback[1],
   ];
 }
@@ -207,7 +199,9 @@ function GroupRateLimitRules({ value, onChange }) {
               value={limits[0]}
               suffix={t('次')}
               style={{ width: 150 }}
-              onChange={(v) => setLimit(groupName, [Number(v) || 0, limits[1]])}
+              onChange={(v) =>
+                setLimit(groupName, [Number(v) || 0, limits[1]])
+              }
             />
             <InputNumber
               size='small'
@@ -217,7 +211,10 @@ function GroupRateLimitRules({ value, onChange }) {
               suffix={t('成功次')}
               style={{ width: 150 }}
               onChange={(v) =>
-                setLimit(groupName, [limits[0], Math.max(1, Number(v) || 1)])
+                setLimit(groupName, [
+                  limits[0],
+                  Math.max(1, Number(v) || 1),
+                ])
               }
             />
             <Popconfirm
@@ -353,10 +350,7 @@ function UserGroupRateLimitSection({
             {ruleCount} {t('条规则')}
           </Tag>
         </div>
-        <div
-          className='flex items-center gap-1'
-          onClick={(e) => e.stopPropagation()}
-        >
+        <div className='flex items-center gap-1' onClick={(e) => e.stopPropagation()}>
           <Button
             icon={<IconPlus />}
             size='small'
@@ -522,9 +516,7 @@ function UserGroupRateLimitSection({
 
 function UserGroupRateLimitRules({ value, groupNames = [], onChange }) {
   const { t } = useTranslation();
-  const [config, setConfig] = useState(() =>
-    normalizeUserGroupRateLimit(value),
-  );
+  const [config, setConfig] = useState(() => normalizeUserGroupRateLimit(value));
   const [newUserGroup, setNewUserGroup] = useState('');
   const [newRuleType, setNewRuleType] = useState('global');
   const [newRequestGroup, setNewRequestGroup] = useState('');
@@ -676,7 +668,9 @@ function UserGroupRateLimitRules({ value, groupNames = [], onChange }) {
   return (
     <div className='space-y-3'>
       <Text type='tertiary' size='small' style={{ display: 'block' }}>
-        {t('优先级：用户组请求分组 > 用户组全局 > 请求分组 > 全局默认值。')}
+        {t(
+          '优先级：用户组请求分组 > 用户组全局 > 请求分组 > 全局默认值。',
+        )}
       </Text>
       {entries.length === 0 ? (
         <Text type='tertiary' className='block py-4 text-center'>
@@ -769,10 +763,7 @@ export default function RequestRateLimit(props) {
   const [inputsRow, setInputsRow] = useState(inputs);
 
   const groupNames = useMemo(() => {
-    const groupRateLimits = parseJSONSafe(
-      inputs.ModelRequestRateLimitGroup,
-      {},
-    );
+    const groupRateLimits = parseJSONSafe(inputs.ModelRequestRateLimitGroup, {});
     const userGroupRateLimits = normalizeUserGroupRateLimit(
       inputs.ModelRequestRateLimitUserGroup,
     );
@@ -782,10 +773,7 @@ export default function RequestRateLimit(props) {
         ...Object.keys(userGroupRateLimits),
       ]),
     );
-  }, [
-    inputs.ModelRequestRateLimitGroup,
-    inputs.ModelRequestRateLimitUserGroup,
-  ]);
+  }, [inputs.ModelRequestRateLimitGroup, inputs.ModelRequestRateLimitUserGroup]);
 
   const handleGroupRateLimitChange = useCallback((value) => {
     setInputs((current) => ({
@@ -952,7 +940,8 @@ export default function RequestRateLimit(props) {
                     stopValidateWithError
                     rules={[
                       {
-                        validator: (rule, value) => !value || verifyJSON(value),
+                        validator: (rule, value) =>
+                          !value || verifyJSON(value),
                         message: t('不是合法的 JSON 字符串'),
                       },
                     ]}
@@ -983,7 +972,8 @@ export default function RequestRateLimit(props) {
                     stopValidateWithError
                     rules={[
                       {
-                        validator: (rule, value) => !value || verifyJSON(value),
+                        validator: (rule, value) =>
+                          !value || verifyJSON(value),
                         message: t('不是合法的 JSON 字符串'),
                       },
                     ]}

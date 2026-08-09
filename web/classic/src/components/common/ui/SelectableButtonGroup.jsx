@@ -206,9 +206,7 @@ const SelectableButtonGroup = ({
                   {item.icon && <span className='sbg-icon'>{item.icon}</span>}
                   <ConditionalTooltipText text={item.label} />
                   {item.tagCount !== undefined && shouldShowTags && (
-                    <span
-                      className={`sbg-badge ${isActive ? 'sbg-badge-active' : ''}`}
-                    >
+                    <span className={`sbg-badge ${isActive ? 'sbg-badge-active' : ''}`}>
                       {item.tagCount}
                     </span>
                   )}
@@ -230,15 +228,11 @@ const SelectableButtonGroup = ({
               <div className='sbg-content'>
                 {item.icon && <span className='sbg-icon'>{item.icon}</span>}
                 <ConditionalTooltipText text={item.label} />
-                {item.tagCount !== undefined &&
-                  shouldShowTags &&
-                  item.tagCount !== '' && (
-                    <span
-                      className={`sbg-badge ${isActive ? 'sbg-badge-active' : ''}`}
-                    >
-                      {item.tagCount}
-                    </span>
-                  )}
+                {item.tagCount !== undefined && shouldShowTags && item.tagCount !== '' && (
+                  <span className={`sbg-badge ${isActive ? 'sbg-badge-active' : ''}`}>
+                    {item.tagCount}
+                  </span>
+                )}
               </div>
             </Button>
           </Col>
