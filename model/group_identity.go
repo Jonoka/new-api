@@ -52,10 +52,47 @@ func (GroupAlias) TableName() string { return "group_aliases" }
 // AutoGroupMember 保存自动分组的顺序。auto 本身是令牌选择模式，不是一个 Group。
 type AutoGroupMember struct {
 	GroupId  int `json:"group_id" gorm:"primaryKey;index"`
-	Position int `json:"position" gorm:"not null;uniqueIndex:idx_auto_group_position"`
+	Position int `json:"position" gorm:"not null"`
 }
 
 func (AutoGroupMember) TableName() string { return "auto_group_members" }
+
+const (
+	autoGroupPositionIndex       = "idx_auto_group_position"
+	autoGroupLegacyPositionIndex = "idx_auto_group_members_position"
+)
+
+type autoGroupMemberPositionIndex struct {
+	Position int `gorm:"uniqueIndex:idx_auto_group_position"`
+}
+
+func (autoGroupMemberPositionIndex) TableName() string { return "auto_group_members" }
+
+func migrateAutoGroupPositionIndex(db *gorm.DB) error {
+	if db == nil {
+		return errors.New("数据库连接为空")
+	}
+	migrator := db.Migrator()
+	if db.Dialector.Name() == "postgres" {
+		// PostgreSQL 的 UNIQUE CONSTRAINT 支撑索引不能直接删除，必须先删约束。
+		if migrator.HasConstraint(&AutoGroupMember{}, autoGroupLegacyPositionIndex) {
+			if err := migrator.DropConstraint(&AutoGroupMember{}, autoGroupLegacyPositionIndex); err != nil {
+				return fmt.Errorf("删除自动分组顺序旧唯一约束失败: %w", err)
+			}
+		}
+		if migrator.HasIndex(&AutoGroupMember{}, autoGroupLegacyPositionIndex) {
+			if err := migrator.DropIndex(&AutoGroupMember{}, autoGroupLegacyPositionIndex); err != nil {
+				return fmt.Errorf("删除自动分组顺序旧唯一索引失败: %w", err)
+			}
+		}
+	}
+	if !migrator.HasIndex(&AutoGroupMember{}, autoGroupPositionIndex) {
+		if err := migrator.CreateIndex(&autoGroupMemberPositionIndex{}, autoGroupPositionIndex); err != nil {
+			return fmt.Errorf("创建自动分组顺序唯一索引失败: %w", err)
+		}
+	}
+	return nil
+}
 
 const (
 	GroupStatusDisabled = 0

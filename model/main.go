@@ -350,6 +350,9 @@ func migrateDB() error {
 	if err := migratePromoCodeDeletionKey(DB); err != nil {
 		return fmt.Errorf("failed to migrate promo code deletion key: %w", err)
 	}
+	if err := migrateAutoGroupPositionIndex(DB); err != nil {
+		return fmt.Errorf("failed to migrate auto group position index: %w", err)
+	}
 	if err := migrateGroupIdentity(); err != nil {
 		return fmt.Errorf("failed to migrate group identity: %w", err)
 	}
@@ -464,6 +467,9 @@ func migrateDBFast() error {
 		&TokenGroupBinding{},
 	); err != nil {
 		return fmt.Errorf("failed to migrate group relationship tables: %w", err)
+	}
+	if err := migrateAutoGroupPositionIndex(DB); err != nil {
+		return fmt.Errorf("failed to migrate auto group position index: %w", err)
 	}
 	if err := migrateGroupIdentity(); err != nil {
 		return fmt.Errorf("failed to migrate group identity: %w", err)

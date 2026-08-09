@@ -21,6 +21,20 @@ jobs:
   build_amd64:
     name: Build & push amd64
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: newapi_test_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d newapi_test_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -56,6 +70,8 @@ jobs:
           cache: true
 
       - name: Run Go tests
+        env:
+          NEW_API_TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/newapi_test_ci?sslmode=disable
         run: go test ./... -count=1
 
       - name: Resolve image tags

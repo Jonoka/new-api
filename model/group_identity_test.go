@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/glebarez/sqlite"
 	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -39,6 +40,183 @@ func openGroupIdentityTestDB(t *testing.T) *gorm.DB {
 		}
 	})
 	return db
+}
+
+func TestMigrateAutoGroupPositionIndexSQLiteIsIdempotent(t *testing.T) {
+	db := openGroupIdentityTestDB(t)
+	if err := db.AutoMigrate(&AutoGroupMember{}); err != nil {
+		t.Fatalf("迁移自动分组表失败: %v", err)
+	}
+	if err := migrateAutoGroupPositionIndex(db); err != nil {
+		t.Fatalf("首次迁移自动分组顺序索引失败: %v", err)
+	}
+	if err := migrateAutoGroupPositionIndex(db); err != nil {
+		t.Fatalf("重复迁移自动分组顺序索引失败: %v", err)
+	}
+	if !db.Migrator().HasIndex(&AutoGroupMember{}, autoGroupPositionIndex) {
+		t.Fatal("自动分组顺序唯一索引不存在")
+	}
+	if err := db.Create(&AutoGroupMember{GroupId: 1, Position: 0}).Error; err != nil {
+		t.Fatalf("创建首个自动分组成员失败: %v", err)
+	}
+	if err := db.Create(&AutoGroupMember{GroupId: 2, Position: 0}).Error; err == nil {
+		t.Fatal("自动分组顺序唯一索引未生效")
+	}
+}
+
+func TestMigrateAutoGroupPositionIndexPostgreSQLStartupIsIdempotent(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("NEW_API_TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("NEW_API_TEST_POSTGRES_DSN is not configured")
+	}
+
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开 PostgreSQL 测试数据库失败: %v", err)
+	}
+	var databaseName string
+	if err := db.Raw("SELECT current_database()").Scan(&databaseName).Error; err != nil {
+		t.Fatalf("读取 PostgreSQL 数据库名失败: %v", err)
+	}
+	if !strings.HasPrefix(databaseName, "newapi_test_") {
+		t.Fatalf("拒绝在非测试数据库 %q 执行破坏性迁移测试", databaseName)
+	}
+
+	t.Cleanup(func() {
+		_ = db.Migrator().DropTable(&AutoGroupMember{})
+		if sqlDB, closeErr := db.DB(); closeErr == nil {
+			_ = sqlDB.Close()
+		}
+	})
+
+	if err := db.Migrator().DropTable(&AutoGroupMember{}); err != nil {
+		t.Fatalf("清理自动分组测试表失败: %v", err)
+	}
+	if err := db.Exec(`
+		CREATE TABLE auto_group_members (
+			group_id BIGINT PRIMARY KEY,
+			position BIGINT NOT NULL
+		)
+	`).Error; err != nil {
+		t.Fatalf("创建自动分组测试表失败: %v", err)
+	}
+	if err := db.Exec("INSERT INTO auto_group_members (group_id, position) VALUES (?, ?)", 101, 3).Error; err != nil {
+		t.Fatalf("创建自动分组成员测试数据失败: %v", err)
+	}
+
+	catalogFingerprint := func() []string {
+		var rows []struct {
+			Item string
+		}
+		if err := db.Raw(`
+			SELECT item FROM (
+				SELECT 'column|' || column_name || '|' || data_type || '|' || is_nullable AS item
+				FROM information_schema.columns
+				WHERE table_schema = current_schema() AND table_name = 'auto_group_members'
+				UNION ALL
+				SELECT 'constraint|' || c.conname || '|' || pg_get_constraintdef(c.oid) AS item
+				FROM pg_constraint c
+				JOIN pg_class t ON t.oid = c.conrelid
+				JOIN pg_namespace n ON n.oid = t.relnamespace
+				WHERE n.nspname = current_schema() AND t.relname = 'auto_group_members'
+				UNION ALL
+				SELECT 'index|' || indexname || '|' || indexdef AS item
+				FROM pg_indexes
+				WHERE schemaname = current_schema() AND tablename = 'auto_group_members'
+			) catalog
+			ORDER BY item
+		`).Scan(&rows).Error; err != nil {
+			t.Fatalf("读取自动分组目录失败: %v", err)
+		}
+		catalog := make([]string, len(rows))
+		for i, row := range rows {
+			catalog[i] = row.Item
+		}
+		return catalog
+	}
+
+	runStartupMigration := func() {
+		if err := db.AutoMigrate(&AutoGroupMember{}); err != nil {
+			t.Fatalf("AutoMigrate 自动分组表失败: %v", err)
+		}
+		if err := migrateAutoGroupPositionIndex(db); err != nil {
+			t.Fatalf("迁移自动分组顺序索引失败: %v", err)
+		}
+	}
+
+	runStartupMigration()
+	firstCatalog := catalogFingerprint()
+	runStartupMigration()
+	secondCatalog := catalogFingerprint()
+	if strings.Join(firstCatalog, "\n") != strings.Join(secondCatalog, "\n") {
+		t.Fatalf("第二次启动改变了自动分组目录:\n首次:\n%s\n第二次:\n%s", strings.Join(firstCatalog, "\n"), strings.Join(secondCatalog, "\n"))
+	}
+	if !db.Migrator().HasIndex(&AutoGroupMember{}, autoGroupPositionIndex) {
+		t.Fatalf("全新表首次启动后目标唯一索引 %s 不存在", autoGroupPositionIndex)
+	}
+	if db.Migrator().HasIndex(&AutoGroupMember{}, autoGroupLegacyPositionIndex) {
+		t.Fatalf("全新表第二次启动生成了遗留唯一索引 %s", autoGroupLegacyPositionIndex)
+	}
+
+	if err := db.Exec("ALTER TABLE auto_group_members ADD CONSTRAINT idx_auto_group_members_position UNIQUE (position)").Error; err != nil {
+		t.Fatalf("构造失败第二次启动的重复唯一键失败: %v", err)
+	}
+	if !db.Migrator().HasConstraint(&AutoGroupMember{}, autoGroupLegacyPositionIndex) {
+		t.Fatalf("未成功构造遗留唯一约束 %s", autoGroupLegacyPositionIndex)
+	}
+	runStartupMigration()
+	firstCleanupCatalog := catalogFingerprint()
+	runStartupMigration()
+	secondCleanupCatalog := catalogFingerprint()
+	if strings.Join(firstCleanupCatalog, "\n") != strings.Join(secondCleanupCatalog, "\n") {
+		t.Fatalf("遗留重复键清理后的第二次启动改变了自动分组目录:\n首次:\n%s\n第二次:\n%s", strings.Join(firstCleanupCatalog, "\n"), strings.Join(secondCleanupCatalog, "\n"))
+	}
+
+	if db.Migrator().HasConstraint(&AutoGroupMember{}, autoGroupLegacyPositionIndex) {
+		t.Fatalf("遗留唯一约束 %s 仍存在", autoGroupLegacyPositionIndex)
+	}
+	if db.Migrator().HasIndex(&AutoGroupMember{}, autoGroupLegacyPositionIndex) {
+		t.Fatalf("遗留唯一索引 %s 仍存在", autoGroupLegacyPositionIndex)
+	}
+	if !db.Migrator().HasIndex(&AutoGroupMember{}, autoGroupPositionIndex) {
+		t.Fatalf("目标唯一索引 %s 不存在", autoGroupPositionIndex)
+	}
+	var positionUniqueIndexRows []struct {
+		Name string
+	}
+	if err := db.Raw(`
+		SELECT idx.relname AS name
+		FROM pg_index i
+		JOIN pg_class tbl ON tbl.oid = i.indrelid
+		JOIN pg_namespace n ON n.oid = tbl.relnamespace
+		JOIN pg_class idx ON idx.oid = i.indexrelid
+		JOIN pg_attribute a ON a.attrelid = tbl.oid AND a.attnum = i.indkey[0]
+		WHERE n.nspname = current_schema()
+			AND tbl.relname = 'auto_group_members'
+			AND i.indisunique
+			AND i.indnatts = 1
+			AND a.attname = 'position'
+		ORDER BY idx.relname
+	`).Scan(&positionUniqueIndexRows).Error; err != nil {
+		t.Fatalf("读取 position 唯一索引失败: %v", err)
+	}
+	positionUniqueIndexes := make([]string, len(positionUniqueIndexRows))
+	for i, row := range positionUniqueIndexRows {
+		positionUniqueIndexes[i] = row.Name
+	}
+	if len(positionUniqueIndexes) != 1 || positionUniqueIndexes[0] != autoGroupPositionIndex {
+		t.Fatalf("position 应仅保留目标唯一索引，实际为 %#v", positionUniqueIndexes)
+	}
+	var member AutoGroupMember
+	if err := db.First(&member, "group_id = ?", 101).Error; err != nil {
+		t.Fatalf("迁移后读取自动分组成员失败: %v", err)
+	}
+	if member.Position != 3 {
+		t.Fatalf("迁移改变了自动分组顺序数据: %#v", member)
+	}
+	if err := db.Create(&AutoGroupMember{GroupId: 102, Position: 3}).Error; err == nil {
+		t.Fatal("PostgreSQL 自动分组顺序唯一索引未生效")
+	}
 }
 
 func TestMigrateGroupIdentityIsIdempotent(t *testing.T) {
