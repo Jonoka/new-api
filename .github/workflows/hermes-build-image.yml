@@ -28,7 +28,10 @@ jobs:
           fetch-depth: 0
 
       - name: Check merge diff
-        run: git diff --check HEAD^1 HEAD
+        run: |
+          merge_commit="$(git log --merges -1 --format=%H)"
+          test -n "$merge_commit"
+          git diff --check "${merge_commit}^1" HEAD
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
