@@ -465,7 +465,7 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
-	isTasksEndpointGeneration := info.RelayMode == relayconstant.RelayModeImagesGenerations && info.ChannelOtherSettings.ImageAsyncMode == dto.ImageAsyncModeTasksEndpoint
+	isTasksEndpointGeneration := info != nil && info.ChannelMeta != nil && info.RelayMode == relayconstant.RelayModeImagesGenerations && info.ChannelOtherSettings.ImageAsyncMode == dto.ImageAsyncModeTasksEndpoint
 	if !isTasksEndpointGeneration && shouldForceGPTImage2HighTierAsync(info, request) {
 		async := true
 		waitForResult := false
@@ -615,7 +615,7 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func shouldDefaultGPTImage2RequestToSync(info *relaycommon.RelayInfo, request dto.ImageRequest) bool {
-	if info == nil || (info.RelayMode != relayconstant.RelayModeImagesGenerations && info.RelayMode != relayconstant.RelayModeImagesEdits) || request.Async != nil {
+	if info == nil || info.ChannelMeta == nil || (info.RelayMode != relayconstant.RelayModeImagesGenerations && info.RelayMode != relayconstant.RelayModeImagesEdits) || request.Async != nil {
 		return false
 	}
 	modelName := strings.ToLower(strings.TrimSpace(firstNonEmptyString(info.UpstreamModelName, info.OriginModelName, request.Model)))
@@ -623,7 +623,7 @@ func shouldDefaultGPTImage2RequestToSync(info *relaycommon.RelayInfo, request dt
 }
 
 func shouldForceGPTImage2HighTierAsync(info *relaycommon.RelayInfo, request dto.ImageRequest) bool {
-	if info == nil || info.RelayMode != relayconstant.RelayModeImagesGenerations {
+	if info == nil || info.ChannelMeta == nil || info.RelayMode != relayconstant.RelayModeImagesGenerations {
 		return false
 	}
 	modelName := strings.ToLower(strings.TrimSpace(firstNonEmptyString(info.UpstreamModelName, info.OriginModelName, request.Model)))

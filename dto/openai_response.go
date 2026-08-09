@@ -468,13 +468,15 @@ func (d InputTokenDetails) GetCacheCreationTokensWithPresence() (int, bool) {
 		return nonNegativeTokenCount(d.CacheCreationTokens), true
 	case d.HasCachedCreationTokens:
 		return nonNegativeTokenCount(d.CachedCreationTokens), true
+	case d.CachedCreationTokensPresent:
+		return nonNegativeTokenCount(d.CachedCreationTokens), true
 	default:
 		return 0, false
 	}
 }
 
 func (d InputTokenDetails) HasAnyCacheCreationTokensField() bool {
-	return d.HasCacheWriteTokens || d.HasCacheCreationTokens || d.HasCachedCreationTokens
+	return d.HasCacheWriteTokens || d.HasCacheCreationTokens || d.HasCachedCreationTokens || d.CachedCreationTokensPresent
 }
 
 func (d *InputTokenDetails) SetCacheCreationTokens(tokens int) {

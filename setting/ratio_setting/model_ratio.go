@@ -575,17 +575,17 @@ func GetCompletionRatioInfo(name string) CompletionRatioInfo {
 		}
 	}
 
-	if ratio, ok := completionRatioMap.Get(name); ok {
-		return CompletionRatioInfo{
-			Ratio:  ratio,
-			Locked: false,
-		}
+	hardCodedRatio, locked := getHardcodedCompletionModelRatio(name)
+	if locked {
+		return CompletionRatioInfo{Ratio: hardCodedRatio, Locked: true}
 	}
 
-	hardCodedRatio, _ := getHardcodedCompletionModelRatio(name)
+	if ratio, ok := completionRatioMap.Get(name); ok {
+		return CompletionRatioInfo{Ratio: ratio}
+	}
+
 	return CompletionRatioInfo{
-		Ratio:  hardCodedRatio,
-		Locked: false,
+		Ratio: hardCodedRatio,
 	}
 }
 

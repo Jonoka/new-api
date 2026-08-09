@@ -2,7 +2,7 @@ package ratio_setting
 
 import "testing"
 
-func TestGetCompletionRatioPrefersConfiguredRatioForGPT5(t *testing.T) {
+func TestGetCompletionRatioUsesConfiguredGPT5RatioWhileInfoStaysLocked(t *testing.T) {
 	oldCompletionRatios := completionRatioMap.ReadAll()
 	defer func() {
 		completionRatioMap.Clear()
@@ -11,23 +11,23 @@ func TestGetCompletionRatioPrefersConfiguredRatioForGPT5(t *testing.T) {
 
 	completionRatioMap.Clear()
 	completionRatioMap.AddAll(map[string]float64{
-		"gpt-5.6-sol": 6,
+		"gpt-5.6-sol": 7,
 	})
 
-	if got := GetCompletionRatio("gpt-5.6-sol"); got != 6 {
-		t.Fatalf("GetCompletionRatio() = %v, want configured ratio 6", got)
+	if got := GetCompletionRatio("gpt-5.6-sol"); got != 7 {
+		t.Fatalf("GetCompletionRatio() = %v, want configured ratio 7", got)
 	}
 
 	info := GetCompletionRatioInfo("gpt-5.6-sol")
-	if info.Locked {
-		t.Fatalf("GetCompletionRatioInfo().Locked = true, want false")
+	if !info.Locked {
+		t.Fatalf("GetCompletionRatioInfo().Locked = false, want true")
 	}
 	if info.Ratio != 6 {
 		t.Fatalf("GetCompletionRatioInfo().Ratio = %v, want 6", info.Ratio)
 	}
 }
 
-func TestGetCompletionRatioFallsBackToGPT5Default(t *testing.T) {
+func TestGetCompletionRatioFallsBackToGPT56LockedRatio(t *testing.T) {
 	oldCompletionRatios := completionRatioMap.ReadAll()
 	defer func() {
 		completionRatioMap.Clear()
@@ -36,16 +36,16 @@ func TestGetCompletionRatioFallsBackToGPT5Default(t *testing.T) {
 
 	completionRatioMap.Clear()
 
-	if got := GetCompletionRatio("gpt-5.6-sol"); got != 8 {
-		t.Fatalf("GetCompletionRatio() = %v, want default ratio 8", got)
+	if got := GetCompletionRatio("gpt-5.6-sol"); got != 6 {
+		t.Fatalf("GetCompletionRatio() = %v, want locked ratio 6", got)
 	}
 
 	info := GetCompletionRatioInfo("gpt-5.6-sol")
-	if info.Locked {
-		t.Fatalf("GetCompletionRatioInfo().Locked = true, want false")
+	if !info.Locked {
+		t.Fatalf("GetCompletionRatioInfo().Locked = false, want true")
 	}
-	if info.Ratio != 8 {
-		t.Fatalf("GetCompletionRatioInfo().Ratio = %v, want default ratio 8", info.Ratio)
+	if info.Ratio != 6 {
+		t.Fatalf("GetCompletionRatioInfo().Ratio = %v, want locked ratio 6", info.Ratio)
 	}
 }
 

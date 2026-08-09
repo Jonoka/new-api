@@ -148,10 +148,14 @@ func serveImageTaskContent(c *gin.Context, platform constant.TaskPlatform) {
 		return
 	}
 
-	userID, ok := validateCanvasImageTaskContentToken(c, taskID, index)
-	if !ok {
-		abortCanvasRequest(c, http.StatusUnauthorized, "Unauthorized")
-		return
+	userID := c.GetInt("id")
+	if platform == constant.TaskPlatformCanvasImage {
+		var ok bool
+		userID, ok = validateCanvasImageTaskContentToken(c, taskID, index)
+		if !ok {
+			abortCanvasRequest(c, http.StatusUnauthorized, "Unauthorized")
+			return
+		}
 	}
 
 	task, exists, err := model.GetByTaskId(userID, taskID)
