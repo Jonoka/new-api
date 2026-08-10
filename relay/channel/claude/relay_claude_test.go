@@ -2,10 +2,16 @@ package claude
 
 import (
 	"encoding/base64"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relay/helper"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -404,6 +410,25 @@ func TestRequestOpenAI2ClaudeMessage_DropsDeprecatedSamplingForClaudeSonnet46(t 
 	require.Nil(t, claudeRequest.Temperature)
 	require.Nil(t, claudeRequest.TopP)
 	require.Nil(t, claudeRequest.TopK)
+}
+
+func TestRequestOpenAI2ClaudeMessageAdaptsMappedThinkingModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	common.SetContextKey(ctx, constant.ContextKeyChannelModelMapping, `{"claude-opus-5":"claude-opus-5-thinking"}`)
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "claude-opus-5",
+		ChannelMeta:     &relaycommon.ChannelMeta{},
+	}
+	request := dto.GeneralOpenAIRequest{Model: "claude-opus-5", Messages: []dto.Message{{Role: "user", Content: "hi"}}}
+	require.NoError(t, helper.ModelMappedHelper(ctx, info, &request))
+
+	converted, err := RequestOpenAI2ClaudeMessage(ctx, request)
+	require.NoError(t, err)
+	require.Equal(t, "claude-opus-5", converted.Model)
+	require.NotNil(t, converted.Thinking)
+	require.Equal(t, "enabled", converted.Thinking.Type)
+	require.Greater(t, converted.Thinking.GetBudgetTokens(), 0)
 }
 
 func TestNormalizeClaudeSamplingParameters_DropsDeprecatedSamplingForNativeClaudeModels(t *testing.T) {
