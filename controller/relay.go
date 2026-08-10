@@ -818,6 +818,9 @@ func recordChannelErrorLog(c *gin.Context, relayInfo *relaycommon.RelayInfo, cha
 	modelName := c.GetString("original_model")
 	tokenId := c.GetInt("token_id")
 	userGroup := c.GetString("group")
+	if relayInfo != nil && relayInfo.UsingGroup != "" {
+		userGroup = relayInfo.UsingGroup
+	}
 	channelId := channelError.ChannelId
 	other := make(map[string]interface{})
 	if c.Request != nil && c.Request.URL != nil {

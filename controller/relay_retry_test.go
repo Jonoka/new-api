@@ -510,7 +510,8 @@ func TestProcessChannelErrorRecordsOnlyFinalAttempt(t *testing.T) {
 	ctx.Set("use_channel", []string{"326", "322"})
 	finalChannel := *types.NewChannelError(322, 1, "final", false, "", false)
 	processChannelError(ctx, nil, finalChannel, relayErr, false)
-	restoredErr := finalizePendingChannelFailure(ctx, nil, &channelFailureSnapshot{channel: finalChannel, err: relayErr})
+	finalRelayInfo := &relaycommon.RelayInfo{UsingGroup: "CC-Max-仅限CC客户端"}
+	restoredErr := finalizePendingChannelFailure(ctx, finalRelayInfo, &channelFailureSnapshot{channel: finalChannel, err: relayErr})
 
 	require.Same(t, relayErr, restoredErr)
 	require.NoError(t, db.Model(&model.Log{}).Where("type = ?", model.LogTypeError).Count(&count).Error)
@@ -518,6 +519,7 @@ func TestProcessChannelErrorRecordsOnlyFinalAttempt(t *testing.T) {
 	var recorded model.Log
 	require.NoError(t, db.Where("type = ?", model.LogTypeError).First(&recorded).Error)
 	require.Equal(t, 322, recorded.ChannelId)
+	require.Equal(t, "CC-Max-仅限CC客户端", recorded.Group)
 
 	var other map[string]interface{}
 	require.NoError(t, common.UnmarshalJsonStr(recorded.Other, &other))
