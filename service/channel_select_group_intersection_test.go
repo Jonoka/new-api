@@ -29,12 +29,16 @@ func setupChannelSelectGroupTestCache(t *testing.T) map[string]*model.Channel {
 	common.MemoryCacheEnabled = true
 
 	priority := int64(10)
+	fallbackPriority := int64(5)
 	weight := uint(100)
 	channels := map[string]*model.Channel{
-		"shared":       {Id: 9301, Name: "shared", Key: "shared", Status: common.ChannelStatusEnabled, Models: "gpt-test", Group: "hack,special,regular", Priority: &priority, Weight: &weight},
-		"hack-only":    {Id: 9302, Name: "hack-only", Key: "hack", Status: common.ChannelStatusEnabled, Models: "gpt-test", Group: "hack", Priority: &priority, Weight: &weight},
-		"special-only": {Id: 9303, Name: "special-only", Key: "special", Status: common.ChannelStatusEnabled, Models: "gpt-test", Group: "special", Priority: &priority, Weight: &weight},
-		"regular-only": {Id: 9304, Name: "regular-only", Key: "regular", Status: common.ChannelStatusEnabled, Models: "gpt-test", Group: "regular", Priority: &priority, Weight: &weight},
+		"shared":           {Id: 9301, Name: "shared", Key: "shared", Status: common.ChannelStatusEnabled, Models: "gpt-test", Group: "hack,special,regular", Priority: &priority, Weight: &weight},
+		"hack-only":        {Id: 9302, Name: "hack-only", Key: "hack", Status: common.ChannelStatusEnabled, Models: "gpt-test", Group: "hack", Priority: &priority, Weight: &weight},
+		"special-only":     {Id: 9303, Name: "special-only", Key: "special", Status: common.ChannelStatusEnabled, Models: "gpt-test", Group: "special", Priority: &priority, Weight: &weight},
+		"regular-only":     {Id: 9304, Name: "regular-only", Key: "regular", Status: common.ChannelStatusEnabled, Models: "gpt-test", Group: "regular", Priority: &priority, Weight: &weight},
+		"hack-fallback":    {Id: 9305, Name: "hack-fallback", Key: "hack-low", Status: common.ChannelStatusEnabled, Models: "gpt-test", Group: "hack", Priority: &fallbackPriority, Weight: &weight},
+		"special-fallback": {Id: 9306, Name: "special-fallback", Key: "special-low", Status: common.ChannelStatusEnabled, Models: "gpt-test", Group: "special", Priority: &fallbackPriority, Weight: &weight},
+		"regular-fallback": {Id: 9307, Name: "regular-fallback", Key: "regular-low", Status: common.ChannelStatusEnabled, Models: "gpt-test", Group: "regular", Priority: &fallbackPriority, Weight: &weight},
 	}
 	for _, channel := range channels {
 		require.NoError(t, db.Create(channel).Error)
@@ -103,7 +107,7 @@ func TestCrossGroupRetryChangesSelectedGroupBeforeUsingNextGroupChannel(t *testi
 		TokenGroup:         "hack,special,regular",
 		ModelName:          "gpt-test",
 		Retry:              common.GetPointer(0),
-		ExcludedChannelIDs: map[int]struct{}{channels["shared"].Id: {}, channels["special-only"].Id: {}},
+		ExcludedChannelIDs: map[int]struct{}{channels["shared"].Id: {}, channels["special-only"].Id: {}, channels["special-fallback"].Id: {}},
 	})
 	require.NoError(t, err)
 	require.Equal(t, "regular", selectedGroup)
@@ -111,59 +115,80 @@ func TestCrossGroupRetryChangesSelectedGroupBeforeUsingNextGroupChannel(t *testi
 	require.Equal(t, channels["regular-only"].Id, channel.Id, "只有选中分组已切换为正价后才能使用正价渠道")
 }
 
-func TestMultiGroupFailureAdvancesImmediatelyToNextGroup(t *testing.T) {
-	setupChannelSelectGroupTestCache(t)
+func TestMultiGroupRetryExhaustsPrioritiesBeforeAdvancing(t *testing.T) {
+	channels := setupChannelSelectGroupTestCache(t)
+	oldRetryTimes := common.RetryTimes
+	common.RetryTimes = 1
+	t.Cleanup(func() { common.RetryTimes = oldRetryTimes })
+
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	param := &RetryParam{
-		Ctx:        ctx,
-		TokenGroup: "hack,special,regular",
-		ModelName:  "gpt-test",
-		Retry:      common.GetPointer(0),
+		Ctx:                ctx,
+		TokenGroup:         "hack,special,regular",
+		ModelName:          "gpt-test",
+		Retry:              common.GetPointer(0),
+		ExcludedChannelIDs: map[int]struct{}{channels["shared"].Id: {}},
 	}
 
-	wantGroups := []string{"hack", "special", "regular"}
-	for _, wantGroup := range wantGroups {
+	wants := []struct {
+		group     string
+		channelID int
+	}{
+		{group: "hack", channelID: channels["hack-only"].Id},
+		{group: "hack", channelID: channels["hack-fallback"].Id},
+		{group: "special", channelID: channels["special-only"].Id},
+	}
+	for _, want := range wants {
 		channel, selectedGroup, err := CacheGetRandomSatisfiedChannel(param)
 		require.NoError(t, err)
 		require.NotNil(t, channel)
-		require.Equal(t, wantGroup, selectedGroup)
-		if param.ExcludedChannelIDs == nil {
-			param.ExcludedChannelIDs = make(map[int]struct{})
-		}
+		require.Equal(t, want.group, selectedGroup)
+		require.Equal(t, want.channelID, channel.Id)
 		param.ExcludedChannelIDs[channel.Id] = struct{}{}
 		param.IncreaseRetry()
 	}
-
-	channel, _, err := CacheGetRandomSatisfiedChannel(param)
-	require.NoError(t, err)
-	require.Nil(t, channel, "所有分组都尝试后不应回到前面的分组")
 }
 
-func TestAutoCrossGroupRetryAdvancesImmediately(t *testing.T) {
-	setupChannelSelectGroupTestCache(t)
+func TestAutoCrossGroupRetryExhaustsPrioritiesBeforeAdvancing(t *testing.T) {
+	channels := setupChannelSelectGroupTestCache(t)
 	preserveAutoGroupSettings(t)
 	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"hack":"Hack","special":"特价","regular":"正价"}`))
 	require.NoError(t, setting.UpdateAutoGroupsByJsonString(`["hack","special","regular"]`))
 	require.NoError(t, setting.UpdateAutoGroupConfigByJsonString(`{"user_selectable":true,"description":"自动选择"}`))
+	oldRetryTimes := common.RetryTimes
+	common.RetryTimes = 1
+	t.Cleanup(func() { common.RetryTimes = oldRetryTimes })
 
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	common.SetContextKey(ctx, constant.ContextKeyTokenCrossGroupRetry, true)
-	param := &RetryParam{Ctx: ctx, TokenGroup: "auto", ModelName: "gpt-test", Retry: common.GetPointer(0)}
-	for _, wantGroup := range []string{"hack", "special", "regular"} {
+	param := &RetryParam{
+		Ctx:                ctx,
+		TokenGroup:         "auto",
+		ModelName:          "gpt-test",
+		Retry:              common.GetPointer(0),
+		ExcludedChannelIDs: map[int]struct{}{channels["shared"].Id: {}},
+	}
+	wants := []struct {
+		group     string
+		channelID int
+	}{
+		{group: "hack", channelID: channels["hack-only"].Id},
+		{group: "hack", channelID: channels["hack-fallback"].Id},
+		{group: "special", channelID: channels["special-only"].Id},
+	}
+	for _, want := range wants {
 		channel, selectedGroup, err := CacheGetRandomSatisfiedChannel(param)
 		require.NoError(t, err)
 		require.NotNil(t, channel)
-		require.Equal(t, wantGroup, selectedGroup)
-		if param.ExcludedChannelIDs == nil {
-			param.ExcludedChannelIDs = make(map[int]struct{})
-		}
+		require.Equal(t, want.group, selectedGroup)
+		require.Equal(t, want.channelID, channel.Id)
 		param.ExcludedChannelIDs[channel.Id] = struct{}{}
 		param.IncreaseRetry()
 	}
 }
 
-func TestRelayMaxRetriesUsesGroupCountForCrossGroupRouting(t *testing.T) {
+func TestRelayMaxRetriesBudgetsEveryGroupPriority(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-	require.Equal(t, 4, RelayMaxRetries(&RetryParam{Ctx: ctx, TokenGroup: "g1,g2,g3,g4,g5"}))
+	require.Equal(t, 5*(common.RetryTimes+1)-1, RelayMaxRetries(&RetryParam{Ctx: ctx, TokenGroup: "g1,g2,g3,g4,g5"}))
 	require.Equal(t, common.RetryTimes, RelayMaxRetries(&RetryParam{Ctx: ctx, TokenGroup: "g1"}))
 }

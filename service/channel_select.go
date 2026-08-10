@@ -120,7 +120,7 @@ func retryGroupIndex(ctx *gin.Context) int {
 
 // RelayMaxRetries 返回 relay 外层允许的最大重试次数。
 // 单分组保持站点 RetryTimes；显式多分组和启用跨组的 auto
-// 每组只发起一次上游请求，因此预算由分组数决定。
+// 为每个分组保留 RetryTimes+1 次 priority 尝试。
 func RelayMaxRetries(param *RetryParam) int {
 	if param == nil {
 		return common.RetryTimes
@@ -133,7 +133,7 @@ func RelayMaxRetries(param *RetryParam) int {
 		groupCount = len(GetUserAutoGroup(userGroup))
 	}
 	if groupCount > 0 {
-		return groupCount - 1
+		return groupCount*(common.RetryTimes+1) - 1
 	}
 	return common.RetryTimes
 }
@@ -160,9 +160,8 @@ func CheckTokenGroupRatioLimit(ctx *gin.Context, userGroup string, usingGroup st
 	return nil
 }
 
-// CacheGetRandomSatisfiedChannel 从当前重试分组选择渠道。
-// 显式多分组和启用跨组重试的 auto 每组最多发起一次上游请求；
-// 当前分组失败后，下一次 relay 尝试直接进入后续分组。
+// CacheGetRandomSatisfiedChannel 从当前重试分组按 priority 选择渠道。
+// 当前分组的 priority 重试耗尽后，下一次 relay 尝试才进入后续分组。
 func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, error) {
 	var channel *model.Channel
 	var err error
@@ -191,9 +190,6 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			// Calculate priorityRetry for current group
 			// 计算当前分组的 priorityRetry
 			priorityRetry := param.GetRetry()
-			if crossGroupRetry {
-				priorityRetry = 0
-			}
 			// If moved to a new group, reset priorityRetry and update startRetryIndex
 			// 如果切换到新分组，重置 priorityRetry 并更新 startRetryIndex
 			if i > startGroupIndex {
@@ -220,12 +216,13 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			logger.LogDebug(param.Ctx, "Auto selected group: %s", autoGroup)
 
-			if crossGroupRetry {
-				logger.LogDebug(param.Ctx, "Auto group %s will switch immediately on the next retry", autoGroup)
+			if crossGroupRetry && priorityRetry >= common.RetryTimes {
+				logger.LogDebug(param.Ctx, "Auto group %s priorities exhausted (priorityRetry=%d), switching on the next retry", autoGroup, priorityRetry)
 				common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex, i+1)
+				param.SetRetry(0)
+				param.ResetRetryNextTry()
 			} else {
-				// Stay in current group, save current state
-				// 保持在当前分组，保存当前状态
+				// Stay in current group until its priority retries are exhausted.
 				common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex, i)
 			}
 			break
@@ -239,17 +236,24 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			// 没有任何分组有该模型的渠道
 			return nil, selectGroup, nil
 		} else if len(candidateGroups) == 1 {
-			// 单候选分组：直接路由，不需要分组间 failover
+			// 单候选分组：仍按当前分组的 priority 重试。
 			if startGroupIndex > 0 {
 				return nil, candidateGroups[0], nil
 			}
 			if !model.GroupHasModelChannels(candidateGroups[0], param.ModelName) {
 				return nil, candidateGroups[0], nil
 			}
-			channel, err = getRandomSatisfiedChannelWithGuards(param, candidateGroups[0], param.ModelName, 0)
+			priorityRetry := param.GetRetry()
+			channel, err = getRandomSatisfiedChannelWithGuards(param, candidateGroups[0], param.ModelName, priorityRetry)
 			selectGroup = candidateGroups[0]
 			common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroup, candidateGroups[0])
-			common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex, 1)
+			if priorityRetry >= common.RetryTimes {
+				common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex, 1)
+				param.SetRetry(0)
+				param.ResetRetryNextTry()
+			} else {
+				common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex, 0)
+			}
 			if err != nil {
 				return nil, selectGroup, err
 			}
@@ -260,7 +264,10 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			// 多候选分组：按用户排序依次尝试（复用 auto 的 group-advancement 模式）
 			for i := startGroupIndex; i < len(candidateGroups); i++ {
 				g := candidateGroups[i]
-				priorityRetry := 0
+				priorityRetry := param.GetRetry()
+				if i > startGroupIndex {
+					priorityRetry = 0
+				}
 				if !model.GroupHasModelChannels(g, param.ModelName) {
 					common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex, i+1)
 					continue
@@ -280,8 +287,14 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 				}
 				logger.LogDebug(param.Ctx, "Multi-group selected group: %s", g)
 
-				// 当前分组最多发起一次上游请求，失败后下次直接进入后续分组。
-				common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex, i+1)
+				if priorityRetry >= common.RetryTimes {
+					logger.LogDebug(param.Ctx, "Multi-group %s priorities exhausted (priorityRetry=%d), switching on the next retry", g, priorityRetry)
+					common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex, i+1)
+					param.SetRetry(0)
+					param.ResetRetryNextTry()
+				} else {
+					common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex, i)
+				}
 				break
 			}
 		}
