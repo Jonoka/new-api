@@ -41,6 +41,7 @@ func TestGeminiImagePreviewConvertImageRequestUsesGenerateContent(t *testing.T) 
 	require.JSONEq(t, `{"aspectRatio":"16:9","imageSize":"4K"}`, string(req.GenerationConfig.ImageConfig))
 	require.Len(t, req.Contents, 1)
 	require.Equal(t, "user", req.Contents[0].Role)
+	require.Len(t, req.Contents[0].Parts, 1)
 	require.Equal(t, "生成一张蓝色小猫图片", req.Contents[0].Parts[0].Text)
 }
 

@@ -1,10 +1,14 @@
 package gemini
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -96,6 +100,75 @@ func geminiImageQualitySize(quality string) string {
 	}
 }
 
+func multipartImageParts(c *gin.Context) ([]dto.GeminiPart, error) {
+	if c == nil || c.Request == nil {
+		return nil, nil
+	}
+
+	form := c.Request.MultipartForm
+	if form == nil {
+		if !strings.Contains(c.Request.Header.Get("Content-Type"), "multipart/form-data") {
+			return nil, nil
+		}
+		if _, err := c.MultipartForm(); err != nil {
+			return nil, fmt.Errorf("failed to parse image edit form request: %w", err)
+		}
+		form = c.Request.MultipartForm
+	}
+
+	var files []*multipart.FileHeader
+	if form != nil {
+		files = form.File["image"]
+		if len(files) == 0 {
+			files = form.File["image[]"]
+		}
+		if len(files) == 0 {
+			keys := make([]string, 0, len(form.File))
+			for key := range form.File {
+				if strings.HasPrefix(key, "image[") {
+					keys = append(keys, key)
+				}
+			}
+			sort.Strings(keys)
+			for _, key := range keys {
+				files = append(files, form.File[key]...)
+			}
+		}
+	}
+
+	parts := make([]dto.GeminiPart, 0, len(files))
+	for i, header := range files {
+		file, err := header.Open()
+		if err != nil {
+			return nil, fmt.Errorf("failed to open uploaded image %d: %w", i+1, err)
+		}
+		data, readErr := io.ReadAll(file)
+		closeErr := file.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("failed to read uploaded image %d: %w", i+1, readErr)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("failed to close uploaded image %d: %w", i+1, closeErr)
+		}
+		if len(data) == 0 {
+			return nil, fmt.Errorf("uploaded image %d is empty", i+1)
+		}
+
+		mimeType, _, err := mime.ParseMediaType(header.Header.Get("Content-Type"))
+		if err != nil || !strings.HasPrefix(strings.ToLower(mimeType), "image/") {
+			mimeType = http.DetectContentType(data)
+		}
+		if !strings.HasPrefix(strings.ToLower(mimeType), "image/") {
+			return nil, fmt.Errorf("uploaded image %d has unsupported content type %q", i+1, mimeType)
+		}
+		parts = append(parts, dto.GeminiPart{InlineData: &dto.GeminiInlineData{
+			MimeType: mimeType,
+			Data:     base64.StdEncoding.EncodeToString(data),
+		}})
+	}
+	return parts, nil
+}
+
 func convertImagePreviewRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
 	if !model_setting.IsGeminiModelSupportImagine(info.UpstreamModelName) {
 		return nil, errors.New("not supported model for image generation, only imagen or configured Gemini image-preview models are supported")
@@ -127,6 +200,16 @@ func convertImagePreviewRequest(c *gin.Context, info *relaycommon.RelayInfo, req
 			mimeType = "image/png"
 		}
 		parts = append(parts, dto.GeminiPart{InlineData: &dto.GeminiInlineData{MimeType: mimeType, Data: base64Data}})
+	}
+	if info.RelayMode == constant.RelayModeImagesEdits {
+		imageParts, err := multipartImageParts(c)
+		if err != nil {
+			return nil, err
+		}
+		if len(parts) == 1 && len(imageParts) == 0 {
+			return nil, errors.New("image is required for image edit")
+		}
+		parts = append(parts, imageParts...)
 	}
 
 	imageConfig, err := common.Marshal(map[string]interface{}{
@@ -233,6 +316,7 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {
 	channel.SetupApiRequestHeader(info, c, req)
+	req.Set("Content-Type", "application/json")
 	req.Set("x-goog-api-key", info.ApiKey)
 	return nil
 }
