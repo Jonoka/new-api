@@ -608,6 +608,54 @@ func TestCanvasImageTaskActionFallsBackToEditPath(t *testing.T) {
 	require.Equal(t, canvasImageTaskActionEdits, canvasImageTaskAction(ctx))
 }
 
+func TestCanvasImageTaskSubmitPreservesRequestAction(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupCanvasImageTaskTestDB(t)
+	originalStart := startCanvasImageTaskRelay
+	t.Cleanup(func() { startCanvasImageTaskRelay = originalStart })
+
+	tests := []struct {
+		name     string
+		target   string
+		expected string
+	}{
+		{name: "edit path", target: "/canvas/v1/images/edits?group=auto", expected: canvasImageTaskActionEdits},
+		{name: "generation path", target: "/canvas/v1/images/generations?group=auto", expected: canvasImageTaskActionGenerations},
+		{name: "explicit edit", target: "/canvas/v1/images/tasks?action=edits&group=auto", expected: canvasImageTaskActionEdits},
+		{name: "explicit generation", target: "/canvas/v1/images/edits?action=generations&group=auto", expected: canvasImageTaskActionGenerations},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var captured canvasImageTaskRelayRequest
+			startCanvasImageTaskRelay = func(relayReq canvasImageTaskRelayRequest) {
+				captured = relayReq
+			}
+
+			body := []byte(`{"model":"nano-banana-v2","prompt":"test"}`)
+			storage, err := common.CreateBodyStorage(body)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = storage.Close() })
+
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Set("id", 1)
+			ctx.Set(common.KeyBodyStorage, storage)
+			ctx.Request = httptest.NewRequest(http.MethodPost, tt.target, bytes.NewReader(body))
+			ctx.Request.Header.Set("Content-Type", "application/json")
+
+			CanvasImageTaskSubmit(ctx)
+
+			require.Equal(t, http.StatusAccepted, recorder.Code)
+			require.Equal(t, tt.expected, captured.Action)
+			task, exists, err := model.GetByTaskId(1, captured.TaskID)
+			require.NoError(t, err)
+			require.True(t, exists)
+			require.Equal(t, tt.expected, task.Action)
+		})
+	}
+}
+
 func TestBuildCanvasImageActualBillingInputUsesReturnedSizeQuality(t *testing.T) {
 	expr := `param("quality") == "high" || has(param("size"), "3840") ? tier("4k", 300000 * param("n")) : tier("standard", 100000 * param("n"))`
 	snap := &billingexpr.BillingSnapshot{

@@ -27,5 +27,6 @@
 - [OpenAI/Codex 首字延迟排查与 Claude 方向排除](../workflows/2026-07/27_claude_compatible_ttft_http2.md)
 - [公告 Unicode 字符长度校验修复](../workflows/2026-07/27_announcement_unicode_length_validation.md)
 - [自动分组顺序唯一索引迁移幂等性修复](../workflows/2026-08/09_auto_group_position_migration_idempotency.md)
+- [Canvas 图片编辑任务 action 路由修复](../workflows/2026-08/24_canvas_image_edit_action_routing.md)
 
 文档中的 API 路径以当前源码为准；部署或升级前请先确认分支版本。
