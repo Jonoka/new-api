@@ -45,6 +45,70 @@ func TestGeminiImagePreviewConvertImageRequestUsesGenerateContent(t *testing.T) 
 	require.Equal(t, "生成一张蓝色小猫图片", req.Contents[0].Parts[0].Text)
 }
 
+func TestGeminiImagePreviewConvertsPixelSizeToAspectRatio(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name string
+		size string
+		want string
+	}{
+		{name: "canvas three by four", size: "864x1152", want: "3:4"},
+		{name: "existing landscape mapping", size: "1536x1024", want: "3:2"},
+		{name: "legacy portrait mapping", size: "1024x1792", want: "9:16"},
+		{name: "supported ratio passthrough", size: "4:3", want: "4:3"},
+		{name: "unknown size defaults square", size: "123x456", want: "1:1"},
+		{name: "unknown ratio defaults square", size: "7:5", want: "1:1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			info := &relaycommon.RelayInfo{
+				ChannelMeta: &relaycommon.ChannelMeta{
+					UpstreamModelName: "gemini-3-pro-image-preview",
+				},
+			}
+
+			converted, err := (&Adaptor{}).ConvertImageRequest(c, info, dto.ImageRequest{
+				Model:  "gemini-3-pro-image-preview",
+				Prompt: "test",
+				Size:   tt.size,
+			})
+			require.NoError(t, err)
+
+			req, ok := converted.(dto.GeminiChatRequest)
+			require.True(t, ok)
+			expected, err := common.Marshal(map[string]string{
+				"aspectRatio": tt.want,
+				"imageSize":   "1K",
+			})
+			require.NoError(t, err)
+			require.JSONEq(t, string(expected), string(req.GenerationConfig.ImageConfig))
+		})
+	}
+}
+
+func TestGeminiImagenConvertImageRequestKeepsLegacySizeMapping(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "imagen-3.0-generate-002",
+		},
+	}
+
+	converted, err := (&Adaptor{}).ConvertImageRequest(c, info, dto.ImageRequest{
+		Model:  "imagen-3.0-generate-002",
+		Prompt: "test",
+		Size:   "1536x1024",
+	})
+	require.NoError(t, err)
+
+	req, ok := converted.(dto.GeminiImageRequest)
+	require.True(t, ok)
+	require.Equal(t, "3:2", req.Parameters.AspectRatio)
+}
+
 func TestGeminiImagePreviewHandlerReturnsOpenAIImageResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()

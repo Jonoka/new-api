@@ -113,12 +113,13 @@ func TestGeminiImageEditCollectsMultipartImages(t *testing.T) {
 			converted, err := (&Adaptor{}).ConvertImageRequest(
 				newGeminiImageEditContext(t, tt.uploads...),
 				geminiImageEditInfo(),
-				dto.ImageRequest{Prompt: "preserve the source image"},
+				dto.ImageRequest{Prompt: "preserve the source image", Size: "864x1152"},
 			)
 			require.NoError(t, err)
 
 			req, ok := converted.(dto.GeminiChatRequest)
 			require.True(t, ok)
+			require.JSONEq(t, `{"aspectRatio":"3:4","imageSize":"1K"}`, string(req.GenerationConfig.ImageConfig))
 			parts := req.Contents[0].Parts
 			require.Len(t, parts, len(tt.want)+1)
 			require.Equal(t, "preserve the source image", parts[0].Text)

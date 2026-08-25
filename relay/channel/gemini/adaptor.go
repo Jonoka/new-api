@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -70,7 +71,10 @@ func geminiImageAspectRatio(size string) string {
 		return aspectRatio
 	}
 	if strings.Contains(size, ":") {
-		return size
+		if isGeminiImageAspectRatioSupported(size) {
+			return size
+		}
+		return aspectRatio
 	}
 	switch size {
 	case "256x256", "512x512", "1024x1024":
@@ -83,8 +87,66 @@ func geminiImageAspectRatio(size string) string {
 		aspectRatio = "9:16"
 	case "1792x1024":
 		aspectRatio = "16:9"
+	default:
+		parts := strings.SplitN(strings.ToLower(size), "x", 2)
+		if len(parts) == 2 {
+			width, widthErr := strconv.Atoi(strings.TrimSpace(parts[0]))
+			height, heightErr := strconv.Atoi(strings.TrimSpace(parts[1]))
+			if widthErr == nil && heightErr == nil && width > 0 && height > 0 {
+				divisor := geminiImageGCD(width, height)
+				candidate := fmt.Sprintf("%d:%d", width/divisor, height/divisor)
+				if isGeminiImageAspectRatioSupported(candidate) {
+					aspectRatio = candidate
+				}
+			}
+		}
 	}
 	return aspectRatio
+}
+
+// Imagen accepts the legacy OpenAI ratio strings and size mappings unchanged.
+func geminiImagenAspectRatio(size string) string {
+	aspectRatio := "1:1"
+	size = strings.TrimSpace(size)
+	if size == "" {
+		return aspectRatio
+	}
+	if strings.Contains(size, ":") {
+		return size
+	}
+	switch size {
+	case "256x256", "512x512", "1024x1024":
+		return "1:1"
+	case "1536x1024":
+		return "3:2"
+	case "1024x1536":
+		return "2:3"
+	case "1024x1792":
+		return "9:16"
+	case "1792x1024":
+		return "16:9"
+	default:
+		return aspectRatio
+	}
+}
+
+func isGeminiImageAspectRatioSupported(ratio string) bool {
+	switch ratio {
+	case "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9":
+		return true
+	default:
+		return false
+	}
+}
+
+func geminiImageGCD(a, b int) int {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	if a < 0 {
+		return -a
+	}
+	return a
 }
 
 func geminiImageQualitySize(quality string) string {
@@ -238,7 +300,7 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 	}
 
 	// convert size to aspect ratio but allow user to specify aspect ratio
-	aspectRatio := geminiImageAspectRatio(request.Size)
+	aspectRatio := geminiImagenAspectRatio(request.Size)
 
 	// build gemini imagen request
 	geminiRequest := dto.GeminiImageRequest{
