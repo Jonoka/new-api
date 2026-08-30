@@ -50,12 +50,12 @@ func TestGeminiResponsesStreamHandlerReturnsResponsesSSE(t *testing.T) {
 	c, recorder := newGeminiResponsesContext(t)
 	stop := "STOP"
 	first, err := common.Marshal(dto.GeminiChatResponse{
-		Candidates:    []dto.GeminiChatCandidate{{Content: dto.GeminiChatContent{Role: "model", Parts: []dto.GeminiPart{{Text: "hello"}}}}},
+		Candidates:    []dto.GeminiChatCandidate{{FinishReason: &stop, Content: dto.GeminiChatContent{Role: "model", Parts: []dto.GeminiPart{{Text: "hello "}}}}},
 		UsageMetadata: dto.GeminiUsageMetadata{PromptTokenCount: 2, CandidatesTokenCount: 3, TotalTokenCount: 5},
 	})
 	require.NoError(t, err)
 	last, err := common.Marshal(dto.GeminiChatResponse{
-		Candidates:    []dto.GeminiChatCandidate{{FinishReason: &stop, Content: dto.GeminiChatContent{Role: "model"}}},
+		Candidates:    []dto.GeminiChatCandidate{{FinishReason: &stop, Content: dto.GeminiChatContent{Role: "model", Parts: []dto.GeminiPart{{Text: "world"}}}}},
 		UsageMetadata: dto.GeminiUsageMetadata{PromptTokenCount: 2, CandidatesTokenCount: 3, TotalTokenCount: 5},
 	})
 	require.NoError(t, err)
@@ -78,9 +78,20 @@ func TestGeminiResponsesStreamHandlerReturnsResponsesSSE(t *testing.T) {
 		"event: response.created",
 		"event: response.output_item.added",
 		"event: response.output_text.delta",
+		"event: response.output_text.delta",
 		"event: response.output_text.done",
+		"event: response.output_item.done",
 		"event: response.completed",
 	)
+	requireOrderedGeminiResponsesEvents(t, output,
+		`"type":"response.output_text.delta","delta":"hello "`,
+		`"type":"response.output_text.delta","delta":"world"`,
+		`"type":"response.output_text.done","text":"hello world"`,
+	)
+	assert.Equal(t, 2, strings.Count(output, "event: response.output_text.delta\n"))
+	assert.Equal(t, 1, strings.Count(output, "event: response.output_text.done\n"))
+	assert.Equal(t, 1, strings.Count(output, "event: response.output_item.done\n"))
+	assert.Equal(t, 1, strings.Count(output, "event: response.completed\n"))
 	assert.Contains(t, output, `"input_tokens":2`)
 	assert.Contains(t, output, `"output_tokens":3`)
 }

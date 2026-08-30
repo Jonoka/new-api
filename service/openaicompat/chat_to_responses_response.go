@@ -397,7 +397,7 @@ func (s *ChatToResponsesStreamState) doneDeltaEvents() []ChatToResponsesStreamEv
 		s.textDone = true
 		events = append(events,
 			responsesStreamEvent("response.output_text.done", dto.ResponsesStreamResponse{
-				OutputIndex: intPointer(s.textOutputIndex), ContentIndex: intPointer(0), ItemID: s.messageID(),
+				OutputIndex: intPointer(s.textOutputIndex), ContentIndex: intPointer(0), ItemID: s.messageID(), Text: s.text.String(),
 			}),
 			responsesStreamEvent(responsesEventOutputItemDone, dto.ResponsesStreamResponse{
 				OutputIndex: intPointer(s.textOutputIndex), Item: s.messageOutput(status),
