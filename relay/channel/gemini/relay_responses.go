@@ -70,7 +70,6 @@ func GeminiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, r
 	created := common.GetTimestamp()
 	state := openaicompat.NewChatToResponsesStreamState(responseID, info.UpstreamModelName)
 	state.Created = created
-	finishReason := constant.FinishReasonStop
 	toolCallIndexByChoice := make(map[int]map[string]int)
 	nextToolCallIndexByChoice := make(map[int]int)
 	var streamErr *types.NewAPIError
@@ -102,13 +101,10 @@ func GeminiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, r
 	}
 
 	usage, relayErr := geminiStreamHandler(c, info, resp, func(_ string, geminiResponse *dto.GeminiChatResponse) bool {
-		response, isStop := streamResponseGeminiChat2OpenAI(geminiResponse)
+		response, _ := streamResponseGeminiChat2OpenAI(geminiResponse)
 		response.Id = responseID
 		response.Created = created
 		response.Model = info.UpstreamModelName
-		if response.IsToolCall() {
-			finishReason = constant.FinishReasonToolCalls
-		}
 		for choiceIndex := range response.Choices {
 			choiceKey := response.Choices[choiceIndex].Index
 			for toolIndex := range response.Choices[choiceIndex].Delta.ToolCalls {
@@ -133,9 +129,6 @@ func GeminiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, r
 		}
 		if !sendChunk(response) {
 			return false
-		}
-		if isStop {
-			return sendChunk(helper.GenerateStopResponse(responseID, created, info.UpstreamModelName, finishReason))
 		}
 		return true
 	})

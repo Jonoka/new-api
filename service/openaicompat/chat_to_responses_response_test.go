@@ -129,6 +129,7 @@ func TestChatStreamToResponsesOrdersTextToolAndUsageEvents(t *testing.T) {
 		responsesEventFunctionArgsDone,
 		responsesEventOutputItemDone,
 	)
+	assert.Equal(t, "hello", events[0].Payload.Text)
 
 	mustChatToResponsesEvents(t, state, &dto.ChatCompletionsStreamResponse{
 		Usage: &dto.Usage{PromptTokens: 2, CompletionTokens: 3, TotalTokens: 5},
