@@ -148,8 +148,8 @@ func TestGeminiStreamHandlerTracesEachUsageChunk(t *testing.T) {
 		common.LogWriterMu.Unlock()
 	})
 
-	streamBody := "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"one\"}]}}],\"usageMetadata\":{\"promptTokenCount\":10,\"cachedContentTokenCount\":24431,\"candidatesTokenCount\":1,\"totalTokenCount\":11}}\n" +
-		"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"two\"}]}}],\"usageMetadata\":{\"promptTokenCount\":10,\"cachedContentTokenCount\":0,\"candidatesTokenCount\":2,\"totalTokenCount\":12}}\n" +
+	streamBody := "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"first-chunk-body\"}]}}],\"usageMetadata\":{\"promptTokenCount\":10,\"cachedContentTokenCount\":24431,\"candidatesTokenCount\":1,\"totalTokenCount\":11}}\n" +
+		"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"second-chunk-body\"}]}}],\"usageMetadata\":{\"promptTokenCount\":10,\"cachedContentTokenCount\":0,\"candidatesTokenCount\":2,\"totalTokenCount\":12}}\n" +
 		"data: {\"candidates\":[],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":3,\"totalTokenCount\":13}}\n" +
 		"data: [DONE]\n"
 
@@ -169,8 +169,8 @@ func TestGeminiStreamHandlerTracesEachUsageChunk(t *testing.T) {
 	require.Contains(t, traceLines[0], "chunk=1 usage_present=true prompt_tokens=10 cached_content_tokens=24431")
 	require.Contains(t, traceLines[1], "chunk=2 usage_present=true prompt_tokens=10 cached_content_tokens=0")
 	require.Contains(t, traceLines[2], "chunk=3 usage_present=false prompt_tokens=10 cached_content_tokens=0")
-	require.NotContains(t, logs.String(), "one")
-	require.NotContains(t, logs.String(), "two")
+	require.NotContains(t, logs.String(), "first-chunk-body")
+	require.NotContains(t, logs.String(), "second-chunk-body")
 }
 
 func TestGeminiChatHandlerCompletionTokensExcludeToolUsePromptTokens(t *testing.T) {
