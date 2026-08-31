@@ -174,6 +174,7 @@ func TestGeminiImagePreviewHandlerAcceptsMarkdownImageURLs(t *testing.T) {
 
 	var imageResp dto.ImageResponse
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &imageResp))
+	require.Len(t, imageResp.Data, 2)
 	require.Equal(t, []string{"https://images.example/one.png?x=1", "https://images.example/two.png"}, []string{imageResp.Data[0].Url, imageResp.Data[1].Url})
 }
 
