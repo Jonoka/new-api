@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -1694,15 +1696,16 @@ func GeminiImagePreviewHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 
 	for _, candidate := range geminiResponse.Candidates {
 		for _, part := range candidate.Content.Parts {
-			if part.InlineData == nil || part.InlineData.Data == "" {
+			if part.InlineData != nil {
+				if part.InlineData.Data == "" || !strings.HasPrefix(part.InlineData.MimeType, "image/") {
+					continue
+				}
+				openAIResponse.Data = append(openAIResponse.Data, dto.ImageData{B64Json: part.InlineData.Data})
 				continue
 			}
-			if !strings.HasPrefix(part.InlineData.MimeType, "image/") {
-				continue
+			for _, imageURL := range extractGeminiMarkdownImageURLs(part.Text) {
+				openAIResponse.Data = append(openAIResponse.Data, dto.ImageData{Url: imageURL})
 			}
-			openAIResponse.Data = append(openAIResponse.Data, dto.ImageData{
-				B64Json: part.InlineData.Data,
-			})
 		}
 	}
 
@@ -1737,6 +1740,29 @@ func GeminiImagePreviewHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	}
 
 	return &usage, nil
+}
+
+var geminiMarkdownImagePattern = regexp.MustCompile(`!\[[^\]\r\n]*\]\([ \t]*(<([^<>\s]+)>|([^<>\s()]+))[ \t]*\)`)
+
+func extractGeminiMarkdownImageURLs(text string) []string {
+	matches := geminiMarkdownImagePattern.FindAllStringSubmatch(text, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+
+	urls := make([]string, 0, len(matches))
+	for _, match := range matches {
+		imageURL := match[2]
+		if imageURL == "" {
+			imageURL = match[3]
+		}
+		parsed, err := url.Parse(imageURL)
+		if err != nil || !parsed.IsAbs() || parsed.Hostname() == "" || (strings.ToLower(parsed.Scheme) != "http" && strings.ToLower(parsed.Scheme) != "https") {
+			continue
+		}
+		urls = append(urls, imageURL)
+	}
+	return urls
 }
 
 type GeminiModelsResponse struct {

@@ -156,3 +156,45 @@ func TestGeminiImagePreviewHandlerReturnsOpenAIImageResponse(t *testing.T) {
 	require.Len(t, imageResp.Data, 1)
 	require.Equal(t, "abcd1234", imageResp.Data[0].B64Json)
 }
+
+func TestGeminiImagePreviewHandlerAcceptsMarkdownImageURLs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gemini-3.1-flash-image"}}
+	payload := dto.GeminiChatResponse{Candidates: []dto.GeminiChatCandidate{{Content: dto.GeminiChatContent{Parts: []dto.GeminiPart{{Text: "![generated image 1](<https://images.example/one.png?x=1>) and ![generated image 2](https://images.example/two.png)"}}}}}}
+	body, err := common.Marshal(payload)
+	require.NoError(t, err)
+
+	usage, apiErr := GeminiImagePreviewHandler(c, info, &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body))})
+	require.Nil(t, apiErr)
+	require.NotNil(t, usage)
+
+	var imageResp dto.ImageResponse
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &imageResp))
+	require.Equal(t, []string{"https://images.example/one.png?x=1", "https://images.example/two.png"}, []string{imageResp.Data[0].Url, imageResp.Data[1].Url})
+}
+
+func TestExtractGeminiMarkdownImageURLsRejectsInvalidDestinations(t *testing.T) {
+	require.Equal(t, []string{"https://images.example/ok.png"}, extractGeminiMarkdownImageURLs("![ok](<https://images.example/ok.png>) ![bad](javascript:alert(1)) ![relative](/image.png) ![broken](<https://images.example/missing.png)"))
+}
+
+func TestGeminiImagePreviewHandlerReturnsNoImagesForInvalidMarkdown(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+
+	payload := dto.GeminiChatResponse{Candidates: []dto.GeminiChatCandidate{{Content: dto.GeminiChatContent{Parts: []dto.GeminiPart{{Text: "![bad](data:image/png;base64,AAAA) plain text"}}}}}}
+	body, err := common.Marshal(payload)
+	require.NoError(t, err)
+
+	usage, apiErr := GeminiImagePreviewHandler(c, &relaycommon.RelayInfo{}, &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(bytes.NewReader(body)),
+	})
+	require.Nil(t, usage)
+	require.EqualError(t, apiErr, "no images generated")
+}
