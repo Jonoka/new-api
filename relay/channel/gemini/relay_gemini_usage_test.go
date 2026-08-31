@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -119,6 +120,57 @@ func TestTraceGeminiUsageLogsSanitizedMetadataOnly(t *testing.T) {
 	require.Contains(t, line, "usage_present=true prompt_tokens=2826 cached_content_tokens=0 candidates_tokens=532 total_tokens=3358")
 	require.NotContains(t, line, "usageMetadata")
 	require.NotContains(t, line, "do-not-log")
+}
+
+func TestGeminiStreamHandlerTracesEachUsageChunk(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	info := &relaycommon.RelayInfo{
+		RequestId:   "stream-request-1",
+		DisablePing: true,
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 100, UpstreamModelName: "gemini-test"},
+	}
+
+	t.Setenv(geminiUsageTraceChannelEnv, "100")
+	oldStreamingTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 1
+	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
+
+	var logs bytes.Buffer
+	common.LogWriterMu.Lock()
+	oldWriter := gin.DefaultWriter
+	gin.DefaultWriter = &logs
+	common.LogWriterMu.Unlock()
+	t.Cleanup(func() {
+		common.LogWriterMu.Lock()
+		gin.DefaultWriter = oldWriter
+		common.LogWriterMu.Unlock()
+	})
+
+	streamBody := "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"one\"}]}}],\"usageMetadata\":{\"promptTokenCount\":10,\"cachedContentTokenCount\":24431,\"candidatesTokenCount\":1,\"totalTokenCount\":11}}\n" +
+		"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"two\"}]}}],\"usageMetadata\":{\"promptTokenCount\":10,\"cachedContentTokenCount\":0,\"candidatesTokenCount\":2,\"totalTokenCount\":12}}\n" +
+		"data: {\"candidates\":[],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":3,\"totalTokenCount\":13}}\n" +
+		"data: [DONE]\n"
+
+	resp := &http.Response{Body: io.NopCloser(bytes.NewBufferString(streamBody))}
+	usage, relayErr := geminiStreamHandler(c, info, resp, func(_ string, _ *dto.GeminiChatResponse) bool { return true })
+	require.Nil(t, relayErr)
+	require.Equal(t, 13, usage.TotalTokens)
+
+	lines := strings.Split(logs.String(), "\n")
+	traceLines := make([]string, 0, 3)
+	for _, line := range lines {
+		if strings.Contains(line, "gemini_usage_trace ") {
+			traceLines = append(traceLines, line)
+		}
+	}
+	require.Len(t, traceLines, 3)
+	require.Contains(t, traceLines[0], "chunk=1 usage_present=true cached_content_tokens=24431")
+	require.Contains(t, traceLines[1], "chunk=2 usage_present=true cached_content_tokens=0")
+	require.Contains(t, traceLines[2], "chunk=3 usage_present=false cached_content_tokens=0")
+	require.NotContains(t, logs.String(), "one")
+	require.NotContains(t, logs.String(), "two")
 }
 
 func TestGeminiChatHandlerCompletionTokensExcludeToolUsePromptTokens(t *testing.T) {
