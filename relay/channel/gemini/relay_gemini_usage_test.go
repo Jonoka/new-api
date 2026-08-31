@@ -16,6 +16,111 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestGeminiUsageTraceCacheFieldPresence(t *testing.T) {
+	tests := []struct {
+		name     string
+		cache    *int
+		present  bool
+	}{
+		{name: "non-zero", cache: common.GetPointer(24431), present: true},
+		{name: "zero", cache: common.GetPointer(0), present: true},
+		{name: "omitted", present: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload := map[string]any{
+				"usageMetadata": map[string]any{
+					"promptTokenCount":     2826,
+					"candidatesTokenCount": 532,
+					"totalTokenCount":      3358,
+				},
+			}
+			if tt.cache != nil {
+				payload["usageMetadata"].(map[string]any)["cachedContentTokenCount"] = *tt.cache
+			}
+			body, err := common.Marshal(payload)
+			require.NoError(t, err)
+			require.Equal(t, tt.present, geminiUsageTraceCacheFieldPresent(string(body)))
+		})
+	}
+}
+
+func TestGeminiUsageTraceGateAndFormat(t *testing.T) {
+	t.Setenv(geminiUsageTraceChannelEnv, "")
+	require.False(t, geminiUsageTraceEnabled(nil))
+	require.False(t, geminiUsageTraceEnabled(&relaycommon.RelayInfo{}))
+	require.False(t, geminiUsageTraceEnabled(&relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 100},
+	}))
+	t.Setenv(geminiUsageTraceChannelEnv, "not-a-channel")
+	require.False(t, geminiUsageTraceEnabled(&relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 100},
+	}))
+
+	t.Setenv(geminiUsageTraceChannelEnv, "100")
+	info := &relaycommon.RelayInfo{
+		RequestId: "request-1",
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 100},
+	}
+	metadata := dto.GeminiUsageMetadata{
+		PromptTokenCount:        2826,
+		CachedContentTokenCount: 24431,
+		CandidatesTokenCount:    532,
+		TotalTokenCount:         3358,
+	}
+
+	require.True(t, geminiUsageTraceEnabled(info))
+	require.False(t, geminiUsageTraceEnabled(&relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 78},
+	}))
+	t.Setenv(geminiUsageTraceChannelEnv, "78")
+	require.False(t, geminiUsageTraceEnabled(&relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 78},
+	}))
+
+	line := formatGeminiUsageTrace(info.RequestId, info.ChannelId, 1, metadata, true)
+	require.Equal(t, "gemini_usage_trace request_id=request-1 channel_id=100 chunk=1 usage_present=true prompt_tokens=2826 cached_content_tokens=24431 candidates_tokens=532 total_tokens=3358", line)
+	require.NotContains(t, line, "usageMetadata")
+	require.NotContains(t, line, "{")
+	require.NotContains(t, line, "}")
+}
+
+func TestTraceGeminiUsageLogsSanitizedMetadataOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	info := &relaycommon.RelayInfo{
+		RequestId:   "request-1",
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 100},
+	}
+
+	t.Setenv(geminiUsageTraceChannelEnv, "100")
+
+	var logs bytes.Buffer
+	common.LogWriterMu.Lock()
+	oldWriter := gin.DefaultWriter
+	gin.DefaultWriter = &logs
+	common.LogWriterMu.Unlock()
+	t.Cleanup(func() {
+		common.LogWriterMu.Lock()
+		gin.DefaultWriter = oldWriter
+		common.LogWriterMu.Unlock()
+	})
+
+	traceGeminiUsage(c, info, `{"usageMetadata":{"cachedContentTokenCount":0},"candidates":[{"content":{"parts":[{"text":"do-not-log"}]}}]}`, 7, dto.GeminiUsageMetadata{
+		PromptTokenCount:        2826,
+		CachedContentTokenCount: 0,
+		CandidatesTokenCount:    532,
+		TotalTokenCount:         3358,
+	})
+
+	line := logs.String()
+	require.Contains(t, line, "gemini_usage_trace request_id=request-1 channel_id=100 chunk=7")
+	require.Contains(t, line, "usage_present=true prompt_tokens=2826 cached_content_tokens=0 candidates_tokens=532 total_tokens=3358")
+	require.NotContains(t, line, "usageMetadata")
+	require.NotContains(t, line, "do-not-log")
+}
+
 func TestGeminiChatHandlerCompletionTokensExcludeToolUsePromptTokens(t *testing.T) {
 	t.Parallel()
 

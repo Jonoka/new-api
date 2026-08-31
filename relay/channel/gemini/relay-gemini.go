@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -1061,6 +1062,57 @@ func buildUsageFromGeminiMetadata(metadata dto.GeminiUsageMetadata, fallbackProm
 	return usage
 }
 
+const (
+	geminiUsageTraceChannelEnv = "GEMINI_USAGE_TRACE_CHANNEL_ID"
+	geminiUsageTraceChannelID  = 100
+)
+
+func geminiUsageTraceEnabled(info *relaycommon.RelayInfo) bool {
+	if info == nil || info.ChannelMeta == nil {
+		return false
+	}
+	channelID, err := strconv.Atoi(strings.TrimSpace(os.Getenv(geminiUsageTraceChannelEnv)))
+	return err == nil && channelID == geminiUsageTraceChannelID && info.ChannelId == geminiUsageTraceChannelID
+}
+
+func geminiUsageTraceCacheFieldPresent(data string) bool {
+	var payload struct {
+		UsageMetadata map[string]json.RawMessage `json:"usageMetadata"`
+	}
+	if err := common.UnmarshalJsonStr(data, &payload); err != nil {
+		return false
+	}
+	_, present := payload.UsageMetadata["cachedContentTokenCount"]
+	return present
+}
+
+func formatGeminiUsageTrace(requestID string, channelID, chunkIndex int, metadata dto.GeminiUsageMetadata, cacheFieldPresent bool) string {
+	return fmt.Sprintf(
+		"gemini_usage_trace request_id=%s channel_id=%d chunk=%d usage_present=%t prompt_tokens=%d cached_content_tokens=%d candidates_tokens=%d total_tokens=%d",
+		requestID,
+		channelID,
+		chunkIndex,
+		cacheFieldPresent,
+		metadata.PromptTokenCount,
+		metadata.CachedContentTokenCount,
+		metadata.CandidatesTokenCount,
+		metadata.TotalTokenCount,
+	)
+}
+
+func traceGeminiUsage(c *gin.Context, info *relaycommon.RelayInfo, data string, chunkIndex int, metadata dto.GeminiUsageMetadata) {
+	if !geminiUsageTraceEnabled(info) {
+		return
+	}
+	logger.LogInfo(c, formatGeminiUsageTrace(
+		info.RequestId,
+		info.ChannelId,
+		chunkIndex,
+		metadata,
+		geminiUsageTraceCacheFieldPresent(data),
+	))
+}
+
 func responseGeminiChat2OpenAI(c *gin.Context, response *dto.GeminiChatResponse) *dto.OpenAITextResponse {
 	fullTextResponse := dto.OpenAITextResponse{
 		Id:      helper.GetResponseID(c),
@@ -1344,6 +1396,7 @@ func handleFinalStream(c *gin.Context, info *relaycommon.RelayInfo, resp *dto.Ch
 func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response, callback func(data string, geminiResponse *dto.GeminiChatResponse) bool) (*dto.Usage, *types.NewAPIError) {
 	var usage = &dto.Usage{}
 	var imageCount int
+	var traceChunkIndex int
 	responseText := strings.Builder{}
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
@@ -1352,6 +1405,8 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			sr.Stop(fmt.Errorf("unmarshal: %w", err))
 			return
 		}
+		traceChunkIndex++
+		traceGeminiUsage(c, info, data, traceChunkIndex, geminiResponse.UsageMetadata)
 
 		if len(geminiResponse.Candidates) == 0 && geminiResponse.PromptFeedback != nil && geminiResponse.PromptFeedback.BlockReason != nil {
 			common.SetContextKey(c, constant.ContextKeyAdminRejectReason, fmt.Sprintf("gemini_block_reason=%s", *geminiResponse.PromptFeedback.BlockReason))
