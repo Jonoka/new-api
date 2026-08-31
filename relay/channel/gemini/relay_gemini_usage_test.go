@@ -166,9 +166,9 @@ func TestGeminiStreamHandlerTracesEachUsageChunk(t *testing.T) {
 		}
 	}
 	require.Len(t, traceLines, 3)
-	require.Contains(t, traceLines[0], "chunk=1 usage_present=true cached_content_tokens=24431")
-	require.Contains(t, traceLines[1], "chunk=2 usage_present=true cached_content_tokens=0")
-	require.Contains(t, traceLines[2], "chunk=3 usage_present=false cached_content_tokens=0")
+	require.Contains(t, traceLines[0], "chunk=1 usage_present=true prompt_tokens=10 cached_content_tokens=24431")
+	require.Contains(t, traceLines[1], "chunk=2 usage_present=true prompt_tokens=10 cached_content_tokens=0")
+	require.Contains(t, traceLines[2], "chunk=3 usage_present=false prompt_tokens=10 cached_content_tokens=0")
 	require.NotContains(t, logs.String(), "one")
 	require.NotContains(t, logs.String(), "two")
 }
