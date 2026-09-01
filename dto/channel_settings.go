@@ -41,6 +41,7 @@ const (
 type ChannelOtherSettings struct {
 	ImageAsyncMode                       ImageAsyncMode `json:"image_async_mode,omitempty"`
 	ImageTasksEndpoint                   string         `json:"image_tasks_endpoint,omitempty"`
+	GeminiImageParamCompatEnabled       bool           `json:"gemini_image_param_compat_enabled,omitempty"`
 	AzureResponsesVersion                 string        `json:"azure_responses_version,omitempty"`
 	VertexKeyType                         VertexKeyType `json:"vertex_key_type,omitempty"` // "json" or "api_key"
 	OpenRouterEnterprise                  *bool         `json:"openrouter_enterprise,omitempty"`

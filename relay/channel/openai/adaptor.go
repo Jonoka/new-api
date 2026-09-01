@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -475,6 +476,9 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		async := false
 		request.Async = &async
 	}
+	if info != nil && info.ChannelMeta != nil && info.RelayMode == relayconstant.RelayModeImagesGenerations && info.ChannelOtherSettings.GeminiImageParamCompatEnabled {
+		return normalizeGeminiImageRequest(request)
+	}
 	switch info.RelayMode {
 	case relayconstant.RelayModeImagesEdits:
 		if isJSONRequest(c) {
@@ -612,6 +616,108 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 	default:
 		return request, nil
 	}
+}
+
+var geminiImageRatios = map[string]struct{}{
+	"2:3": {}, "1:1": {}, "16:9": {}, "4:3": {}, "4:5": {}, "9:16": {}, "21:9": {},
+}
+
+func normalizeGeminiImageRequest(request dto.ImageRequest) (any, error) {
+	size := strings.TrimSpace(request.Size)
+	effectiveSize := geminiImageTier(request.Quality)
+	var aspectRatio string
+
+	switch {
+	case size == "":
+		// An omitted ratio keeps the provider's square default.
+	case isGeminiImageTier(size):
+		effectiveSize = strings.ToLower(size)
+	case isGeminiImageRatio(size):
+		aspectRatio = strings.TrimSpace(size)
+	case strings.ContainsAny(size, "xX"):
+		width, height, ok := parseGeminiImageDimensions(size)
+		if !ok {
+			return nil, invalidGeminiImageSize(request.Size)
+		}
+		effectiveSize = fmt.Sprintf("%dx%d", width, height)
+	default:
+		return nil, invalidGeminiImageSize(request.Size)
+	}
+
+	body, err := common.Marshal(request)
+	if err != nil {
+		return nil, err
+	}
+	fields := make(map[string]json.RawMessage)
+	if err := common.Unmarshal(body, &fields); err != nil {
+		return nil, err
+	}
+	fields["size"], _ = json.Marshal(effectiveSize)
+	delete(fields, "quality")
+	if aspectRatio == "" {
+		delete(fields, "aspect_ratio")
+	} else {
+		fields["aspect_ratio"], _ = json.Marshal(aspectRatio)
+	}
+	return fields, nil
+}
+
+func geminiImageTier(quality string) string {
+	switch strings.ToLower(strings.TrimSpace(quality)) {
+	case "4k", "ultra", "ultra-high", "超清":
+		return "4k"
+	case "2k", "hd", "high":
+		return "2k"
+	default:
+		return "1k"
+	}
+}
+
+func isGeminiImageTier(size string) bool {
+	switch strings.ToLower(strings.TrimSpace(size)) {
+	case "1k", "2k", "4k":
+		return true
+	default:
+		return false
+	}
+}
+
+func isGeminiImageRatio(size string) bool {
+	_, ok := geminiImageRatios[strings.TrimSpace(size)]
+	return ok
+}
+
+func parseGeminiImageDimensions(size string) (int, int, bool) {
+	separator := strings.IndexAny(size, "xX")
+	if separator <= 0 || separator == len(size)-1 || strings.ContainsAny(size[separator+1:], "xX") {
+		return 0, 0, false
+	}
+	widthText, heightText := size[:separator], size[separator+1:]
+	if !allASCIIDigits(widthText) || !allASCIIDigits(heightText) {
+		return 0, 0, false
+	}
+	width, err := strconv.Atoi(widthText)
+	if err != nil {
+		return 0, 0, false
+	}
+	height, err := strconv.Atoi(heightText)
+	if err != nil || width <= 0 || height <= 0 {
+		return 0, 0, false
+	}
+	return width, height, true
+}
+
+func allASCIIDigits(value string) bool {
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func invalidGeminiImageSize(size string) *types.NewAPIError {
+	return types.NewErrorWithStatusCode(fmt.Errorf("invalid image size %q", size), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 }
 
 func shouldDefaultGPTImage2RequestToSync(info *relaycommon.RelayInfo, request dto.ImageRequest) bool {
