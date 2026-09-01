@@ -8,9 +8,11 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -57,4 +59,26 @@ func TestResolveImageSettlementCount(t *testing.T) {
 			require.Equal(t, test.delivered, delivered)
 		})
 	}
+}
+
+func TestImageHelperPreservesTypedGeminiImageSizeError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+	common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeOpenAI)
+	common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, dto.ChannelOtherSettings{
+		GeminiImageParamCompatEnabled: true,
+	})
+
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeImagesGenerations,
+		Request:   &dto.ImageRequest{Model: "model", Prompt: "prompt", Size: "not-a-size"},
+	}
+	err := ImageHelper(c, info)
+
+	var apiErr *types.NewAPIError
+	require.ErrorAs(t, err, &apiErr)
+	require.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
+	require.Equal(t, types.ErrorCodeInvalidRequest, apiErr.GetErrorCode())
+	require.True(t, types.IsSkipRetryError(apiErr))
 }

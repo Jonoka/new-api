@@ -631,7 +631,7 @@ func normalizeGeminiImageRequest(request dto.ImageRequest) (any, error) {
 	case size == "":
 		// An omitted ratio keeps the provider's square default.
 	case isGeminiImageTier(size):
-		effectiveSize = strings.ToLower(size)
+		effectiveSize = strings.ToLower(strings.TrimSpace(size))
 	case isGeminiImageRatio(size):
 		aspectRatio = strings.TrimSpace(size)
 	case strings.ContainsAny(size, "xX"):
