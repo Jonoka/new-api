@@ -618,14 +618,14 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 	}
 }
 
-var geminiImageRatios = map[string]struct{}{
-	"2:3": {}, "1:1": {}, "16:9": {}, "4:3": {}, "4:5": {}, "9:16": {}, "21:9": {},
+var geminiImageBaseSizes = map[string][2]int{
+	"2:3": {848, 1264}, "1:1": {1024, 1024}, "16:9": {1376, 768}, "4:3": {1200, 896},
+	"4:5": {928, 1152}, "9:16": {768, 1376}, "21:9": {1584, 672},
 }
 
 func normalizeGeminiImageRequest(request dto.ImageRequest) (any, error) {
 	size := strings.TrimSpace(request.Size)
 	effectiveSize := geminiImageTier(request.Quality)
-	var aspectRatio string
 
 	switch {
 	case size == "":
@@ -633,7 +633,7 @@ func normalizeGeminiImageRequest(request dto.ImageRequest) (any, error) {
 	case isGeminiImageTier(size):
 		effectiveSize = strings.ToLower(strings.TrimSpace(size))
 	case isGeminiImageRatio(size):
-		aspectRatio = strings.TrimSpace(size)
+		effectiveSize = geminiImageOfficialSize(strings.TrimSpace(size), effectiveSize)
 	case strings.ContainsAny(size, "xX"):
 		width, height, ok := parseGeminiImageDimensions(size)
 		if !ok {
@@ -654,11 +654,7 @@ func normalizeGeminiImageRequest(request dto.ImageRequest) (any, error) {
 	}
 	fields["size"], _ = json.Marshal(effectiveSize)
 	delete(fields, "quality")
-	if aspectRatio == "" {
-		delete(fields, "aspect_ratio")
-	} else {
-		fields["aspect_ratio"], _ = json.Marshal(aspectRatio)
-	}
+	delete(fields, "aspect_ratio")
 	return fields, nil
 }
 
@@ -683,8 +679,19 @@ func isGeminiImageTier(size string) bool {
 }
 
 func isGeminiImageRatio(size string) bool {
-	_, ok := geminiImageRatios[strings.TrimSpace(size)]
+	_, ok := geminiImageBaseSizes[strings.TrimSpace(size)]
 	return ok
+}
+
+func geminiImageOfficialSize(ratio, tier string) string {
+	dimensions := geminiImageBaseSizes[ratio]
+	multiplier := 1
+	if tier == "2k" {
+		multiplier = 2
+	} else if tier == "4k" {
+		multiplier = 4
+	}
+	return fmt.Sprintf("%dx%d", dimensions[0]*multiplier, dimensions[1]*multiplier)
 }
 
 func parseGeminiImageDimensions(size string) (int, int, bool) {

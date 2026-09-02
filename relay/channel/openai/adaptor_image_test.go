@@ -86,18 +86,26 @@ func TestGeminiImageParamCompatOnlyAppliesToGenerations(t *testing.T) {
 }
 
 func TestNormalizeGeminiImageRequestRatiosAndQualityAliases(t *testing.T) {
-	ratios := []string{"2:3", "1:1", "16:9", "4:3", "4:5", "9:16", "21:9"}
+	ratios := map[string]map[string]string{
+		"2:3": {"1k": "848x1264", "2k": "1696x2528", "4k": "3392x5056"},
+		"1:1": {"1k": "1024x1024", "2k": "2048x2048", "4k": "4096x4096"},
+		"16:9": {"1k": "1376x768", "2k": "2752x1536", "4k": "5504x3072"},
+		"4:3": {"1k": "1200x896", "2k": "2400x1792", "4k": "4800x3584"},
+		"4:5": {"1k": "928x1152", "2k": "1856x2304", "4k": "3712x4608"},
+		"9:16": {"1k": "768x1376", "2k": "1536x2752", "4k": "3072x5504"},
+		"21:9": {"1k": "1584x672", "2k": "3168x1344", "4k": "6336x2688"},
+	}
 	aliases := map[string]string{
 		"4K": "4k", "ultra": "4k", "ultra-high": "4k", "超清": "4k",
 		"2K": "2k", "hd": "2k", "high": "2k",
 		"1K": "1k", "standard": "1k", "medium": "1k", "low": "1k", "auto": "1k", "": "1k", "unknown": "1k",
 	}
-	for _, ratio := range ratios {
+	for ratio, sizes := range ratios {
 		for quality, tier := range aliases {
 			t.Run(ratio+"/"+quality, func(t *testing.T) {
 				fields := convertImageRequestJSON(t, dto.ImageRequest{Model: "model", Prompt: "prompt", Size: ratio, Quality: quality})
-				requireJSONString(t, fields, "size", tier)
-				requireJSONString(t, fields, "aspect_ratio", ratio)
+				requireJSONString(t, fields, "size", sizes[tier])
+				require.NotContains(t, fields, "aspect_ratio")
 				require.NotContains(t, fields, "quality")
 			})
 		}
