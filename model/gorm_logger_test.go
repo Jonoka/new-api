@@ -82,9 +82,11 @@ func TestGormLoggerRedactsNormalSlowErrorAndDebugSQL(t *testing.T) {
 		wantLogMarker string
 	}{
 		{
-			name:          "normal info",
-			threshold:     time.Hour,
-			configure:     func(db *gorm.DB) *gorm.DB { return db.Session(&gorm.Session{Logger: db.Logger.LogMode(gormlogger.Info)}) },
+			name:      "normal info",
+			threshold: time.Hour,
+			configure: func(db *gorm.DB) *gorm.DB {
+				return db.Session(&gorm.Session{Logger: db.Logger.LogMode(gormlogger.Info)})
+			},
 			query:         "SELECT ? AS value",
 			wantLogMarker: "SELECT ? AS value",
 		},
