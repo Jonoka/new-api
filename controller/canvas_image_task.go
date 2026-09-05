@@ -47,10 +47,14 @@ type canvasImageTaskRelayRequest struct {
 	Context     context.Context
 }
 
+var startCanvasImageTaskRelay = func(relayReq canvasImageTaskRelayRequest) {
+	go runCanvasImageTaskRelay(relayReq)
+}
+
 func CanvasImageTaskSubmit(c *gin.Context) {
 	submitImageTask(
 		c,
-		normalizeCanvasImageTaskAction(c.Query("action")),
+		canvasImageTaskAction(c),
 		constant.TaskPlatformCanvasImage,
 		canvasImageTaskRelayPrefix,
 	)
@@ -99,7 +103,7 @@ func submitImageTask(c *gin.Context, action string, platform constant.TaskPlatfo
 		RawQuery:    imageTaskRelayRawQuery(c),
 		Keys:        cloneCanvasImageTaskKeys(c.Keys),
 	}
-	go runCanvasImageTaskRelay(relayReq)
+	startCanvasImageTaskRelay(relayReq)
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"task_id": task.TaskID,

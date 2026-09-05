@@ -29,5 +29,6 @@
 - [自动分组顺序唯一索引迁移幂等性修复](../workflows/2026-08/09_auto_group_position_migration_idempotency.md)
 - [Gemini 图片尺寸比例归一化修复记录](../workflows/2026-08/25_gemini_image_ratio_normalization.md)
 - [Gemini Responses 流提前完成修复记录](../workflows/2026-08/31_gemini_responses_premature_completion.md)
+- [Canvas image edit action regression](../workflows/2026-09/05_canvas_image_edit_action_regression.md)
 
 文档中的 API 路径以当前源码为准；部署或升级前请先确认分支版本。
