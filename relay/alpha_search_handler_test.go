@@ -89,6 +89,9 @@ func TestValidateAlphaSearchResponseContract(t *testing.T) {
 		`{"output":"result","encrypted_output":"cipher"}`,
 		`{"output":"result","encrypted_output":"","future":{"large":9007199254740993}}`,
 		`{"output":"result","error":null}`,
+		`{"output":"result","error":false}`,
+		`{"output":"result","error":[]}`,
+		`{"output":"result","error":"future field"}`,
 	}
 	for _, body := range valid {
 		require.NoError(t, validateAlphaSearchResponse([]byte(body)), body)

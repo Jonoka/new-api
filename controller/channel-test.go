@@ -219,6 +219,8 @@ func testChannel(channel *model.Channel, testUserID int, testModel string, endpo
 			relayFormat = types.RelayFormatOpenAIResponses
 		case constant.EndpointTypeOpenAIResponseCompact:
 			relayFormat = types.RelayFormatOpenAIResponsesCompaction
+		case constant.EndpointTypeOpenAIAlphaSearch:
+			relayFormat = types.RelayFormatOpenAIAlphaSearch
 		case constant.EndpointTypeAnthropic:
 			relayFormat = types.RelayFormatClaude
 		case constant.EndpointTypeGemini:
@@ -275,6 +277,27 @@ func testChannel(channel *model.Channel, testUserID int, testModel string, endpo
 	service.BindChannelMetricRelayInfo(c, info)
 	metricInfo = info
 	info.InitChannelMeta(c)
+	if relayFormat == types.RelayFormatOpenAIAlphaSearch {
+		if isStream {
+			probeErr := errors.New("alpha search channel tests require synchronous JSON")
+			return testResult{context: c, localErr: probeErr, newAPIError: types.NewErrorWithStatusCode(probeErr, types.ErrorCodeInvalidRequest, http.StatusBadRequest)}
+		}
+		alpha := request.(*dto.AlphaSearchRequest)
+		c.Request.Body = io.NopCloser(bytes.NewReader(alpha.RawBody))
+		info.ResetAttemptState(time.Now())
+		service.BeginChannelMetricAttempt(c, info, channel.Id, channel.Name, channel.Type)
+		metricAttemptStarted = true
+		if probeErr := relay.AlphaSearchHelper(c, info); probeErr != nil {
+			return testResult{context: c, localErr: probeErr, newAPIError: probeErr}
+		}
+		model.RecordConsumeLog(c, testUserID, model.RecordConsumeLogParams{
+			ChannelId: channel.Id, ModelName: info.OriginModelName, TokenName: "model test",
+			Content: "Alpha Search channel test", Group: info.UsingGroup,
+			UseTimeSeconds: int(time.Since(tik).Seconds()),
+			Other:          map[string]any{"alpha_search": true, "is_channel_test": true, "request_path": requestPath},
+		})
+		return testResult{context: c}
+	}
 
 	err = attachTestBillingRequestInput(info, request)
 	if err != nil {
@@ -738,6 +761,12 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 	// 根据端点类型构建不同的测试请求
 	if endpointType != "" {
 		switch constant.EndpointType(endpointType) {
+		case constant.EndpointTypeOpenAIAlphaSearch:
+			body, _ := common.Marshal(map[string]any{
+				"model":    model,
+				"commands": map[string]any{"search_query": []map[string]string{{"q": "OpenAI"}}},
+			})
+			return &dto.AlphaSearchRequest{Model: model, RawBody: body}
 		case constant.EndpointTypeEmbeddings:
 			// 返回 EmbeddingRequest
 			return &dto.EmbeddingRequest{

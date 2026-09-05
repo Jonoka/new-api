@@ -43,6 +43,20 @@ cost. Explicit zero tool price/group ratio records a free successful request.
 Admission precedes upstream I/O, settlement precedes client success, and failures
 release the reservation. Existing non-Alpha billing is preserved.
 
+In this baseline the Alpha DTO has no request-specific billing multiplier;
+unknown client fields do not define a tariff. The existing validated BillingRatios
+API remains supported by the search calculator, without importing image count
+ratios or evaluating the model's token/request pricing expression for this endpoint.
+Normal group/model distribution is retained. An unsupported selected channel
+fails locally, so Alpha should use a type1/type57 pool or a supported pinned channel.
+
+The explicit admin channel-test endpoint uses the same Alpha mapping, transport,
+response bound and validator. It does not debit customer quota or create a billing
+reservation, matching existing probe behavior; its test log has zero quota. The
+probe itself still calls the configured provider and may incur provider cost.
+Streaming probes are rejected. Automatic tests retain their existing default
+endpoint and do not automatically start Alpha searches.
+
 If a client disconnects while publishing an already validated and settled search,
 the completed search remains charged once and is never replayed. A transport or
 response-read failure before validated success is not blindly retried and releases

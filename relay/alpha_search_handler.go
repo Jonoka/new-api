@@ -107,8 +107,12 @@ func AlphaSearchHelper(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAP
 	if err := validateAlphaSearchResponse(responseBody); err != nil {
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
 	}
-	if err := service.SettleAlphaSearchBilling(c, info); err != nil {
-		return types.NewErrorWithStatusCode(err, types.ErrorCodeUpdateDataError, http.StatusInternalServerError, types.ErrOptionWithSkipRetry())
+	if info.IsChannelTest {
+		service.AttachChannelMetricUsage(c, service.ChannelMetricUsage{})
+	} else {
+		if err := service.SettleAlphaSearchBilling(c, info); err != nil {
+			return types.NewErrorWithStatusCode(err, types.ErrorCodeUpdateDataError, http.StatusInternalServerError, types.ErrOptionWithSkipRetry())
+		}
 	}
 
 	contentType := httpResponse.Header.Get("Content-Type")
@@ -185,7 +189,7 @@ func validateAlphaSearchResponse(body []byte) error {
 	if err := common.Unmarshal(body, &fields); err != nil {
 		return fmt.Errorf("invalid alpha search response: %w", err)
 	}
-	if rawError, ok := fields["error"]; ok && common.GetJsonType(rawError) != "null" {
+	if rawError, ok := fields["error"]; ok && common.GetJsonType(rawError) == "object" {
 		return errors.New("alpha search upstream returned an error object")
 	}
 	output, ok := fields["output"]
