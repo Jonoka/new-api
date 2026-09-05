@@ -221,7 +221,7 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 
 	for _, responseItem := range responseItems.Data {
 		task := taskM[taskPollingKey(channelId, responseItem.TaskID)]
-		if !taskNeedsUpdate(task, responseItem) {
+		if task == nil || !taskNeedsUpdate(task, responseItem) {
 			continue
 		}
 

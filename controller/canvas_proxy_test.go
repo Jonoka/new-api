@@ -639,14 +639,17 @@ func setupCanvasImageTaskTestDB(t *testing.T) {
 
 	oldDB, oldLogDB := model.DB, model.LOG_DB
 	oldUsingSQLite := common.UsingSQLite
+	oldRedis := common.RedisEnabled
 	t.Cleanup(func() {
 		model.DB, model.LOG_DB = oldDB, oldLogDB
 		common.UsingSQLite = oldUsingSQLite
+		common.RedisEnabled = oldRedis
 	})
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	common.UsingSQLite = true
+	common.RedisEnabled = false
 	model.DB, model.LOG_DB = db, db
 	require.NoError(t, db.AutoMigrate(&model.Task{}, &model.TaskSubmission{}, &model.TaskAccounting{}, &model.TaskAccountingEvent{}, &model.TaskAccountingLogReceipt{}, &model.User{}, &model.Channel{}, &model.Log{}))
 	require.NoError(t, db.Create(&model.User{Id: 1, Username: "canvas-user", Status: common.UserStatusEnabled}).Error)

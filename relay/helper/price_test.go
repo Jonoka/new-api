@@ -10,6 +10,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -123,6 +124,9 @@ func TestModelPriceHelperTieredUsesCompletionFallbackAndRejectsOverflow(t *testi
 
 func TestModelPriceHelperTieredRefreshesOnlyGroupDependentSnapshotFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	oldFreePreConsume := operation_setting.GetQuotaSetting().EnableFreeModelPreConsume
+	operation_setting.GetQuotaSetting().EnableFreeModelPreConsume = false
+	t.Cleanup(func() { operation_setting.GetQuotaSetting().EnableFreeModelPreConsume = oldFreePreConsume })
 	saved := map[string]string{}
 	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
 		saved[key] = value

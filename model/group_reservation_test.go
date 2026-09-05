@@ -82,7 +82,7 @@ func seedGroupReservationWallet(t *testing.T, db *gorm.DB, suffix string, userQu
 	user := &User{Username: fmt.Sprintf("gr%d", time.Now().UnixNano()%1_000_000_000_000_000), Password: "test-password", Quota: userQuota}
 	user.AffCode = user.Username
 	require.NoError(t, db.Create(user).Error)
-	token := &Token{UserId: user.Id, Key: "group-reservation-token-" + suffix, Name: suffix, RemainQuota: tokenQuota}
+	token := &Token{UserId: user.Id, Key: "group-reservation-token-" + common.GetUUID(), Name: suffix, RemainQuota: tokenQuota}
 	require.NoError(t, db.Create(token).Error)
 	return user, token
 }

@@ -734,10 +734,20 @@ func OpenaiHandlerWithUsage(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	}
 
 	deliveredImageCount, countErr := countDeliveredOpenAIImages(responseBody)
-	if countErr != nil {
+	isTaskSubmission := false
+	if info != nil && info.ChannelMeta != nil && info.RelayMode == relayconstant.RelayModeImagesGenerations && info.ChannelOtherSettings.ImageAsyncMode == dto.ImageAsyncModeTasksEndpoint {
+		var taskIdentity struct {
+			ID     string `json:"id"`
+			TaskID string `json:"task_id"`
+		}
+		if err := common.Unmarshal(responseBody, &taskIdentity); err == nil {
+			isTaskSubmission = strings.TrimSpace(taskIdentity.ID) != "" || strings.TrimSpace(taskIdentity.TaskID) != ""
+		}
+	}
+	if countErr != nil && !isTaskSubmission {
 		return nil, types.NewOpenAIError(countErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
-	if info != nil && info.PriceData.UsePrice {
+	if info != nil && info.PriceData.UsePrice && deliveredImageCount > 0 {
 		// 图片按次计费必须以实际可交付数量为准。上游可能返回 2xx，
 		// 但 data 数量少于请求 n；此时不能继续按请求数量全额结算。
 		info.PriceData.AddOtherRatio("n", float64(deliveredImageCount))
