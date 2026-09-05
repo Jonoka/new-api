@@ -8,6 +8,8 @@ Stored within-day OR expressions are ambiguous: they may be legacy generated def
 
 Incomplete/invalid visual rules retain the last valid parent draft and disable saving until corrected or removed. Generation is all-or-nothing, so an invalid condition cannot disappear while leaving the rest of a pricing rule enabled. Raw-mode expressions retain the existing backend validation path.
 
+Editor instances are keyed by the selected record. Parent echoes of a base-price edit do not reinitialize rule drafts. While a visual rule is invalid, outer price-mode/model switches and batch application are blocked so they cannot unmount and discard it; correcting or explicitly removing the rule restores navigation. Cancel remains an explicit discard action. The parser respects quoted literals and rejects unparenthesized mixed top-level OR/AND, whose precedence is not representable by an all-conditions-AND rule group.
+
 ## Validation
 
 GitHub-hosted Actions runs `bun test web/default/src/features/pricing/lib/time-rule-expr.test.mjs`, covering both implementations with identical fixtures, all 24 hours, wrap/equal boundaries, domains, compound guards and raw-expression preservation. Both frontend builds and Default typecheck are also required. Test results and candidate identity belong to the batch's CI evidence; this document does not claim production deployment.

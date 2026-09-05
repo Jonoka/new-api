@@ -1752,23 +1752,6 @@ export default function TieredPricingEditor({
     [onRequestRuleExprChange],
   );
 
-  useEffect(() => {
-    const parsed = tryParseVisualConfig(currentExpr);
-    if (parsed && canUseVisualRules) {
-      setEditorMode('visual');
-      setVisualConfig(parsed);
-      setRawExpr(combineBillingExpr(currentExpr, currentRequestRuleExpr));
-    } else if (currentExpr || !canUseVisualRules) {
-      setEditorMode('raw');
-      setRawExpr(combineBillingExpr(currentExpr, currentRequestRuleExpr));
-      setVisualConfig(null);
-    } else {
-      setEditorMode('visual');
-      setVisualConfig(createDefaultVisualConfig());
-      setRawExpr('');
-    }
-  }, [model?.name]);
-
   const effectiveExpr = useMemo(() => {
     if (editorMode === 'visual') {
       return generateExprFromVisualConfig(visualConfig);

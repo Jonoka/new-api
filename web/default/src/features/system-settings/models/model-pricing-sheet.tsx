@@ -143,6 +143,7 @@ export type ModelRatioData = {
 }
 
 type ModelPricingSheetProps = {
+  onValidityChange?: (valid: boolean) => void
   open: boolean
   onOpenChange: (open: boolean) => void
   onSave: (data: ModelRatioData) => void
@@ -643,6 +644,7 @@ export function ModelPricingSheet({
   onCancel,
   editData,
   selectedTargetCount = 0,
+  onValidityChange,
 }: ModelPricingSheetProps) {
   const { t } = useTranslation()
   const title = editData ? t('Edit model pricing') : t('Add model pricing')
@@ -659,6 +661,8 @@ export function ModelPricingSheet({
           <SheetDescription>{description}</SheetDescription>
         </SheetHeader>
         <ModelPricingEditorPanel
+          key={editData?.name ?? 'new-model'}
+          onValidityChange={onValidityChange}
           onSave={onSave}
           editData={editData}
           selectedTargetCount={selectedTargetCount}
@@ -679,6 +683,7 @@ export function ModelPricingEditorPanel({
   selectedTargetCount = 0,
   onCancel,
   className,
+  onValidityChange,
 }: ModelPricingEditorPanelProps) {
   const { t } = useTranslation()
   const [pricingMode, setPricingMode] = useState<PricingMode>('per-token')
@@ -692,6 +697,9 @@ export function ModelPricingEditorPanel({
   const [billingExpr, setBillingExpr] = useState('')
   const [requestRuleExpr, setRequestRuleExpr] = useState('')
   const [requestRulesValid, setRequestRulesValid] = useState(true)
+  useEffect(() => {
+    onValidityChange?.(pricingMode !== 'tiered_expr' || requestRulesValid)
+  }, [pricingMode, requestRulesValid, onValidityChange])
   const [priceUnit, setPriceUnit] = useState<ModelPriceUnit>(
     MODEL_PRICE_UNITS.REQUEST
   )
@@ -948,6 +956,7 @@ export function ModelPricingEditorPanel({
   }
 
   const handleModeChange = (value: string) => {
+    if (pricingMode === 'tiered_expr' && !requestRulesValid) return
     const nextMode = value as PricingMode
     setPricingMode(nextMode)
     if (nextMode === 'per-token') {
@@ -1188,8 +1197,20 @@ export function ModelPricingEditorPanel({
 
               <Tabs value={pricingMode} onValueChange={handleModeChange}>
                 <TabsList className='grid w-full grid-cols-3'>
-                  <TabsTrigger value='per-token'>{t('Per-token')}</TabsTrigger>
-                  <TabsTrigger value='per-request'>
+                  <TabsTrigger
+                    value='per-token'
+                    disabled={
+                      pricingMode === 'tiered_expr' && !requestRulesValid
+                    }
+                  >
+                    {t('Per-token')}
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value='per-request'
+                    disabled={
+                      pricingMode === 'tiered_expr' && !requestRulesValid
+                    }
+                  >
                     {t('Per-request')}
                   </TabsTrigger>
                   <TabsTrigger value='tiered_expr'>
@@ -1341,6 +1362,7 @@ export function ModelPricingEditorPanel({
                   className='flex flex-col gap-5'
                 >
                   <TieredPricingEditor
+                    key={editData?.name ?? 'new-model'}
                     modelName={watchedValues.name}
                     billingExpr={billingExpr}
                     requestRuleExpr={requestRuleExpr}

@@ -80,13 +80,14 @@ jobs:
           bun install --frozen-lockfile
           bun test src/features/pricing/lib/time-rule-expr.test.mjs src/features/system-settings/models/tiered-pricing-editor.test.mjs
           bun run typecheck
-          bun x eslint src/features/pricing/lib/billing-expr.ts src/features/system-settings/models/tiered-pricing-editor.tsx src/features/system-settings/models/model-pricing-sheet.tsx
+          bun x eslint src/features/pricing/lib/billing-expr.ts src/features/system-settings/models/tiered-pricing-editor.tsx src/features/system-settings/models/model-pricing-sheet.tsx src/features/system-settings/models/model-ratio-visual-editor.tsx
           bun run build
 
       - name: Check and build classic frontend
         working-directory: web/classic
         run: |
           bun install --frozen-lockfile
+          bun test src/pages/Setting/Ratio/components/tiered-pricing-editor.test.mjs
           bun run build
 
       - name: Run Go tests
@@ -99,7 +100,7 @@ jobs:
           NEW_API_TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/newapi_test_ci?sslmode=disable
         run: >-
           go test -race ./model ./service ./controller ./middleware
-          -run 'Test(RelayResponseHeaderTimeout|RelayTransportsApplyResponseHeaderTimeout|ResponseHeaderTimeout|RelayRequestParseError|RelayRejectsMalformedRequest|RelayPreservesRequestBodyTooLarge|UserCriticalRateLimit|FormatUserLogsUsesStrictProjection|ProjectUserLogOther|UserAndTokenReadsProject|SumUsedQuotaKeepsHistorical|SanitizeDBError|SanitizedGormWriter|GormLoggerRedacts)'
+          -run 'Test(RelayResponseHeaderTimeout|RelayTransportsApplyResponseHeaderTimeout|ResponseHeaderTimeout|RelayRequestParseError|RelayRejectsMalformedRequest|RelayRejectsNonObjectRequest|RelayPreservesRequestBodyTooLarge|UserCriticalRateLimit|FormatUserLogsUsesStrictProjection|ProjectUserLogOther|UserAndTokenReadsProject|SumUsedQuotaKeepsHistorical|SanitizeDBError|SanitizedGormWriter|GormLoggerRedacts)'
           -count=1
 
       - name: Resolve image tags

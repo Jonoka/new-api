@@ -21,7 +21,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ChangeEvent,
   type FocusEvent,
@@ -1656,33 +1655,6 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
   const [requestRuleGroups, setRequestRuleGroups] = useState<
     RequestRuleGroup[]
   >(() => tryParseRequestRuleExpr(currentRequestRuleExpr) || [])
-  const initRef = useRef(false)
-
-  useEffect(() => {
-    if (initRef.current) return
-    initRef.current = true
-    const parsedConfig = tryParseVisualConfig(currentExpr)
-    const parsedRules = tryParseRequestRuleExpr(currentRequestRuleExpr)
-    if (parsedConfig && parsedRules !== null) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setVisualConfig(parsedConfig)
-      setEditorMode('visual')
-    } else if (currentExpr || parsedRules === null) {
-      setVisualConfig(null)
-      setEditorMode('raw')
-    } else {
-      setVisualConfig(createDefaultVisualConfig())
-    }
-    setRawExpr(
-      combineBillingExpr(currentExpr || '', currentRequestRuleExpr || '')
-    )
-    setRequestRuleGroups(tryParseRequestRuleExpr(currentRequestRuleExpr) || [])
-  }, [currentExpr, currentRequestRuleExpr])
-
-  useEffect(() => {
-    initRef.current = false
-  }, [modelName])
-
   const canUseVisualRules = useMemo(() => {
     if (!currentRequestRuleExpr) return true
     return tryParseRequestRuleExpr(currentRequestRuleExpr) !== null

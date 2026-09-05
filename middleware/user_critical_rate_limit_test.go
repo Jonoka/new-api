@@ -60,11 +60,12 @@ func TestUserCriticalRateLimitRequiresAuthenticatedUser(t *testing.T) {
 func runUserRateLimit(t *testing.T, handler gin.HandlerFunc, userID int) int {
 	t.Helper()
 	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
-	if userID != 0 {
-		c.Set("id", userID)
-	}
-	handler(c)
+	router := gin.New()
+	router.POST("/", func(c *gin.Context) {
+		if userID != 0 {
+			c.Set("id", userID)
+		}
+	}, handler, func(c *gin.Context) { c.Status(http.StatusOK) })
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/", nil))
 	return recorder.Code
 }

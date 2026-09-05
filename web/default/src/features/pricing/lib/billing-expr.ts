@@ -351,40 +351,42 @@ export function normalizeTierLabel(label: string | undefined): string {
 // Request rule parser
 // ---------------------------------------------------------------------------
 
-function splitTopLevelMultiply(expr: string): string[] {
+function splitTopLevelOperator(expr: string, operator: string): string[] {
   const parts: string[] = []
   let start = 0
   let depth = 0
+  let quote = ''
+  let escaped = false
   for (let index = 0; index < expr.length; index += 1) {
     const char = expr[index]
+    if (quote) {
+      if (escaped) escaped = false
+      else if (char === '\\') escaped = true
+      else if (char === quote) quote = ''
+      continue
+    }
+    if (char === '"' || char === "'") {
+      quote = char
+      continue
+    }
     if (char === '(') depth += 1
     if (char === ')') depth -= 1
-    if (depth === 0 && expr.slice(index, index + 3) === ' * ') {
+    if (depth === 0 && expr.startsWith(operator, index)) {
       parts.push(expr.slice(start, index).trim())
-      start = index + 3
-      index += 2
+      start = index + operator.length
+      index += operator.length - 1
     }
   }
   parts.push(expr.slice(start).trim())
-  return parts.filter(Boolean)
+  return parts
+}
+
+function splitTopLevelMultiply(expr: string): string[] {
+  return splitTopLevelOperator(expr, ' * ')
 }
 
 function splitTopLevelAnd(expr: string): string[] {
-  const parts: string[] = []
-  let start = 0
-  let depth = 0
-  for (let i = 0; i < expr.length; i += 1) {
-    const c = expr[i]
-    if (c === '(') depth += 1
-    if (c === ')') depth -= 1
-    if (depth === 0 && expr.slice(i, i + 4) === ' && ') {
-      parts.push(expr.slice(start, i).trim())
-      start = i + 4
-      i += 3
-    }
-  }
-  parts.push(expr.slice(start).trim())
-  return parts.filter(Boolean)
+  return splitTopLevelOperator(expr, ' && ')
 }
 
 function parseExprLiteral(raw: string): string | null {
@@ -510,6 +512,11 @@ function tryParseRuleGroupFactor(part: string): RequestRuleGroup | null {
   const multiplier = m[2]
 
   const andParts = splitTopLevelAnd(conditionStr)
+  if (
+    andParts.length > 1 &&
+    splitTopLevelOperator(conditionStr, ' || ').length > 1
+  )
+    return null
   const conditions: RequestCondition[] = []
   for (let index = 0; index < andParts.length; index += 1) {
     const pair =
@@ -550,7 +557,20 @@ export function tryParseRequestRuleExpr(
 function hasFullOuterParens(expr: string): boolean {
   if (!expr.startsWith('(') || !expr.endsWith(')')) return false
   let depth = 0
+  let quote = ''
+  let escaped = false
   for (let i = 0; i < expr.length; i += 1) {
+    const char = expr[i]
+    if (quote) {
+      if (escaped) escaped = false
+      else if (char === '\\') escaped = true
+      else if (char === quote) quote = ''
+      continue
+    }
+    if (char === '"' || char === "'") {
+      quote = char
+      continue
+    }
     if (expr[i] === '(') depth += 1
     if (expr[i] === ')') depth -= 1
     if (depth === 0 && i < expr.length - 1) return false

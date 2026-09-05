@@ -23,6 +23,47 @@ for (const [theme, rules] of [
   })
 
   describe(`${theme} time pricing rules`, () => {
+    test('keeps unparenthesized mixed boolean precedence in raw mode', () => {
+      const expressions = [
+        '(hour("UTC") >= 21 || hour("UTC") < 6 && header("x-test") != "" ? 2 : 1)',
+        '(header("x-test") != "" && hour("UTC") >= 21 || hour("UTC") < 6 ? 2 : 1)',
+      ]
+      for (const expression of expressions) {
+        assert.equal(rules.tryParseRequestRuleExpr(expression), null)
+      }
+      const wrapped =
+        '((hour("UTC") >= 21 || hour("UTC") < 6) && header("x-test") != "" ? 2 : 1)'
+      const parsed = rules.tryParseRequestRuleExpr(wrapped)
+      assert.ok(parsed)
+      assert.equal(rules.buildRequestRuleExpr(parsed), wrapped)
+    })
+
+    test('quoted operators, parentheses and escaped quotes survive round trips', () => {
+      const groups = [
+        {
+          conditions: [
+            {
+              source: 'param',
+              path: 'message',
+              mode: 'eq',
+              value: 'a && b ( ) * "quoted" \\ tail',
+            },
+            condition(),
+          ],
+          multiplier: '2',
+        },
+      ]
+      const expression = rules.buildRequestRuleExpr(groups)
+      const parsed = rules.tryParseRequestRuleExpr(expression)
+      assert.ok(parsed)
+      assert.equal(rules.buildRequestRuleExpr(parsed), expression)
+      const full = rules.combineBillingExpr('tier("base", p * 2)', expression)
+      const split = rules.splitBillingExprAndRequestRules(full)
+      assert.equal(
+        rules.combineBillingExpr(split.billingExpr, split.requestRuleExpr),
+        full
+      )
+    })
     test('evaluates every hour for within-day, overnight and equal ranges', () => {
       for (const [start, end] of [
         [9, 12],

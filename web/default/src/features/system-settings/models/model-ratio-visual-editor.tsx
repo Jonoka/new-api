@@ -240,6 +240,7 @@ export const ModelRatioVisualEditor = memo(
     const isMobile = useMediaQuery('(max-width: 767px)')
     const [sheetOpen, setSheetOpen] = useState(false)
     const [editorOpen, setEditorOpen] = useState(false)
+    const [editorValid, setEditorValid] = useState(true)
     const [editData, setEditData] = useState<ModelRatioData | null>(null)
     const [sorting, setSorting] = useState<SortingState>([])
     const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
@@ -467,6 +468,7 @@ export const ModelRatioVisualEditor = memo(
 
     const handleEdit = useCallback(
       (model: ModelRow) => {
+        if (!editorValid) return
         setEditData({
           name: model.name,
           price: model.price,
@@ -493,16 +495,18 @@ export const ModelRatioVisualEditor = memo(
         setEditorOpen(true)
         if (isMobile) setSheetOpen(true)
       },
-      [isMobile]
+      [isMobile, editorValid]
     )
 
     const handleAdd = useCallback(() => {
+      if (!editorValid) return
       setEditData(null)
       setEditorOpen(true)
       if (isMobile) setSheetOpen(true)
-    }, [isMobile])
+    }, [isMobile, editorValid])
 
     const handleCancel = useCallback(() => {
+      setEditorValid(true)
       setEditData(null)
       setEditorOpen(false)
       setSheetOpen(false)
@@ -510,6 +514,7 @@ export const ModelRatioVisualEditor = memo(
 
     const handleGlobalFilterChange = useCallback<OnChangeFn<string>>(
       (updater) => {
+        if (!editorValid) return
         setGlobalFilter((previous) => {
           const next =
             typeof updater === 'function' ? updater(previous) : updater
@@ -521,7 +526,7 @@ export const ModelRatioVisualEditor = memo(
           return next
         })
       },
-      []
+      [editorValid]
     )
 
     const handleDelete = useCallback(
@@ -964,6 +969,7 @@ export const ModelRatioVisualEditor = memo(
 
     const handleSave = useCallback(
       (data: ModelRatioData) => {
+        if (!editorValid) return
         persistPricingData(data)
         setEditData(data)
         setEditorOpen(true)
@@ -973,10 +979,11 @@ export const ModelRatioVisualEditor = memo(
           )
         )
       },
-      [persistPricingData, t]
+      [persistPricingData, t, editorValid]
     )
 
     const handleBatchCopy = useCallback(() => {
+      if (!editorValid) return
       if (!editData) {
         toast.error(t('Open a source model first'))
         return
@@ -999,7 +1006,7 @@ export const ModelRatioVisualEditor = memo(
           count: targetNames.length,
         })
       )
-    }, [editData, persistPricingData, t, table])
+    }, [editData, persistPricingData, t, table, editorValid])
 
     const selectedTargetCount = table.getFilteredSelectedRowModel().rows.length
 
@@ -1108,6 +1115,8 @@ export const ModelRatioVisualEditor = memo(
           <div className='hidden min-w-0 md:block'>
             {editorOpen ? (
               <ModelPricingEditorPanel
+                key={editData?.name ?? 'new-model'}
+                onValidityChange={setEditorValid}
                 onSave={handleSave}
                 onCancel={handleCancel}
                 editData={editData}
@@ -1134,7 +1143,11 @@ export const ModelRatioVisualEditor = memo(
         </div>
 
         <DataTableBulkActions table={table} entityName={t('model')}>
-          <Button size='sm' disabled={!editData} onClick={handleBatchCopy}>
+          <Button
+            size='sm'
+            disabled={!editData || !editorValid}
+            onClick={handleBatchCopy}
+          >
             <Copy data-icon='inline-start' />
             {editData
               ? t('Copy {{name}} pricing', { name: editData.name })
@@ -1144,8 +1157,12 @@ export const ModelRatioVisualEditor = memo(
 
         {isMobile && (
           <ModelPricingSheet
+            onValidityChange={setEditorValid}
             open={sheetOpen}
-            onOpenChange={setSheetOpen}
+            onOpenChange={(open) => {
+              if (!open) handleCancel()
+              else setSheetOpen(true)
+            }}
             onSave={handleSave}
             onCancel={handleCancel}
             editData={editData}

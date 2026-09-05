@@ -15,6 +15,16 @@ const (
 	userLogOtherString
 	userLogOtherStringOrNumber
 	userLogOtherStringArray
+	userLogOtherUsageSemantic
+	userLogOtherCacheWriteTokensSource
+)
+
+const (
+	userLogErrorContent  = "Request failed."
+	userLogRefundContent = "Quota refunded."
+
+	userLogErrorReason  = "request_failed"
+	userLogRefundReason = "quota_refunded"
 )
 
 // userLogOtherAllowlist is the complete metadata contract for self, token and
@@ -44,6 +54,8 @@ var userLogOtherAllowlist = map[string]userLogOtherValueKind{
 	"cache_creation_tokens_5m":      userLogOtherNumber,
 	"cache_ratio":                   userLogOtherNumber,
 	"cache_tokens":                  userLogOtherNumber,
+	"cache_write_tokens":            userLogOtherNumber,
+	"cache_write_tokens_source":     userLogOtherCacheWriteTokensSource,
 	"claude":                        userLogOtherBoolean,
 	"compatibility_requested_model": userLogOtherString,
 	"compatibility_routed_model":    userLogOtherString,
@@ -61,6 +73,9 @@ var userLogOtherAllowlist = map[string]userLogOtherValueKind{
 	"image_generation_call_price":   userLogOtherNumber,
 	"image_output":                  userLogOtherNumber,
 	"image_ratio":                   userLogOtherNumber,
+	"inferred_cache_write_billable": userLogOtherBoolean,
+	"inferred_cache_write_tokens":   userLogOtherNumber,
+	"input_tokens_total":            userLogOtherNumber,
 	"is_model_mapped":               userLogOtherBoolean,
 	"is_system_prompt_overwritten":  userLogOtherBoolean,
 	"is_task":                       userLogOtherBoolean,
@@ -68,12 +83,14 @@ var userLogOtherAllowlist = map[string]userLogOtherValueKind{
 	"model_price":                   userLogOtherNumber,
 	"model_price_unit":              userLogOtherString,
 	"model_ratio":                   userLogOtherNumber,
+	"n":                             userLogOtherNumber,
 	"pre_consumed_quota":            userLogOtherNumber,
-	"reason":                        userLogOtherString,
 	"reasoning_effort":              userLogOtherString,
 	"request_conversion":            userLogOtherStringArray,
 	"request_path":                  userLogOtherString,
+	"resolution":                    userLogOtherNumber,
 	"seconds":                       userLogOtherNumber,
+	"size":                          userLogOtherNumber,
 	"subscription_consumed":         userLogOtherNumber,
 	"subscription_id":               userLogOtherStringOrNumber,
 	"subscription_plan_id":          userLogOtherStringOrNumber,
@@ -87,6 +104,7 @@ var userLogOtherAllowlist = map[string]userLogOtherValueKind{
 	"text_input":                    userLogOtherNumber,
 	"text_output":                   userLogOtherNumber,
 	"upstream_model_name":           userLogOtherString,
+	"usage_semantic":                userLogOtherUsageSemantic,
 	"use_time_ms":                   userLogOtherNumber,
 	"user_group_ratio":              userLogOtherNumber,
 	"violation_fee":                 userLogOtherBoolean,
@@ -128,19 +146,53 @@ func userLogOtherValueMatches(raw json.RawMessage, kind userLogOtherValueKind) b
 			}
 		}
 		return true
+	case userLogOtherUsageSemantic:
+		return userLogOtherStringEquals(raw, "anthropic")
+	case userLogOtherCacheWriteTokensSource:
+		return userLogOtherStringEquals(raw,
+			"upstream",
+			"explicit_zero",
+			"inferred_missing_field",
+			"inferred_untrusted_explicit_zero",
+		)
 	default:
 		return false
 	}
 }
 
-func projectUserLogOther(value string) string {
-	if value == "" {
-		return ""
+func userLogOtherStringEquals(raw json.RawMessage, allowed ...string) bool {
+	if common.GetJsonType(raw) != "string" {
+		return false
 	}
+	var value string
+	if common.Unmarshal(raw, &value) != nil {
+		return false
+	}
+	for _, candidate := range allowed {
+		if value == candidate {
+			return true
+		}
+	}
+	return false
+}
 
+func userLogPublicReason(logType int) (string, bool) {
+	switch logType {
+	case LogTypeError:
+		return userLogErrorReason, true
+	case LogTypeRefund:
+		return userLogRefundReason, true
+	default:
+		return "", false
+	}
+}
+
+func projectUserLogOther(value string, logType int) string {
 	var source map[string]json.RawMessage
-	if err := common.UnmarshalJsonStr(value, &source); err != nil || source == nil {
-		return "{}"
+	if value != "" {
+		if err := common.UnmarshalJsonStr(value, &source); err != nil || source == nil {
+			source = map[string]json.RawMessage{}
+		}
 	}
 
 	projected := make(map[string]json.RawMessage)
@@ -151,11 +203,33 @@ func projectUserLogOther(value string) string {
 		}
 		projected[key] = raw
 	}
+	if reason, ok := userLogPublicReason(logType); ok {
+		raw, err := common.Marshal(reason)
+		if err == nil {
+			projected["reason"] = raw
+		}
+	}
+	if value == "" && len(projected) == 0 {
+		return ""
+	}
 	encoded, err := common.Marshal(projected)
 	if err != nil {
 		return "{}"
 	}
 	return string(encoded)
+}
+
+func projectUserLogContent(logType int, content string) string {
+	switch logType {
+	case LogTypeTopup, LogTypeConsume, LogTypeManage, LogTypeSystem:
+		return content
+	case LogTypeError:
+		return userLogErrorContent
+	case LogTypeRefund:
+		return userLogRefundContent
+	default:
+		return ""
+	}
 }
 
 func projectUserLog(log *Log, displayId int) *Log {
@@ -166,7 +240,7 @@ func projectUserLog(log *Log, displayId int) *Log {
 		Id:               displayId,
 		CreatedAt:        log.CreatedAt,
 		Type:             log.Type,
-		Content:          log.Content,
+		Content:          projectUserLogContent(log.Type, log.Content),
 		TokenName:        log.TokenName,
 		ModelName:        log.ModelName,
 		Quota:            log.Quota,
@@ -177,7 +251,7 @@ func projectUserLog(log *Log, displayId int) *Log {
 		Group:            log.Group,
 		GroupName:        log.GroupName,
 		RequestId:        log.RequestId,
-		Other:            projectUserLogOther(log.Other),
+		Other:            projectUserLogOther(log.Other, log.Type),
 	}
 }
 

@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   Banner,
   Button,
@@ -109,7 +109,7 @@ export default function ModelPricingEditor({
     selectedModel,
     selectedModelName,
     selectedModelNames,
-    setSelectedModelName,
+    setSelectedModelName: selectModel,
     setSelectedModelNames,
     searchText,
     setSearchText,
@@ -146,12 +146,15 @@ export default function ModelPricingEditor({
     filterMode,
   });
 
-  useEffect(() => {
-    setRequestRulesValid(true);
-  }, [selectedModelName]);
-
   const invalidRequestRules =
     selectedModel?.billingMode === 'tiered_expr' && !requestRulesValid;
+
+  const setSelectedModelName = useCallback(
+    (name) => {
+      if (!invalidRequestRules) selectModel(name);
+    },
+    [invalidRequestRules, selectModel],
+  );
 
   const getExprModeLabel = useCallback(
     (model) => {
@@ -267,6 +270,7 @@ export default function ModelPricingEditor({
   );
 
   const handleAddModel = () => {
+    if (invalidRequestRules) return;
     if (addModel(newModelName)) {
       setNewModelName('');
       setAddVisible(false);
@@ -285,6 +289,7 @@ export default function ModelPricingEditor({
           {allowAddModel ? (
             <Button
               icon={<IconPlus />}
+              disabled={invalidRequestRules}
               onClick={() => setAddVisible(true)}
               style={isMobile ? { width: '100%' } : undefined}
             >
@@ -441,11 +446,13 @@ export default function ModelPricingEditor({
                     {t('计费方式')}
                   </div>
                   <RadioGroup
+                    disabled={invalidRequestRules}
                     type='button'
                     value={selectedModel.billingMode}
-                    onChange={(event) =>
-                      handleBillingModeChange(event.target.value)
-                    }
+                    onChange={(event) => {
+                      if (!invalidRequestRules)
+                        handleBillingModeChange(event.target.value);
+                    }}
                   >
                     <Radio value='per-token'>{t('按量计费')}</Radio>
                     <Radio value='per-request'>{t('按次计费')}</Radio>
@@ -525,6 +532,7 @@ export default function ModelPricingEditor({
                   </>
                 ) : selectedModel.billingMode === 'tiered_expr' ? (
                   <TieredPricingEditor
+                    key={selectedModel.name}
                     model={selectedModel}
                     onExprChange={handleBillingExprChange}
                     requestRuleExpr={selectedModel.requestRuleExpr}
