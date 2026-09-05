@@ -610,13 +610,21 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 			if err := settle(c); err != nil {
 				return err
 			}
-			gopool.Go(func() { perfmetrics.RecordRelaySample(relayInfo, true, int64(summary.CompletionTokens)) })
+			recordTextPerformanceSample(relayInfo, int64(summary.CompletionTokens))
 			return nil
 		}
 		return
 	}
 	model.RecordConsumeLog(ctx, relayInfo.UserId, logParams)
-	gopool.Go(func() {
-		perfmetrics.RecordRelaySample(relayInfo, true, int64(summary.CompletionTokens))
-	})
+	recordTextPerformanceSample(relayInfo, int64(summary.CompletionTokens))
+}
+
+func recordTextPerformanceSample(info *relaycommon.RelayInfo, outputTokens int64) {
+	if !common.RedisEnabled {
+		// With no external projection this is a small in-memory update, and
+		// completing it here avoids retaining request/config state in a worker.
+		perfmetrics.RecordRelaySample(info, true, outputTokens)
+		return
+	}
+	gopool.Go(func() { perfmetrics.RecordRelaySample(info, true, outputTokens) })
 }

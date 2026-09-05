@@ -77,6 +77,9 @@ model/group, caller and pricing fields. Receipt delivery remains idempotent;
 the existing optional quota-data export remains best effort and runs only for
 a newly inserted consume log. Request/attempt metrics finalize after accounting,
 and settlement failures are gateway failures rather than channel penalties.
+Without Redis, user-quota helpers skip cache workers and performance samples
+update their in-memory counters before returning, so no no-op background work
+retains request/configuration state after completion.
 Canvas captures username, token name, request IDs and privacy-permitted IP
 before its Gin context ends so background consume/refund events retain those
 facts without retaining the request credentials.
