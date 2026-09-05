@@ -26,7 +26,7 @@ func TestAsyncTaskGeminiFetchOwnsTerminalAccounting(t *testing.T) {
 			oldRedis, oldBatch, oldMemory, oldLogEnabled := common.RedisEnabled, common.BatchUpdateEnabled, common.MemoryCacheEnabled, common.LogConsumeEnabled
 			db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "fetch-accounting.db")), &gorm.Config{})
 			require.NoError(t, err)
-			require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}, &model.Channel{}, &model.Task{}, &model.TaskAccounting{}, &model.TaskAccountingEvent{}, &model.TaskAccountingLogReceipt{}, &model.Log{}))
+			require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}, &model.Channel{}, &model.Task{}, &model.TaskSubmission{}, &model.TaskAccounting{}, &model.TaskAccountingEvent{}, &model.TaskAccountingLogReceipt{}, &model.Log{}))
 			model.DB, model.LOG_DB = db, db
 			common.UsingSQLite, common.UsingPostgreSQL, common.UsingMySQL = true, false, false
 			common.RedisEnabled, common.BatchUpdateEnabled, common.MemoryCacheEnabled, common.LogConsumeEnabled = false, false, false, true

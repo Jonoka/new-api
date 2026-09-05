@@ -5,20 +5,22 @@ import (
 	"errors"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/bytedance/gopkg/util/gopool"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 type TaskAccountingEvent struct {
-	EventID     string `json:"event_id" gorm:"type:varchar(64);primaryKey"`
-	TaskRowID   int64  `json:"task_row_id" gorm:"not null;index"`
-	Kind        string `json:"kind" gorm:"type:varchar(20);not null"`
-	FactsJSON   string `json:"facts_json" gorm:"type:text;not null"`
-	Ready       bool   `json:"ready" gorm:"not null;default:false;index"`
-	Delivered   bool   `json:"delivered" gorm:"not null;default:false;index"`
-	CreatedAt   int64  `json:"created_at" gorm:"not null"`
-	DeliveredAt int64  `json:"delivered_at" gorm:"not null;default:0"`
+	SubmissionID string `json:"submission_id,omitempty" gorm:"type:varchar(64);index;default:''"`
+	EventID      string `json:"event_id" gorm:"type:varchar(64);primaryKey"`
+	TaskRowID    int64  `json:"task_row_id" gorm:"not null;index"`
+	Kind         string `json:"kind" gorm:"type:varchar(20);not null"`
+	FactsJSON    string `json:"facts_json" gorm:"type:text;not null"`
+	Ready        bool   `json:"ready" gorm:"not null;default:false;index"`
+	Delivered    bool   `json:"delivered" gorm:"not null;default:false;index"`
+	CreatedAt    int64  `json:"created_at" gorm:"not null"`
+	DeliveredAt  int64  `json:"delivered_at" gorm:"not null;default:0"`
 }
 
 // TaskAccountingLogReceipt lives in LOG_DB. The claim token, rather than
@@ -74,6 +76,7 @@ func deliverTaskAccountingLog(ctx context.Context, event *TaskAccountingEvent) e
 	if err := common.Unmarshal([]byte(event.FactsJSON), &facts); err != nil {
 		return err
 	}
+	createdLog := false
 	err := LOG_DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		claimToken := common.GetUUID()
 		receipt := TaskAccountingLogReceipt{EventID: event.EventID, ClaimToken: claimToken, CreatedAt: common.GetTimestamp()}
@@ -91,6 +94,8 @@ func deliverTaskAccountingLog(ctx context.Context, event *TaskAccountingEvent) e
 			return nil
 		}
 		log := &Log{
+			PromptTokens: facts.PromptTokens, CompletionTokens: facts.CompletionTokens,
+			UseTime: facts.UseTimeSeconds, IsStream: facts.IsStream,
 			UserId: facts.UserID, Username: facts.Username, CreatedAt: facts.CreatedAt,
 			Type: facts.LogType, Content: facts.Content, TokenName: facts.TokenName,
 			ModelName: facts.ModelName, Quota: facts.Quota, ChannelId: facts.ChannelID,
@@ -101,11 +106,17 @@ func deliverTaskAccountingLog(ctx context.Context, event *TaskAccountingEvent) e
 		if err := tx.Create(log).Error; err != nil {
 			return err
 		}
+		createdLog = true
 		return tx.Model(&TaskAccountingLogReceipt{}).Where("event_id = ? AND claim_token = ?", event.EventID, claimToken).
 			Update("log_id", log.Id).Error
 	})
 	if err != nil {
 		return err
+	}
+	if createdLog && common.DataExportEnabled && (event.Kind == "initial" || event.Kind == "synchronous_image") {
+		gopool.Go(func() {
+			LogQuotaData(facts.UserID, facts.Username, facts.ModelName, facts.Quota, facts.CreatedAt, facts.PromptTokens+facts.CompletionTokens)
+		})
 	}
 	result := DB.WithContext(ctx).Model(&TaskAccountingEvent{}).Where("event_id = ? AND delivered = ?", event.EventID, false).
 		Updates(map[string]any{"delivered": true, "delivered_at": common.GetTimestamp()})

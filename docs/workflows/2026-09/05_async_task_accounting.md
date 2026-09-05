@@ -58,8 +58,20 @@ requests set `DeferTaskBilling`, so the normal synchronous image settlement and
 log path does not duplicate this handoff.
 
 The shared image submit wrapper also receives ordinary synchronous image
-responses. When such a response contains images and no task ID, it completes
-the deferred synchronous billing once instead of creating task ownership.
+responses. It freezes the actual charge, usage and log facts once. When the
+response has no task ID, a settlement callback commits funding/token changes,
+user/channel counters, the submission's `settled` state, and the log event in
+one transaction. Failure returns a gateway error without publishing the image;
+the active reservation remains releasable. Ordinary synchronous images retain
+configured wallet trust; queued tasks and tasks-endpoint channels require full
+admission.
+
+Synchronous image log events use `task_row_id = 0` and their indexed
+`submission_id`, because no public task is created. They retain ordinary usage,
+model/group, caller and pricing fields. Receipt delivery remains idempotent;
+the existing optional quota-data export remains best effort and runs only for
+a newly inserted consume log. Request/attempt metrics finalize after accounting,
+and settlement failures are gateway failures rather than channel penalties.
 Canvas captures username, token name, request IDs and privacy-permitted IP
 before its Gin context ends so background consume/refund events retain those
 facts without retaining the request credentials.

@@ -86,6 +86,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	// 此 defer 必须早于错误响应 defer 注册。Go 按后进先出执行 defer，
 	// 因而最终请求样本可以读取错误响应实际写出的客户端状态码。
 	defer func() {
+		if relayInfo != nil && relayInfo.FinalizeImageMetrics != nil {
+			return
+		}
 		service.FinishChannelMetricRequest(c, relayInfo, newAPIError)
 	}()
 
@@ -236,7 +239,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		if newAPIError == nil {
 			relayInfo.LastError = nil
-			service.FinishChannelMetricAttempt(c, relayInfo, nil, false, "")
+			if relayInfo.DeferTaskBilling {
+				deferImageMetricFinalization(c, relayInfo)
+			} else {
+				service.FinishChannelMetricAttempt(c, relayInfo, nil, false, "")
+			}
 			return
 		}
 

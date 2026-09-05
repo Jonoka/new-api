@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func groupBillingContext(t *testing.T) *gin.Context {
@@ -46,7 +48,7 @@ func groupBillingInfo(user *model.User, token *model.Token) *relaycommon.RelayIn
 		UserId: user.Id, UserQuota: user.Quota, TokenId: token.Id, TokenKey: token.Key,
 		OriginModelName: "billing-group-model", UsingGroup: "free", UserGroup: "default",
 		RequestId:   fmt.Sprintf("billing-group-request-%d", time.Now().UnixNano()),
-		UserSetting: dto.UserSetting{BillingPreference: "wallet_only"},
+		UserSetting: dto.UserSetting{BillingPreference: "wallet_only", QuotaWarningThreshold: 1},
 		PriceData:   types.PriceData{FreeModel: true, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 0}},
 	}
 }
@@ -171,7 +173,14 @@ func TestBillingSessionRefundFailureKeepsRetryableReservation(t *testing.T) {
 	info.ForcePreConsume = true
 	info.PriceData.FreeModel = false
 	require.Nil(t, ReconcileBillingReservation(c, 200, info))
-	require.NoError(t, model.DB.Unscoped().Delete(&model.Token{}, token.Id).Error)
+	db := model.DB
+	callback := "test:billing-refund-read-failure"
+	require.NoError(t, db.Callback().Query().Before("gorm:query").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == "tokens" {
+			tx.AddError(errors.New("injected token query failure"))
+		}
+	}))
+	t.Cleanup(func() { _ = db.Callback().Query().Remove(callback) })
 
 	info.Billing.Refund(c)
 	require.True(t, info.Billing.NeedsRefund())
@@ -179,8 +188,7 @@ func TestBillingSessionRefundFailureKeepsRetryableReservation(t *testing.T) {
 	require.NoError(t, model.DB.First(&gotUser, user.Id).Error)
 	require.Equal(t, 800, gotUser.Quota)
 
-	restored := &model.Token{Id: token.Id, UserId: user.Id, Key: token.Key, Name: token.Name, RemainQuota: 800, UsedQuota: 200}
-	require.NoError(t, model.DB.Create(restored).Error)
+	require.NoError(t, db.Callback().Query().Remove(callback))
 	info.Billing.Refund(c)
 	info.Billing.Refund(c)
 	require.False(t, info.Billing.NeedsRefund())

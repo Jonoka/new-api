@@ -19,7 +19,7 @@ import (
 func taskAccountingMatrixDatabase(t *testing.T, fixture groupReservationDatabase) *gorm.DB {
 	t.Helper()
 	db := useGroupReservationDatabase(t, fixture)
-	require.NoError(t, db.AutoMigrate(&Channel{}, &Task{}, &TaskAccounting{}, &TaskAccountingEvent{}))
+	require.NoError(t, db.AutoMigrate(&Channel{}, &Task{}, &TaskSubmission{}, &TaskAccounting{}, &TaskAccountingEvent{}))
 	openLog := func() (*gorm.DB, error) {
 		return gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "separate-log.db")), &gorm.Config{})
 	}

@@ -35,6 +35,14 @@ var (
 // billing, channel selection, and retries in Relay, then persists the returned
 // task metadata for polling.
 func RelayImageTaskSubmit(c *gin.Context) {
+	var accountingErr error
+	defer func() {
+		if value, ok := c.Get("relay_info"); ok {
+			if info, ok := value.(*relaycommon.RelayInfo); ok {
+				finishImageMetricFinalization(info, accountingErr, c.Writer.Status())
+			}
+		}
+	}()
 	c.Set(relaycommon.ContextKeyDeferTaskBilling, true)
 	capture := &imageTaskResponseCapture{ResponseWriter: c.Writer}
 	c.Writer = capture
@@ -63,11 +71,19 @@ func RelayImageTaskSubmit(c *gin.Context) {
 	if strings.TrimSpace(taskID) == "" {
 		common.SysLog(fmt.Sprintf("skip image task insert: no task id in response, status=%d, body=%s", capture.Status(), common.LocalLogPreview(string(body))))
 		if relayInfo.ChannelOtherSettings.ImageAsyncMode != dto.ImageAsyncModeTasksEndpoint {
-			service.CompleteDeferredImageBilling(c, relayInfo)
+			if err := service.CompleteDeferredImageBilling(c, relayInfo); err != nil {
+				accountingErr = err
+				common.SysError("complete image billing error: " + err.Error())
+				refundImageSubmit(c, relayInfo)
+				capture.statusCode = http.StatusInternalServerError
+				capture.buf.Reset()
+				_, _ = capture.buf.WriteString(`{"error":{"message":"failed to settle image request"}}`)
+			}
 			capture.flush()
 			return
 		}
 		refundImageSubmit(c, relayInfo)
+		accountingErr = types.NewErrorWithStatusCode(fmt.Errorf("upstream returned no image task id"), types.ErrorCodeBadResponse, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
 		capture.statusCode = http.StatusBadGateway
 		capture.buf.Reset()
 		_, _ = capture.buf.WriteString(`{"error":{"message":"upstream returned no image task id"}}`)
@@ -132,7 +148,11 @@ func RelayImageTaskSubmit(c *gin.Context) {
 	if relayInfo.Billing == nil {
 		chargedQuota = task.Quota
 	}
+	if relayInfo.TaskBillingActualQuota != nil {
+		chargedQuota = *relayInfo.TaskBillingActualQuota
+	}
 	if handoffErr := handoffImageTask(c, relayInfo, task, "", chargedQuota); handoffErr != nil {
+		accountingErr = handoffErr
 		common.SysError("insert image task error: " + handoffErr.Error())
 		refundImageSubmit(c, relayInfo)
 		capture.statusCode = http.StatusInternalServerError
@@ -157,6 +177,7 @@ func RelayImageTaskSubmit(c *gin.Context) {
 			reason = "upstream failed during async image submission"
 		}
 		if _, err := service.FinalizeTaskAccounting(c.Request.Context(), task, expectedStatus, finalQuota, reason); err != nil {
+			accountingErr = err
 			common.SysError("finalize terminal image task error: " + err.Error())
 			capture.statusCode = http.StatusInternalServerError
 			capture.buf.Reset()
@@ -164,6 +185,7 @@ func RelayImageTaskSubmit(c *gin.Context) {
 			capture.flush()
 			return
 		}
+		relayInfo.PriceData.Quota = task.Quota
 	}
 	capture.flush()
 	common.SysLog(fmt.Sprintf("insert image task success: task_id=%s upstream_task_id=%s channel_id=%d status=%s", task.TaskID, task.PrivateData.UpstreamTaskID, task.ChannelId, task.Status))

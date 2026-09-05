@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"time"
@@ -23,6 +24,8 @@ const (
 var batchUpdateStores []map[int]int
 var batchUpdateLocks []sync.Mutex
 var userQuotaBatchApplyLock sync.Mutex
+var tokenQuotaBatchApplyLock sync.Mutex
+var applyTokenQuotaBatchDelta = increaseTokenQuota
 
 func init() {
 	for i := 0; i < BatchUpdateTypeCount; i++ {
@@ -77,10 +80,10 @@ func flushUserQuotaBatchUpdates() {
 	defer userQuotaBatchApplyLock.Unlock()
 
 	batchUpdateLocks[BatchUpdateTypeUserQuota].Lock()
-	defer batchUpdateLocks[BatchUpdateTypeUserQuota].Unlock()
-
 	store := batchUpdateStores[BatchUpdateTypeUserQuota]
 	batchUpdateStores[BatchUpdateTypeUserQuota] = make(map[int]int)
+	batchUpdateLocks[BatchUpdateTypeUserQuota].Unlock()
+
 	for key, value := range store {
 		err := increaseUserQuota(key, value)
 		if err != nil {
@@ -89,7 +92,26 @@ func flushUserQuotaBatchUpdates() {
 	}
 }
 
+func flushTokenQuotaBatchUpdates() {
+	tokenQuotaBatchApplyLock.Lock()
+	defer tokenQuotaBatchApplyLock.Unlock()
+
+	batchUpdateLocks[BatchUpdateTypeTokenQuota].Lock()
+	store := batchUpdateStores[BatchUpdateTypeTokenQuota]
+	batchUpdateStores[BatchUpdateTypeTokenQuota] = make(map[int]int)
+	batchUpdateLocks[BatchUpdateTypeTokenQuota].Unlock()
+
+	for key, value := range store {
+		if err := applyTokenQuotaBatchDelta(key, value); err != nil {
+			common.SysLog("failed to batch update token quota: " + err.Error())
+		}
+	}
+}
+
 func batchUpdate() {
+	if err := RecoverPendingTaskSubmissionBatches(context.Background(), 100); err != nil {
+		common.SysLog("failed to reconcile pending task submission batch values: " + err.Error())
+	}
 	// check if there's any data to update
 	hasData := false
 	for i := 0; i < BatchUpdateTypeCount; i++ {
@@ -112,6 +134,10 @@ func batchUpdate() {
 			flushUserQuotaBatchUpdates()
 			continue
 		}
+		if i == BatchUpdateTypeTokenQuota {
+			flushTokenQuotaBatchUpdates()
+			continue
+		}
 		batchUpdateLocks[i].Lock()
 		store := batchUpdateStores[i]
 		batchUpdateStores[i] = make(map[int]int)
@@ -123,11 +149,6 @@ func batchUpdate() {
 				err := increaseUserQuota(key, value)
 				if err != nil {
 					common.SysLog("failed to batch update user quota: " + err.Error())
-				}
-			case BatchUpdateTypeTokenQuota:
-				err := increaseTokenQuota(key, value)
-				if err != nil {
-					common.SysLog("failed to batch update token quota: " + err.Error())
 				}
 			case BatchUpdateTypeUsedQuota:
 				updateUserUsedQuota(key, value)

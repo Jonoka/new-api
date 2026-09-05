@@ -438,9 +438,6 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		// The task handoff transaction owns money, counters and the consume log.
 		quota := summary.Quota
 		relayInfo.TaskBillingActualQuota = &quota
-		relayInfo.TaskBillingUsage = usage
-		relayInfo.TaskBillingExtraContent = append([]string(nil), extraContent...)
-		return
 	}
 
 	if summary.WebSearchCallCount > 0 {
@@ -462,15 +459,19 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	if summary.TotalTokens == 0 {
 		extraContent = append(extraContent, "上游没有返回计费信息，无法扣费（可能是上游超时）")
 		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, summary.ModelName, relayInfo.FinalPreConsumedQuota))
-	} else {
+	} else if !relayInfo.DeferTaskBilling {
 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, summary.Quota)
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, summary.Quota)
 	}
 
-	settleErr := SettleBilling(ctx, relayInfo, summary.Quota)
-	if settleErr != nil {
-		logger.LogError(ctx, "error settling billing: "+settleErr.Error())
+	var settleErr error
+	if !relayInfo.DeferTaskBilling {
+		settleErr = SettleBilling(ctx, relayInfo, summary.Quota)
+		if settleErr != nil {
+			logger.LogError(ctx, "error settling billing: "+settleErr.Error())
+		}
 	}
+	var deferredMetricUsage *ChannelMetricUsage
 	if originUsage != nil && summary.TotalTokens > 0 {
 		cacheWriteTokens := cacheWriteTokensTotal(summary)
 		uncachedInputTokens := summary.PromptTokens
@@ -482,13 +483,18 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		if uncachedInputTokens < 0 {
 			uncachedInputTokens = 0
 		}
-		AttachChannelMetricUsageAfterSettlement(ctx, ChannelMetricUsage{
+		metricUsage := ChannelMetricUsage{
 			InputTokensTotal:    int64(uncachedInputTokens + summary.CacheTokens + cacheWriteTokens),
 			UncachedInputTokens: int64(uncachedInputTokens),
 			OutputTokens:        int64(summary.CompletionTokens),
 			CacheReadTokens:     int64(summary.CacheTokens),
 			CacheWriteTokens:    int64(cacheWriteTokens),
-		}, summary.Quota, settleErr)
+		}
+		if relayInfo.DeferTaskBilling {
+			deferredMetricUsage = &metricUsage
+		} else {
+			AttachChannelMetricUsageAfterSettlement(ctx, metricUsage, summary.Quota, settleErr)
+		}
 	}
 
 	logModel := summary.ModelName
@@ -584,7 +590,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	}
 	attachQuotaSaturation(ctx, relayInfo, other)
 
-	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
+	logParams := model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,
 		PromptTokens:     summary.PromptTokens,
 		CompletionTokens: summary.CompletionTokens,
@@ -597,7 +603,19 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		IsStream:         relayInfo.IsStream,
 		Group:            relayInfo.UsingGroup,
 		Other:            other,
-	})
+	}
+	if relayInfo.DeferTaskBilling {
+		settle := prepareDeferredImageSettlement(ctx, relayInfo, logParams, summary.TotalTokens > 0, deferredMetricUsage)
+		relayInfo.DeferredImageSettlement = func(c *gin.Context) error {
+			if err := settle(c); err != nil {
+				return err
+			}
+			gopool.Go(func() { perfmetrics.RecordRelaySample(relayInfo, true, int64(summary.CompletionTokens)) })
+			return nil
+		}
+		return
+	}
+	model.RecordConsumeLog(ctx, relayInfo.UserId, logParams)
 	gopool.Go(func() {
 		perfmetrics.RecordRelaySample(relayInfo, true, int64(summary.CompletionTokens))
 	})

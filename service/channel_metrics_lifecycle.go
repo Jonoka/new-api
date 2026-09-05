@@ -440,6 +440,12 @@ func classifyChannelMetricAttempt(c *gin.Context, info *relaycommon.RelayInfo, r
 	code := relayErr.GetErrorCode()
 	status := relayErr.StatusCode
 	switch code {
+	case types.ErrorCodeUpdateDataError:
+		stage := channelmetrics.ErrorStagePreUpstream
+		if upstreamStarted {
+			stage = channelmetrics.ErrorStageSettlement
+		}
+		return channelmetrics.OutcomeLocalError, channelmetrics.FailureOwnerGateway, stage, false
 	case types.ErrorCodeDoRequestFailed, types.ErrorCodeChannelResponseTimeExceeded:
 		return channelmetrics.OutcomeTransportError, channelmetrics.FailureOwnerChannel, channelmetrics.ErrorStageConnect, upstreamStarted
 	case types.ErrorCodeReadResponseBodyFailed, types.ErrorCodeBadResponse, types.ErrorCodeBadResponseBody, types.ErrorCodeEmptyResponse:

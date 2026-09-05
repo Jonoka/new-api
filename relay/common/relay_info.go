@@ -146,8 +146,9 @@ type RelayInfo struct {
 	// Async task controllers transfer the reservation to durable task accounting.
 	DeferTaskBilling        bool
 	TaskBillingActualQuota  *int
-	TaskBillingUsage        *dto.Usage
-	TaskBillingExtraContent []string
+	DeferredImageSettlement func(*gin.Context) error      `json:"-"`
+	AttachImageMetricUsage  func(int, error)              `json:"-"`
+	FinalizeImageMetrics    func(*types.NewAPIError, int) `json:"-"`
 	TaskBillingAttribution  *TaskBillingAttribution
 	// TaskSubmissionID and its lease token are internal durable reservation
 	// ownership. They are never derived from or returned as client task IDs.
@@ -461,7 +462,6 @@ func GenRelayInfoImage(c *gin.Context, request dto.Request) *RelayInfo {
 	info.RelayFormat = types.RelayFormatOpenAIImage
 	info.DeferTaskBilling = c.GetBool(ContextKeyDeferTaskBilling)
 	if info.DeferTaskBilling {
-		info.ForcePreConsume = true
 		info.TaskSubmissionID = c.GetString(ContextKeyTaskSubmissionID)
 		info.TaskSubmissionLeaseToken = c.GetString(ContextKeyTaskSubmissionLeaseToken)
 		if value, ok := c.Get(ContextKeyTaskSubmissionTaskRowID); ok {
@@ -472,6 +472,9 @@ func GenRelayInfoImage(c *gin.Context, request dto.Request) *RelayInfo {
 				info.TaskSubmissionTaskRowID = int64(taskRowID)
 			}
 		}
+		// Queued tasks require full admission. The shared synchronous image
+		// wrapper retains configured wallet trust; tasks_endpoint forces it later.
+		info.ForcePreConsume = info.TaskSubmissionTaskRowID > 0
 		info.EnsureTaskSubmissionIdentity()
 	}
 	return info

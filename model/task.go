@@ -451,6 +451,7 @@ func (Task *Task) Update() error {
 	query := DB.Model(Task)
 	if isTaskTerminal(Task.Status) {
 		query = query.Where("NOT EXISTS (?)", DB.Model(&TaskAccounting{}).Select("1").Where("task_row_id = ?", Task.ID))
+		query = query.Where("NOT EXISTS (?)", DB.Model(&TaskSubmission{}).Select("1").Where("task_row_id = ? AND state = ?", Task.ID, TaskSubmissionStateActive))
 	} else {
 		query = query.Where("NOT EXISTS (?)", DB.Model(&TaskAccounting{}).Select("1").Where("task_row_id = ? AND decision_id <> ?", Task.ID, ""))
 	}
@@ -491,6 +492,7 @@ func (t *Task) UpdateWithStatus(fromStatus TaskStatus) (bool, error) {
 	query := DB.Model(t).Where("status = ?", fromStatus)
 	if isTaskTerminal(t.Status) {
 		query = query.Where("NOT EXISTS (?)", DB.Model(&TaskAccounting{}).Select("1").Where("task_row_id = ?", t.ID))
+		query = query.Where("NOT EXISTS (?)", DB.Model(&TaskSubmission{}).Select("1").Where("task_row_id = ? AND state = ?", t.ID, TaskSubmissionStateActive))
 	} else {
 		query = query.Where("NOT EXISTS (?)", DB.Model(&TaskAccounting{}).Select("1").Where("task_row_id = ? AND decision_id <> ?", t.ID, ""))
 	}

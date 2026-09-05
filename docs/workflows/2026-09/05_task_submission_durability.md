@@ -97,6 +97,62 @@ A synchronous deferred image without an async task marks the journal
 refund. If the database remains unavailable, the caller does not infer commit
 outcome; the durable row is resolved by a later retry/recovery pass.
 
+## Folded legacy batch reconciliation contract
+
+Task reservation admission may fold pre-existing in-process wallet and token
+batch deltas into the same SQL transaction. The journal therefore has one
+additional additive nullable `TEXT` column,
+`folded_batch_operation_ids`, containing a JSON array of random internal
+operation UUIDs. `NULL` or an empty value means that no batch operation has
+been folded. An ID is appended in the same transaction only when that
+transaction actually folds a nonzero legacy batch delta. The array is
+immutable history across later reservation resizes and terminal journal
+states. It contains no quota values and no raw token keys.
+
+The corresponding quota values remain in an in-process parked registry only
+while a commit result is ambiguous. This does not make the pre-existing legacy
+batch queue crash-durable: process loss retains the same volatility boundary as
+the original queue. Within a live process, however, an extracted value is
+handled as follows:
+
+1. A Begin failure or transaction callback failure is a definite rollback.
+   The extracted wallet/token values are restored immediately without querying
+   the journal.
+2. A successful transaction body followed by a Commit error is ambiguous. The
+   extracted values are parked under the folded operation UUID before the
+   journal is queried.
+3. A readable journal containing that UUID proves commit, so the parked values
+   are discarded. A readable journal without it, including a missing row,
+   proves rollback, so the values are restored once. An unavailable read leaves
+   them parked and returns an error.
+4. Receipt lookup uses the immutable UUID array rather than
+   `last_operation_id`, so later reservation updates, transfer, settlement, or
+   release cannot erase proof of an earlier fold.
+
+`RecoverPendingTaskSubmissionBatches(ctx, limit)` performs bounded independent
+classification and is called by both the existing batch updater and task
+submission recovery pass. Before a critical reservation extracts new pending
+values, it also classifies every parked operation touching the same user or
+token. If any such operation remains unreadable, admission stops; its value is
+not omitted from the effective quota decision.
+
+Wallet and token SQL batch application use separate process-wide apply locks.
+Any path requiring both acquires `user quota apply` before `token quota apply`.
+After those locks, code may briefly acquire a batch-store lock or the parked
+registry lock, but never holds the registry lock across a database call and
+never acquires an apply lock while holding a store/registry lock. Token flush
+now retains the token apply lock from map detachment through SQL application,
+so a task reservation cannot race a detached in-flight token delta.
+
+The internal model surface added for this contract is:
+
+```go
+func RecoverPendingTaskSubmissionBatches(ctx context.Context, limit int) error
+```
+
+All newly admitted task reservation changes continue to execute directly in
+the journal transaction and never enter either legacy batch queue.
+
 ## Compatibility and rollback
 
 The migration is additive in normal and fast primary migration paths and uses
@@ -124,9 +180,12 @@ lease exclusion, same-identity resize, one-time expired wallet release,
 reset-epoch subscription release without a token, queued Canvas crash recovery,
 expiry versus late handoff/refund, exact owner replay after a simulated
 unobserved commit, no duplicate task/counters/log event/money, and definite
-rollback followed by one refund. Model fixtures use SQLite and opt into
-PostgreSQL/MySQL through `NEW_API_TEST_POSTGRES_DSN` and
-`NEW_API_TEST_MYSQL_DSN`.
+rollback followed by one refund. Pending-batch fixtures additionally use real
+transactions with injected pre-commit rollback and post-commit errors, an
+unavailable receipt read, later one-time classification after journal
+advancement, admission blocking, and coordinated token flush/admission. Model
+fixtures use SQLite and opt into PostgreSQL/MySQL through
+`NEW_API_TEST_POSTGRES_DSN` and `NEW_API_TEST_MYSQL_DSN`.
 
 No tests or builds are run on the production checkout. Formatting and diff
 checks are local; executable verification belongs to GitHub Actions.

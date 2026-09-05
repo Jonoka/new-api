@@ -104,6 +104,7 @@ func seedDurablyReservedWalletTask(t *testing.T, charged int) (*model.Task, *rel
 	}
 	info.ForcePreConsume = true
 	info.UserSetting.BillingPreference = "wallet_only"
+	info.UserSetting.QuotaWarningThreshold = 1
 	c := groupBillingContext(t)
 	require.Nil(t, PreConsumeBilling(c, charged, info))
 	task := model.InitTask("video", info)
@@ -306,6 +307,7 @@ func assertTaskAccountingSubscriptionWithoutToken(t *testing.T) {
 		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: channel.Id}, TaskRelayInfo: &relaycommon.TaskRelayInfo{Action: "generate"},
 		PriceData: types.PriceData{Quota: 1000, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1}}}
 	info.UserSetting.BillingPreference = "subscription_only"
+	info.UserSetting.QuotaWarningThreshold = 1
 	c := groupBillingContext(t)
 	require.Nil(t, PreConsumeBilling(c, 1000, info))
 	require.NoError(t, HandoffTaskBilling(c, info, task, "", 1000))

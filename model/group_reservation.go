@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 
@@ -85,31 +86,51 @@ func WithReconciledGroupReservation(req GroupReservationRequest, apply func(*gor
 		return nil, errors.New("requestId is empty")
 	}
 
-	lockUserBatch := req.Source == GroupReservationWallet
-	lockTokenBatch := !req.SkipTokenQuota
-	if lockUserBatch {
+	consumeUserBatch := req.Source == GroupReservationWallet
+	consumeTokenBatch := !req.SkipTokenQuota
+	if consumeUserBatch || consumeTokenBatch {
 		userQuotaBatchApplyLock.Lock()
 		defer userQuotaBatchApplyLock.Unlock()
-		batchUpdateLocks[BatchUpdateTypeUserQuota].Lock()
-		defer batchUpdateLocks[BatchUpdateTypeUserQuota].Unlock()
-	}
-	if lockTokenBatch {
-		batchUpdateLocks[BatchUpdateTypeTokenQuota].Lock()
-		defer batchUpdateLocks[BatchUpdateTypeTokenQuota].Unlock()
+		tokenQuotaBatchApplyLock.Lock()
+		defer tokenQuotaBatchApplyLock.Unlock()
+		recoverCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := recoverPendingTaskSubmissionBatchesForReservationLocked(recoverCtx, req.UserId, req.TokenId)
+		cancel()
+		if err != nil {
+			return nil, fmt.Errorf("reconcile pending task submission batch values: %w", err)
+		}
 	}
 
 	pendingUser := 0
-	if lockUserBatch {
+	if consumeUserBatch {
+		batchUpdateLocks[BatchUpdateTypeUserQuota].Lock()
 		pendingUser = batchUpdateStores[BatchUpdateTypeUserQuota][req.UserId]
 		delete(batchUpdateStores[BatchUpdateTypeUserQuota], req.UserId)
+		batchUpdateLocks[BatchUpdateTypeUserQuota].Unlock()
 	}
 	pendingToken := 0
-	if lockTokenBatch {
+	if consumeTokenBatch {
+		batchUpdateLocks[BatchUpdateTypeTokenQuota].Lock()
 		pendingToken = batchUpdateStores[BatchUpdateTypeTokenQuota][req.TokenId]
 		delete(batchUpdateStores[BatchUpdateTypeTokenQuota], req.TokenId)
+		batchUpdateLocks[BatchUpdateTypeTokenQuota].Unlock()
+	}
+
+	var pendingBatch pendingTaskSubmissionBatch
+	if req.SubmissionID != "" && (pendingUser != 0 || pendingToken != 0) {
+		pendingBatch = pendingTaskSubmissionBatch{
+			OperationID: common.GetUUID(), SubmissionID: req.SubmissionID,
+			UserID: req.UserId, TokenID: req.TokenId,
+			UserDelta: pendingUser, TokenDelta: pendingToken,
+		}
+		if err := parkTaskSubmissionBatch(pendingBatch); err != nil {
+			restorePendingTaskSubmissionBatchLocked(pendingBatch)
+			return nil, err
+		}
 	}
 
 	result := &GroupReservationResult{Reserved: req.TargetReserved}
+	transactionBodyCompleted := false
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var submission *TaskSubmission
 		if req.SubmissionID != "" {
@@ -143,25 +164,49 @@ func WithReconciledGroupReservation(req GroupReservationRequest, apply func(*gor
 			return err
 		}
 		if submission != nil {
-			if err := updateTaskSubmissionReservationTx(tx, submission, req, result, pendingUser != 0 || pendingToken != 0); err != nil {
+			if err := updateTaskSubmissionReservationTx(tx, submission, req, result, pendingBatch.OperationID); err != nil {
 				return err
 			}
 		}
 		if apply != nil {
-			return apply(tx, result)
+			if err := apply(tx, result); err != nil {
+				return err
+			}
 		}
+		transactionBodyCompleted = true
 		return nil
 	})
 	if err != nil {
-		restorePending := true
-		if req.SubmissionID != "" {
-			resolution, resolveErr := resolveTaskSubmissionReservationCommit(req)
+		if !transactionBodyCompleted {
+			if pendingBatch.OperationID != "" {
+				restorePendingTaskSubmissionBatchLocked(pendingBatch)
+			} else {
+				restorePendingBatchDeltas(req, pendingUser, pendingToken)
+			}
+			return nil, err
+		}
+
+		if pendingBatch.OperationID != "" {
+			resolveBatchCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			committed, resolveErr := resolvePendingTaskSubmissionBatchLocked(resolveBatchCtx, pendingBatch)
+			cancel()
 			if resolveErr != nil {
-				// An unavailable or conflicting durable journal cannot safely be
-				// classified as a rollback. Do not replay pulled deltas by guess.
-				restorePending = false
-			} else if resolution.Committed {
-				restorePending = false
+				return nil, err
+			}
+			if !committed {
+				return nil, err
+			}
+		} else if req.SubmissionID == "" {
+			// Non-journaled legacy reservations retain their existing volatility
+			// boundary; there is no durable identity with which to classify Commit.
+			restorePendingBatchDeltas(req, pendingUser, pendingToken)
+		}
+
+		if req.SubmissionID != "" {
+			resolveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			resolution, resolveErr := resolveTaskSubmissionReservationCommit(resolveCtx, req)
+			cancel()
+			if resolveErr == nil && resolution.Committed {
 				if resolution.CanReturn && apply == nil {
 					if cacheErr := ReconcileTaskSubmissionCache(context.Background(), req.SubmissionID); cacheErr != nil {
 						common.SysLog("failed to invalidate task submission quota cache after commit reconciliation: " + cacheErr.Error())
@@ -170,13 +215,10 @@ func WithReconciledGroupReservation(req GroupReservationRequest, apply func(*gor
 				}
 			}
 		}
-		if restorePending && pendingUser != 0 {
-			batchUpdateStores[BatchUpdateTypeUserQuota][req.UserId] += pendingUser
-		}
-		if restorePending && pendingToken != 0 {
-			batchUpdateStores[BatchUpdateTypeTokenQuota][req.TokenId] += pendingToken
-		}
 		return nil, err
+	}
+	if pendingBatch.OperationID != "" {
+		removePendingTaskSubmissionBatch(pendingBatch)
 	}
 
 	if req.Source == GroupReservationWallet && common.RedisEnabled {
@@ -195,6 +237,19 @@ func WithReconciledGroupReservation(req GroupReservationRequest, apply func(*gor
 		}
 	}
 	return result, nil
+}
+
+func restorePendingBatchDeltas(req GroupReservationRequest, pendingUser, pendingToken int) {
+	if pendingUser != 0 {
+		batchUpdateLocks[BatchUpdateTypeUserQuota].Lock()
+		batchUpdateStores[BatchUpdateTypeUserQuota][req.UserId] += pendingUser
+		batchUpdateLocks[BatchUpdateTypeUserQuota].Unlock()
+	}
+	if pendingToken != 0 {
+		batchUpdateLocks[BatchUpdateTypeTokenQuota].Lock()
+		batchUpdateStores[BatchUpdateTypeTokenQuota][req.TokenId] += pendingToken
+		batchUpdateLocks[BatchUpdateTypeTokenQuota].Unlock()
+	}
 }
 
 func reconcileWalletReservationTx(tx *gorm.DB, userId int, pendingDelta int, reservationDelta int, postConsume bool) error {
@@ -221,11 +276,11 @@ func reconcileTokenReservationTx(tx *gorm.DB, req GroupReservationRequest, pendi
 	}
 	var token Token
 	tokenTx := tx
-	if req.SubmissionID != "" && reservationDelta <= 0 {
+	if req.PostConsume || (req.SubmissionID != "" && reservationDelta <= 0) {
 		tokenTx = tx.Unscoped()
 	}
 	if err := lockForUpdate(tokenTx).Where("id = ?", req.TokenId).First(&token).Error; err != nil {
-		if reservationDelta <= 0 && errors.Is(err, gorm.ErrRecordNotFound) {
+		if (req.PostConsume || reservationDelta <= 0) && errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil
 		}
 		return err

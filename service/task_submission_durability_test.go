@@ -17,6 +17,36 @@ func resetTaskSubmissionDurabilityFixture(t *testing.T) {
 	resetTaskAccountingFixture(t, model.DB, model.LOG_DB)
 }
 
+func TestTaskSubmissionPostAcceptIncreaseSurvivesTokenDeletion(t *testing.T) {
+	for _, physical := range []bool{false, true} {
+		t.Run(map[bool]string{false: "soft_deleted", true: "removed"}[physical], func(t *testing.T) {
+			useTaskAccountingDB(t, serviceTestSQLite, serviceTestSQLite, "sqlite")
+			resetTaskSubmissionDurabilityFixture(t)
+			user, token, info, task := prepareTaskHandoff(t)
+			c := groupBillingContext(t)
+			require.Nil(t, ReconcileBillingReservation(c, 300, info))
+			deletion := model.DB
+			if physical {
+				deletion = deletion.Unscoped()
+			}
+			require.NoError(t, deletion.Delete(&model.Token{}, token.Id).Error)
+			require.NoError(t, HandoffTaskBilling(c, info, task, "", 500))
+			require.Positive(t, task.ID)
+			require.NoError(t, model.DB.First(user, user.Id).Error)
+			require.Equal(t, 500, user.Quota)
+			require.Equal(t, 500, user.UsedQuota)
+			require.Equal(t, 1, user.RequestCount)
+			if !physical {
+				var deleted model.Token
+				require.NoError(t, model.DB.Unscoped().First(&deleted, token.Id).Error)
+				require.True(t, deleted.DeletedAt.Valid)
+				require.Equal(t, 500, deleted.RemainQuota)
+				require.Equal(t, 500, deleted.UsedQuota)
+			}
+		})
+	}
+}
+
 func TestTaskSubmissionExactHandoffReplayAndTransferredRefundNoOp(t *testing.T) {
 	useTaskAccountingDB(t, serviceTestSQLite, serviceTestSQLite, "sqlite")
 	resetTaskSubmissionDurabilityFixture(t)

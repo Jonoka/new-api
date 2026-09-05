@@ -25,6 +25,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 const (
@@ -275,6 +276,14 @@ func runCanvasImageTaskRelayWithExecutor(
 			refundCanvasImageSubmit(liveRelayInfo)
 			failCanvasImageTask(task, fmt.Sprintf("image generation failed: %v", recovered), nil)
 		}
+		if liveRelayInfo != nil && liveRelayInfo.FinalizeImageMetrics != nil {
+			liveRelayInfo.PriceData.Quota = 0
+			finalErr := relayReq.Context.Err()
+			if finalErr == nil {
+				finalErr = errors.New("image request ended before durable completion")
+			}
+			finishImageMetricFinalization(liveRelayInfo, finalErr, http.StatusInternalServerError)
+		}
 	}()
 
 	now := time.Now().Unix()
@@ -407,6 +416,17 @@ func parseImageTaskAction(action string) (string, bool) {
 }
 
 func finishCanvasImageTask(task *model.Task, channelID int, recorder *httptest.ResponseRecorder, relayInfo *relaycommon.RelayInfo) {
+	var accountingErr error
+	defer func() {
+		status := recorder.Code
+		if accountingErr != nil {
+			status = http.StatusInternalServerError
+		}
+		if relayInfo != nil && task.Status == model.TaskStatusFailure && accountingErr == nil {
+			relayInfo.PriceData.Quota = 0
+		}
+		finishImageMetricFinalization(relayInfo, accountingErr, status)
+	}()
 	expectedStatus := task.Status
 	body := bytes.TrimSpace(recorder.Body.Bytes())
 	if recorder.Code >= http.StatusOK && recorder.Code < http.StatusMultipleChoices && relayInfo != nil && relayInfo.ChannelOtherSettings.ImageAsyncMode == dto.ImageAsyncModeTasksEndpoint {
@@ -434,6 +454,7 @@ func finishCanvasImageTask(task *model.Task, channelID int, recorder *httptest.R
 				chargedQuota = task.Quota
 			}
 			if err := service.HandoffTaskBilling(nil, relayInfo, task, expectedStatus, chargedQuota); err != nil {
+				accountingErr = err
 				common.SysError(fmt.Sprintf("canvas image async handoff update failed: task_id=%s err=%v", task.TaskID, err))
 				refundCanvasImageSubmit(relayInfo)
 				failCanvasImageTask(task, "failed to persist upstream async image task", body)
@@ -449,6 +470,7 @@ func finishCanvasImageTask(task *model.Task, channelID int, recorder *httptest.R
 				chargedQuota = task.Quota
 			}
 			if err := service.HandoffTaskBilling(nil, relayInfo, task, expectedStatus, chargedQuota); err != nil {
+				accountingErr = err
 				refundCanvasImageSubmit(relayInfo)
 				failCanvasImageTask(task, extractCanvasImageRelayError(body), body)
 				return
@@ -458,6 +480,7 @@ func finishCanvasImageTask(task *model.Task, channelID int, recorder *httptest.R
 			task.FinishTime = time.Now().Unix()
 			task.FailReason = extractCanvasImageRelayError(body)
 			if _, err := service.FinalizeTaskAccounting(context.Background(), task, expectedStatus, 0, task.FailReason); err != nil {
+				accountingErr = err
 				common.SysError(fmt.Sprintf("canvas terminal failure accounting failed: task_id=%s err=%v", task.TaskID, err))
 			}
 			return
@@ -491,6 +514,7 @@ func finishCanvasImageTask(task *model.Task, channelID int, recorder *httptest.R
 			chargedQuota = task.Quota
 		}
 		if err := service.HandoffTaskBilling(nil, relayInfo, task, expectedStatus, chargedQuota); err != nil {
+			accountingErr = err
 			common.SysError(fmt.Sprintf("failed to hand off image task %s: %v", task.TaskID, err))
 			refundCanvasImageSubmit(relayInfo)
 			failCanvasImageTask(task, "failed to persist image task billing", body)
@@ -509,8 +533,10 @@ func finishCanvasImageTask(task *model.Task, channelID int, recorder *httptest.R
 			finalQuota, reason = actualQuota, actualReason
 		}
 		if _, err := service.FinalizeTaskAccounting(context.Background(), task, expectedStatus, finalQuota, reason); err != nil {
+			accountingErr = err
 			common.SysError(fmt.Sprintf("failed to finish image task %s: %v", task.TaskID, err))
 		}
+		relayInfo.PriceData.Quota = task.Quota
 		return
 	}
 
@@ -649,10 +675,23 @@ func failCanvasImageTask(task *model.Task, reason string, body []byte) {
 	if len(body) > 0 {
 		task.Data = json.RawMessage(append([]byte(nil), body...))
 	}
-	if accounting, err := model.GetTaskAccounting(task.ID); err == nil && accounting.DecisionID == "" {
+	if _, err := model.GetTaskAccounting(task.ID); err == nil {
 		if _, finalizeErr := service.FinalizeTaskAccounting(context.Background(), task, expectedStatus, 0, reason); finalizeErr != nil {
 			common.SysError(fmt.Sprintf("failed to account image task failure %s: %v", task.TaskID, finalizeErr))
 		}
+		return
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		common.SysError(fmt.Sprintf("failed to read image task accounting %s: %v", task.TaskID, err))
+		return
+	}
+	if canonical, err := model.FailTaskSubmission(context.Background(), task.ID, task.UserId, reason); err == nil {
+		*task = *canonical
+		return
+	} else if !errors.Is(err, model.ErrTaskSubmissionNotFound) {
+		common.SysError(fmt.Sprintf("failed to release image task %s: %v", task.TaskID, err))
+		return
+	}
+	if task.Quota != 0 {
 		return
 	}
 	_, _ = task.UpdateWithStatus(expectedStatus)

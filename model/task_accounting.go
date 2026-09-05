@@ -52,6 +52,10 @@ type TaskAccounting struct {
 }
 
 type TaskAccountingLogFacts struct {
+	PromptTokens      int            `json:"prompt_tokens,omitempty"`
+	CompletionTokens  int            `json:"completion_tokens,omitempty"`
+	UseTimeSeconds    int            `json:"use_time_seconds,omitempty"`
+	IsStream          bool           `json:"is_stream,omitempty"`
 	UserID            int            `json:"user_id"`
 	Username          string         `json:"username,omitempty"`
 	TokenID           int            `json:"token_id,omitempty"`

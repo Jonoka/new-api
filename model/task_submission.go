@@ -40,6 +40,9 @@ type TaskSubmission struct {
 	State           string `json:"state" gorm:"type:varchar(20);not null;index:idx_task_submission_recovery,priority:1"`
 	LeaseToken      string `json:"lease_token" gorm:"type:varchar(64);not null"`
 	LastOperationID string `json:"last_operation_id" gorm:"type:varchar(64);not null;default:''"`
+	// FoldedBatchOperationIDs is immutable commit evidence for legacy in-memory
+	// batch values folded by reservation transactions. It never stores token keys.
+	FoldedBatchOperationIDs string `json:"-" gorm:"type:text"`
 
 	LeaseExpiresAt int64  `json:"lease_expires_at" gorm:"not null;index:idx_task_submission_recovery,priority:2"`
 	UserID         int    `json:"user_id" gorm:"not null;index"`
@@ -219,7 +222,7 @@ func prepareTaskSubmissionReservationTx(tx *gorm.DB, req GroupReservationRequest
 	return &submission, nil
 }
 
-func updateTaskSubmissionReservationTx(tx *gorm.DB, submission *TaskSubmission, req GroupReservationRequest, result *GroupReservationResult, foldedBatchDelta bool) error {
+func updateTaskSubmissionReservationTx(tx *gorm.DB, submission *TaskSubmission, req GroupReservationRequest, result *GroupReservationResult, foldedBatchOperationID string) error {
 	if submission == nil || result == nil {
 		return errors.New("task submission reservation result is required")
 	}
@@ -252,7 +255,14 @@ func updateTaskSubmissionReservationTx(tx *gorm.DB, submission *TaskSubmission, 
 		"updated_at":              now,
 		"last_operation_id":       req.SubmissionOperationID,
 	}
-	if result.Reserved != req.ExpectedReserved || foldedBatchDelta {
+	if foldedBatchOperationID != "" {
+		operationIDs, err := appendTaskSubmissionFoldedBatchOperationID(submission.FoldedBatchOperationIDs, foldedBatchOperationID)
+		if err != nil {
+			return err
+		}
+		updates["folded_batch_operation_ids"] = operationIDs
+	}
+	if result.Reserved != req.ExpectedReserved || foldedBatchOperationID != "" {
 		updates["cache_pending"] = true
 	}
 	switch req.SubmissionFinalState {
@@ -280,12 +290,42 @@ func updateTaskSubmissionReservationTx(tx *gorm.DB, submission *TaskSubmission, 
 	if query.RowsAffected != 1 {
 		return ErrTaskSubmissionConflict
 	}
+	if req.SubmissionFinalState == TaskSubmissionStateReleased && taskRowID != nil {
+		return failReleasedTaskSubmissionTx(tx, *taskRowID, submission.UserID, cleanTaskSubmissionReason(req.SubmissionFinalReason), now)
+	}
 	return nil
 }
 
-func resolveTaskSubmissionReservationCommit(req GroupReservationRequest) (*taskSubmissionReservationResolution, error) {
+func failReleasedTaskSubmissionTx(tx *gorm.DB, taskRowID int64, userID int, reason string, now int64) error {
+	var task Task
+	if err := lockForUpdate(tx).Where("id = ?", taskRowID).First(&task).Error; err != nil {
+		return err
+	}
+	if task.UserId != userID {
+		return ErrTaskSubmissionConflict
+	}
+	var owners int64
+	if err := tx.Model(&TaskAccounting{}).Where("task_row_id = ?", taskRowID).Count(&owners).Error; err != nil {
+		return err
+	}
+	if owners != 0 {
+		return ErrTaskSubmissionConflict
+	}
+	if isTaskTerminal(task.Status) {
+		return nil
+	}
+	if reason == "" {
+		reason = "image request ended before task handoff"
+	}
+	return tx.Model(&Task{}).Where("id = ?", taskRowID).Updates(map[string]any{
+		"status": TaskStatusFailure, "progress": "100%", "quota": 0,
+		"fail_reason": reason, "finish_time": now, "updated_at": now,
+	}).Error
+}
+
+func resolveTaskSubmissionReservationCommit(ctx context.Context, req GroupReservationRequest) (*taskSubmissionReservationResolution, error) {
 	var submission TaskSubmission
-	query := DB.Where("submission_id = ?", req.SubmissionID).Limit(1).Find(&submission)
+	query := DB.WithContext(ctx).Where("submission_id = ?", req.SubmissionID).Limit(1).Find(&submission)
 	if query.Error != nil {
 		return nil, query.Error
 	}
@@ -326,7 +366,7 @@ func resolveTaskSubmissionReservationCommit(req GroupReservationRequest) (*taskS
 	}
 	if submission.FundingSource == GroupReservationSubscription && submission.SubscriptionID > 0 {
 		var subscription UserSubscription
-		if err := DB.Where("id = ?", submission.SubscriptionID).First(&subscription).Error; err != nil {
+		if err := DB.WithContext(ctx).Where("id = ?", submission.SubscriptionID).First(&subscription).Error; err != nil {
 			return nil, err
 		}
 		resolution.Result.SubscriptionAmountTotal = subscription.AmountTotal
@@ -370,7 +410,7 @@ func EnsureZeroTaskSubmissionTx(tx *gorm.DB, req GroupReservationRequest) error 
 	if err != nil {
 		return err
 	}
-	return updateTaskSubmissionReservationTx(tx, submission, req, &GroupReservationResult{Reserved: 0}, false)
+	return updateTaskSubmissionReservationTx(tx, submission, req, &GroupReservationResult{Reserved: 0}, "")
 }
 
 // TransferTaskSubmissionTx moves the exact active reservation to the durable
@@ -514,12 +554,16 @@ func cleanTaskSubmissionReason(reason string) string {
 }
 
 func releaseExpiredTaskSubmissionTx(tx *gorm.DB, submissionID string) (*TaskSubmission, bool, error) {
+	return releaseTaskSubmissionTx(tx, submissionID, true, "submission lease expired before durable task handoff")
+}
+
+func releaseTaskSubmissionTx(tx *gorm.DB, submissionID string, expiredOnly bool, reason string) (*TaskSubmission, bool, error) {
 	var submission TaskSubmission
 	if err := lockForUpdate(tx).Where("submission_id = ?", submissionID).First(&submission).Error; err != nil {
 		return nil, false, err
 	}
 	now := getDBTimestampTx(tx)
-	if submission.State != TaskSubmissionStateActive || submission.LeaseExpiresAt > now {
+	if submission.State != TaskSubmissionStateActive || (expiredOnly && submission.LeaseExpiresAt > now) {
 		return &submission, false, nil
 	}
 	if submission.TaskRowID != nil {
@@ -568,7 +612,7 @@ func releaseExpiredTaskSubmissionTx(tx *gorm.DB, submissionID string) (*TaskSubm
 			}
 		}
 	}
-	reason := "submission lease expired before durable task handoff"
+	reason = cleanTaskSubmissionReason(reason)
 	if submission.TaskRowID != nil {
 		var task Task
 		if err := lockForUpdate(tx).Where("id = ?", *submission.TaskRowID).First(&task).Error; err != nil {
@@ -592,17 +636,20 @@ func releaseExpiredTaskSubmissionTx(tx *gorm.DB, submissionID string) (*TaskSubm
 	}
 	hadReservation := submission.ReservedQuota > 0
 	query := tx.Model(&TaskSubmission{}).
-		Where("submission_id = ? AND state = ? AND lease_token = ? AND lease_expires_at <= ?", submission.SubmissionID, TaskSubmissionStateActive, submission.LeaseToken, now).
-		Updates(map[string]any{
-			"state":            TaskSubmissionStateReleased,
-			"reserved_quota":   0,
-			"accepted_quota":   0,
-			"lease_expires_at": int64(0),
-			"released_at":      now,
-			"release_reason":   reason,
-			"cache_pending":    submission.ReservedQuota > 0,
-			"updated_at":       now,
-		})
+		Where("submission_id = ? AND state = ? AND lease_token = ?", submission.SubmissionID, TaskSubmissionStateActive, submission.LeaseToken)
+	if expiredOnly {
+		query = query.Where("lease_expires_at <= ?", now)
+	}
+	query = query.Updates(map[string]any{
+		"state":            TaskSubmissionStateReleased,
+		"reserved_quota":   0,
+		"accepted_quota":   0,
+		"lease_expires_at": int64(0),
+		"released_at":      now,
+		"release_reason":   reason,
+		"cache_pending":    submission.ReservedQuota > 0,
+		"updated_at":       now,
+	})
 	if query.Error != nil {
 		return nil, false, query.Error
 	}
@@ -624,6 +671,35 @@ func sameTaskSubmissionResetTime(left, right *int64) bool {
 		return left == nil && right == nil
 	}
 	return *left == *right
+}
+
+// FailTaskSubmission releases the durable reservation and publishes its known
+// Canvas task failure together, including zero-charge failures before execution.
+func FailTaskSubmission(ctx context.Context, taskRowID int64, userID int, reason string) (*Task, error) {
+	var canonical Task
+	err := DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var submission TaskSubmission
+		if err := lockForUpdate(tx).Where("task_row_id = ?", taskRowID).First(&submission).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrTaskSubmissionNotFound
+			}
+			return err
+		}
+		if submission.UserID != userID {
+			return ErrTaskSubmissionConflict
+		}
+		if submission.State != TaskSubmissionStateActive && submission.State != TaskSubmissionStateReleased {
+			return taskSubmissionStateError(submission.State)
+		}
+		if _, _, err := releaseTaskSubmissionTx(tx, submission.SubmissionID, false, reason); err != nil {
+			return err
+		}
+		return tx.First(&canonical, taskRowID).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &canonical, nil
 }
 
 func releaseTaskSubmissionTokenTx(tx *gorm.DB, tokenID, reservedQuota int) error {
@@ -658,15 +734,21 @@ func RecoverExpiredTaskSubmissions(ctx context.Context, limit int) error {
 	if limit <= 0 {
 		limit = 100
 	}
+	firstErr := RecoverPendingTaskSubmissionBatches(ctx, limit)
 	now := getDBTimestampTx(DB.WithContext(ctx))
 	var ids []string
 	if err := DB.WithContext(ctx).Model(&TaskSubmission{}).
 		Where("state = ? AND lease_expires_at <= ?", TaskSubmissionStateActive, now).
 		Order("lease_expires_at asc").Limit(limit).Pluck("submission_id", &ids).Error; err != nil {
-		return err
+		if firstErr == nil {
+			firstErr = err
+		}
+		return firstErr
 	}
-	var firstErr error
 	for _, submissionID := range ids {
+		if hasPendingTaskSubmissionBatch(submissionID) {
+			continue
+		}
 		if err := DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			_, _, err := releaseExpiredTaskSubmissionTx(tx, submissionID)
 			return err

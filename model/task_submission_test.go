@@ -87,13 +87,44 @@ func TestTaskSubmissionQueuedTaskCrashFailsAtomically(t *testing.T) {
 
 	var stored Task
 	require.NoError(t, db.First(&stored, task.ID).Error)
-	require.Equal(t, TaskStatusFailure, stored.Status)
+	require.EqualValues(t, TaskStatusFailure, stored.Status)
 	require.Contains(t, stored.FailReason, "submission lease expired")
 	submission, err := GetTaskSubmission(submissionID)
 	require.NoError(t, err)
 	require.Equal(t, TaskSubmissionStateReleased, submission.State)
 	require.NotNil(t, submission.TaskRowID)
 	require.Equal(t, task.ID, *submission.TaskRowID)
+}
+
+func TestTaskSubmissionLiveReleaseAlsoFinishesCanvasRow(t *testing.T) {
+	for _, fixture := range groupReservationDatabases(t) {
+		t.Run(fixture.name, func(t *testing.T) {
+			db := useGroupReservationDatabase(t, fixture)
+			require.NoError(t, db.AutoMigrate(&Task{}, &TaskSubmission{}, &TaskAccounting{}))
+			user, token := seedGroupReservationWallet(t, db, common.GetUUID(), 1000, 1000)
+			task := &Task{TaskID: GenerateTaskID(), Platform: constant.TaskPlatformCanvasImage, UserId: user.Id, Status: TaskStatusQueued}
+			submissionID, leaseToken := common.GetUUID(), common.GetUUID()
+			require.NoError(t, CreateQueuedTaskSubmission(task, submissionID, leaseToken))
+			req := GroupReservationRequest{Source: GroupReservationWallet, UserId: user.Id, TokenId: token.Id, TokenKey: token.Key, TargetReserved: 200,
+				SubmissionID: submissionID, SubmissionLeaseToken: leaseToken, SubmissionTaskRowID: task.ID}
+			_, err := ReconcileGroupReservation(req)
+			require.NoError(t, err)
+			req.ExpectedReserved, req.TargetReserved = 200, 0
+			req.PostConsume, req.SubmissionFinalState, req.SubmissionFinalReason = true, TaskSubmissionStateReleased, "submit failed"
+			_, err = ReconcileGroupReservation(req)
+			require.NoError(t, err)
+			// No subsequent controller write or timeout sweep is needed.
+			require.NoError(t, db.First(task, task.ID).Error)
+			require.EqualValues(t, TaskStatusFailure, task.Status)
+			require.Equal(t, "submit failed", task.FailReason)
+			require.Zero(t, task.Quota)
+			require.NoError(t, RecoverExpiredTaskSubmissions(context.Background(), 100))
+			quota, remain, used := readGroupReservationBalances(t, db, user.Id, token.Id)
+			require.Equal(t, 1000, quota)
+			require.Equal(t, 1000, remain)
+			require.Zero(t, used)
+		})
+	}
 }
 
 func TestTaskSubmissionRecoveryKeepsSoftDeletedTokenDeleted(t *testing.T) {

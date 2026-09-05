@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -85,6 +86,9 @@ func (u *finalGroupRelayUpstream) balanceSamples() []finalGroupRelayBalance {
 
 func setupFinalGroupRelayDB(t *testing.T) *gorm.DB {
 	t.Helper()
+	if service.GetHttpClient() == nil {
+		service.InitHttpClient()
+	}
 
 	oldDB, oldLogDB := model.DB, model.LOG_DB
 	oldSQLite, oldMySQL, oldPostgres := common.UsingSQLite, common.UsingMySQL, common.UsingPostgreSQL
@@ -190,7 +194,7 @@ func finalGroupRelayContext(t *testing.T, user *model.User, token *model.Token, 
 	common.SetContextKey(c, constant.ContextKeyUserQuota, user.Quota)
 	common.SetContextKey(c, constant.ContextKeyUserGroup, "default")
 	common.SetContextKey(c, constant.ContextKeyUsingGroup, firstGroup)
-	common.SetContextKey(c, constant.ContextKeyUserSetting, dto.UserSetting{BillingPreference: "wallet_only"})
+	common.SetContextKey(c, constant.ContextKeyUserSetting, dto.UserSetting{BillingPreference: "wallet_only", QuotaWarningThreshold: 1})
 	common.SetContextKey(c, constant.ContextKeyTokenId, token.Id)
 	common.SetContextKey(c, constant.ContextKeyTokenKey, token.Key)
 	common.SetContextKey(c, constant.ContextKeyTokenGroup, tokenGroup)
@@ -318,7 +322,11 @@ func TestFinalGroupRelayControllerRetryAdmissionAndSettlement(t *testing.T) {
 			} else {
 				require.Equal(t, firstChannel.Id, info.ChannelId)
 			}
-			require.Equal(t, []string{strconv.Itoa(firstChannel.Id), strconv.Itoa(secondChannel.Id)}, c.GetStringSlice("use_channel"))
+			usedChannels := []string{strconv.Itoa(firstChannel.Id)}
+			if test.wantSecondCalls > 0 {
+				usedChannels = append(usedChannels, strconv.Itoa(secondChannel.Id))
+			}
+			require.Equal(t, usedChannels, c.GetStringSlice("use_channel"))
 
 			gotUser, gotToken, gotFirstChannel, gotSecondChannel := readFinalGroupRelayState(t, db, user.Id, token.Id, firstChannel.Id, secondChannel.Id)
 			require.Equal(t, test.initialQuota-test.wantFinalQuota, gotUser.Quota)
