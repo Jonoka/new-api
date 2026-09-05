@@ -588,7 +588,8 @@ function VisualTierCard({
     return unitCostToPrice((tier[fieldKey] as number | undefined) ?? 0) > 0
   })
   const [mediaOpen, setMediaOpen] = useState(hasMediaPricing)
-  const [previousHasMediaPricing, setPreviousHasMediaPricing] = useState(hasMediaPricing)
+  const [previousHasMediaPricing, setPreviousHasMediaPricing] =
+    useState(hasMediaPricing)
   if (hasMediaPricing !== previousHasMediaPricing) {
     setPreviousHasMediaPricing(hasMediaPricing)
     if (hasMediaPricing) setMediaOpen(true)
