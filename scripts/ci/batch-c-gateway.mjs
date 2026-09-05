@@ -39,7 +39,7 @@ try {
   const body = (extra = '') => '{"model":"c-alpha-public","input":"fixture","opaque":9007199254740993,"zero":0,"flag":false,"null":null' + extra + '}';
   const request = (raw, authenticated = true) => fetch('http://127.0.0.1:3000/v1/alpha/search', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(authenticated ? { Authorization: 'Bearer sk-c-alpha-synthetic-token' } : {}) },
+    headers: { 'Content-Type': 'application/json', ...(authenticated ? { Authorization: 'Bearer sk-calphasynthetictoken' } : {}) },
     body: raw,
     signal: AbortSignal.timeout(20000),
   });

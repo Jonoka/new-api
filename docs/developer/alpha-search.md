@@ -19,16 +19,17 @@ supported. The gateway must actually implement Alpha; model listing or Responses
 support alone does not establish this. Existing channels need no type conversion.
 
 The pinned Codex client `rust-v0.144.1` expects JSON `output` (string) and optional
-`encrypted_output` (string). Empty output is a valid no-result response. A bounded
-validated response is forwarded intact, including unknown fields, only after
-settlement. HTML, malformed JSON, error objects and empty bodies cannot count as
-success. No redirects are followed for Alpha. No Responses conversion, SSE or
-synthetic token usage is introduced.
+`encrypted_output` (string). Empty output is a valid no-result response. The relay
+reads at most 8 MiB plus one sentinel byte, rejects larger responses, and forwards
+the validated raw bytes intact, including unknown fields, only after settlement.
+This bound is intentionally far below the existing 128 MiB request default while
+leaving room for the pinned client's two string fields. HTML, malformed JSON,
+error objects and empty bodies cannot count as success. Only the safe upstream
+Content-Type is retained; Content-Length is recalculated. No redirects are followed
+for Alpha. No Responses conversion, SSE or synthetic token usage is introduced.
 
-Both success and error bodies are capped at 8 MiB. This is an endpoint-specific
-memory bound, below the existing 128 MiB default request limit; actual provider
-result sizes remain unverified until the approved canary. Successful JSON uses
-`Content-Type: application/json`. Parameter overrides cannot enable streaming.
+Both success and error bodies use this cap. Actual provider result sizes remain
+unverified until the approved canary. Parameter overrides cannot enable streaming.
 
 ## Accounting
 

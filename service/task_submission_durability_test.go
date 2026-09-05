@@ -183,7 +183,7 @@ func TestTaskSubmissionExpiryVersusLateHandoff(t *testing.T) {
 		require.Zero(t, used)
 		var storedTask model.Task
 		require.NoError(t, model.DB.First(&storedTask, task.ID).Error)
-		require.Equal(t, model.TaskStatusFailure, storedTask.Status)
+		require.Equal(t, model.TaskStatus(model.TaskStatusFailure), storedTask.Status)
 	default:
 		t.Fatalf("unexpected submission state after race: %s", submission.State)
 	}

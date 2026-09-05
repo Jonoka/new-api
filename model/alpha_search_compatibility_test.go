@@ -17,7 +17,7 @@ func TestAlphaSearchCompatibilitySeed(t *testing.T) {
 		Status: common.UserStatusEnabled, Group: "default", AffCode: "c-alpha-user"}
 	user.SetSetting(dto.UserSetting{BillingPreference: "wallet_only", QuotaWarningThreshold: 1})
 	require.NoError(t, db.Create(user).Error)
-	token := &Token{UserId: user.Id, Key: "c-alpha-synthetic-token", Name: "c-alpha-token",
+	token := &Token{UserId: user.Id, Key: "calphasynthetictoken", Name: "c-alpha-token",
 		Status: common.TokenStatusEnabled, RemainQuota: 100000, Group: "default",
 		ModelLimitsEnabled: true, ModelLimits: "c-alpha-public"}
 	require.NoError(t, db.Create(token).Error)
