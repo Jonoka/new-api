@@ -30,6 +30,7 @@ func TestCodexAlphaSearchRequestURL(t *testing.T) {
 func TestCodexAlphaSearchUsesOAuthHeadersAndJSON(t *testing.T) {
 	c := newCodexHeaderTestContext()
 	c.Request.URL.Path = "/v1/alpha/search"
+	c.Request.Header.Set("Accept", "text/event-stream")
 	info := &relaycommon.RelayInfo{
 		RelayMode: relayconstant.RelayModeAlphaSearch,
 		ChannelMeta: &relaycommon.ChannelMeta{
@@ -42,6 +43,8 @@ func TestCodexAlphaSearchUsesOAuthHeadersAndJSON(t *testing.T) {
 	require.Equal(t, "account-id", headers.Get("chatgpt-account-id"))
 	require.Equal(t, "application/json", headers.Get("Content-Type"))
 	require.Equal(t, "application/json", headers.Get("Accept"))
+	require.Equal(t, defaultOpenAIBetaHeaderValue, headers.Get("OpenAI-Beta"))
+	require.Equal(t, defaultCodexOriginatorHeaderValue, headers.Get("Originator"))
 }
 
 func newCodexHeaderTestContext() *gin.Context {

@@ -47,9 +47,9 @@ func alphaSearchBillingFixture(t *testing.T, userQuota, tokenQuota int) (*gin.Co
 	c.Set("token_quota", tokenQuota)
 	info := &relaycommon.RelayInfo{
 		UserId: user.Id, UserQuota: user.Quota, TokenId: token.Id, TokenKey: token.Key,
-		OriginModelName: "gpt-4.1-alpha", UpstreamModelName: "mapped-alpha",
-		UsingGroup: "paid", UserGroup: "default", RequestId: c.GetString(common.RequestIdKey),
-		StartTime: time.Now().Add(-time.Second), ChannelMeta: &relaycommon.ChannelMeta{ChannelId: channel.Id, IsModelMapped: true},
+		OriginModelName: "gpt-4.1-alpha",
+		UsingGroup:      "paid", UserGroup: "default", RequestId: c.GetString(common.RequestIdKey),
+		StartTime: time.Now().Add(-time.Second), ChannelMeta: &relaycommon.ChannelMeta{ChannelId: channel.Id, UpstreamModelName: "mapped-alpha", IsModelMapped: true},
 		UserSetting: dto.UserSetting{BillingPreference: "wallet_only", QuotaWarningThreshold: 1},
 	}
 	return c, info, user, token, channel
@@ -181,6 +181,40 @@ func TestAlphaSearchBillingPositiveToolPriceWithFreeGroupStillCounts(t *testing.
 	require.Equal(t, 1000, storedToken.RemainQuota)
 	require.Zero(t, storedToken.UsedQuota)
 	require.Zero(t, storedChannel.UsedQuota)
+}
+
+func TestAlphaSearchBillingZeroToPaidRetryReselectsFunding(t *testing.T) {
+	c, info, user, token, channel := alphaSearchBillingFixture(t, 1, 1_000_000)
+	info.UserSetting.BillingPreference = "wallet_first"
+	plan := &model.SubscriptionPlan{Title: fmt.Sprintf("alpha-retry-%d", time.Now().UnixNano()), DurationUnit: model.SubscriptionDurationMonth, DurationValue: 1, Enabled: true, TotalAmount: 1_000_000, QuotaResetPeriod: model.SubscriptionResetNever}
+	require.NoError(t, model.DB.Create(plan).Error)
+	model.InvalidateSubscriptionPlanCache(plan.Id)
+	sub := &model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: 1_000_000, StartTime: time.Now().Add(-time.Hour).Unix(), EndTime: time.Now().Add(time.Hour).Unix(), Status: "active"}
+	require.NoError(t, model.DB.Create(sub).Error)
+
+	require.Nil(t, AdmitAlphaSearchBilling(c, info, types.GroupRatioInfo{GroupRatio: 0}, nil))
+	zeroSubmissionID := info.TaskSubmissionID
+	require.Equal(t, BillingSourceWallet, info.BillingSource)
+	info.UsingGroup = "paid-final"
+	require.Nil(t, AdmitAlphaSearchBilling(c, info, types.GroupRatioInfo{GroupRatio: 1}, nil))
+	require.NotEqual(t, zeroSubmissionID, info.TaskSubmissionID)
+	require.Equal(t, BillingSourceSubscription, info.BillingSource)
+	require.NoError(t, SettleAlphaSearchBilling(c, info))
+
+	storedUser, storedToken, storedChannel := readAlphaBalances(t, user.Id, token.Id, channel.Id)
+	expected := alphaExpectedQuota(t, info.OriginModelName, 1, nil)
+	require.Equal(t, 1, storedUser.Quota)
+	require.Equal(t, expected, storedUser.UsedQuota)
+	require.Equal(t, 1, storedUser.RequestCount)
+	require.Equal(t, 1_000_000-expected, storedToken.RemainQuota)
+	require.Equal(t, expected, storedToken.UsedQuota)
+	require.EqualValues(t, expected, storedChannel.UsedQuota)
+	var storedSub model.UserSubscription
+	require.NoError(t, model.DB.First(&storedSub, sub.Id).Error)
+	require.EqualValues(t, expected, storedSub.AmountUsed)
+	var zeroSubmission model.TaskSubmission
+	require.NoError(t, model.DB.Where("submission_id = ?", zeroSubmissionID).Take(&zeroSubmission).Error)
+	require.Equal(t, model.TaskSubmissionStateReleased, zeroSubmission.State)
 }
 
 func TestAlphaSearchBillingRejectsInsufficientFundsBeforeAdmission(t *testing.T) {
@@ -321,6 +355,17 @@ func TestAlphaSearchBillingExternalDatabases(t *testing.T) {
 			require.Equal(t, 1, storedUser.RequestCount)
 			require.Equal(t, expected, storedToken.UsedQuota)
 			require.EqualValues(t, expected, storedChannel.UsedQuota)
+
+			freeContext, freeInfo, freeUser, freeToken, freeChannel := alphaSearchBillingFixture(t, 1000, 1000)
+			require.Nil(t, AdmitAlphaSearchBilling(freeContext, freeInfo, types.GroupRatioInfo{GroupRatio: 0}, nil))
+			require.NoError(t, SettleAlphaSearchBilling(freeContext, freeInfo))
+			storedUser, storedToken, storedChannel = readAlphaBalances(t, freeUser.Id, freeToken.Id, freeChannel.Id)
+			require.Equal(t, 1000, storedUser.Quota)
+			require.Equal(t, 1, storedUser.RequestCount)
+			require.Zero(t, storedUser.UsedQuota)
+			require.Equal(t, 1000, storedToken.RemainQuota)
+			require.Zero(t, storedToken.UsedQuota)
+			require.Zero(t, storedChannel.UsedQuota)
 		})
 	}
 }

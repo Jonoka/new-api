@@ -12,6 +12,8 @@ func CompleteAlphaSearchSubmissionTx(tx *gorm.DB, submissionID string, facts Tas
 	return completeSynchronousSubmissionTx(tx, submissionID, "alpha_search", facts, true)
 }
 
+// ResolveAlphaSearchSettlement classifies an ambiguous final transaction from
+// the durable submission receipt without replaying money or counters.
 func ResolveAlphaSearchSettlement(ctx context.Context, req GroupReservationRequest) (*GroupReservationResult, error) {
 	return resolveSynchronousSubmissionSettlement(ctx, req)
 }

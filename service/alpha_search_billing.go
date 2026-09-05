@@ -32,6 +32,8 @@ type alphaSearchBillingState struct {
 	toolPrice      float64
 	toolRatios     map[string]float64
 	quota          int
+	fundingChosen  bool
+	settled        bool
 }
 
 // AdmitAlphaSearchBilling prices and reserves exactly one configured search
@@ -44,6 +46,11 @@ func AdmitAlphaSearchBilling(c *gin.Context, info *relaycommon.RelayInfo, groupR
 	state, err := calculateAlphaSearchBilling(info.OriginModelName, info.UsingGroup, groupRatioInfo, toolMultipliers)
 	if err != nil {
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeModelPriceError, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
+	previous, _ := c.Get(alphaSearchBillingStateKey)
+	previousState, _ := previous.(*alphaSearchBillingState)
+	if previousState != nil {
+		state.fundingChosen = previousState.fundingChosen
 	}
 
 	info.ForcePreConsume = true
@@ -59,14 +66,32 @@ func AdmitAlphaSearchBilling(c *gin.Context, info *relaycommon.RelayInfo, groupR
 			"alpha_search_price_per_1k": strconv.FormatFloat(state.toolPrice, 'f', -1, 64),
 		},
 	}
-	c.Set(alphaSearchBillingStateKey, state)
-
 	if info.Billing == nil {
 		session, apiErr := newBillingSession(c, info, state.quota, true)
 		if apiErr != nil {
 			return apiErr
 		}
 		info.Billing = session
+		state.fundingChosen = state.quota > 0
+		c.Set(alphaSearchBillingStateKey, state)
+		return nil
+	}
+	if state.quota > 0 && !state.fundingChosen {
+		// A zero first attempt has not proven that its provisional funding
+		// source can cover a paid retry. Close the zero journal and run normal
+		// preference/fallback selection against the paid target.
+		info.Billing.Refund(c)
+		if info.Billing.NeedsRefund() {
+			return types.NewError(errors.New("failed to close zero alpha search reservation"), types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
+		}
+		resetAlphaSearchBillingSession(info)
+		session, apiErr := newBillingSession(c, info, state.quota, true)
+		if apiErr != nil {
+			return apiErr
+		}
+		info.Billing = session
+		state.fundingChosen = true
+		c.Set(alphaSearchBillingStateKey, state)
 		return nil
 	}
 	if err := info.Billing.Reserve(state.quota); err != nil {
@@ -76,7 +101,27 @@ func AdmitAlphaSearchBilling(c *gin.Context, info *relaycommon.RelayInfo, groupR
 		}
 		return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
 	}
+	if state.quota > 0 {
+		state.fundingChosen = true
+	}
+	c.Set(alphaSearchBillingStateKey, state)
 	return nil
+}
+
+func resetAlphaSearchBillingSession(info *relaycommon.RelayInfo) {
+	info.Billing = nil
+	info.FinalPreConsumedQuota = 0
+	info.BillingSource = ""
+	info.SubscriptionId = 0
+	info.SubscriptionPreConsumed = 0
+	info.SubscriptionPostDelta = 0
+	info.SubscriptionAmountTotal = 0
+	info.SubscriptionAmountUsedAfterPreConsume = 0
+	info.SubscriptionPlanId = 0
+	info.SubscriptionPlanTitle = ""
+	info.TaskSubmissionID = ""
+	info.TaskSubmissionLeaseToken = ""
+	info.TaskSubmissionTaskRowID = 0
 }
 
 func calculateAlphaSearchBilling(modelName, group string, groupRatioInfo types.GroupRatioInfo, toolMultipliers map[string]float64) (*alphaSearchBillingState, error) {
@@ -134,6 +179,9 @@ func SettleAlphaSearchBilling(c *gin.Context, info *relaycommon.RelayInfo) error
 	if !ok || state == nil || state.modelName != info.OriginModelName || state.group != info.UsingGroup {
 		return errors.New("alpha search billing state does not match the final attempt")
 	}
+	if state.settled {
+		return nil
+	}
 	if info.Billing == nil {
 		return errors.New("alpha search billing reservation is missing")
 	}
@@ -143,6 +191,7 @@ func SettleAlphaSearchBilling(c *gin.Context, info *relaycommon.RelayInfo) error
 	if err != nil {
 		return err
 	}
+	state.settled = true
 	recordTextPerformanceSample(info, 0)
 	return nil
 }

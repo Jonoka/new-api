@@ -32,6 +32,7 @@ func TestAlphaSearchGatewayUsesBearerKey(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", nil)
 	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("Accept", "text/event-stream")
 	info := &relaycommon.RelayInfo{
 		RelayMode: relayconstant.RelayModeAlphaSearch,
 		ChannelMeta: &relaycommon.ChannelMeta{
@@ -43,4 +44,6 @@ func TestAlphaSearchGatewayUsesBearerKey(t *testing.T) {
 	require.NoError(t, (&Adaptor{}).SetupRequestHeader(c, &headers, info))
 	require.Equal(t, "Bearer gateway-key", headers.Get("Authorization"))
 	require.Empty(t, headers.Get("chatgpt-account-id"))
+	require.Equal(t, "application/json", headers.Get("Content-Type"))
+	require.Equal(t, "application/json", headers.Get("Accept"))
 }

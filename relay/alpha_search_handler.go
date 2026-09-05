@@ -83,6 +83,9 @@ func AlphaSearchHelper(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAP
 	if !ok || httpResponse == nil {
 		return types.NewOpenAIError(errors.New("invalid upstream response"), types.ErrorCodeBadResponse, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
 	}
+	if httpResponse.Body == nil {
+		return types.NewOpenAIError(errors.New("alpha search upstream response body is missing"), types.ErrorCodeBadResponseBody, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
+	}
 	defer httpResponse.Body.Close()
 	responseBody, err := readBoundedAlphaSearchResponse(httpResponse.Body)
 	if err != nil {
@@ -106,7 +109,11 @@ func AlphaSearchHelper(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAP
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeUpdateDataError, http.StatusInternalServerError, types.ErrOptionWithSkipRetry())
 	}
 
-	c.Writer.Header().Set("Content-Type", "application/json")
+	contentType := httpResponse.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/json"
+	}
+	c.Writer.Header().Set("Content-Type", contentType)
 	c.Writer.Header().Set("Content-Length", strconv.Itoa(len(responseBody)))
 	c.Writer.WriteHeader(httpResponse.StatusCode)
 	if _, err := c.Writer.Write(responseBody); err != nil {

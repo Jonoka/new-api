@@ -69,6 +69,7 @@ func TestAlphaSearchMappingRebuildsEachAttemptFromOriginalBody(t *testing.T) {
 
 func TestValidateAlphaSearchMappedModelRejectsConflictingOverride(t *testing.T) {
 	require.NoError(t, validateAlphaSearchMappedModel([]byte(`{"model":"mapped","future":true}`), "mapped"))
+	require.NoError(t, validateAlphaSearchMappedModel([]byte(`{"model":"mapped","stream":false}`), "mapped"))
 	for _, body := range []string{
 		`{"model":"other"}`,
 		`{"model":57}`,

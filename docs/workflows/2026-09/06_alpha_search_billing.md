@@ -36,8 +36,10 @@ reservation.
 A zero tool price or zero effective group ratio remains a successful request. It
 creates a durable zero-value billing journal so request count and a zero-quota
 consume log still commit exactly once. Subscription funding does not create or
-charge a subscription pre-consume row for such a request. A later paid retry may
-resize the same zero journal and select the configured funding source normally.
+charge a subscription pre-consume row for such a request. If a later retry is
+paid, the zero journal is released and admission re-runs the configured funding
+preference and fallback against the paid target before upstream I/O. A prior paid
+reservation that later reaches zero keeps its established funding owner.
 
 The Alpha log records zero prompt and completion tokens, the original model, final
 mapped model, selected channel/group, one `web_search_preview` call, configured
