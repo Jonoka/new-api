@@ -959,6 +959,7 @@ func RelayTask(c *gin.Context) {
 		})
 		return
 	}
+	service.EnsureTaskSubmissionIdentity(relayInfo)
 	common.SetContextKey(c, constant.ContextKeyRelayInfo, relayInfo)
 	service.BindChannelMetricRelayInfo(c, relayInfo)
 

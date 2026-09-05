@@ -51,15 +51,16 @@ func TestMain(m *testing.M) {
 func migrateTaskAccountingFixture(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&model.Task{}, &model.TaskAccounting{}, &model.TaskAccountingEvent{},
+		&model.TaskSubmission{},
 		&model.TaskAccountingLogReceipt{}, &model.User{}, &model.Token{},
 		&model.Channel{}, &model.Log{}, &model.UserSubscription{},
-		&model.SubscriptionPreConsumeRecord{},
+		&model.SubscriptionPlan{}, &model.SubscriptionPreConsumeRecord{},
 	)
 }
 
 func resetTaskAccountingFixture(t *testing.T, db, logDB *gorm.DB) {
 	t.Helper()
-	for _, value := range []any{&model.TaskAccountingLogReceipt{}, &model.TaskAccountingEvent{}, &model.TaskAccounting{}, &model.Task{}, &model.Token{}, &model.Channel{}, &model.SubscriptionPreConsumeRecord{}, &model.UserSubscription{}, &model.User{}} {
+	for _, value := range []any{&model.TaskSubmission{}, &model.TaskAccountingLogReceipt{}, &model.TaskAccountingEvent{}, &model.TaskAccounting{}, &model.Task{}, &model.Token{}, &model.Channel{}, &model.SubscriptionPreConsumeRecord{}, &model.UserSubscription{}, &model.User{}} {
 		require.NoError(t, db.Unscoped().Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(value).Error)
 	}
 	if logDB != db {
@@ -88,23 +89,23 @@ func useTaskAccountingDB(t *testing.T, db, logDB *gorm.DB, dialect string) {
 
 func seedDurablyReservedWalletTask(t *testing.T, charged int) (*model.Task, *relaycommon.RelayInfo) {
 	t.Helper()
-	user := &model.User{Username: "acct-user", Quota: 10000 - charged, Status: common.UserStatusEnabled}
+	user := &model.User{Username: "acct-user", Quota: 10000, Status: common.UserStatusEnabled}
 	require.NoError(t, model.DB.Create(user).Error)
-	token := &model.Token{UserId: user.Id, Key: "acct-token-key", Name: "acct-token", Status: common.TokenStatusEnabled, RemainQuota: 10000 - charged, UsedQuota: charged}
+	token := &model.Token{UserId: user.Id, Key: "acct-token-key", Name: "acct-token", Status: common.TokenStatusEnabled, RemainQuota: 10000}
 	require.NoError(t, model.DB.Create(token).Error)
 	channel := &model.Channel{Name: "acct-channel", Key: "provider-key", Status: common.ChannelStatusEnabled}
 	require.NoError(t, model.DB.Create(channel).Error)
 	info := &relaycommon.RelayInfo{
 		UserId: user.Id, TokenId: token.Id, TokenKey: token.Key, UsingGroup: "default",
 		OriginModelName: "async-model", RequestId: common.GetUUID(),
-		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: channel.Id},
-		PriceData:   types.PriceData{Quota: charged, ModelRatio: 1, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1}},
+		ChannelMeta:   &relaycommon.ChannelMeta{ChannelId: channel.Id},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{Action: "generate"},
+		PriceData:     types.PriceData{Quota: charged, ModelRatio: 1, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1}},
 	}
-	info.BillingSource = BillingSourceWallet
-	info.Billing = &BillingSession{
-		relayInfo: info, funding: &WalletFunding{userId: user.Id, consumed: charged},
-		preConsumedQuota: charged, tokenConsumed: charged,
-	}
+	info.ForcePreConsume = true
+	info.UserSetting.BillingPreference = "wallet_only"
+	c := groupBillingContext(t)
+	require.Nil(t, PreConsumeBilling(c, charged, info))
 	task := model.InitTask("video", info)
 	task.Status = model.TaskStatusInProgress
 	task.Progress = "30%"
@@ -160,7 +161,7 @@ func TestTaskAccountingWalletLifecycleAndDuplicate(t *testing.T) {
 	var channel model.Channel
 	require.NoError(t, model.DB.First(&channel, task.ChannelId).Error)
 	require.Zero(t, channel.UsedQuota)
-	require.Equal(t, model.TaskStatusFailure, task.Status)
+	require.EqualValues(t, model.TaskStatusFailure, task.Status)
 	require.Zero(t, task.Quota)
 
 	_, err = FinalizeTaskAccounting(context.Background(), task, expected, 0, "conflicting repeat")
@@ -212,7 +213,7 @@ func TestTaskAccountingDecisionRecoveryAndFirstDecisionWins(t *testing.T) {
 	require.NoError(t, model.RecoverTaskAccounting(context.Background(), 100))
 	var after model.Task
 	require.NoError(t, model.DB.First(&after, task.ID).Error)
-	require.Equal(t, model.TaskStatusSuccess, after.Status)
+	require.EqualValues(t, model.TaskStatusSuccess, after.Status)
 	require.Equal(t, 600, after.Quota)
 	var user model.User
 	require.NoError(t, model.DB.First(&user, task.UserId).Error)
@@ -248,7 +249,7 @@ func TestTaskAccountingApplyRollbackThenRecovery(t *testing.T) {
 	require.NoError(t, model.DB.Create(&model.Channel{Id: task.ChannelId, Name: "restored-channel", Key: "provider-key", Status: common.ChannelStatusEnabled, UsedQuota: 1800}).Error)
 	require.NoError(t, model.RecoverTaskAccounting(context.Background(), 100))
 	require.NoError(t, model.DB.First(&pending, task.ID).Error)
-	require.Equal(t, model.TaskStatusSuccess, pending.Status)
+	require.EqualValues(t, model.TaskStatusSuccess, pending.Status)
 	require.Equal(t, 300, pending.Quota)
 	require.NoError(t, model.DB.First(&user, task.UserId).Error)
 	require.Equal(t, 9700, user.Quota)
@@ -285,23 +286,32 @@ func TestTaskAccountingSeparateLogDBRecoversDelivery(t *testing.T) {
 func TestTaskAccountingSubscriptionWithoutToken(t *testing.T) {
 	useTaskAccountingDB(t, serviceTestSQLite, serviceTestSQLite, "sqlite")
 	resetTaskAccountingFixture(t, model.DB, model.LOG_DB)
+	assertTaskAccountingSubscriptionWithoutToken(t)
+}
+
+func assertTaskAccountingSubscriptionWithoutToken(t *testing.T) {
+	t.Helper()
 	user := &model.User{Username: "subscription-user", Quota: 5000, Status: common.UserStatusEnabled}
 	require.NoError(t, model.DB.Create(user).Error)
 	channel := &model.Channel{Name: "subscription-channel", Key: "provider-key", Status: common.ChannelStatusEnabled}
 	require.NoError(t, model.DB.Create(channel).Error)
-	subscription := &model.UserSubscription{UserId: user.Id, AmountTotal: 10000, AmountUsed: 1000, Status: "active", StartTime: time.Now().Add(-time.Hour).Unix(), EndTime: time.Now().Add(time.Hour).Unix()}
+	plan := &model.SubscriptionPlan{Title: "accounting-plan", DurationUnit: model.SubscriptionDurationMonth, DurationValue: 1, Enabled: true, TotalAmount: 10000, QuotaResetPeriod: model.SubscriptionResetNever}
+	require.NoError(t, model.DB.Create(plan).Error)
+	model.InvalidateSubscriptionPlanCache(plan.Id)
+	subscription := &model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: 10000, Status: "active", StartTime: time.Now().Add(-time.Hour).Unix(), EndTime: time.Now().Add(time.Hour).Unix()}
 	require.NoError(t, model.DB.Create(subscription).Error)
 	task := &model.Task{TaskID: model.GenerateTaskID(), UserId: user.Id, ChannelId: channel.Id, Group: "default", Status: model.TaskStatusInProgress, Progress: "30%",
 		PrivateData: model.TaskPrivateData{BillingSource: BillingSourceSubscription, SubscriptionId: subscription.Id}}
-	err := model.DB.Transaction(func(tx *gorm.DB) error {
-		_, err := model.PersistAsyncTaskHandoffTx(tx, model.AsyncTaskHandoffRequest{Task: task, ChargedQuota: 1000,
-			InitialLog: model.TaskAccountingLogFacts{UserID: user.Id, ChannelID: channel.Id, ModelName: "subscription-model", Group: "default", Other: map[string]any{"is_task": true}}})
-		return err
-	})
-	require.NoError(t, err)
+	info := &relaycommon.RelayInfo{UserId: user.Id, OriginModelName: "subscription-model", UsingGroup: "default", RequestId: common.GetUUID(), ForcePreConsume: true, SkipTokenQuota: true,
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: channel.Id}, TaskRelayInfo: &relaycommon.TaskRelayInfo{Action: "generate"},
+		PriceData: types.PriceData{Quota: 1000, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1}}}
+	info.UserSetting.BillingPreference = "subscription_only"
+	c := groupBillingContext(t)
+	require.Nil(t, PreConsumeBilling(c, 1000, info))
+	require.NoError(t, HandoffTaskBilling(c, info, task, "", 1000))
 	expected := task.Status
 	task.Status, task.Progress = model.TaskStatusSuccess, "100%"
-	_, err = FinalizeTaskAccounting(context.Background(), task, expected, 0, "explicit zero actual")
+	_, err := FinalizeTaskAccounting(context.Background(), task, expected, 0, "explicit zero actual")
 	require.NoError(t, err)
 	require.NoError(t, model.DB.First(subscription, subscription.Id).Error)
 	require.Zero(t, subscription.AmountUsed)
@@ -353,7 +363,7 @@ func TestGenericPollerUsesDurableTerminalAccounting(t *testing.T) {
 	require.NoError(t, err)
 	var persisted model.Task
 	require.NoError(t, model.DB.First(&persisted, task.ID).Error)
-	require.Equal(t, model.TaskStatusSuccess, persisted.Status)
+	require.EqualValues(t, model.TaskStatusSuccess, persisted.Status)
 	require.Equal(t, 300, persisted.Quota)
 	var user model.User
 	require.NoError(t, model.DB.First(&user, task.UserId).Error)
@@ -373,7 +383,7 @@ func TestTimeoutSweepUsesDurableTerminalAccounting(t *testing.T) {
 	sweepTimedOutTaskBatch(context.Background(), []*model.Task{task}, "task timed out")
 	var persisted model.Task
 	require.NoError(t, model.DB.First(&persisted, task.ID).Error)
-	require.Equal(t, model.TaskStatusFailure, persisted.Status)
+	require.EqualValues(t, model.TaskStatusFailure, persisted.Status)
 	require.Zero(t, persisted.Quota)
 	var user model.User
 	require.NoError(t, model.DB.First(&user, task.UserId).Error)
@@ -449,6 +459,8 @@ func TestAsyncTaskAccountingExternalDatabases(t *testing.T) {
 			require.Equal(t, 9750, user.Quota)
 			require.Equal(t, 250, user.UsedQuota)
 			require.Equal(t, 1, user.RequestCount)
+			resetTaskAccountingFixture(t, db, logDB)
+			assertTaskAccountingSubscriptionWithoutToken(t)
 		})
 	}
 }

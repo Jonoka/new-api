@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +23,9 @@ func groupBillingContext(t *testing.T) *gin.Context {
 	t.Helper()
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	ctx, cancel := context.WithCancel(c.Request.Context())
+	c.Request = c.Request.WithContext(ctx)
+	t.Cleanup(cancel)
 	c.Set("token_quota", 1000)
 	return c
 }
@@ -30,6 +34,7 @@ func seedGroupBillingWallet(t *testing.T, quota int, tokenQuota int) (*model.Use
 	t.Helper()
 	suffix := time.Now().UnixNano()
 	user := &model.User{Username: fmt.Sprintf("bg%d", suffix%1_000_000_000_000_000), Password: "test-password", Quota: quota}
+	user.AffCode = user.Username
 	require.NoError(t, model.DB.Create(user).Error)
 	token := &model.Token{UserId: user.Id, Key: fmt.Sprintf("billing-group-token-%d", suffix), Name: "group", RemainQuota: tokenQuota}
 	require.NoError(t, model.DB.Create(token).Error)
@@ -240,10 +245,10 @@ func TestBillingSessionTrustIsNotInferredFromFreeAndForceDisablesIt(t *testing.T
 }
 
 func TestBillingSessionSubscriptionReservationTracksLiveTarget(t *testing.T) {
-	require.NoError(t, model.DB.AutoMigrate(&model.SubscriptionPlan{}, &model.SubscriptionPreConsumeRecord{}))
 	user, token := seedGroupBillingWallet(t, 1000, 1000)
 	plan := &model.SubscriptionPlan{Title: "billing group", DurationUnit: model.SubscriptionDurationMonth, DurationValue: 1, Enabled: true, TotalAmount: 1000, QuotaResetPeriod: model.SubscriptionResetNever}
 	require.NoError(t, model.DB.Create(plan).Error)
+	model.InvalidateSubscriptionPlanCache(plan.Id)
 	sub := &model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: 1000, StartTime: time.Now().Add(-time.Hour).Unix(), EndTime: time.Now().Add(time.Hour).Unix(), Status: "active"}
 	require.NoError(t, model.DB.Create(sub).Error)
 
@@ -263,7 +268,7 @@ func TestBillingSessionSubscriptionReservationTracksLiveTarget(t *testing.T) {
 	var gotSub model.UserSubscription
 	var record model.SubscriptionPreConsumeRecord
 	require.NoError(t, model.DB.First(&gotSub, sub.Id).Error)
-	require.NoError(t, model.DB.Where("request_id = ?", info.RequestId).First(&record).Error)
+	require.NoError(t, model.DB.Where("request_id = ?", info.TaskSubmissionID).First(&record).Error)
 	require.EqualValues(t, 400, gotSub.AmountUsed)
 	require.EqualValues(t, 400, record.PreConsumed)
 	require.EqualValues(t, 400, info.SubscriptionAmountUsedAfterPreConsume)
@@ -273,7 +278,7 @@ func TestBillingSessionSubscriptionReservationTracksLiveTarget(t *testing.T) {
 		if err := model.DB.First(&gotSub, sub.Id).Error; err != nil {
 			return false
 		}
-		if err := model.DB.Where("request_id = ?", info.RequestId).First(&record).Error; err != nil {
+		if err := model.DB.Where("request_id = ?", info.TaskSubmissionID).First(&record).Error; err != nil {
 			return false
 		}
 		var gotToken model.Token
@@ -286,10 +291,10 @@ func TestBillingSessionSubscriptionReservationTracksLiveTarget(t *testing.T) {
 }
 
 func TestBillingSessionWalletFirstFallsBackWithoutDuplicateTokenPreconsume(t *testing.T) {
-	require.NoError(t, model.DB.AutoMigrate(&model.SubscriptionPlan{}, &model.SubscriptionPreConsumeRecord{}))
 	user, token := seedGroupBillingWallet(t, 100, 1000)
 	plan := &model.SubscriptionPlan{Title: fmt.Sprintf("wallet fallback %d", time.Now().UnixNano()), DurationUnit: model.SubscriptionDurationMonth, DurationValue: 1, Enabled: true, TotalAmount: 1000, QuotaResetPeriod: model.SubscriptionResetNever}
 	require.NoError(t, model.DB.Create(plan).Error)
+	model.InvalidateSubscriptionPlanCache(plan.Id)
 	sub := &model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: 1000, StartTime: time.Now().Add(-time.Hour).Unix(), EndTime: time.Now().Add(time.Hour).Unix(), Status: "active"}
 	require.NoError(t, model.DB.Create(sub).Error)
 
@@ -316,6 +321,8 @@ func TestFinalGroupTieredSnapshotAndLogFactsAgree(t *testing.T) {
 	c.Set("token_name", "final-token")
 	info := &relaycommon.RelayInfo{
 		OriginModelName: "final-model", UsingGroup: "paid-final", UserId: 0,
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{},
+		ChannelMeta:   &relaycommon.ChannelMeta{},
 		PriceData: types.PriceData{
 			ModelRatio: 1.5, Quota: 321,
 			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 2, GroupSpecialRatio: 2, HasSpecialRatio: true},

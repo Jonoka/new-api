@@ -438,6 +438,8 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		// The task handoff transaction owns money, counters and the consume log.
 		quota := summary.Quota
 		relayInfo.TaskBillingActualQuota = &quota
+		relayInfo.TaskBillingUsage = usage
+		relayInfo.TaskBillingExtraContent = append([]string(nil), extraContent...)
 		return
 	}
 

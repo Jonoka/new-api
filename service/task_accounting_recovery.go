@@ -30,6 +30,9 @@ func StartTaskAccountingRecovery() {
 func runTaskAccountingRecovery() {
 	ctx, cancel := context.WithTimeout(context.Background(), taskAccountingRecoveryTimeout)
 	defer cancel()
+	if err := model.RecoverExpiredTaskSubmissions(ctx, taskAccountingRecoveryLimit); err != nil {
+		common.SysLog("task submission recovery pending: " + err.Error())
+	}
 	if err := model.RecoverTaskAccounting(ctx, taskAccountingRecoveryLimit); err != nil {
 		common.SysLog("task accounting recovery pending: " + err.Error())
 	}

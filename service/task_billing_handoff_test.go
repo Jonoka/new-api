@@ -18,8 +18,6 @@ import (
 
 func prepareTaskHandoff(t *testing.T) (*model.User, *model.Token, *relaycommon.RelayInfo, *model.Task) {
 	t.Helper()
-	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.TaskAccounting{}, &model.TaskAccountingEvent{}))
-	require.NoError(t, model.LOG_DB.AutoMigrate(&model.TaskAccountingLogReceipt{}))
 	user, token := seedGroupBillingWallet(t, 1000, 1000)
 	channel := &model.Channel{Name: fmt.Sprintf("task-handoff-%d", time.Now().UnixNano())}
 	require.NoError(t, model.DB.Create(channel).Error)
@@ -72,7 +70,7 @@ func TestAsyncTaskHandoffDurableChargeAndTerminalRefundWithBatchEnabled(t *testi
 	require.Equal(t, 1, chargedUser.RequestCount)
 	var settledTask model.Task
 	require.NoError(t, model.DB.First(&settledTask, task.ID).Error)
-	require.Equal(t, model.TaskStatusFailure, settledTask.Status)
+	require.EqualValues(t, model.TaskStatusFailure, settledTask.Status)
 	require.Zero(t, settledTask.Quota)
 }
 

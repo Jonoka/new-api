@@ -648,7 +648,7 @@ func setupCanvasImageTaskTestDB(t *testing.T) {
 	require.NoError(t, err)
 	common.UsingSQLite = true
 	model.DB, model.LOG_DB = db, db
-	require.NoError(t, db.AutoMigrate(&model.Task{}, &model.TaskAccounting{}, &model.TaskAccountingEvent{}, &model.TaskAccountingLogReceipt{}, &model.User{}, &model.Channel{}, &model.Log{}))
+	require.NoError(t, db.AutoMigrate(&model.Task{}, &model.TaskSubmission{}, &model.TaskAccounting{}, &model.TaskAccountingEvent{}, &model.TaskAccountingLogReceipt{}, &model.User{}, &model.Channel{}, &model.Log{}))
 	require.NoError(t, db.Create(&model.User{Id: 1, Username: "canvas-user", Status: common.UserStatusEnabled}).Error)
 	require.NoError(t, db.Create(&model.Channel{Id: 12, Name: "canvas-12", Key: "test", Status: common.ChannelStatusEnabled}).Error)
 	require.NoError(t, db.Create(&model.Channel{Id: 34, Name: "canvas-34", Key: "test", Status: common.ChannelStatusEnabled}).Error)

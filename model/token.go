@@ -30,7 +30,7 @@ type Token struct {
 	GroupMode          string           `json:"group_mode" gorm:"type:varchar(16);default:'inherit'"`
 	GroupIds           []int            `json:"group_ids,omitempty" gorm:"-"`
 	GroupDetails       []GroupReference `json:"group_details,omitempty" gorm:"-"`
-	GroupRatioLimits   string           `json:"group_ratio_limits" gorm:"type:text;default:''"`
+	GroupRatioLimits   string           `json:"group_ratio_limits" gorm:"type:text"`
 	CrossGroupRetry    bool             `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
 	DeletedAt          gorm.DeletedAt   `gorm:"index"`
 }

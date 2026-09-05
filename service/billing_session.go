@@ -1,10 +1,12 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -30,6 +32,8 @@ type BillingSession struct {
 	fundingSettled   bool // final funding ownership/settlement has committed
 	settled          bool // Settle 全部完成（资金 + 令牌）
 	refunded         bool // Refund 已调用
+	requestContext   context.Context
+	heartbeatStop    func()
 	mu               sync.Mutex
 }
 
@@ -48,13 +52,14 @@ func (s *BillingSession) Settle(actualQuota int) error {
 		return errors.New("actual quota cannot be negative")
 	}
 	delta := actualQuota - s.preConsumedQuota
-	if delta != 0 || s.funding.Source() == BillingSourceSubscription {
-		if apiErr := s.reconcileReservation(s.preConsumedQuota, actualQuota, true); apiErr != nil {
+	if delta != 0 || s.funding.Source() == BillingSourceSubscription || s.hasTaskSubmission() {
+		if apiErr := s.reconcileReservationWithFinal(s.preConsumedQuota, actualQuota, true, model.TaskSubmissionStateSettled, ""); apiErr != nil {
 			return apiErr
 		}
 	}
 	s.fundingSettled = true
 	s.settled = true
+	s.stopTaskSubmissionHeartbeatLocked()
 	if s.funding.Source() == BillingSourceSubscription {
 		s.relayInfo.SubscriptionPostDelta += int64(delta)
 	}
@@ -68,17 +73,34 @@ func (s *BillingSession) Refund(c *gin.Context) {
 	if s.settled || s.refunded || !s.needsRefundLocked() {
 		return
 	}
+	closedByDurableOwner := false
 	if err := refundWithRetry(func() error {
-		if apiErr := s.reconcileReservation(s.preConsumedQuota, 0, false); apiErr != nil {
-			return apiErr
+		result, err := s.reconcileReservationRaw(s.preConsumedQuota, 0, true, model.TaskSubmissionStateReleased, "live request ended before task handoff")
+		if errors.Is(err, model.ErrTaskSubmissionTransferred) || errors.Is(err, model.ErrTaskSubmissionSettled) {
+			closedByDurableOwner = true
+			return nil
 		}
+		if errors.Is(err, model.ErrTaskSubmissionReleased) {
+			return nil
+		}
+		if err != nil {
+			return groupReservationError(err)
+		}
+		s.applyReservationResult(result)
 		return nil
 	}); err != nil {
 		logger.LogError(c, "failed to release billing reservation: "+err.Error())
 		return
 	}
+	if closedByDurableOwner {
+		s.fundingSettled = true
+		s.settled = true
+		s.stopTaskSubmissionHeartbeatLocked()
+		return
+	}
 	s.syncRelayInfo()
 	s.refunded = true
+	s.stopTaskSubmissionHeartbeatLocked()
 }
 
 // NeedsRefund 返回是否存在需要退还的预扣状态。
@@ -92,6 +114,9 @@ func (s *BillingSession) needsRefundLocked() bool {
 	if s.settled || s.refunded || s.fundingSettled {
 		// fundingSettled 时资金来源已提交结算，不能再退预扣费
 		return false
+	}
+	if s.hasTaskSubmission() {
+		return true
 	}
 	if s.tokenConsumed > 0 {
 		return true
@@ -176,27 +201,58 @@ func (s *BillingSession) preConsume(c *gin.Context, quota int) *types.NewAPIErro
 }
 
 func (s *BillingSession) reconcileReservation(currentQuota int, targetQuota int, postConsume bool) *types.NewAPIError {
-	req := model.GroupReservationRequest{
-		Source:           s.funding.Source(),
-		RequestId:        s.relayInfo.RequestId,
-		UserId:           s.relayInfo.UserId,
-		ModelName:        s.relayInfo.OriginModelName,
-		SubscriptionId:   s.relayInfo.SubscriptionId,
-		TokenId:          s.relayInfo.TokenId,
-		TokenKey:         s.relayInfo.TokenKey,
-		TokenUnlimited:   s.relayInfo.TokenUnlimited,
-		SkipTokenQuota:   s.relayInfo.IsPlayground || s.relayInfo.SkipTokenQuota,
-		ExpectedReserved: currentQuota,
-		TargetReserved:   targetQuota,
-		PostConsume:      postConsume,
-	}
-	result, err := model.ReconcileGroupReservation(req)
+	return s.reconcileReservationWithFinal(currentQuota, targetQuota, postConsume, "", "")
+}
+
+func (s *BillingSession) reconcileReservationWithFinal(currentQuota int, targetQuota int, postConsume bool, finalState, finalReason string) *types.NewAPIError {
+	result, err := s.reconcileReservationRaw(currentQuota, targetQuota, postConsume, finalState, finalReason)
 	if err != nil {
 		return groupReservationError(err)
 	}
+	s.applyReservationResult(result)
+	if finalState == "" {
+		s.startTaskSubmissionHeartbeatLocked()
+	}
+	return nil
+}
 
+func (s *BillingSession) reconcileReservationRaw(currentQuota int, targetQuota int, postConsume bool, finalState, finalReason string) (*model.GroupReservationResult, error) {
+	s.ensureTaskSubmissionIdentityLocked()
+	req := model.GroupReservationRequest{
+		Source:                s.funding.Source(),
+		RequestId:             s.relayInfo.RequestId,
+		UserId:                s.relayInfo.UserId,
+		ModelName:             s.relayInfo.OriginModelName,
+		SubscriptionId:        s.relayInfo.SubscriptionId,
+		TokenId:               s.relayInfo.TokenId,
+		TokenKey:              s.relayInfo.TokenKey,
+		TokenUnlimited:        s.relayInfo.TokenUnlimited,
+		SkipTokenQuota:        s.relayInfo.IsPlayground || s.relayInfo.SkipTokenQuota,
+		ExpectedReserved:      currentQuota,
+		TargetReserved:        targetQuota,
+		PostConsume:           postConsume,
+		SubmissionFinalState:  finalState,
+		SubmissionFinalReason: finalReason,
+	}
+	if s.hasTaskSubmission() {
+		req.SubmissionID = s.relayInfo.TaskSubmissionID
+		req.SubmissionLeaseToken = s.relayInfo.TaskSubmissionLeaseToken
+		req.SubmissionTaskRowID = s.relayInfo.TaskSubmissionTaskRowID
+		req.SubmissionLeaseSeconds = int64(model.TaskSubmissionLeaseDuration / time.Second)
+	}
+	result, err := model.ReconcileGroupReservation(req)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *BillingSession) applyReservationResult(result *model.GroupReservationResult) {
+	if result == nil {
+		return
+	}
 	s.preConsumedQuota = result.Reserved
-	if req.SkipTokenQuota {
+	if s.relayInfo.IsPlayground || s.relayInfo.SkipTokenQuota {
 		s.tokenConsumed = 0
 	} else {
 		s.tokenConsumed = result.Reserved
@@ -216,7 +272,30 @@ func (s *BillingSession) reconcileReservation(currentQuota int, targetQuota int,
 			}
 		}
 	}
-	return nil
+}
+
+func (s *BillingSession) hasTaskSubmission() bool {
+	return s.relayInfo != nil && s.relayInfo.TaskSubmissionID != "" && s.relayInfo.TaskSubmissionLeaseToken != ""
+}
+
+func (s *BillingSession) ensureTaskSubmissionIdentityLocked() {
+	if s.relayInfo != nil && (s.relayInfo.ForcePreConsume || s.relayInfo.DeferTaskBilling) {
+		s.relayInfo.EnsureTaskSubmissionIdentity()
+	}
+}
+
+func (s *BillingSession) startTaskSubmissionHeartbeatLocked() {
+	if !s.hasTaskSubmission() || s.heartbeatStop != nil {
+		return
+	}
+	s.heartbeatStop = startTaskSubmissionHeartbeatAfterReservation(s.requestContext, s.relayInfo.TaskSubmissionID, s.relayInfo.TaskSubmissionLeaseToken)
+}
+
+func (s *BillingSession) stopTaskSubmissionHeartbeatLocked() {
+	if s.heartbeatStop != nil {
+		s.heartbeatStop()
+		s.heartbeatStop = nil
+	}
 }
 
 func groupReservationError(err error) *types.NewAPIError {
@@ -303,8 +382,9 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 		relayInfo.UserQuota = userQuota
 
 		session := &BillingSession{
-			relayInfo: relayInfo,
-			funding:   &WalletFunding{userId: relayInfo.UserId},
+			relayInfo:      relayInfo,
+			funding:        &WalletFunding{userId: relayInfo.UserId},
+			requestContext: billingRequestContext(c),
 		}
 		if apiErr := session.preConsume(c, preConsumedQuota); apiErr != nil {
 			return nil, apiErr
@@ -318,7 +398,8 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 			subConsume = 1
 		}
 		session := &BillingSession{
-			relayInfo: relayInfo,
+			relayInfo:      relayInfo,
+			requestContext: billingRequestContext(c),
 			funding: &SubscriptionFunding{
 				requestId: relayInfo.RequestId,
 				userId:    relayInfo.UserId,
@@ -367,4 +448,11 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 		}
 		return session, nil
 	}
+}
+
+func billingRequestContext(c *gin.Context) context.Context {
+	if c != nil && c.Request != nil {
+		return c.Request.Context()
+	}
+	return context.Background()
 }

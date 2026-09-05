@@ -480,6 +480,10 @@ func applyTaskFundingDeltaTx(tx *gorm.DB, accounting *TaskAccounting, delta int)
 	}
 	switch accounting.FundingSource {
 	case TaskAccountingFundingSubscription:
+		var user User
+		if err := lockForUpdate(tx).Select("id").Where("id = ?", accounting.UserID).First(&user).Error; err != nil {
+			return err
+		}
 		var subscription UserSubscription
 		if err := lockForUpdate(tx).Where("id = ?", accounting.SubscriptionID).First(&subscription).Error; err != nil {
 			return err

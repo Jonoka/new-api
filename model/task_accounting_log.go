@@ -108,7 +108,7 @@ func deliverTaskAccountingLog(ctx context.Context, event *TaskAccountingEvent) e
 		return err
 	}
 	result := DB.WithContext(ctx).Model(&TaskAccountingEvent{}).Where("event_id = ? AND delivered = ?", event.EventID, false).
-		Updates(map[string]any{"delivered": true, "delivered_at": GetDBTimestamp()})
+		Updates(map[string]any{"delivered": true, "delivered_at": common.GetTimestamp()})
 	if result.Error != nil {
 		return result.Error
 	}

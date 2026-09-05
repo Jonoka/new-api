@@ -78,6 +78,8 @@ jobs:
           cache: true
 
       - name: Check changed Go formatting
+        id: go_format
+        continue-on-error: true
         run: |
           base="$(git merge-base origin/custom-main HEAD)"
           mapfile -d '' files < <(git diff --name-only --diff-filter=ACM -z "$base" HEAD -- '*.go')
@@ -88,7 +90,7 @@ jobs:
           git diff --exit-code
 
       - name: Upload formatting correction
-        if: failure()
+        if: steps.go_format.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: go-format-correction
@@ -100,7 +102,7 @@ jobs:
           NEW_API_TEST_REDIS_ADDR: 127.0.0.1:6379
           NEW_API_TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/newapi_test_ci?sslmode=disable
           NEW_API_TEST_MYSQL_DSN: root:mysql_ci_only@tcp(127.0.0.1:3306)/newapi_test_ci?charset=utf8mb4&parseTime=True&loc=Local
-        run: go test ./model ./service ./controller ./relay ./relay/helper -run 'Test(ReconcileGroupReservation|BillingSession|FinalGroup|TaskAccounting|AsyncTask|TaskBilling|UserCacheGeneration)' -count=1
+        run: go test ./model ./service ./controller ./relay ./relay/helper -run 'Test(ReconcileGroupReservation|BillingSession|FinalGroup|TaskAccounting|TaskSubmission|AsyncTask|TaskBilling|UserCacheGeneration)' -count=1
 
       - name: Check and build default frontend
         working-directory: web/default
@@ -132,8 +134,12 @@ jobs:
           NEW_API_TEST_MYSQL_DSN: root:mysql_ci_only@tcp(127.0.0.1:3306)/newapi_test_ci?charset=utf8mb4&parseTime=True&loc=Local
         run: >-
           go test -race ./model ./service ./controller ./middleware ./relay ./relay/helper
-          -run 'Test(RelayResponseHeaderTimeout|RelayTransportsApplyResponseHeaderTimeout|ResponseHeaderTimeout|RelayRequestParseError|RelayRejectsMalformedRequest|RelayRejectsNonObjectRequest|RelayPreservesRequestBodyTooLarge|UserCriticalRateLimit|FormatUserLogsUsesStrictProjection|ProjectUserLogOther|UserAndTokenReadsProject|SumUsedQuotaKeepsHistorical|SanitizeDBError|SanitizedGormWriter|GormLoggerRedacts|ReconcileGroupReservation|BillingSession|ModelPriceHelper|RelayTaskSubmit|FinalGroup|TaskAccounting|AsyncTask|TaskBilling|CanvasImageTask|ImageTask|UserCacheGeneration)'
+          -run 'Test(RelayResponseHeaderTimeout|RelayTransportsApplyResponseHeaderTimeout|ResponseHeaderTimeout|RelayRequestParseError|RelayRejectsMalformedRequest|RelayRejectsNonObjectRequest|RelayPreservesRequestBodyTooLarge|UserCriticalRateLimit|FormatUserLogsUsesStrictProjection|ProjectUserLogOther|UserAndTokenReadsProject|SumUsedQuotaKeepsHistorical|SanitizeDBError|SanitizedGormWriter|GormLoggerRedacts|ReconcileGroupReservation|BillingSession|ModelPriceHelper|RelayTaskSubmit|FinalGroup|TaskAccounting|TaskSubmission|AsyncTask|TaskBilling|CanvasImageTask|ImageTask|UserCacheGeneration)'
           -count=1
+
+      - name: Require committed Go formatting before publishing
+        if: steps.go_format.outcome != 'success'
+        run: exit 1
 
       - name: Resolve image tags
         id: tags

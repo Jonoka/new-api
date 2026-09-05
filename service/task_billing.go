@@ -80,19 +80,38 @@ func BuildTaskAccountingLogFacts(c *gin.Context, info *relaycommon.RelayInfo, qu
 		CreatedAt: common.GetTimestamp(), Other: buildTaskConsumptionOther(c, info),
 	}
 	if c != nil {
-		facts.Username = c.GetString("username")
-		facts.TokenName = c.GetString("token_name")
-		facts.RequestID = c.GetString(common.RequestIdKey)
-		facts.UpstreamRequestID = c.GetString(common.UpstreamRequestIdKey)
-		if model.ShouldRecordUserLogIP(info.UserId) {
-			facts.IP = c.ClientIP()
-		}
+		CaptureTaskBillingAttribution(c, info)
+	}
+	if attribution := info.TaskBillingAttribution; attribution != nil {
+		facts.Username = attribution.Username
+		facts.TokenName = attribution.TokenName
+		facts.RequestID = attribution.RequestID
+		facts.UpstreamRequestID = attribution.UpstreamRequestID
+		facts.IP = attribution.IP
 	}
 	return facts
 }
 
+func CaptureTaskBillingAttribution(c *gin.Context, info *relaycommon.RelayInfo) {
+	if c == nil || info == nil {
+		return
+	}
+	attribution := &relaycommon.TaskBillingAttribution{
+		Username: c.GetString("username"), TokenName: c.GetString("token_name"),
+		RequestID: c.GetString(common.RequestIdKey), UpstreamRequestID: c.GetString(common.UpstreamRequestIdKey),
+	}
+	if info.UserId > 0 && model.ShouldRecordUserLogIP(info.UserId) {
+		attribution.IP = c.ClientIP()
+	}
+	info.TaskBillingAttribution = attribution
+}
+
 func buildTaskConsumptionLogContent(info *relaycommon.RelayInfo) string {
-	logContent := fmt.Sprintf("操作 %s", info.Action)
+	action := info.RequestURLPath
+	if info.TaskRelayInfo != nil && info.Action != "" {
+		action = info.Action
+	}
+	logContent := fmt.Sprintf("操作 %s", action)
 	// 固定价格任务按配置的价格单位展示。
 	if common.StringsContains(constant.TaskPricePatches, info.OriginModelName) {
 		logContent = fmt.Sprintf("%s，按次计费", logContent)
@@ -248,17 +267,29 @@ func FinalizeTaskAccounting(ctx context.Context, task *model.Task, expectedStatu
 	if task == nil || task.ID <= 0 {
 		return nil, fmt.Errorf("persisted task is required")
 	}
-	decision, err := model.AcceptTaskTerminalDecision(ctx, model.TaskTerminalDecision{
+	request := model.TaskTerminalDecision{
 		TaskRowID: task.ID, ExpectedStatus: expectedStatus, Status: task.Status,
 		Progress: task.Progress, StartTime: task.StartTime, FinishTime: task.FinishTime,
 		FailReason: task.FailReason, ResultURL: task.PrivateData.ResultURL,
 		Data: append([]byte(nil), task.Data...), FinalQuota: finalQuota, Reason: reason,
-	})
-	if err != nil {
-		return nil, err
 	}
-	if !decision.Won && decision.Accounting.DecisionID == "" {
-		return decision, nil
+	var decision *model.TaskTerminalDecisionResult
+	for attempt := 0; attempt < 3; attempt++ {
+		var err error
+		decision, err = model.AcceptTaskTerminalDecision(ctx, request)
+		if err != nil {
+			return nil, err
+		}
+		if decision.Won || decision.Accounting.DecisionID != "" {
+			break
+		}
+		// A poller may have advanced QUEUED to IN_PROGRESS while this provider
+		// result was in flight. Retry the same frozen result against that state.
+		if attempt == 2 || decision.Task.Status == model.TaskStatusSuccess || decision.Task.Status == model.TaskStatusFailure {
+			*task = decision.Task
+			return decision, model.ErrTaskAccountingConflict
+		}
+		request.ExpectedStatus = decision.Task.Status
 	}
 	applied, err := model.ApplyTaskAccountingDecision(ctx, task.ID)
 	if err != nil {

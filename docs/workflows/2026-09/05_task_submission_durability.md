@@ -1,0 +1,132 @@
+# Durable async initial submissions
+
+## Problem and scope
+
+Async task and deferred image requests used to debit a live billing session
+before contacting the provider, but created durable `TaskAccounting` ownership
+only after the provider response was parsed. A process exit in that interval
+could strand the funding/token reservation. A database commit whose result was
+not observed could also leave a stale live session able to refund money already
+transferred to the task.
+
+The fix is deliberately task-specific. It applies when
+`ForcePreConsume` or `DeferTaskBilling` is set and does not change ordinary text
+request reservations or redesign the global wallet system.
+
+## Identity and schema
+
+Every logical submission has a random internal `submission_id`, a separate
+random `lease_token`, and a fresh random `last_operation_id` for each
+reservation transaction. These are independent from request IDs and public or
+upstream task IDs.
+
+The additive primary table `task_submissions` stores:
+
+- version and lifecycle state: `active`, `transferred`, `settled`, `released`;
+- lease owner and expiry;
+- frozen user, wallet/subscription, subscription reset epoch and token IDs;
+- nullable unique internal task row ID, including the pre-created Canvas task;
+- frozen model evidence, current reserved quota and immutable accepted quota;
+- last reservation operation identity and lifecycle timestamps;
+- bounded release evidence and a retryable cache-invalidation marker.
+
+There is no backfill or inference for historical tasks. A zero-value queued
+Canvas/image task may initially have no funding source; the first paid
+reservation establishes it. After that point all funding identities are
+immutable.
+
+## Reservation transaction
+
+`model.GroupReservationRequest` carries the submission identity. The existing
+funding/token transaction now locks or creates the active journal, checks its
+lease token and expected amount, moves funding and token quota, and stores the
+new amount plus `last_operation_id` before committing. Subscription records for
+new journaled submissions use `submission_id` as their idempotency key.
+
+Same-submission retry pricing may resize the amount up or down. A transaction
+error is reconciled by `last_operation_id`; this also handles same-target
+transactions and MySQL no-change affected-row behavior. A journal that cannot
+be read is not guessed to have committed or rolled back.
+
+`service.CreateQueuedTaskSubmission` inserts a Canvas/image `tasks` row and its
+zero-value active journal in one transaction before the controller returns 202.
+The executor imports that exact identity into `RelayInfo`.
+
+## Lease and recovery
+
+The lease lasts 45 seconds and live ownership refreshes every 10 seconds.
+`StartTaskSubmissionHeartbeat` performs a synchronous database CAS before
+starting the Canvas executor. Billing sessions start the same loop immediately
+after the reservation transaction, whose journal write already proves and
+renews ownership; this avoids a second fallible database step before the
+session is published. The loop stops on context cancellation, explicit
+completion, CAS loss, transfer, settlement or release. Transient database
+errors do not spawn replacement goroutines.
+
+The independent accounting recovery loop processes expired submissions before
+terminal task decisions, cache reconciliation and log outboxes. Under a row
+lock it rechecks expiry/state, refuses to refund a row that already has a
+`TaskAccounting` owner, and releases only the journaled funding/token amount.
+It does not change initial user/channel used counters because those counters are
+created only at handoff. A known nonterminal Canvas/image task becomes FAILURE
+in the same transaction. A generic submission without a task remains as a
+released internal record, and recovery never contacts or retries the provider.
+
+Subscription release uses the existing `reservation_reset_time` rule: an
+old-period reservation is not credited into a newer reset period. Soft-deleted
+tokens are adjusted through unscoped access but stay deleted; physically absent
+tokens are not recreated. Cache invalidation is repeatable through
+`cache_pending` and never replays money.
+
+## Handoff and ambiguous commit
+
+`service.HandoffTaskBilling` reconciles the accepted quota, persists the task,
+creates `TaskAccounting`, initial counters and the initial log event, then marks
+the submission `transferred`, all in one primary transaction.
+
+If the caller observes a transaction error, it queries by the immutable
+submission ID. Success is accepted only when journal state, lease token,
+funding/user/subscription/token identities, accepted quota, task public
+identity, and stored `TaskAccounting` owner all match. Exact replay creates no
+second task, counter, event or money movement. A definite rollback leaves the
+active reservation releasable. A stale live `Refund` can mutate only `active`;
+`transferred` and `settled` are database-enforced no-ops.
+
+A synchronous deferred image without an async task marks the journal
+`settled`. A request failure marks it `released` in the same transaction as the
+refund. If the database remains unavailable, the caller does not infer commit
+outcome; the durable row is resolved by a later retry/recovery pass.
+
+## Compatibility and rollback
+
+The migration is additive in normal and fast primary migration paths and uses
+GORM-compatible scalar columns for SQLite, MySQL and PostgreSQL. Existing task
+accounting and independent log receipts are unchanged.
+
+Before starting an older image, stop new async submissions and require this
+query to return zero:
+
+```sql
+SELECT COUNT(*)
+FROM task_submissions
+WHERE state = 'active';
+```
+
+Also retain the existing guards for unapplied task decisions, pending cache/log
+delivery, and managed nonterminal tasks. An older image must not process tasks
+linked from `transferred` rows. Do not drop the journal or restore a stale
+database over later money movements.
+
+## Verification
+
+Dedicated GitHub Actions fixtures cover real initial reservation flow, live
+lease exclusion, same-identity resize, one-time expired wallet release,
+reset-epoch subscription release without a token, queued Canvas crash recovery,
+expiry versus late handoff/refund, exact owner replay after a simulated
+unobserved commit, no duplicate task/counters/log event/money, and definite
+rollback followed by one refund. Model fixtures use SQLite and opt into
+PostgreSQL/MySQL through `NEW_API_TEST_POSTGRES_DSN` and
+`NEW_API_TEST_MYSQL_DSN`.
+
+No tests or builds are run on the production checkout. Formatting and diff
+checks are local; executable verification belongs to GitHub Actions.

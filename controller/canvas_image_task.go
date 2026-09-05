@@ -37,14 +37,18 @@ const (
 var updateCanvasImageTask = func(task *model.Task) error { return task.Update() }
 
 type canvasImageTaskRelayRequest struct {
-	TaskID      string
-	Action      string
-	RelayPrefix string
-	Body        []byte
-	Header      http.Header
-	RawQuery    string
-	Keys        map[string]any
-	Context     context.Context
+	TaskID               string
+	SubmissionID         string
+	SubmissionLeaseToken string
+	SubmissionTaskRowID  int64
+	Action               string
+	RelayPrefix          string
+	Body                 []byte
+	Header               http.Header
+	RawQuery             string
+	Keys                 map[string]any
+	BillingAttribution   *relaycommon.TaskBillingAttribution
+	Context              context.Context
 }
 
 var startCanvasImageTaskRelay = func(relayReq canvasImageTaskRelayRequest) {
@@ -89,19 +93,26 @@ func submitImageTask(c *gin.Context, action string, platform constant.TaskPlatfo
 		Progress:   "0%",
 		SubmitTime: now,
 	}
-	if err := task.Insert(); err != nil {
+	submissionID, submissionLeaseToken, err := service.CreateQueuedTaskSubmission(task)
+	if err != nil {
 		abortCanvasRequest(c, http.StatusInternalServerError, "failed to create image task")
 		return
 	}
+	attributionInfo := &relaycommon.RelayInfo{UserId: task.UserId}
+	service.CaptureTaskBillingAttribution(c, attributionInfo)
 
 	relayReq := canvasImageTaskRelayRequest{
-		TaskID:      task.TaskID,
-		Action:      action,
-		RelayPrefix: relayPrefix,
-		Body:        append([]byte(nil), body...),
-		Header:      c.Request.Header.Clone(),
-		RawQuery:    imageTaskRelayRawQuery(c),
-		Keys:        cloneCanvasImageTaskKeys(c.Keys),
+		TaskID:               task.TaskID,
+		SubmissionID:         submissionID,
+		SubmissionLeaseToken: submissionLeaseToken,
+		SubmissionTaskRowID:  task.ID,
+		Action:               action,
+		RelayPrefix:          relayPrefix,
+		Body:                 append([]byte(nil), body...),
+		Header:               c.Request.Header.Clone(),
+		RawQuery:             imageTaskRelayRawQuery(c),
+		Keys:                 cloneCanvasImageTaskKeys(c.Keys),
+		BillingAttribution:   attributionInfo.TaskBillingAttribution,
 	}
 	startCanvasImageTaskRelay(relayReq)
 
@@ -242,6 +253,21 @@ func runCanvasImageTaskRelayWithExecutor(
 	if err != nil || !exists {
 		return
 	}
+	if timeout > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		relayReq.Context = ctx
+	} else {
+		relayReq.Context = context.Background()
+	}
+	if relayReq.SubmissionID != "" && relayReq.SubmissionLeaseToken != "" {
+		stopHeartbeat, heartbeatErr := service.StartTaskSubmissionHeartbeat(relayReq.Context, relayReq.SubmissionID, relayReq.SubmissionLeaseToken)
+		if heartbeatErr != nil {
+			common.SysError(fmt.Sprintf("failed to own image task submission %s: %v", task.TaskID, heartbeatErr))
+			return
+		}
+		defer stopHeartbeat()
+	}
 	var liveRelayInfo *relaycommon.RelayInfo
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -264,14 +290,6 @@ func runCanvasImageTaskRelayWithExecutor(
 	}
 	if !won {
 		return
-	}
-
-	if timeout > 0 {
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-		relayReq.Context = ctx
-	} else {
-		relayReq.Context = context.Background()
 	}
 
 	recorder, channelID, relayInfo := execute(relayReq)
@@ -312,11 +330,22 @@ func executeCanvasImageRelayWithHandler(relayReq canvasImageTaskRelayRequest, ha
 			c.Set(key, value)
 		}
 		c.Set(relaycommon.ContextKeyDeferTaskBilling, true)
+		if relayReq.SubmissionID != "" && relayReq.SubmissionLeaseToken != "" {
+			c.Set(relaycommon.ContextKeyTaskSubmissionID, relayReq.SubmissionID)
+			c.Set(relaycommon.ContextKeyTaskSubmissionLeaseToken, relayReq.SubmissionLeaseToken)
+			c.Set(relaycommon.ContextKeyTaskSubmissionTaskRowID, relayReq.SubmissionTaskRowID)
+		}
 		c.Next()
 		channelID = common.GetContextKeyInt(c, constant.ContextKeyChannelId)
 		if value, ok := c.Get("relay_info"); ok {
 			if info, ok := value.(*relaycommon.RelayInfo); ok {
 				relayInfo = info
+				service.CaptureTaskBillingAttribution(c, info)
+				if relayReq.BillingAttribution != nil {
+					attribution := *relayReq.BillingAttribution
+					attribution.UpstreamRequestID = c.GetString(common.UpstreamRequestIdKey)
+					info.TaskBillingAttribution = &attribution
+				}
 			}
 		}
 	})

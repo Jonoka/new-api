@@ -34,6 +34,12 @@ also included in shared-primary and separate `LOG_DB` migrations. Migrations
 are additive; completed records are retained because deleting a receipt while
 its source event can replay would remove the deduplication guarantee.
 
+The existing token `group_ratio_limits` TEXT field no longer declares an SQL
+empty-string default, which MySQL rejects. Application inserts already write
+its string value explicitly; reads preserve empty/no-limit behavior. This
+portability correction changes the default metadata only and does not rewrite
+stored token limits.
+
 ## Initial ownership handoff
 
 `service.HandoffTaskBilling` holds the live `BillingSession`, then calls
@@ -50,6 +56,13 @@ The session is closed only after commit. Failure leaves the previous live
 reservation refundable and does not create a task owner. Task-shaped image
 requests set `DeferTaskBilling`, so the normal synchronous image settlement and
 log path does not duplicate this handoff.
+
+The shared image submit wrapper also receives ordinary synchronous image
+responses. When such a response contains images and no task ID, it completes
+the deferred synchronous billing once instead of creating task ownership.
+Canvas captures username, token name, request IDs and privacy-permitted IP
+before its Gin context ends so background consume/refund events retain those
+facts without retaining the request credentials.
 
 ## Terminal decision and application
 

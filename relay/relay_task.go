@@ -551,6 +551,10 @@ func isOpenAIVideoRequestURI(requestURI string) bool {
 // 仅当渠道类型为 Gemini 或 Vertex 时触发；其他渠道或出错时返回 nil。
 // 当非 OpenAI Video API 时，还会构建自定义格式的响应体。
 func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
+	if task == nil || task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure {
+		return nil
+	}
+	previousTask := *task
 	channelModel, err := model.GetChannelById(task.ChannelId, true)
 	if err != nil {
 		return nil
@@ -623,12 +627,14 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 			finalQuota, reason = service.ResolveTerminalTaskQuota(adaptor, task, ti)
 		}
 		if _, err := service.FinalizeTaskAccounting(context.Background(), task, snap.Status, finalQuota, reason); err != nil {
+			*task = previousTask
 			reloadCanonicalTask(task)
 			return nil
 		}
 	} else if !snap.Equal(task.Snapshot()) {
 		won, _ := task.UpdateWithStatus(snap.Status)
 		if !won {
+			*task = previousTask
 			reloadCanonicalTask(task)
 		}
 	}
@@ -659,8 +665,8 @@ func reloadCanonicalTask(task *model.Task) {
 	if task == nil {
 		return
 	}
-	canonical, exists, err := model.GetByTaskId(task.UserId, task.TaskID)
-	if err == nil && exists {
+	canonical, err := model.GetTaskByRowID(task.ID)
+	if err == nil {
 		*task = *canonical
 	}
 }

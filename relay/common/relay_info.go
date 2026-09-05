@@ -144,8 +144,16 @@ type RelayInfo struct {
 	// 必须在提交前锁定全额。
 	ForcePreConsume bool
 	// Async task controllers transfer the reservation to durable task accounting.
-	DeferTaskBilling       bool
-	TaskBillingActualQuota *int
+	DeferTaskBilling        bool
+	TaskBillingActualQuota  *int
+	TaskBillingUsage        *dto.Usage
+	TaskBillingExtraContent []string
+	TaskBillingAttribution  *TaskBillingAttribution
+	// TaskSubmissionID and its lease token are internal durable reservation
+	// ownership. They are never derived from or returned as client task IDs.
+	TaskSubmissionID         string
+	TaskSubmissionLeaseToken string
+	TaskSubmissionTaskRowID  int64
 	// Billing 是计费会话，封装了预扣费/结算/退款的统一生命周期。
 	// 免费模型时为 nil。
 	Billing BillingSettler
@@ -454,6 +462,17 @@ func GenRelayInfoImage(c *gin.Context, request dto.Request) *RelayInfo {
 	info.DeferTaskBilling = c.GetBool(ContextKeyDeferTaskBilling)
 	if info.DeferTaskBilling {
 		info.ForcePreConsume = true
+		info.TaskSubmissionID = c.GetString(ContextKeyTaskSubmissionID)
+		info.TaskSubmissionLeaseToken = c.GetString(ContextKeyTaskSubmissionLeaseToken)
+		if value, ok := c.Get(ContextKeyTaskSubmissionTaskRowID); ok {
+			switch taskRowID := value.(type) {
+			case int64:
+				info.TaskSubmissionTaskRowID = taskRowID
+			case int:
+				info.TaskSubmissionTaskRowID = int64(taskRowID)
+			}
+		}
+		info.EnsureTaskSubmissionIdentity()
 	}
 	return info
 }

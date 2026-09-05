@@ -134,7 +134,7 @@ func setupFinalGroupRelayDB(t *testing.T) *gorm.DB {
 
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "final-group-relay.db")+"?_busy_timeout=5000"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}, &model.Channel{}, &model.Ability{}, &model.Log{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}, &model.Channel{}, &model.Ability{}, &model.Log{}, &model.TaskSubmission{}))
 	model.DB, model.LOG_DB = db, db
 	t.Cleanup(func() {
 		if sqlDB, dbErr := db.DB(); dbErr == nil {
@@ -334,7 +334,7 @@ func TestFinalGroupRelayControllerRetryAdmissionAndSettlement(t *testing.T) {
 				require.Zero(t, gotUser.RequestCount)
 				require.Empty(t, logs)
 				require.Contains(t, recorder.Body.String(), string(types.ErrorCodeInsufficientUserQuota))
-				continue
+				return
 			}
 
 			require.Equal(t, 1, gotUser.RequestCount)

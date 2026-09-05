@@ -63,6 +63,7 @@ func RelayImageTaskSubmit(c *gin.Context) {
 	if strings.TrimSpace(taskID) == "" {
 		common.SysLog(fmt.Sprintf("skip image task insert: no task id in response, status=%d, body=%s", capture.Status(), common.LocalLogPreview(string(body))))
 		if relayInfo.ChannelOtherSettings.ImageAsyncMode != dto.ImageAsyncModeTasksEndpoint {
+			service.CompleteDeferredImageBilling(c, relayInfo)
 			capture.flush()
 			return
 		}

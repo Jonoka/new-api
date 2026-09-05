@@ -41,7 +41,7 @@ func TestRelayTaskSubmitDoesNotSendUpstreamWhenSelectedGroupAdmissionFails(t *te
 	common.UsingSQLite = true
 	common.BatchUpdateEnabled = false
 	common.RedisEnabled = false
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}, &model.TaskSubmission{}))
 	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"final-group-task-model":1}`))
 
 	user := &model.User{Username: fmt.Sprintf("ta%d", time.Now().UnixNano()%1_000_000_000_000_000), Password: "test-password", Quota: 100}
@@ -71,7 +71,7 @@ func TestRelayTaskSubmitDoesNotSendUpstreamWhenSelectedGroupAdmissionFails(t *te
 
 	info := &relaycommon.RelayInfo{
 		UserId: user.Id, UserQuota: user.Quota, TokenId: token.Id, TokenKey: token.Key,
-		OriginModelName: "final-group-task-model", UpstreamModelName: "final-group-task-model", UsingGroup: "default", UserGroup: "default",
+		OriginModelName: "final-group-task-model", UsingGroup: "default", UserGroup: "default",
 		RequestId: fmt.Sprintf("task-admission-request-%d", time.Now().UnixNano()), RequestURLPath: "/v1/videos",
 		UserSetting:   dto.UserSetting{BillingPreference: "wallet_only"},
 		TaskRelayInfo: &relaycommon.TaskRelayInfo{},

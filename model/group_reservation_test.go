@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -79,6 +80,7 @@ func useGroupReservationDatabase(t *testing.T, fixture groupReservationDatabase)
 func seedGroupReservationWallet(t *testing.T, db *gorm.DB, suffix string, userQuota int, tokenQuota int) (*User, *Token) {
 	t.Helper()
 	user := &User{Username: fmt.Sprintf("gr%d", time.Now().UnixNano()%1_000_000_000_000_000), Password: "test-password", Quota: userQuota}
+	user.AffCode = user.Username
 	require.NoError(t, db.Create(user).Error)
 	token := &Token{UserId: user.Id, Key: "group-reservation-token-" + suffix, Name: suffix, RemainQuota: tokenQuota}
 	require.NoError(t, db.Create(token).Error)
@@ -153,16 +155,16 @@ func TestReconcileGroupReservationRollsBackFundingWhenTokenAdmissionFails(t *tes
 func TestReconcileGroupReservationRejectsQuotaOverflowWithoutMutation(t *testing.T) {
 	fixture := groupReservationDatabases(t)[0]
 	db := useGroupReservationDatabase(t, fixture)
-	user, token := seedGroupReservationWallet(t, db, fmt.Sprintf("overflow-%d", time.Now().UnixNano()), common.MaxQuota, common.MaxQuota)
+	user, token := seedGroupReservationWallet(t, db, fmt.Sprintf("overflow-%d", time.Now().UnixNano()), math.MaxInt, math.MaxInt)
 
 	_, err := ReconcileGroupReservation(GroupReservationRequest{
 		Source: GroupReservationWallet, UserId: user.Id, TokenId: token.Id, TokenKey: token.Key,
-		ExpectedReserved: common.MaxQuota, TargetReserved: 0,
+		ExpectedReserved: 1, TargetReserved: 0,
 	})
 	require.Error(t, err)
 	userQuota, tokenRemain, tokenUsed := readGroupReservationBalances(t, db, user.Id, token.Id)
-	require.Equal(t, common.MaxQuota, userQuota)
-	require.Equal(t, common.MaxQuota, tokenRemain)
+	require.Equal(t, math.MaxInt, userQuota)
+	require.Equal(t, math.MaxInt, tokenRemain)
 	require.Zero(t, tokenUsed)
 }
 
@@ -192,6 +194,7 @@ func TestReconcileGroupReservationSubscriptionCreateResizeAndRollback(t *testing
 	user, token := seedGroupReservationWallet(t, db, fmt.Sprintf("subscription-%d", time.Now().UnixNano()), 1000, 1000)
 	plan := &SubscriptionPlan{Title: "group reservation", DurationUnit: SubscriptionDurationMonth, DurationValue: 1, Enabled: true, TotalAmount: 1000, QuotaResetPeriod: SubscriptionResetNever}
 	require.NoError(t, db.Create(plan).Error)
+	InvalidateSubscriptionPlanCache(plan.Id)
 	sub := &UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: 1000, StartTime: time.Now().Add(-time.Hour).Unix(), EndTime: time.Now().Add(time.Hour).Unix(), Status: "active"}
 	require.NoError(t, db.Create(sub).Error)
 
@@ -239,6 +242,7 @@ func TestReconcileGroupReservationSubscriptionCrossDatabase(t *testing.T) {
 			user, token := seedGroupReservationWallet(t, db, suffix, 1000, 1000)
 			plan := &SubscriptionPlan{Title: suffix, DurationUnit: SubscriptionDurationMonth, DurationValue: 1, Enabled: true, TotalAmount: 1000, QuotaResetPeriod: SubscriptionResetNever}
 			require.NoError(t, db.Create(plan).Error)
+			InvalidateSubscriptionPlanCache(plan.Id)
 			sub := &UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: 1000, StartTime: time.Now().Add(-time.Hour).Unix(), EndTime: time.Now().Add(time.Hour).Unix(), Status: "active"}
 			require.NoError(t, db.Create(sub).Error)
 			req := GroupReservationRequest{
@@ -272,6 +276,7 @@ func TestReconcileGroupReservationSubscriptionReestablishesTargetAfterReset(t *t
 	user, token := seedGroupReservationWallet(t, db, suffix, 1000, 1000)
 	plan := &SubscriptionPlan{Title: suffix, DurationUnit: SubscriptionDurationMonth, DurationValue: 1, Enabled: true, TotalAmount: 1000, QuotaResetPeriod: SubscriptionResetDaily}
 	require.NoError(t, db.Create(plan).Error)
+	InvalidateSubscriptionPlanCache(plan.Id)
 	now := time.Now()
 	sub := &UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: 1000, StartTime: now.Add(-time.Hour).Unix(), EndTime: now.Add(48 * time.Hour).Unix(), Status: "active"}
 	require.NoError(t, db.Create(sub).Error)
@@ -311,6 +316,7 @@ func TestReconcileGroupReservationSkipTokenQuotaStillTracksWallet(t *testing.T) 
 	fixture := groupReservationDatabases(t)[0]
 	db := useGroupReservationDatabase(t, fixture)
 	user := &User{Username: fmt.Sprintf("skip-token-%d", time.Now().UnixNano()), Password: "test-password", Quota: 500}
+	user.AffCode = common.GetRandomString(12)
 	require.NoError(t, db.Create(user).Error)
 	req := GroupReservationRequest{Source: GroupReservationWallet, UserId: user.Id, SkipTokenQuota: true, TargetReserved: 300}
 	_, err := ReconcileGroupReservation(req)

@@ -352,6 +352,17 @@ func GetAllUnFinishSyncTasks(limit int) []*Task {
 	return tasks
 }
 
+func GetTaskByRowID(id int64) (*Task, error) {
+	if id <= 0 {
+		return nil, errors.New("persisted task id is required")
+	}
+	var task Task
+	if err := DB.First(&task, id).Error; err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
 func GetByOnlyTaskId(taskId string) (*Task, bool, error) {
 	if taskId == "" {
 		return nil, false, nil
@@ -474,6 +485,9 @@ func (t *Task) UpdateBillingSettlement() error {
 // falls back to INSERT ON CONFLICT when the WHERE-guarded UPDATE matches
 // zero rows, which silently bypasses the CAS guard.
 func (t *Task) UpdateWithStatus(fromStatus TaskStatus) (bool, error) {
+	if t == nil || t.ID <= 0 {
+		return false, errors.New("persisted task id is required")
+	}
 	query := DB.Model(t).Where("status = ?", fromStatus)
 	if isTaskTerminal(t.Status) {
 		query = query.Where("NOT EXISTS (?)", DB.Model(&TaskAccounting{}).Select("1").Where("task_row_id = ?", t.ID))

@@ -51,6 +51,7 @@ func seedTaskAccountingMatrix(t *testing.T, db *gorm.DB) (*Task, *User, *Token, 
 	t.Helper()
 	suffix := fmt.Sprintf("%x", time.Now().UnixNano())
 	user := &User{Username: "m" + suffix, Password: "ci-only", Quota: 2000}
+	user.AffCode = user.Username
 	require.NoError(t, db.Create(user).Error)
 	token := &Token{UserId: user.Id, Key: "matrix-token-" + suffix, Name: "matrix", RemainQuota: 2000}
 	require.NoError(t, db.Create(token).Error)
@@ -92,12 +93,18 @@ func TestTaskAccountingFinalQuotaCrossDatabase(t *testing.T) {
 			for _, target := range []int{0, 100, 300, 500} {
 				t.Run(fmt.Sprint(target), func(t *testing.T) {
 					task, user, token, channel := seedTaskAccountingMatrix(t, db)
+					missingIdentity := *task
+					missingIdentity.ID = 0
+					missingIdentity.Status = TaskStatusFailure
+					wonMissing, err := missingIdentity.UpdateWithStatus(TaskStatusQueued)
+					require.Error(t, err)
+					require.False(t, wonMissing)
 					decision := TaskTerminalDecision{TaskRowID: task.ID, ExpectedStatus: TaskStatusQueued, Status: TaskStatusSuccess, FinalQuota: target, Progress: "100%", Reason: "frozen actual usage"}
 					accepted, err := AcceptTaskTerminalDecision(context.Background(), decision)
 					require.NoError(t, err)
 					require.True(t, accepted.Won)
 					require.NoError(t, db.First(task, task.ID).Error)
-					require.Equal(t, TaskStatusQueued, task.Status)
+					require.EqualValues(t, TaskStatusQueued, task.Status)
 					stale := *task
 					stale.Progress = "90%"
 					won, err := stale.UpdateWithStatus(TaskStatusQueued)
@@ -105,7 +112,7 @@ func TestTaskAccountingFinalQuotaCrossDatabase(t *testing.T) {
 					require.False(t, won)
 					require.NoError(t, RecoverTaskAccounting(context.Background(), 100))
 					assertTaskAccountingMatrix(t, db, task, user, token, channel, target)
-					require.Equal(t, TaskStatusSuccess, task.Status)
+					require.EqualValues(t, TaskStatusSuccess, task.Status)
 					decision.Status, decision.FinalQuota = TaskStatusFailure, 0
 					duplicate, err := AcceptTaskTerminalDecision(context.Background(), decision)
 					require.NoError(t, err)
@@ -142,7 +149,7 @@ func TestTaskAccountingRollbackAndLogRedelivery(t *testing.T) {
 			_, err = ApplyTaskAccountingDecision(context.Background(), task.ID)
 			require.Error(t, err)
 			assertTaskAccountingMatrix(t, db, task, user, token, channel, 300)
-			require.Equal(t, TaskStatusQueued, task.Status)
+			require.EqualValues(t, TaskStatusQueued, task.Status)
 			require.NoError(t, db.Callback().Update().Remove(name))
 			_, err = ApplyTaskAccountingDecision(context.Background(), task.ID)
 			require.NoError(t, err)

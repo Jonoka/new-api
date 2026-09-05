@@ -38,3 +38,4 @@
 - [Time-range billing rules](../workflows/2026-09/05_time_range_billing_rules.md)
 - [Final-group pricing and reservation](../workflows/2026-09/05_final_group_billing.md)
 - [Durable async task accounting](../workflows/2026-09/05_async_task_accounting.md)
+- [Task submission reservation recovery](../workflows/2026-09/05_task_submission_durability.md)

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -36,13 +37,23 @@ type GroupReservationRequest struct {
 	TargetReserved   int
 	// PostConsume is only for an accepted upstream result, never retry admission.
 	PostConsume bool
+	// Submission fields are populated only for ForcePreConsume/DeferTaskBilling
+	// flows. They bind every resize to one durable async submission owner.
+	SubmissionID           string
+	SubmissionLeaseToken   string
+	SubmissionOperationID  string
+	SubmissionTaskRowID    int64
+	SubmissionLeaseSeconds int64
+	SubmissionFinalState   string
+	SubmissionFinalReason  string
 }
 
 type GroupReservationResult struct {
-	Reserved                    int
-	SubscriptionId              int
-	SubscriptionAmountTotal     int64
-	SubscriptionAmountUsedAfter int64
+	Reserved                         int
+	SubscriptionId                   int
+	SubscriptionAmountTotal          int64
+	SubscriptionAmountUsedAfter      int64
+	SubscriptionReservationResetTime *int64
 }
 
 // ReconcileGroupReservation atomically moves one live request reservation to
@@ -58,11 +69,17 @@ func WithReconciledGroupReservation(req GroupReservationRequest, apply func(*gor
 	if req.UserId <= 0 {
 		return nil, errors.New("invalid userId")
 	}
-	if req.ExpectedReserved < 0 || req.TargetReserved < 0 {
-		return nil, errors.New("reservation quota cannot be negative")
+	if req.ExpectedReserved < 0 || req.TargetReserved < 0 || req.ExpectedReserved > common.MaxQuota || req.TargetReserved > common.MaxQuota {
+		return nil, errors.New("reservation quota is out of range")
 	}
 	if req.Source != GroupReservationWallet && req.Source != GroupReservationSubscription {
 		return nil, fmt.Errorf("unsupported group reservation source: %s", req.Source)
+	}
+	if req.SubmissionID != "" {
+		req.RequestId = req.SubmissionID
+		if req.SubmissionOperationID == "" {
+			req.SubmissionOperationID = common.GetUUID()
+		}
 	}
 	if req.Source == GroupReservationSubscription && strings.TrimSpace(req.RequestId) == "" {
 		return nil, errors.New("requestId is empty")
@@ -94,12 +111,25 @@ func WithReconciledGroupReservation(req GroupReservationRequest, apply func(*gor
 
 	result := &GroupReservationResult{Reserved: req.TargetReserved}
 	err := DB.Transaction(func(tx *gorm.DB) error {
+		var submission *TaskSubmission
+		if req.SubmissionID != "" {
+			var err error
+			submission, err = prepareTaskSubmissionReservationTx(tx, req)
+			if err != nil {
+				return err
+			}
+		}
 		delta := req.TargetReserved - req.ExpectedReserved
 		if req.Source == GroupReservationWallet {
 			if err := reconcileWalletReservationTx(tx, req.UserId, pendingUser, delta, req.PostConsume); err != nil {
 				return err
 			}
 		} else {
+			// Match wallet lock order before a handoff later updates user counters.
+			var user User
+			if err := lockForUpdate(tx).Select("id").Where("id = ?", req.UserId).First(&user).Error; err != nil {
+				return err
+			}
 			subResult, err := reconcileSubscriptionReservationTx(tx, req, delta)
 			if err != nil {
 				return err
@@ -107,9 +137,15 @@ func WithReconciledGroupReservation(req GroupReservationRequest, apply func(*gor
 			result.SubscriptionId = subResult.SubscriptionId
 			result.SubscriptionAmountTotal = subResult.SubscriptionAmountTotal
 			result.SubscriptionAmountUsedAfter = subResult.SubscriptionAmountUsedAfter
+			result.SubscriptionReservationResetTime = subResult.SubscriptionReservationResetTime
 		}
 		if err := reconcileTokenReservationTx(tx, req, pendingToken, delta); err != nil {
 			return err
+		}
+		if submission != nil {
+			if err := updateTaskSubmissionReservationTx(tx, submission, req, result, pendingUser != 0 || pendingToken != 0); err != nil {
+				return err
+			}
 		}
 		if apply != nil {
 			return apply(tx, result)
@@ -117,10 +153,27 @@ func WithReconciledGroupReservation(req GroupReservationRequest, apply func(*gor
 		return nil
 	})
 	if err != nil {
-		if pendingUser != 0 {
+		restorePending := true
+		if req.SubmissionID != "" {
+			resolution, resolveErr := resolveTaskSubmissionReservationCommit(req)
+			if resolveErr != nil {
+				// An unavailable or conflicting durable journal cannot safely be
+				// classified as a rollback. Do not replay pulled deltas by guess.
+				restorePending = false
+			} else if resolution.Committed {
+				restorePending = false
+				if resolution.CanReturn && apply == nil {
+					if cacheErr := ReconcileTaskSubmissionCache(context.Background(), req.SubmissionID); cacheErr != nil {
+						common.SysLog("failed to invalidate task submission quota cache after commit reconciliation: " + cacheErr.Error())
+					}
+					return &resolution.Result, nil
+				}
+			}
+		}
+		if restorePending && pendingUser != 0 {
 			batchUpdateStores[BatchUpdateTypeUserQuota][req.UserId] += pendingUser
 		}
-		if pendingToken != 0 {
+		if restorePending && pendingToken != 0 {
 			batchUpdateStores[BatchUpdateTypeTokenQuota][req.TokenId] += pendingToken
 		}
 		return nil, err
@@ -134,6 +187,11 @@ func WithReconciledGroupReservation(req GroupReservationRequest, apply func(*gor
 	if !req.SkipTokenQuota && common.RedisEnabled && req.TokenKey != "" {
 		if err := cacheDeleteToken(req.TokenKey); err != nil {
 			common.SysLog("failed to invalidate token quota cache after group reservation: " + err.Error())
+		}
+	}
+	if req.SubmissionID != "" {
+		if err := ReconcileTaskSubmissionCache(context.Background(), req.SubmissionID); err != nil {
+			common.SysLog("failed to invalidate task submission quota cache: " + err.Error())
 		}
 	}
 	return result, nil
@@ -162,7 +220,11 @@ func reconcileTokenReservationTx(tx *gorm.DB, req GroupReservationRequest, pendi
 		return errors.New("invalid token reservation identity")
 	}
 	var token Token
-	if err := lockForUpdate(tx).Where("id = ?", req.TokenId).First(&token).Error; err != nil {
+	tokenTx := tx
+	if req.SubmissionID != "" && reservationDelta <= 0 {
+		tokenTx = tx.Unscoped()
+	}
+	if err := lockForUpdate(tokenTx).Where("id = ?", req.TokenId).First(&token).Error; err != nil {
 		if reservationDelta <= 0 && errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil
 		}
@@ -179,7 +241,7 @@ func reconcileTokenReservationTx(tx *gorm.DB, req GroupReservationRequest, pendi
 	if err != nil {
 		return err
 	}
-	return tx.Model(&Token{}).Where("id = ?", req.TokenId).Updates(map[string]interface{}{
+	return tokenTx.Model(&Token{}).Where("id = ?", req.TokenId).Updates(map[string]interface{}{
 		"remain_quota":  newRemain,
 		"used_quota":    newUsed,
 		"accessed_time": common.GetTimestamp(),
@@ -247,14 +309,18 @@ func reconcileSubscriptionReservationTx(tx *gorm.DB, req GroupReservationRequest
 	}
 	record.PreConsumed = int64(req.TargetReserved)
 	record.ReservationResetTime = common.GetPointer(sub.LastResetTime)
+	if req.PostConsume && req.TargetReserved == 0 {
+		record.Status = "refunded"
+	}
 	if err := tx.Save(&record).Error; err != nil {
 		return nil, err
 	}
 	return &GroupReservationResult{
-		Reserved:                    req.TargetReserved,
-		SubscriptionId:              sub.Id,
-		SubscriptionAmountTotal:     sub.AmountTotal,
-		SubscriptionAmountUsedAfter: sub.AmountUsed,
+		Reserved:                         req.TargetReserved,
+		SubscriptionId:                   sub.Id,
+		SubscriptionAmountTotal:          sub.AmountTotal,
+		SubscriptionAmountUsedAfter:      sub.AmountUsed,
+		SubscriptionReservationResetTime: common.GetPointer(sub.LastResetTime),
 	}, nil
 }
 
@@ -298,10 +364,11 @@ func createSubscriptionReservationTx(tx *gorm.DB, req GroupReservationRequest) (
 			return nil, err
 		}
 		return &GroupReservationResult{
-			Reserved:                    req.TargetReserved,
-			SubscriptionId:              sub.Id,
-			SubscriptionAmountTotal:     sub.AmountTotal,
-			SubscriptionAmountUsedAfter: sub.AmountUsed,
+			Reserved:                         req.TargetReserved,
+			SubscriptionId:                   sub.Id,
+			SubscriptionAmountTotal:          sub.AmountTotal,
+			SubscriptionAmountUsedAfter:      sub.AmountUsed,
+			SubscriptionReservationResetTime: common.GetPointer(sub.LastResetTime),
 		}, nil
 	}
 	return nil, fmt.Errorf("%w, need=%d", ErrGroupReservationSubscriptionInsufficient, req.TargetReserved)

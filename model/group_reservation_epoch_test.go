@@ -16,6 +16,7 @@ func TestReconcileGroupReservationResetPreservesOtherCurrentPeriodUsage(t *testi
 			user, token := seedGroupReservationWallet(t, db, suffix, 2000, 2000)
 			plan := &SubscriptionPlan{Title: suffix, DurationUnit: SubscriptionDurationMonth, DurationValue: 1, Enabled: true, TotalAmount: 2000, QuotaResetPeriod: SubscriptionResetNever}
 			require.NoError(t, db.Create(plan).Error)
+			InvalidateSubscriptionPlanCache(plan.Id)
 			now := time.Now().Unix()
 			sub := &UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: 2000, StartTime: now - 100, EndTime: now + 3600, Status: "active", LastResetTime: now - 100}
 			require.NoError(t, db.Create(sub).Error)
