@@ -4,6 +4,7 @@ import { test } from 'node:test'
 
 const browser = new JSDOM('<!doctype html><html><body></body></html>', {
   url: 'https://pricing.example.test/',
+  pretendToBeVisual: true,
 })
 Object.defineProperties(globalThis, {
   window: { configurable: true, value: browser.window },
@@ -18,6 +19,27 @@ Object.defineProperties(globalThis, {
     value: browser.window.getComputedStyle.bind(browser.window),
   },
   IS_REACT_ACT_ENVIRONMENT: { configurable: true, value: true },
+  requestAnimationFrame: {
+    configurable: true,
+    value: browser.window.requestAnimationFrame.bind(browser.window),
+  },
+  cancelAnimationFrame: {
+    configurable: true,
+    value: browser.window.cancelAnimationFrame.bind(browser.window),
+  },
+  ShadowRoot: { configurable: true, value: browser.window.ShadowRoot },
+  MutationObserver: {
+    configurable: true,
+    value: browser.window.MutationObserver,
+  },
+  ResizeObserver: {
+    configurable: true,
+    value: class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  },
 })
 browser.window.matchMedia = () => ({
   matches: false,
@@ -140,14 +162,12 @@ test('invalid rule survives a base-price edit and blocks outer mode and submit',
     )
     await React.act(async () => {
       tokenTab.click()
-      container
-        .querySelector('form')
-        .dispatchEvent(
-          new browser.window.Event('submit', {
-            bubbles: true,
-            cancelable: true,
-          })
-        )
+      container.querySelector('form').dispatchEvent(
+        new browser.window.Event('submit', {
+          bubbles: true,
+          cancelable: true,
+        })
+      )
     })
     assert.equal(saved.length, 0)
     assert.ok(container.querySelector('[aria-label="Remove rule group"]'))
