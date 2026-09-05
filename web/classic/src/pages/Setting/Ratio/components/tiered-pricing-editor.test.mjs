@@ -65,6 +65,13 @@ browser.window.ResizeObserver = class {
   unobserve() {}
   disconnect() {}
 };
+globalThis.matchMedia = browser.window.matchMedia;
+globalThis.self = browser.window;
+globalThis.location = browser.window.location;
+globalThis.Image = browser.window.Image;
+globalThis.HTMLCanvasElement = browser.window.HTMLCanvasElement;
+globalThis.SVGElement = browser.window.SVGElement;
+globalThis.DOMParser = browser.window.DOMParser;
 globalThis.ResizeObserver = browser.window.ResizeObserver;
 globalThis.requestAnimationFrame = (callback) =>
   setTimeout(() => callback(Date.now()), 0);
