@@ -306,9 +306,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if shouldMarkLitePoolExhausted(c, relayInfo, newAPIError, liteChannelSelectionExhausted) {
 			newAPIError = markLitePoolExhausted(newAPIError)
 		}
-		gopool.Go(func() {
+		if !common.RedisEnabled {
 			perfmetrics.RecordRelaySample(relayInfo, false, 0)
-		})
+		} else {
+			gopool.Go(func() {
+				perfmetrics.RecordRelaySample(relayInfo, false, 0)
+			})
+		}
 	}
 }
 

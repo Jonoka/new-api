@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -110,7 +112,8 @@ func AlphaSearchHelper(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAP
 	}
 
 	contentType := httpResponse.Header.Get("Content-Type")
-	if contentType == "" {
+	mediaType, _, contentTypeErr := mime.ParseMediaType(contentType)
+	if contentTypeErr != nil || (mediaType != "application/json" && !(strings.HasPrefix(mediaType, "application/") && strings.HasSuffix(mediaType, "+json"))) {
 		contentType = "application/json"
 	}
 	c.Writer.Header().Set("Content-Type", contentType)

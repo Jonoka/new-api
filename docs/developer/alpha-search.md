@@ -24,12 +24,14 @@ reads at most 8 MiB plus one sentinel byte, rejects larger responses, and forwar
 the validated raw bytes intact, including unknown fields, only after settlement.
 This bound is intentionally far below the existing 128 MiB request default while
 leaving room for the pinned client's two string fields. HTML, malformed JSON,
-error objects and empty bodies cannot count as success. Only the safe upstream
-Content-Type is retained; Content-Length is recalculated. No redirects are followed
+error objects and empty bodies cannot count as success. Upstream JSON Content-Type
+is retained; other media types normalize to application/json. Content-Length is
+recalculated. No redirects are followed
 for Alpha. No Responses conversion, SSE or synthetic token usage is introduced.
 
 Both success and error bodies use this cap. Actual provider result sizes remain
-unverified until the approved canary. Parameter overrides cannot enable streaming.
+unverified until the approved canary. Parameter overrides cannot enable streaming,
+and final request Accept/Content-Type remain application/json after header overrides.
 
 ## Accounting
 

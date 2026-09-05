@@ -73,7 +73,7 @@ func TestAlphaSearchRelayFinalGroupAccounting(t *testing.T) {
 					require.NoError(t, err)
 					require.Contains(t, string(body), `9007199254740993`)
 					require.NotContains(t, string(body), `"instructions"`)
-					w.Header().Set("Content-Type", "application/json")
+					w.Header().Set("Content-Type", "text/html")
 					w.WriteHeader(status)
 					if status == 200 {
 						_, _ = io.WriteString(w, response)
@@ -128,6 +128,7 @@ func TestAlphaSearchRelayFinalGroupAccounting(t *testing.T) {
 			}
 			require.True(t, published)
 			require.Equal(t, response, recorder.Body.String())
+			require.Equal(t, "application/json", recorder.Header().Get("Content-Type"))
 			require.Equal(t, 1, gotUser.RequestCount)
 			require.Len(t, logs, 1)
 			require.Equal(t, finalChannel.Id, logs[0].ChannelId)

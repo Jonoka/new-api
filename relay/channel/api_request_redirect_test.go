@@ -50,3 +50,13 @@ func TestAlphaRedirectPolicyIsScopedAndPreservesClientSettings(t *testing.T) {
 	require.Equal(t, http.StatusTemporaryRedirect, alphaResp.StatusCode)
 	require.Equal(t, "/success", alphaResp.Header.Get("Location"))
 }
+
+func TestAlphaFinalHeadersPreserveSynchronousContract(t *testing.T) {
+	req, err := http.NewRequest(http.MethodPost, "https://gateway.invalid/v1/alpha/search", nil)
+	require.NoError(t, err)
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Content-Type", "text/plain")
+	enforceFinalStreamHeaders(req, &relaycommon.RelayInfo{RelayMode: relayconstant.RelayModeAlphaSearch})
+	require.Equal(t, "application/json", req.Header.Get("Accept"))
+	require.Equal(t, "application/json", req.Header.Get("Content-Type"))
+}

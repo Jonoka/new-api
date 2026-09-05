@@ -428,7 +428,15 @@ func sanitizeClaudeCodeHeadersForCompatibleClient(c *gin.Context, req *http.Requ
 }
 
 func enforceFinalStreamHeaders(req *http.Request, info *common.RelayInfo) {
-	if req == nil || info == nil || !info.IsStream {
+	if req == nil || info == nil {
+		return
+	}
+	if info.RelayMode == constant.RelayModeAlphaSearch {
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json")
+		return
+	}
+	if !info.IsStream {
 		return
 	}
 	if info.ApiType == rootconstant.APITypeCodex && info.RelayMode == constant.RelayModeResponses {

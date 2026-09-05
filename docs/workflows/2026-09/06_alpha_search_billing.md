@@ -60,3 +60,8 @@ and other text billing continue through `PostTextConsumeQuota` unchanged.
 All builds and tests run in GitHub-hosted Actions. The source worktree is formatted
 and inspected locally only. Real gateway accounting remains a separately approved
 bounded canary and is not established by fixture results.
+
+CI also exposed a pre-existing failure-sample race when a test restored Redis
+configuration before its asynchronous metric worker finished. Failed requests now
+match successful text requests: when Redis is disabled, the small in-memory
+performance update completes synchronously before releasing request state.
