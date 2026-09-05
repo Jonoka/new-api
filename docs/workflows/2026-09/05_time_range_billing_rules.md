@@ -10,6 +10,8 @@ Incomplete/invalid visual rules retain the last valid parent draft and disable s
 
 Editor instances are keyed by the selected record. Parent echoes of a base-price edit do not reinitialize rule drafts. While a visual rule is invalid, outer price-mode/model switches and batch application are blocked so they cannot unmount and discard it; correcting or explicitly removing the rule restores navigation. Cancel remains an explicit discard action. The parser respects quoted literals and rejects unparenthesized mixed top-level OR/AND, whose precedence is not representable by an all-conditions-AND rule group.
 
+Validity also reaches the page-level owners: Classic `ModelPricingCombined` blocks Visual/Manual switching, and Default `ModelRatioForm` blocks Visual/JSON switching and page Save/Reset while an invalid nested rule exists. Tests mount these actual owners, not just the nested panel, and verify the rule remains until explicitly corrected or removed.
+
 ## Validation
 
 GitHub-hosted Actions runs `bun test web/default/src/features/pricing/lib/time-rule-expr.test.mjs`, covering both implementations with identical fixtures, all 24 hours, wrap/equal boundaries, domains, compound guards and raw-expression preservation. Both frontend builds and Default typecheck are also required. Test results and candidate identity belong to the batch's CI evidence; this document does not claim production deployment.

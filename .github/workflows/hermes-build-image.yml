@@ -80,7 +80,7 @@ jobs:
           bun install --frozen-lockfile
           bun test src/features/pricing/lib/time-rule-expr.test.mjs src/features/system-settings/models/tiered-pricing-editor.test.mjs
           bun run typecheck
-          bun x eslint src/features/pricing/lib/billing-expr.ts src/features/system-settings/models/tiered-pricing-editor.tsx src/features/system-settings/models/model-pricing-sheet.tsx src/features/system-settings/models/model-ratio-visual-editor.tsx
+          bun x eslint src/features/pricing/lib/billing-expr.ts src/features/system-settings/models/tiered-pricing-editor.tsx src/features/system-settings/models/model-pricing-sheet.tsx src/features/system-settings/models/model-ratio-visual-editor.tsx src/features/system-settings/models/model-ratio-form.tsx
           bun run build
 
       - name: Check and build classic frontend

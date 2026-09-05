@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Banner,
   Button,
@@ -87,6 +87,7 @@ const PriceInput = ({
 );
 
 export default function ModelPricingEditor({
+  onValidityChange,
   options,
   refresh,
   candidateModelNames = EMPTY_CANDIDATE_MODEL_NAMES,
@@ -148,6 +149,9 @@ export default function ModelPricingEditor({
 
   const invalidRequestRules =
     selectedModel?.billingMode === 'tiered_expr' && !requestRulesValid;
+  useEffect(() => {
+    onValidityChange?.(!invalidRequestRules);
+  }, [invalidRequestRules, onValidityChange]);
 
   const setSelectedModelName = useCallback(
     (name) => {

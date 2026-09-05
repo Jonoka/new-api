@@ -127,7 +127,7 @@ const React = await import('react');
 const { act } = await import('react-dom/test-utils');
 const { createRoot } = await import('react-dom/client');
 const { default: ModelPricingEditor } =
-  await import('./ModelPricingEditor.jsx');
+  await import('../ModelPricingCombined.jsx');
 
 function buttonWithText(container, text) {
   const button = [...container.querySelectorAll('button')].find(
@@ -138,9 +138,9 @@ function buttonWithText(container, text) {
 }
 
 function radioWithLabel(container, text) {
-  const label = [...container.querySelectorAll('label')].find(
-    (candidate) => candidate.textContent.trim() === text,
-  );
+  const label = [...container.querySelectorAll('label')]
+    .filter((candidate) => candidate.textContent.trim() === text)
+    .at(-1);
   const input = label?.querySelector('input');
   assert.ok(input, `missing radio label: ${text}`);
   return input;
@@ -198,11 +198,14 @@ test('model selection preserves each tariff and invalid drafts block switching a
       buttonWithText(container, '添加条件组').click();
     });
     assert.equal(buttonWithText(container, '应用更改').disabled, true);
+    const manualMode = radioWithLabel(container, '手动编辑');
+    assert.equal(manualMode.disabled, true);
     const invalidGroupsBefore = container.querySelectorAll('input').length;
     const perTokenRadio = radioWithLabel(container, '按量计费');
     assert.equal(perTokenRadio.disabled, true);
     await act(async () => {
       perTokenRadio.click();
+      manualMode.click();
       buttonWithText(container, 'A-model').click();
       buttonWithText(container, '应用更改').click();
     });

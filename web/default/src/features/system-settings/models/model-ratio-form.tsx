@@ -73,6 +73,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
 }: ModelRatioFormProps) {
   const { t } = useTranslation()
   const [editMode, setEditMode] = useState<'visual' | 'json'>('visual')
+  const [editorValid, setEditorValid] = useState(true)
 
   const handleFieldChange = useCallback(
     (field: keyof ModelFormValues, value: string) => {
@@ -85,13 +86,23 @@ export const ModelRatioForm = memo(function ModelRatioForm({
   )
 
   const toggleEditMode = useCallback(() => {
+    if (!editorValid) return
     setEditMode((prev) => (prev === 'visual' ? 'json' : 'visual'))
-  }, [])
+  }, [editorValid])
+
+  const submit = form.handleSubmit(async (values) => {
+    if (editorValid) await onSave(values)
+  })
 
   return (
     <div className='space-y-6'>
       <div className='flex justify-end'>
-        <Button variant='outline' size='sm' onClick={toggleEditMode}>
+        <Button
+          variant='outline'
+          size='sm'
+          onClick={toggleEditMode}
+          disabled={!editorValid}
+        >
           {editMode === 'visual' ? (
             <>
               <Code2 className='mr-2 h-4 w-4' />
@@ -113,15 +124,15 @@ export const ModelRatioForm = memo(function ModelRatioForm({
             variant='destructive'
             size='sm'
             onClick={onReset}
-            disabled={isResetting}
+            disabled={isResetting || !editorValid}
           >
             {t('Reset prices')}
           </Button>
           <Button
             type='button'
             size='sm'
-            onClick={form.handleSubmit(onSave)}
-            disabled={isSaving}
+            onClick={submit}
+            disabled={isSaving || !editorValid}
           >
             {isSaving ? t('Saving...') : t('Save model prices')}
           </Button>
@@ -129,6 +140,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
         {editMode === 'visual' ? (
           <div className='space-y-6'>
             <ModelRatioVisualEditor
+              onValidityChange={setEditorValid}
               modelPrice={form.watch('ModelPrice')}
               modelPriceUnit={form.watch('ModelPriceUnit')}
               modelPriceVariants={form.watch('ModelPriceVariants')}
@@ -176,7 +188,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
             />
           </div>
         ) : (
-          <SettingsForm onSubmit={form.handleSubmit(onSave)}>
+          <SettingsForm onSubmit={submit}>
             <FormField
               control={form.control}
               name='ModelPrice'

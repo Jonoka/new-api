@@ -26,6 +26,7 @@ import ModelRatioSettings from './ModelRatioSettings';
 export default function ModelPricingCombined({ options, refresh }) {
   const { t } = useTranslation();
   const [editMode, setEditMode] = useState('visual');
+  const [editorValid, setEditorValid] = useState(true);
 
   return (
     <div>
@@ -34,14 +35,21 @@ export default function ModelPricingCombined({ options, refresh }) {
           type='button'
           size='small'
           value={editMode}
-          onChange={(e) => setEditMode(e.target.value)}
+          disabled={!editorValid}
+          onChange={(e) => {
+            if (editorValid) setEditMode(e.target.value);
+          }}
         >
           <Radio value='visual'>{t('可视化编辑')}</Radio>
           <Radio value='manual'>{t('手动编辑')}</Radio>
         </RadioGroup>
       </div>
       {editMode === 'visual' ? (
-        <ModelPricingEditor options={options} refresh={refresh} />
+        <ModelPricingEditor
+          options={options}
+          refresh={refresh}
+          onValidityChange={setEditorValid}
+        />
       ) : (
         <ModelRatioSettings options={options} refresh={refresh} />
       )}

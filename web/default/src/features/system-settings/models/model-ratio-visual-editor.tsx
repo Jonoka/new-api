@@ -83,6 +83,7 @@ import {
 import { formatPricingNumber } from './pricing-format'
 
 type ModelRatioVisualEditorProps = {
+  onValidityChange?: (valid: boolean) => void
   modelPrice: string
   modelPriceUnit: string
   modelPriceVariants: string
@@ -235,12 +236,16 @@ export const ModelRatioVisualEditor = memo(
     billingMode,
     billingExpr,
     onChange,
+    onValidityChange,
   }: ModelRatioVisualEditorProps) {
     const { t } = useTranslation()
     const isMobile = useMediaQuery('(max-width: 767px)')
     const [sheetOpen, setSheetOpen] = useState(false)
     const [editorOpen, setEditorOpen] = useState(false)
     const [editorValid, setEditorValid] = useState(true)
+    useEffect(() => {
+      onValidityChange?.(editorValid)
+    }, [editorValid, onValidityChange])
     const [editData, setEditData] = useState<ModelRatioData | null>(null)
     const [sorting, setSorting] = useState<SortingState>([])
     const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
@@ -1187,6 +1192,7 @@ export const ModelRatioVisualEditor = memo(
       prevProps.audioCompletionRatio === nextProps.audioCompletionRatio &&
       prevProps.billingMode === nextProps.billingMode &&
       prevProps.billingExpr === nextProps.billingExpr &&
+      prevProps.onValidityChange === nextProps.onValidityChange &&
       prevProps.onChange === nextProps.onChange
     )
   }

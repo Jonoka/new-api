@@ -59,6 +59,10 @@ const { createRoot } = await import('react-dom/client')
 const { TieredPricingEditor } = await import('./tiered-pricing-editor.tsx')
 const { combineBillingExpr } = await import('../../pricing/lib/billing-expr.ts')
 const { ModelPricingEditorPanel } = await import('./model-pricing-sheet.tsx')
+const { ModelRatioForm } = await import('./model-ratio-form.tsx')
+const { useForm } = await import('react-hook-form')
+const { SettingsPageProvider } =
+  await import('../components/settings-page-context.tsx')
 
 function buttonWithText(container, text) {
   const button = [...container.querySelectorAll('button')].find(
@@ -183,5 +187,83 @@ test('invalid rule survives a base-price edit and blocks outer mode and submit',
       root.unmount()
     })
     container.remove()
+  }
+})
+
+test('page-level JSON mode and save remain blocked by an invalid nested rule', async () => {
+  const container = document.createElement('div')
+  const actions = document.createElement('div')
+  document.body.append(container, actions)
+  const root = createRoot(container)
+  const saves = []
+  function PageHarness() {
+    const form = useForm({
+      defaultValues: {
+        ModelPrice: '{}',
+        ModelPriceUnit: '{}',
+        ModelPriceVariants: '{}',
+        ModelRatio: '{}',
+        CacheRatio: '{}',
+        CreateCacheRatio: '{}',
+        CompletionRatio: '{}',
+        ImageRatio: '{}',
+        AudioRatio: '{}',
+        AudioCompletionRatio: '{}',
+        ExposeRatioEnabled: false,
+        BillingMode: JSON.stringify({ 'page-model': 'tiered_expr' }),
+        BillingExpr: JSON.stringify({
+          'page-model': 'tier("base", p * 2.5 + c * 15)',
+        }),
+      },
+    })
+    return React.createElement(
+      SettingsPageProvider,
+      { actionsContainer: actions },
+      React.createElement(ModelRatioForm, {
+        form,
+        onSave: async (data) => {
+          saves.push(data)
+        },
+        onReset() {},
+        isSaving: false,
+        isResetting: false,
+      })
+    )
+  }
+  try {
+    await React.act(async () => {
+      root.render(React.createElement(PageHarness))
+    })
+    const row = [...container.querySelectorAll('tr')].find((candidate) =>
+      candidate.textContent.includes('page-model')
+    )
+    assert.ok(row)
+    await React.act(async () => {
+      row.click()
+    })
+    await React.act(async () => {
+      buttonWithText(container, 'Add rule group').click()
+    })
+    const jsonMode = buttonWithText(container, 'Switch to JSON')
+    const save = buttonWithText(actions, 'Save model prices')
+    assert.equal(jsonMode.disabled, true)
+    assert.equal(save.disabled, true)
+    await React.act(async () => {
+      jsonMode.click()
+      save.click()
+    })
+    assert.equal(saves.length, 0)
+    assert.ok(container.querySelector('[aria-label="Remove rule group"]'))
+    await React.act(async () => {
+      container.querySelector('[aria-label="Remove rule group"]').click()
+    })
+    assert.equal(jsonMode.disabled, false)
+    assert.equal(save.disabled, false)
+  } finally {
+    await React.act(async () => {
+      root.unmount()
+    })
+    container.remove()
+    actions.remove()
   }
 })
