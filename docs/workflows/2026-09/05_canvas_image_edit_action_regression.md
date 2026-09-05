@@ -64,4 +64,12 @@ are not automatically retried by this repair.
 
 ## Verification Results
 
-Pending source repair and GitHub Actions validation.
+Prettier, the new developer-document link, and `git diff --check` passed.
+The repaired controller matches the previously verified controller at
+`18ea6828475a1166cfdb08ffb837c8d92557ef96` byte-for-byte in Git.
+
+The first GitHub Actions run, `33942891324`, passed both frontend gates and
+compiled the Go packages. The new action table test failed because its
+platform assertion compared a plain string with the named `TaskPlatform`
+type. The assertion now uses the explicit named type; production code did
+not change. That run published no image. Final CI validation is pending.

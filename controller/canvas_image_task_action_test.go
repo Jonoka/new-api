@@ -61,7 +61,7 @@ func TestCanvasImageTaskSubmitPreservesRequestAction(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, exists)
 			require.Equal(t, tt.expected, task.Action)
-			require.Equal(t, constant.TaskPlatformCanvasImage, task.Platform)
+			require.Equal(t, constant.TaskPlatform(constant.TaskPlatformCanvasImage), task.Platform)
 			require.Equal(t, "auto", task.Group)
 
 			replay, _, _ := executeCanvasImageRelayWithHandler(captured, func(c *gin.Context) {
