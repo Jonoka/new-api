@@ -206,6 +206,7 @@ func finalGroupRelayContext(t *testing.T, user *model.User, token *model.Token, 
 	common.SetContextKey(c, constant.ContextKeyChannelType, first.Type)
 	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, first.GetBaseURL())
 	common.SetContextKey(c, constant.ContextKeyChannelKey, first.Key)
+	common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, first.GetOtherSettings())
 	common.SetContextKey(c, constant.ContextKeyChannelAutoBan, false)
 	common.SetContextKey(c, constant.ContextKeySelectedChannel, first)
 	c.Set("auto_group", firstGroup)
