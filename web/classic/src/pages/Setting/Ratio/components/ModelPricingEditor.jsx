@@ -249,6 +249,7 @@ export default function ModelPricingEditor({
               <Button
                 size='small'
                 type='danger'
+                disabled={invalidRequestRules}
                 icon={<IconDelete />}
                 onClick={() => deleteModel(record.name)}
               />
@@ -259,6 +260,7 @@ export default function ModelPricingEditor({
     ],
     [
       allowDeleteModel,
+      invalidRequestRules,
       deleteModel,
       getBillingModeLabel,
       getExprModeLabel,
@@ -326,14 +328,20 @@ export default function ModelPricingEditor({
             prefix={<IconSearch />}
             placeholder={t('搜索模型名称')}
             value={searchText}
-            onChange={(value) => setSearchText(value)}
+            disabled={invalidRequestRules}
+            onChange={(value) => {
+              if (!invalidRequestRules) setSearchText(value);
+            }}
             style={{ width: isMobile ? '100%' : 220 }}
             showClear
           />
           {showConflictFilter ? (
             <Checkbox
               checked={conflictOnly}
-              onChange={(event) => setConflictOnly(event.target.checked)}
+              disabled={invalidRequestRules}
+              onChange={(event) => {
+                if (!invalidRequestRules) setConflictOnly(event.target.checked);
+              }}
             >
               {t('仅显示矛盾倍率')}
             </Checkbox>

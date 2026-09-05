@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
+import { mock } from 'bun:test';
 
 const requireDefault = createRequire(
   new URL('../../../../../../default/package.json', import.meta.url),
@@ -77,6 +78,47 @@ globalThis.requestAnimationFrame = (callback) =>
   setTimeout(() => callback(Date.now()), 0);
 globalThis.cancelAnimationFrame = clearTimeout;
 
+// Provider logos are outside pricing behavior and import a React 19 peer entry.
+const logo = () => null;
+Object.assign(logo, { Color: logo, Combine: logo, Text: logo });
+mock.module('@lobehub/icons', () =>
+  Object.fromEntries(
+    [
+      'OpenAI',
+      'Claude',
+      'Gemini',
+      'Moonshot',
+      'Zhipu',
+      'Qwen',
+      'DeepSeek',
+      'Minimax',
+      'Wenxin',
+      'Spark',
+      'Midjourney',
+      'Hunyuan',
+      'Cohere',
+      'Cloudflare',
+      'Ai360',
+      'Yi',
+      'Jina',
+      'Mistral',
+      'XAI',
+      'Ollama',
+      'Doubao',
+      'Suno',
+      'Xinference',
+      'OpenRouter',
+      'Dify',
+      'Coze',
+      'SiliconCloud',
+      'FastGPT',
+      'Kling',
+      'Jimeng',
+      'Perplexity',
+      'Replicate',
+    ].map((name) => [name, logo]),
+  ),
+);
 const React = await import('react');
 const { act } = await import('react-dom/test-utils');
 const { createRoot } = await import('react-dom/client');
