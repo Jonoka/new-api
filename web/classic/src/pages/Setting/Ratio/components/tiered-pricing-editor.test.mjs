@@ -160,7 +160,7 @@ test('model selection preserves each tariff and invalid drafts block switching a
         React.createElement(ModelPricingEditor, { options, refresh() {} }),
       );
     });
-    assert.ok(container.textContent.includes(legacy));
+    assert.equal(container.querySelector('textarea').value, legacy);
     for (const [name, expression] of [
       ['B-model', valid],
       ['A-model', legacy],
@@ -169,10 +169,26 @@ test('model selection preserves each tariff and invalid drafts block switching a
       await act(async () => {
         buttonWithText(container, name).click();
       });
-      assert.ok(
-        container.textContent.includes(expression),
-        `${name} tariff preserved`,
+      const rawMode = [
+        ...container.querySelectorAll('input[type="radio"]'),
+      ].find((input) => input.value === 'raw');
+      assert.ok(rawMode);
+      if (!rawMode.checked)
+        await act(async () => {
+          rawMode.click();
+        });
+      assert.equal(
+        container.querySelector('textarea').value,
+        expression,
+        `${name} full tariff preserved`,
       );
+      if (name === 'B-model') {
+        await act(async () => {
+          [...container.querySelectorAll('input[type="radio"]')]
+            .find((input) => input.value === 'visual')
+            .click();
+        });
+      }
     }
     await act(async () => {
       buttonWithText(container, '添加条件组').click();
@@ -194,7 +210,12 @@ test('model selection preserves each tariff and invalid drafts block switching a
       container.querySelectorAll('input').length,
       invalidGroupsBefore,
     );
-    assert.ok(container.textContent.includes(valid));
+    assert.equal(perTokenRadio.checked, false);
+    assert.equal(
+      container.querySelector('textarea'),
+      null,
+      'invalid model selection must remain on B visual draft',
+    );
   } finally {
     await act(async () => {
       root.unmount();
