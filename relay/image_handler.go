@@ -32,7 +32,11 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	isTasksEndpointGeneration := info.RelayMode == relayconstant.RelayModeImagesGenerations && info.ChannelOtherSettings.ImageAsyncMode == dto.ImageAsyncModeTasksEndpoint
 	if isTasksEndpointGeneration && info.Billing != nil {
 		info.ForcePreConsume = true
-		if err := info.Billing.Reserve(info.PriceData.Quota); err != nil {
+		reservationTarget := info.PriceData.Quota
+		if info.PriceData.QuotaToPreConsume > reservationTarget {
+			reservationTarget = info.PriceData.QuotaToPreConsume
+		}
+		if err := info.Billing.Reserve(reservationTarget); err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodePreConsumeTokenQuotaFailed, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 		}
 	}

@@ -66,6 +66,11 @@ the active reservation remains releasable. Ordinary synchronous images retain
 configured wallet trust; queued tasks and tasks-endpoint channels require full
 admission.
 
+Tasks-endpoint image admission retains `QuotaToPreConsume` when tiered pricing
+has not assigned a final `Quota` yet. A queued submit response with a returned
+task identity is accepted without requiring deliverable image data; the same
+data validation still applies to ordinary synchronous image responses.
+
 Synchronous image log events use `task_row_id = 0` and their indexed
 `submission_id`, because no public task is created. They retain ordinary usage,
 model/group, caller and pricing fields. Receipt delivery remains idempotent;
