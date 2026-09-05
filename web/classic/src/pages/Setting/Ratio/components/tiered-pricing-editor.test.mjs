@@ -9,6 +9,22 @@ const { JSDOM } = requireDefault('jsdom');
 const browser = new JSDOM('<!doctype html><html><body></body></html>', {
   url: 'https://pricing.example.test/',
 });
+// Semi's animation module initializes a 1px canvas even without visible animation.
+browser.window.HTMLCanvasElement.prototype.getContext = function () {
+  return {
+    canvas: this,
+    fillStyle: '',
+    fillRect() {},
+    clearRect() {},
+    drawImage() {},
+    measureText() {
+      return { width: 0 };
+    },
+    getImageData() {
+      return { data: new Uint8ClampedArray(4) };
+    },
+  };
+};
 for (const name of [
   'window',
   'document',
