@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -191,6 +192,68 @@ func TestAlphaSearchRelayRejectsInvalidSuccessWithoutRetry(t *testing.T) {
 			require.Equal(t, 100000, gotUser.Quota)
 			require.Equal(t, 100000, gotToken.RemainQuota)
 			require.Zero(t, gotUser.RequestCount)
+		})
+	}
+}
+
+type alphaSearchDisconnectWriter struct {
+	gin.ResponseWriter
+	writes int
+}
+
+func (w *alphaSearchDisconnectWriter) Write(body []byte) (int, error) {
+	w.writes++
+	n := len(body) / 2
+	_, _ = w.ResponseWriter.Write(body[:n])
+	return n, errors.New("client disconnected")
+}
+
+func TestAlphaSearchRelaySettlementAndPublicationFailures(t *testing.T) {
+	for _, failSettlement := range []bool{false, true} {
+		t.Run(fmt.Sprintf("settlement_failure_%t", failSettlement), func(t *testing.T) {
+			db := setupAlphaSearchRelayDB(t)
+			user, token := seedFinalGroupRelayFunding(t, db, 1, 100000)
+			var calls atomic.Int32
+			response := `{"output":"validated search"}`
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, response)
+			}))
+			t.Cleanup(server.Close)
+			channel := seedFinalGroupRelayChannel(t, db, "alpha-publish", "fg-paid-b", server.URL, 100)
+			c, recorder := finalGroupRelayContext(t, user, token, channel, "fg-paid-b", "fg-paid-b", "alpha-publish")
+			setAlphaSearchRelayBody(c, `{"model":"fg-relay-model"}`)
+			writer := &alphaSearchDisconnectWriter{ResponseWriter: c.Writer}
+			if failSettlement {
+				callback := "test:alpha-publication-settlement"
+				require.NoError(t, db.Callback().Create().Before("gorm:create").Register(callback, func(tx *gorm.DB) {
+					if tx.Statement.Table == "task_accounting_events" {
+						tx.AddError(errors.New("injected settlement error"))
+					}
+				}))
+				t.Cleanup(func() { _ = db.Callback().Create().Remove(callback) })
+			} else {
+				c.Writer = writer
+			}
+			Relay(c, types.RelayFormatOpenAIAlphaSearch)
+			require.EqualValues(t, 1, calls.Load())
+			gotUser, gotToken, _, gotChannel := readFinalGroupRelayState(t, db, user.Id, token.Id, channel.Id, channel.Id)
+			if failSettlement {
+				require.Equal(t, 500, recorder.Code)
+				require.NotContains(t, recorder.Body.String(), "validated search")
+				require.Equal(t, 100000, gotUser.Quota)
+				require.Equal(t, 100000, gotToken.RemainQuota)
+				require.Zero(t, gotUser.RequestCount)
+				require.Zero(t, gotChannel.UsedQuota)
+				return
+			}
+			require.Equal(t, 1, writer.writes, "no JSON error may be appended to partial output")
+			require.Equal(t, response[:len(response)/2], recorder.Body.String())
+			require.Equal(t, 95000, gotUser.Quota)
+			require.Equal(t, 95000, gotToken.RemainQuota)
+			require.Equal(t, 1, gotUser.RequestCount)
+			require.EqualValues(t, 5000, gotChannel.UsedQuota)
 		})
 	}
 }

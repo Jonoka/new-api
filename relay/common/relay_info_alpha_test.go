@@ -24,7 +24,7 @@ func TestGenRelayInfoAlphaSearchKeepsPublicIdentityAndSyncMode(t *testing.T) {
 	info, err := GenRelayInfo(c, types.RelayFormatOpenAIAlphaSearch, request, nil)
 	require.NoError(t, err)
 	require.Equal(t, relayconstant.RelayModeAlphaSearch, info.RelayMode)
-	require.Equal(t, types.RelayFormatOpenAIAlphaSearch, info.RelayFormat)
+	require.Equal(t, types.RelayFormat(types.RelayFormatOpenAIAlphaSearch), info.RelayFormat)
 	require.Equal(t, "public-model", info.OriginModelName)
 	require.False(t, info.IsStream)
 	require.Equal(t, []types.RelayFormat{types.RelayFormatOpenAIAlphaSearch}, info.RequestConversionChain)
