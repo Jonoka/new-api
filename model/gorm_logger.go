@@ -26,7 +26,34 @@ func newGormConfig(prepareStmt bool) *gorm.Config {
 	return &gorm.Config{
 		PrepareStmt: prepareStmt,
 		Logger:      newGormLogger(os.Stdout),
+		Plugins: map[string]gorm.Plugin{
+			"newapi:parameterized-row-logging": parameterizedRowLogging{},
+		},
 	}
+}
+
+type parameterizedRowLogging struct{}
+
+func (parameterizedRowLogging) Name() string { return "newapi:parameterized-row-logging" }
+
+func (plugin parameterizedRowLogging) Initialize(db *gorm.DB) error {
+	return db.Callback().Row().Before("gorm:row").Register(plugin.Name(), func(tx *gorm.DB) {
+		// GORM 1.25.2 Scan replaces the logger with a recorder that loses
+		// ParamsFilter. Preserve placeholders before that recorder sees SQL.
+		if _, ok := tx.Logger.(gorm.ParamsFilter); !ok {
+			config := *tx.Config
+			config.Logger = parameterizedScanLogger{Interface: tx.Logger}
+			tx.Config = &config
+		}
+	})
+}
+
+type parameterizedScanLogger struct {
+	gormlogger.Interface
+}
+
+func (parameterizedScanLogger) ParamsFilter(_ context.Context, sql string, _ ...interface{}) (string, []interface{}) {
+	return sql, nil
 }
 
 func newGormLogger(w io.Writer) gormlogger.Interface {

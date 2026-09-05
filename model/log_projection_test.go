@@ -148,6 +148,8 @@ func TestFormatUserLogsUsesStrictProjectionWithoutMutatingSource(t *testing.T) {
 func TestProjectUserLogOtherRejectsMalformedAndWrongShapes(t *testing.T) {
 	assert.Equal(t, "{}", projectUserLogOther("not-json"))
 	assert.Equal(t, "{}", projectUserLogOther("null"))
+	assert.Equal(t, "{}", projectUserLogOther(`{"request_conversion":["OpenAI",null]}`))
+	assert.Equal(t, "{}", projectUserLogOther(`{"request_conversion":[null]}`))
 
 	projected := projectUserLogOther(`{
 		"request_path":{"nested":"secret"},

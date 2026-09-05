@@ -21,6 +21,8 @@ ID、用户名、渠道 ID/名称、IP 和上游请求 ID 不进入普通用户�
 - 渠道字段、`reject_reason`、`stream_status`、`timing_diagnostics` 和参数覆盖审计 `po`；
 - 未登记字段，以及已登记字段中类型不符合契约的对象或混合数组。
 
+字符串数组逐元素验证；含 `null` 的数组也视为类型错误，不进入用户投影。
+
 无法解析、`null` 或形状错误的旧 `other` 返回空对象。过滤使用 `json.RawMessage`，避免
 将大整数经 `float64` 往返后改变字面值。管理员日志查询继续返回原始主记录和原始
 `other`，普通用户投影通过新对象构造，不会修改管理员读取的记录。
@@ -31,6 +33,11 @@ SQLite、MySQL 和 PostgreSQL 的所有 `gorm.Open` 路径共用同一配置。S
 错误和 `DEBUG=true` 的 Info 日志中始终保留占位符，不输出绑定值。驱动错误仅保留数据库
 类型与错误码；上下文取消和超时保留稳定错误身份；其他错误统一记录为
 `database operation failed`，防止包装后的 GORM sentinel 或服务端错误正文夹带参数。
+
+GORM 1.25.2 的 `Scan` 会临时改用不实现 `ParamsFilter` 的 recorder。数据库配置因此同时
+注册 Row 回调，在 SQL 插值前给 recorder 补上参数过滤接口，并复制请求级配置以避免并发
+请求之间修改共享 logger。只设置 `ParameterizedQueries=true` 不能覆盖这个路径；回归测试
+必须使用完整数据库配置并实际执行 `Raw(...).Scan(...)`，不能只测试 logger 的配置值。
 
 `SQL_SLOW_THRESHOLD_MS` 默认 `200`，`0` 关闭慢查询判定，合法范围为 0 到 3600000。
 越界值记录配置错误并回退到默认值。该配置只改变慢查询日志阈值，不改变查询执行。

@@ -22,9 +22,7 @@ func TestUserCriticalRateLimitIsolatesUsersAndOperations(t *testing.T) {
 	common.CriticalRateLimitNum = 1
 	common.CriticalRateLimitDuration = 60
 	common.RateLimitKeyExpirationDuration = 0
-	inMemoryRateLimiter = common.InMemoryRateLimiter{}
 	t.Cleanup(func() {
-		inMemoryRateLimiter = common.InMemoryRateLimiter{}
 		common.RedisEnabled = previousRedisEnabled
 		common.CriticalRateLimitEnable = previousEnable
 		common.CriticalRateLimitNum = previousNum
@@ -32,8 +30,9 @@ func TestUserCriticalRateLimitIsolatesUsersAndOperations(t *testing.T) {
 		common.RateLimitKeyExpirationDuration = previousExpiration
 	})
 
-	accessTokenLimit := UserCriticalRateLimit("access-token")
-	affiliateTransferLimit := UserCriticalRateLimit("aff-transfer")
+	scope := t.Name() + ":" + common.GetUUID()
+	accessTokenLimit := UserCriticalRateLimit(scope + ":access-token")
+	affiliateTransferLimit := UserCriticalRateLimit(scope + ":aff-transfer")
 
 	require.Equal(t, http.StatusOK, runUserRateLimit(t, accessTokenLimit, 1))
 	require.Equal(t, http.StatusTooManyRequests, runUserRateLimit(t, accessTokenLimit, 1))
@@ -49,9 +48,7 @@ func TestUserCriticalRateLimitRequiresAuthenticatedUser(t *testing.T) {
 	common.RedisEnabled = false
 	common.CriticalRateLimitEnable = true
 	common.RateLimitKeyExpirationDuration = 0
-	inMemoryRateLimiter = common.InMemoryRateLimiter{}
 	t.Cleanup(func() {
-		inMemoryRateLimiter = common.InMemoryRateLimiter{}
 		common.RedisEnabled = previousRedisEnabled
 		common.CriticalRateLimitEnable = previousEnable
 		common.RateLimitKeyExpirationDuration = previousExpiration

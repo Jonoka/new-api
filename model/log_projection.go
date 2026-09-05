@@ -118,8 +118,16 @@ func userLogOtherValueMatches(raw json.RawMessage, kind userLogOtherValueKind) b
 		if jsonType != "array" {
 			return false
 		}
-		var values []string
-		return common.Unmarshal(raw, &values) == nil
+		var values []json.RawMessage
+		if common.Unmarshal(raw, &values) != nil {
+			return false
+		}
+		for _, value := range values {
+			if common.GetJsonType(value) != "string" {
+				return false
+			}
+		}
+		return true
 	default:
 		return false
 	}

@@ -65,3 +65,29 @@ func TestRelayPreservesRequestBodyTooLargeStatus(t *testing.T) {
 	require.Equal(t, http.StatusRequestEntityTooLarge, recorder.Code)
 	require.Contains(t, recorder.Body.String(), string(types.ErrorCodeReadRequestBodyFailed))
 }
+
+func TestRelayRejectsNonObjectRequestBeforeUpstream(t *testing.T) {
+	for _, fixture := range []struct {
+		name   string
+		path   string
+		format types.RelayFormat
+	}{
+		{name: "rerank", path: "/v1/rerank", format: types.RelayFormatRerank},
+		{name: "embedding", path: "/v1/embeddings", format: types.RelayFormatEmbedding},
+	} {
+		for _, body := range []string{"null", "[]", "42", `"text"`} {
+			t.Run(fixture.name+"/"+body, func(t *testing.T) {
+				recorder := httptest.NewRecorder()
+				context, _ := gin.CreateTestContext(recorder)
+				context.Request = httptest.NewRequest(http.MethodPost, fixture.path, strings.NewReader(body))
+				context.Request.Header.Set("Content-Type", "application/json")
+				t.Cleanup(func() { common.CleanupBodyStorage(context) })
+
+				Relay(context, fixture.format)
+
+				require.Equal(t, http.StatusBadRequest, recorder.Code)
+				require.Contains(t, recorder.Body.String(), string(types.ErrorCodeInvalidRequest))
+			})
+		}
+	}
+}

@@ -84,6 +84,9 @@ func GetAndValidateRerankRequest(c *gin.Context) (*dto.RerankRequest, error) {
 		return nil, types.NewError(err, types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
 
+	if rerankRequest == nil {
+		return nil, errors.New("request body must be a JSON object")
+	}
 	if rerankRequest.Query == "" {
 		return nil, types.NewError(fmt.Errorf("query is empty"), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
@@ -101,6 +104,9 @@ func GetAndValidateEmbeddingRequest(c *gin.Context, relayMode int) (*dto.Embeddi
 		return nil, types.NewError(err, types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
 
+	if embeddingRequest == nil {
+		return nil, errors.New("request body must be a JSON object")
+	}
 	if embeddingRequest.Input == nil {
 		return nil, fmt.Errorf("input is empty")
 	}

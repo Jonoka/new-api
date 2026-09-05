@@ -116,9 +116,9 @@ func TestGormLoggerRedactsNormalSlowErrorAndDebugSQL(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			var output bytes.Buffer
-			database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
-				Logger: newGormLoggerWithThreshold(&output, test.threshold),
-			})
+			config := newGormConfig(false)
+			config.Logger = newGormLoggerWithThreshold(&output, test.threshold)
+			database, err := gorm.Open(sqlite.Open(":memory:"), config)
 			require.NoError(t, err)
 			output.Reset()
 
