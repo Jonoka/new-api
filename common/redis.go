@@ -45,6 +45,7 @@ func InitRedisClient() (err error) {
 	if err != nil {
 		FatalLog("Redis ping test failed: " + err.Error())
 	}
+	InitCanvasSSORedisClient()
 	if DebugEnabled {
 		SysLog(fmt.Sprintf("Redis connected to %s", opt.Addr))
 		SysLog(fmt.Sprintf("Redis database: %d", opt.DB))

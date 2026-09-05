@@ -3,7 +3,10 @@
 This additive integration preserves the existing canvas launcher and relay billing.
 It is enabled only with `CANVAS_SSO_ORIGIN`, an exact HTTPS origin without a
 path, user info, query or fragment. `CANVAS_SSO_LAUNCH_ENABLED` defaults to false
-and controls publication of the separate Canvas 2 command in both themes.
+and controls only publication of the separate Canvas 2 command in both themes.
+Validated login resumption works while the command is hidden. Explicit default
+port `:443`, empty ports, zero, noncanonical leading zeros and ports above 65535
+are rejected at startup, matching the browser launch origin contract.
 
 ## Identity Exchange
 
@@ -18,7 +21,10 @@ and controls publication of the separate Canvas 2 command in both themes.
 - A random 256-bit opaque code is stored under its SHA-256 Redis key for 60
   seconds. Redis 7 `GETDEL` consumes it once, including invalid proof attempts.
   There is no memory fallback. Redis operations use a two-second deadline and
-  never the generic value-logging wrappers. Role/status are read directly from
+  never the generic value-logging wrappers. An SSO-only client copies the existing
+  Redis connection options but disables command retries; a consumed code whose
+  reply is lost produces 503 without a second `GETDEL`. Other clients retain their
+  existing retry policy. Role/status are read directly from
   the database when authorizing and consuming, not the user cache.
 - Authentication payloads are bounded to 2 KiB and responses are `no-store`.
   Missing session is 401, invalid proof/input is 400, disabled identity/origin
@@ -35,7 +41,9 @@ That endpoint selects `/canvas` for Default or `/console/canvas` for Classic.
 The authenticated launcher consumes the resume marker, then returns with
 `newapi_returned=1`, which Canvas 2 must enforce as a one-roundtrip limit.
 Logout uses the same launcher endpoint without a resume marker. It never calls
-New API logout. Invalid or external destinations are discarded.
+New API logout. Invalid or external destinations are discarded, including paths
+whose raw or encoded dot segments normalize to a protocol-relative destination.
+The final launch URL origin is checked again after resolving the destination.
 
 `/api/status` exposes `canvas_sso_origin` and `canvas_sso_launch_enabled` only.
 Both themes preserve login return context through password, 2FA and OAuth flows.

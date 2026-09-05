@@ -7,7 +7,7 @@ export function safeCanvasDestination(value: unknown): string {
     const decoded = decodeURIComponent(value);
     if (decoded.startsWith('//') || /[\\\\\u0000-\u0020\u007f]/.test(decoded)) return '/';
     const url = new URL(value, 'https://canvas.invalid');
-    if (url.origin !== 'https://canvas.invalid') return '/';
+    if (url.origin !== 'https://canvas.invalid' || url.pathname.startsWith('//')) return '/';
     return url.pathname + url.search + url.hash;
   } catch {
     return '/';
@@ -18,8 +18,9 @@ export function buildCanvasSSOLaunchUrl(origin: unknown, group: string, next: un
   if (typeof origin !== 'string' || !group) return '';
   try {
     const base = new URL(origin);
-    if (base.protocol !== 'https:' || base.origin !== origin) return '';
+    if (base.protocol !== 'https:' || base.origin !== origin || base.port === '0') return '';
     const url = new URL(safeCanvasDestination(next), origin);
+    if (url.origin !== origin) return '';
     url.searchParams.delete('apiKey');
     url.searchParams.delete('baseUrl');
     url.searchParams.set('newapi_launch', '1');

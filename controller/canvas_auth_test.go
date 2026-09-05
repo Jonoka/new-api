@@ -6,11 +6,14 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -38,7 +41,6 @@ func setupCanvasAuth(t *testing.T) (*gin.Engine, []*http.Cookie, *model.User) {
 	}
 	options, err := redis.ParseURL(redisURL)
 	require.NoError(t, err)
-	options.MaxRetries = -1
 	client := redis.NewClient(options)
 	require.NoError(t, client.Ping(context.Background()).Err())
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -47,10 +49,12 @@ func setupCanvasAuth(t *testing.T) (*gin.Engine, []*http.Cookie, *model.User) {
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSubscription{}))
-	oldDB, oldRDB := model.DB, common.RDB
+	oldDB, oldRDB, oldSSORDB := model.DB, common.RDB, common.CanvasSSORDB
 	oldEnabled, oldSQLite, oldOrigin := common.RedisEnabled, common.UsingSQLite, common.CanvasSSOOrigin
 	model.DB, common.RDB = db, client
 	common.RedisEnabled, common.UsingSQLite, common.CanvasSSOOrigin = true, true, canvasTestOrigin
+	common.InitCanvasSSORedisClient()
+	ssoClient := common.CanvasSSORDB
 	user := &model.User{Id: 72439, Username: "canvas-test", DisplayName: "Shared Name", Role: common.RoleRootUser, Status: common.UserStatusEnabled, Group: "default", AffCode: "canvas-test"}
 	require.NoError(t, db.Create(user).Error)
 	// Seed stale session cache explicitly so UserSessionAuth does not start a background cache fill.
@@ -61,8 +65,9 @@ func setupCanvasAuth(t *testing.T) (*gin.Engine, []*http.Cookie, *model.User) {
 	t.Cleanup(func() {
 		_ = client.Del(context.Background(), cacheKey).Err()
 		_ = client.Close()
+		_ = ssoClient.Close()
 		_ = sqlDB.Close()
-		model.DB, common.RDB = oldDB, oldRDB
+		model.DB, common.RDB, common.CanvasSSORDB = oldDB, oldRDB, oldSSORDB
 		common.RedisEnabled, common.UsingSQLite, common.CanvasSSOOrigin = oldEnabled, oldSQLite, oldOrigin
 	})
 	gin.SetMode(gin.TestMode)
@@ -111,7 +116,11 @@ func issueCanvasCode(t *testing.T, router *gin.Engine, cookies []*http.Cookie) s
 	require.Equal(t, "no-store", response.Header().Get("Cache-Control"))
 	var envelope struct {
 		Success bool `json:"success"`
-		Data struct {Code string `json:"code"`; State string `json:"state"`; ExpiresIn int `json:"expires_in"`} `json:"data"`
+		Data    struct {
+			Code      string `json:"code"`
+			State     string `json:"state"`
+			ExpiresIn int    `json:"expires_in"`
+		} `json:"data"`
 	}
 	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &envelope))
 	require.True(t, envelope.Success)
@@ -142,7 +151,10 @@ func TestCanvasAuthSingleUseAndFreshRole(t *testing.T) {
 		body := canvasExchangeBody(t, code, canvasTestState, canvasTestVerifier, canvasTestOrigin)
 		response := canvasAuthRequest(router, "/canvas/auth/exchange", "", body, nil)
 		require.Equal(t, http.StatusOK, response.Code)
-		var envelope struct {Success bool `json:"success"`; Data canvasIdentity `json:"data"`}
+		var envelope struct {
+			Success bool           `json:"success"`
+			Data    canvasIdentity `json:"data"`
+		}
 		require.NoError(t, common.Unmarshal(response.Body.Bytes(), &envelope))
 		require.True(t, envelope.Success)
 		require.Equal(t, user.Id, envelope.Data.ID)
@@ -171,7 +183,11 @@ func TestCanvasAuthConcurrentRedemption(t *testing.T) {
 	close(statuses)
 	successes := 0
 	for status := range statuses {
-		if status == http.StatusOK { successes++ } else { require.Equal(t, http.StatusBadRequest, status) }
+		if status == http.StatusOK {
+			successes++
+		} else {
+			require.Equal(t, http.StatusBadRequest, status)
+		}
 	}
 	require.Equal(t, 1, successes)
 }
@@ -184,13 +200,23 @@ func TestCanvasAuthRejectsProofAndRevokedIdentity(t *testing.T) {
 			state, verifier, audience := canvasTestState, canvasTestVerifier, canvasTestOrigin
 			want := http.StatusBadRequest
 			switch reason {
-			case "state": state = strings.Repeat("x", 43)
-			case "verifier": verifier = strings.Repeat("x", 43)
-			case "audience": audience = "https://other.example.test"
-			case "expired": require.NoError(t, common.RDB.ExpireAt(context.Background(), canvasCodeKey(code), time.Unix(1, 0)).Err())
-			case "disabled": require.NoError(t, model.DB.Model(user).Update("status", common.UserStatusDisabled).Error); want = http.StatusForbidden
-			case "deleted": require.NoError(t, model.DB.Delete(user).Error); want = http.StatusForbidden
-			case "role": require.NoError(t, model.DB.Model(user).Update("role", 999).Error); want = http.StatusForbidden
+			case "state":
+				state = strings.Repeat("x", 43)
+			case "verifier":
+				verifier = strings.Repeat("x", 43)
+			case "audience":
+				audience = "https://other.example.test"
+			case "expired":
+				require.NoError(t, common.RDB.ExpireAt(context.Background(), canvasCodeKey(code), time.Unix(1, 0)).Err())
+			case "disabled":
+				require.NoError(t, model.DB.Model(user).Update("status", common.UserStatusDisabled).Error)
+				want = http.StatusForbidden
+			case "deleted":
+				require.NoError(t, model.DB.Delete(user).Error)
+				want = http.StatusForbidden
+			case "role":
+				require.NoError(t, model.DB.Model(user).Update("role", 999).Error)
+				want = http.StatusForbidden
 			}
 			response := canvasAuthRequest(router, "/canvas/auth/exchange", "", canvasExchangeBody(t, code, state, verifier, audience), nil)
 			require.Equal(t, want, response.Code)
@@ -223,10 +249,10 @@ func TestCanvasAuthBoundaryAndFailClosed(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, oversized.Code)
 	code := issueCanvasCode(t, router, cookies)
 	body := canvasExchangeBody(t, code, canvasTestState, canvasTestVerifier, canvasTestOrigin)
-	client := common.RDB
-	common.RDB = nil
+	client := common.CanvasSSORDB
+	common.CanvasSSORDB = nil
 	response := canvasAuthRequest(router, "/canvas/auth/exchange", "", body, nil)
-	common.RDB = client
+	common.CanvasSSORDB = client
 	require.Equal(t, http.StatusServiceUnavailable, response.Code)
 	require.NoError(t, model.DB.Model(user).Update("status", common.UserStatusDisabled).Error)
 	digest := sha256.Sum256([]byte(canvasTestVerifier))
@@ -243,4 +269,51 @@ func TestCanvasAuthDestinationValidation(t *testing.T) {
 	for _, destination := range []string{"https://evil.test", "//evil.test", "/\\evil.test", "/%2fevil.test", "/%5cevil.test", "/%0d%0aX", "/\x00", strings.Repeat("/", 1025)} {
 		require.False(t, validCanvasDestination(destination))
 	}
+}
+
+func TestCanvasAuthConsumedResponseLossDoesNotRetry(t *testing.T) {
+	originalRDB, originalSSORDB := common.RDB, common.CanvasSSORDB
+	originalEnabled, originalOrigin := common.RedisEnabled, common.CanvasSSOOrigin
+	code := strings.Repeat("c", 43)
+	key := canvasCodeKey(code)
+	expected := fmt.Sprintf("*2\r\n$6\r\ngetdel\r\n$%d\r\n%s\r\n", len(key), key)
+	var attempts atomic.Int32
+	consumed := make(chan string, 8)
+	common.RDB = redis.NewClient(&redis.Options{
+		MaxRetries: 3,
+		Dialer: func(context.Context, string, string) (net.Conn, error) {
+			client, server := net.Pipe()
+			go func() {
+				defer server.Close()
+				command := make([]byte, len(expected))
+				if _, err := io.ReadFull(server, command); err == nil {
+					attempts.Add(1)
+					consumed <- string(command)
+					// Redis consumed the command, but the connection loses its reply.
+				}
+			}()
+			return client, nil
+		},
+	})
+	common.RedisEnabled, common.CanvasSSOOrigin = true, canvasTestOrigin
+	common.InitCanvasSSORedisClient()
+	t.Cleanup(func() {
+		_ = common.CanvasSSORDB.Close()
+		_ = common.RDB.Close()
+		common.RDB, common.CanvasSSORDB = originalRDB, originalSSORDB
+		common.RedisEnabled, common.CanvasSSOOrigin = originalEnabled, originalOrigin
+	})
+	router := gin.New()
+	router.POST("/canvas/auth/exchange", CanvasAuthBoundary, CanvasExchange)
+	body := canvasExchangeBody(t, code, canvasTestState, canvasTestVerifier, canvasTestOrigin)
+	response := canvasAuthRequest(router, "/canvas/auth/exchange", "", body, nil)
+	require.Equal(t, http.StatusServiceUnavailable, response.Code)
+	require.EqualValues(t, 1, attempts.Load())
+	select {
+	case command := <-consumed:
+		require.Equal(t, expected, command)
+	default:
+		t.Fatal("the simulated Redis server did not consume GETDEL")
+	}
+	require.Equal(t, 3, common.RDB.Options().MaxRetries)
 }

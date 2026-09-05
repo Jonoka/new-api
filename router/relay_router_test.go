@@ -75,15 +75,23 @@ func TestCanvasSSOLaunchReturnsToCurrentThemeWithoutLoggingOut(t *testing.T) {
 	for _, theme := range []string{"default", "classic"} {
 		common.SetTheme(theme)
 		path := "/canvas"
-		if theme == "classic" { path = "/console/canvas" }
+		if theme == "classic" {
+			path = "/console/canvas"
+		}
 		response := httptest.NewRecorder()
 		engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/canvas/auth/launch", nil))
 		require.Equal(t, http.StatusSeeOther, response.Code)
 		require.Equal(t, path, response.Header().Get("Location"))
 		require.Empty(t, response.Result().Cookies())
-		response = httptest.NewRecorder()
-		engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/canvas/auth/launch?canvas_resume=1&canvas_next=https%3A%2F%2Fevil.test&group=vip", nil))
-		require.Equal(t, path+"?canvas_resume=1&group=vip", response.Header().Get("Location"))
+		for _, launchEnabled := range []bool{true, false} {
+			common.CanvasSSOLaunchEnabled = launchEnabled
+			response = httptest.NewRecorder()
+			engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/canvas/auth/launch?canvas_resume=1&canvas_next=https%3A%2F%2Fevil.test&group=vip", nil))
+			require.Equal(t, path+"?canvas_resume=1&group=vip", response.Header().Get("Location"))
+			response = httptest.NewRecorder()
+			engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/canvas/auth/launch?canvas_resume=1&canvas_next=%2Fprojects%2F1&group=vip", nil))
+			require.Equal(t, path+"?canvas_next=%2Fprojects%2F1&canvas_resume=1&group=vip", response.Header().Get("Location"))
+		}
 	}
 }
 

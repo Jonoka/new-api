@@ -25,32 +25,32 @@ import (
 const canvasCodeTTL = 60 * time.Second
 
 type canvasAuthorizeRequest struct {
-	State string `json:"state"`
+	State     string `json:"state"`
 	Challenge string `json:"code_challenge"`
-	Method string `json:"code_challenge_method"`
-	Audience string `json:"audience"`
+	Method    string `json:"code_challenge_method"`
+	Audience  string `json:"audience"`
 }
 
 type canvasExchangeRequest struct {
-	Code string `json:"code"`
-	State string `json:"state"`
+	Code     string `json:"code"`
+	State    string `json:"state"`
 	Verifier string `json:"code_verifier"`
 	Audience string `json:"audience"`
 }
 
 type canvasCodePayload struct {
-	UserID int `json:"user_id"`
-	State string `json:"state"`
+	UserID    int    `json:"user_id"`
+	State     string `json:"state"`
 	Challenge string `json:"code_challenge"`
-	Audience string `json:"audience"`
+	Audience  string `json:"audience"`
 }
 
 type canvasIdentity struct {
-	ID int `json:"id"`
-	Username string `json:"username"`
+	ID          int    `json:"id"`
+	Username    string `json:"username"`
 	DisplayName string `json:"display_name"`
-	Role int `json:"role"`
-	Status int `json:"status"`
+	Role        int    `json:"role"`
+	Status      int    `json:"status"`
 }
 
 func canvasAuthError(c *gin.Context, status int, message string) {
@@ -144,7 +144,7 @@ func CanvasAuthorize(c *gin.Context) {
 		canvasAuthError(c, http.StatusBadRequest, "invalid authentication request")
 		return
 	}
-	if common.RDB == nil || !common.RedisEnabled {
+	if common.CanvasSSORDB == nil || !common.RedisEnabled {
 		canvasAuthError(c, http.StatusServiceUnavailable, "canvas authentication is unavailable")
 		return
 	}
@@ -170,7 +170,7 @@ func CanvasAuthorize(c *gin.Context) {
 		canvasAuthError(c, http.StatusServiceUnavailable, "canvas authentication is unavailable")
 		return
 	}
-	stored, err := common.RDB.SetNX(ctx, canvasCodeKey(code), payload, canvasCodeTTL).Result()
+	stored, err := common.CanvasSSORDB.SetNX(ctx, canvasCodeKey(code), payload, canvasCodeTTL).Result()
 	if err != nil || !stored {
 		canvasAuthError(c, http.StatusServiceUnavailable, "canvas authentication is unavailable")
 		return
@@ -188,14 +188,14 @@ func CanvasExchange(c *gin.Context) {
 		canvasAuthError(c, http.StatusBadRequest, "invalid authentication request")
 		return
 	}
-	if common.RDB == nil || !common.RedisEnabled {
+	if common.CanvasSSORDB == nil || !common.RedisEnabled {
 		canvasAuthError(c, http.StatusServiceUnavailable, "canvas authentication is unavailable")
 		return
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 	// Invalid proofs burn the code too; never split GET and DEL or retry consumption.
-	raw, err := common.RDB.GetDel(ctx, canvasCodeKey(req.Code)).Bytes()
+	raw, err := common.CanvasSSORDB.GetDel(ctx, canvasCodeKey(req.Code)).Bytes()
 	if errors.Is(err, redis.Nil) {
 		canvasAuthError(c, http.StatusBadRequest, "authentication code is invalid or expired")
 		return
@@ -248,7 +248,7 @@ func CanvasLaunch(c *gin.Context) {
 		destination = "/console/canvas"
 	}
 	query := url.Values{}
-	if c.Query("canvas_resume") == "1" && common.CanvasSSOLaunchEnabled {
+	if c.Query("canvas_resume") == "1" && common.CanvasSSOOrigin != "" {
 		query.Set("canvas_resume", "1")
 		if next := c.Query("canvas_next"); validCanvasDestination(next) {
 			query.Set("canvas_next", next)

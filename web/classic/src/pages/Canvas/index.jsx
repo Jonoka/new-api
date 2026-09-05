@@ -115,9 +115,7 @@ const Canvas = () => {
     resumed.current = true;
     consumeCanvasReturn();
     window.history.replaceState(window.history.state, '', '/console/canvas');
-    const target = ssoStatus.canvas_sso_launch_enabled
-      ? buildCanvasSSOLaunchUrl(ssoStatus.canvas_sso_origin, defaultGroup, resumeParams.get('canvas_next'), true)
-      : '';
+    const target = buildCanvasSSOLaunchUrl(ssoStatus.canvas_sso_origin, defaultGroup, resumeParams.get('canvas_next'), true);
     if (!target) {
       showError(t('新版无限画布暂不可用'));
       return;

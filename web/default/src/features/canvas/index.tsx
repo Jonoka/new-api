@@ -70,13 +70,11 @@ export function CanvasLauncher() {
 
   useEffect(() => {
     if (resumed.current || resumeParams.get('canvas_resume') !== '1' || statusLoading || !status || isLoading) return
-    if (status.canvas_sso_launch_enabled && groups.length > 0 && !selectedGroup) return
+    if (status.canvas_sso_origin && groups.length > 0 && !selectedGroup) return
     resumed.current = true
     consumeCanvasReturn()
     window.history.replaceState(window.history.state, '', '/canvas')
-    const target = status.canvas_sso_launch_enabled
-      ? buildCanvasSSOLaunchUrl(status.canvas_sso_origin, selectedGroup, resumeParams.get('canvas_next'), true)
-      : ''
+    const target = buildCanvasSSOLaunchUrl(status.canvas_sso_origin, selectedGroup, resumeParams.get('canvas_next'), true)
     if (!target) {
       toast.error(t('Canvas 2 is unavailable'))
       return
