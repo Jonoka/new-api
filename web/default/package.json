@@ -103,7 +103,6 @@
     "typescript-eslint": "^8.59.4"
   },
   "overrides": {
-    "brace-expansion": "2.1.1",
     "dompurify": "3.4.11",
     "fast-uri": "3.1.2",
     "hono": "4.12.22",
