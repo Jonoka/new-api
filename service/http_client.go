@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -53,12 +54,25 @@ func ValidateSSRFProtectedFetchURL(urlStr string) error {
 	return validateURLWithCurrentFetchSetting(urlStr, true)
 }
 
+func relayResponseHeaderTimeout(seconds int) time.Duration {
+	if seconds <= 0 {
+		return 0
+	}
+	maxSeconds := int64(math.MaxInt64) / int64(time.Second)
+	value := int64(seconds)
+	if value > maxSeconds {
+		value = maxSeconds
+	}
+	return time.Duration(value) * time.Second
+}
+
 func InitHttpClient() {
 	transport := &http.Transport{
-		MaxIdleConns:        common.RelayMaxIdleConns,
-		MaxIdleConnsPerHost: common.RelayMaxIdleConnsPerHost,
-		ForceAttemptHTTP2:   true,
-		Proxy:               http.ProxyFromEnvironment, // Support HTTP_PROXY, HTTPS_PROXY, NO_PROXY env vars
+		MaxIdleConns:          common.RelayMaxIdleConns,
+		MaxIdleConnsPerHost:   common.RelayMaxIdleConnsPerHost,
+		ResponseHeaderTimeout: relayResponseHeaderTimeout(common.RelayResponseHeaderTimeout),
+		ForceAttemptHTTP2:     true,
+		Proxy:                 http.ProxyFromEnvironment, // Support HTTP_PROXY, HTTPS_PROXY, NO_PROXY env vars
 	}
 	if common.TLSInsecureSkipVerify {
 		transport.TLSClientConfig = common.InsecureTLSConfig
@@ -146,10 +160,11 @@ func NewProxyHttpClient(proxyURL string) (*http.Client, error) {
 	switch parsedURL.Scheme {
 	case "http", "https":
 		transport := &http.Transport{
-			MaxIdleConns:        common.RelayMaxIdleConns,
-			MaxIdleConnsPerHost: common.RelayMaxIdleConnsPerHost,
-			ForceAttemptHTTP2:   true,
-			Proxy:               http.ProxyURL(parsedURL),
+			MaxIdleConns:          common.RelayMaxIdleConns,
+			MaxIdleConnsPerHost:   common.RelayMaxIdleConnsPerHost,
+			ResponseHeaderTimeout: relayResponseHeaderTimeout(common.RelayResponseHeaderTimeout),
+			ForceAttemptHTTP2:     true,
+			Proxy:                 http.ProxyURL(parsedURL),
 		}
 		if common.TLSInsecureSkipVerify {
 			transport.TLSClientConfig = common.InsecureTLSConfig
@@ -185,9 +200,10 @@ func NewProxyHttpClient(proxyURL string) (*http.Client, error) {
 		}
 
 		transport := &http.Transport{
-			MaxIdleConns:        common.RelayMaxIdleConns,
-			MaxIdleConnsPerHost: common.RelayMaxIdleConnsPerHost,
-			ForceAttemptHTTP2:   true,
+			MaxIdleConns:          common.RelayMaxIdleConns,
+			MaxIdleConnsPerHost:   common.RelayMaxIdleConnsPerHost,
+			ResponseHeaderTimeout: relayResponseHeaderTimeout(common.RelayResponseHeaderTimeout),
+			ForceAttemptHTTP2:     true,
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				return dialer.Dial(network, addr)
 			},

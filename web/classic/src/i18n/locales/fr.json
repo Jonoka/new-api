@@ -1,5 +1,7 @@
 {
   "translation": {
+    "时间范围": "Plage horaire",
+    "请求规则无效": "Règle de requête invalide",
     " + 图片生成调用 {{symbol}}{{price}} / 1次 * {{ratioType}} {{ratio}}": " + Appel de génération d'image {{symbol}}{{price}} / 1 fois * {{ratioType}} {{ratio}}",
     " + 文件搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_one": " + Recherche de fichiers {{count}} fois / 1K fois * {{symbol}}{{price}} * {{ratioType}} {{ratio}}",
     " + 文件搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_many": " + Recherche de fichiers {{count}} fois / 1K fois * {{symbol}}{{price}} * {{ratioType}} {{ratio}}",

@@ -96,9 +96,10 @@ func newClaudeCodeTransport() *http.Transport {
 		},
 	}
 	return &http.Transport{
-		MaxIdleConns:        common.RelayMaxIdleConns,
-		MaxIdleConnsPerHost: common.RelayMaxIdleConnsPerHost,
-		ForceAttemptHTTP2:   false,
+		MaxIdleConns:          common.RelayMaxIdleConns,
+		MaxIdleConnsPerHost:   common.RelayMaxIdleConnsPerHost,
+		ResponseHeaderTimeout: relayResponseHeaderTimeout(common.RelayResponseHeaderTimeout),
+		ForceAttemptHTTP2:     false,
 		Proxy: func(req *http.Request) (*url.URL, error) {
 			if req.URL.Scheme == "https" {
 				return nil, nil
@@ -131,9 +132,10 @@ func newClaudeCodeTransportWithProxy(proxyURL *url.URL) *http.Transport {
 	}
 
 	return &http.Transport{
-		MaxIdleConns:        common.RelayMaxIdleConns,
-		MaxIdleConnsPerHost: common.RelayMaxIdleConnsPerHost,
-		ForceAttemptHTTP2:   false,
+		MaxIdleConns:          common.RelayMaxIdleConns,
+		MaxIdleConnsPerHost:   common.RelayMaxIdleConnsPerHost,
+		ResponseHeaderTimeout: relayResponseHeaderTimeout(common.RelayResponseHeaderTimeout),
+		ForceAttemptHTTP2:     false,
 		Proxy: func(req *http.Request) (*url.URL, error) {
 			if req.URL.Scheme == "https" {
 				return nil, nil

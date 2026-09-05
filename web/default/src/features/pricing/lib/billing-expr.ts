@@ -185,6 +185,21 @@ export const MATCH_RANGE = 'range'
 export const TIME_FUNCS = ['hour', 'minute', 'weekday', 'month', 'day'] as const
 export type TimeFunc = (typeof TIME_FUNCS)[number]
 
+const TIME_VALUE_BOUNDS: Record<TimeFunc, readonly [number, number]> = {
+  hour: [0, 23],
+  minute: [0, 59],
+  weekday: [0, 6],
+  month: [1, 12],
+  day: [1, 31],
+}
+
+function isTimeValue(timeFunc: TimeFunc, text: string): boolean {
+  if (!NUMERIC_LITERAL_REGEX.test(text)) return false
+  const value = Number(text)
+  const [min, max] = TIME_VALUE_BOUNDS[timeFunc]
+  return Number.isInteger(value) && value >= min && value <= max
+}
+
 export const COMMON_TIMEZONES: { value: string; label: string }[] = [
   { value: 'Asia/Shanghai', label: 'UTC+8 Shanghai (Asia/Shanghai)' },
   { value: 'UTC', label: 'UTC' },
@@ -300,9 +315,7 @@ export function parseTiersFromExpr(exprStr: string): ParsedTier[] {
       const conditions: TierCondition[] = []
       if (condStr && /^(?:p|c|len)\b/.test(condStr)) {
         for (const cp of condStr.split(/\s*&&\s*/)) {
-          const cm = cp
-            .trim()
-            .match(/^(p|c|len)\s*(<=|<|>=|>)\s*([\d.eE+-]+)$/)
+          const cm = cp.trim().match(/^(p|c|len)\s*(<=|<|>=|>)\s*([\d.eE+-]+)$/)
           if (cm) {
             conditions.push({
               var: cm[1] as TierCondition['var'],
@@ -386,38 +399,33 @@ function parseExprLiteral(raw: string): string | null {
 }
 
 function tryParseTimeCondition(expr: string): RequestCondition | null {
-  let m = expr.match(
-    /^(hour|minute|weekday|month|day)\("([^"]+)"\) >= ([\d.eE+-]+) \|\| \1\("\2"\) < ([\d.eE+-]+)$/
+  const unwrapped = unwrapOuterParens(expr)
+  let m = unwrapped.match(
+    /^(hour|minute|weekday|month|day)\("([^"]+)"\) >= ([\d.eE+-]+) (\|\||&&) \1\("\2"\) < ([\d.eE+-]+)$/
   )
   if (m) {
+    const timeFunc = m[1] as TimeFunc
+    if (!isTimeValue(timeFunc, m[3]) || !isTimeValue(timeFunc, m[5])) {
+      return null
+    }
+    const operator = Number(m[3]) > Number(m[5]) ? '||' : '&&'
+    // A legacy within-day OR is a tautology; never silently change its price.
+    if (m[4] !== operator) return null
     return {
       source: 'time',
-      timeFunc: m[1] as TimeFunc,
+      timeFunc,
       timezone: m[2],
       mode: MATCH_RANGE,
       value: '',
       rangeStart: m[3],
-      rangeEnd: m[4],
+      rangeEnd: m[5],
     }
   }
-  m = expr.match(
-    /^\((hour|minute|weekday|month|day)\("([^"]+)"\) >= ([\d.eE+-]+) \|\| \1\("\2"\) < ([\d.eE+-]+)\)$/
-  )
-  if (m) {
-    return {
-      source: 'time',
-      timeFunc: m[1] as TimeFunc,
-      timezone: m[2],
-      mode: MATCH_RANGE,
-      value: '',
-      rangeStart: m[3],
-      rangeEnd: m[4],
-    }
-  }
-  m = expr.match(
+  m = unwrapped.match(
     /^(hour|minute|weekday|month|day)\("([^"]+)"\) (==|>=|<) ([\d.eE+-]+)$/
   )
   if (m) {
+    if (!isTimeValue(m[1] as TimeFunc, m[4])) return null
     const opMap: Record<string, string> = {
       '==': MATCH_EQ,
       '>=': MATCH_GTE,
@@ -503,10 +511,17 @@ function tryParseRuleGroupFactor(part: string): RequestRuleGroup | null {
 
   const andParts = splitTopLevelAnd(conditionStr)
   const conditions: RequestCondition[] = []
-  for (const ap of andParts) {
-    const cond = tryParseRequestCondition(ap.trim())
+  for (let index = 0; index < andParts.length; index += 1) {
+    const pair =
+      index + 1 < andParts.length
+        ? tryParseRequestCondition(
+            `${andParts[index]} && ${andParts[index + 1]}`
+          )
+        : null
+    const cond = pair || tryParseRequestCondition(andParts[index].trim())
     if (!cond) return null
     conditions.push(cond)
+    if (pair) index += 1
   }
   if (conditions.length === 0) return null
   return { conditions, multiplier }
@@ -634,7 +649,7 @@ export function getRequestRuleMatchOptions(source: string): MatchOption[] {
       { value: MATCH_EQ, labelKey: 'Equals' },
       { value: MATCH_GTE, labelKey: 'Greater than or equal' },
       { value: MATCH_LT, labelKey: 'Less than' },
-      { value: MATCH_RANGE, labelKey: 'Overnight range' },
+      { value: MATCH_RANGE, labelKey: 'Time range' },
     ]
   }
   const base: MatchOption[] = [
@@ -725,13 +740,14 @@ function buildTimeConditionExpr(cond: TimeCondition): string {
   if (mode === MATCH_RANGE) {
     const s = normalized.rangeStart.trim()
     const e = normalized.rangeEnd.trim()
-    if (!NUMERIC_LITERAL_REGEX.test(s) || !NUMERIC_LITERAL_REGEX.test(e)) {
+    if (!isTimeValue(timeFunc, s) || !isTimeValue(timeFunc, e)) {
       return ''
     }
-    return `${fn} >= ${s} || ${fn} < ${e}`
+    const operator = Number(s) > Number(e) ? '||' : '&&'
+    return `${fn} >= ${s} ${operator} ${fn} < ${e}`
   }
   const v = normalized.value.trim()
-  if (!NUMERIC_LITERAL_REGEX.test(v)) return ''
+  if (!isTimeValue(timeFunc, v)) return ''
   const opMap: Record<string, string> = {
     [MATCH_EQ]: '==',
     [MATCH_GTE]: '>=',
@@ -783,10 +799,8 @@ function buildRequestConditionExpr(cond: RequestCondition): string {
 function buildRuleGroupFactor(group: RequestRuleGroup): string {
   const multiplier = (group.multiplier || '').trim()
   if (!NUMERIC_LITERAL_REGEX.test(multiplier)) return ''
-  const condExprs = (group.conditions || [])
-    .map(buildRequestConditionExpr)
-    .filter(Boolean)
-  if (condExprs.length === 0) return ''
+  const condExprs = (group.conditions || []).map(buildRequestConditionExpr)
+  if (condExprs.length === 0 || condExprs.some((expr) => !expr)) return ''
 
   const combined =
     condExprs.length === 1
@@ -796,5 +810,10 @@ function buildRuleGroupFactor(group: RequestRuleGroup): string {
 }
 
 export function buildRequestRuleExpr(groups: RequestRuleGroup[]): string {
-  return (groups || []).map(buildRuleGroupFactor).filter(Boolean).join(' * ')
+  const factors = (groups || []).map(buildRuleGroupFactor)
+  return factors.some((factor) => !factor) ? '' : factors.join(' * ')
+}
+
+export function areRequestRuleGroupsValid(groups: RequestRuleGroup[]): boolean {
+  return groups.every((group) => Boolean(buildRuleGroupFactor(group)))
 }

@@ -156,6 +156,15 @@ func CriticalRateLimit() func(c *gin.Context) {
 	return defNext
 }
 
+// UserCriticalRateLimit applies the critical-operation policy per authenticated
+// user. The scope keeps independent operations from consuming each other's quota.
+func UserCriticalRateLimit(scope string) func(c *gin.Context) {
+	if !common.CriticalRateLimitEnable {
+		return defNext
+	}
+	return userRateLimitFactory(common.CriticalRateLimitNum, common.CriticalRateLimitDuration, "UC:"+scope)
+}
+
 func DownloadRateLimit() func(c *gin.Context) {
 	return rateLimitFactory(common.DownloadRateLimitNum, common.DownloadRateLimitDuration, "DW")
 }

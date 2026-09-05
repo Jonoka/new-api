@@ -106,7 +106,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	filterResult, err := service.ApplySensitiveFilterToRequestBody(c, relayFormat)
 	if err != nil {
-		newAPIError = types.NewError(err, types.ErrorCodeInvalidRequest)
+		newAPIError = relayRequestParseError(err)
 		return
 	}
 	if filterResult.Blocked {
@@ -117,12 +117,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	request, err := helper.GetAndValidateRequest(c, relayFormat)
 	if err != nil {
-		// Map "request body too large" to 413 so clients can handle it correctly
-		if common.IsRequestBodyTooLargeError(err) || errors.Is(err, common.ErrRequestBodyTooLarge) {
-			newAPIError = types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusRequestEntityTooLarge, types.ErrOptionWithSkipRetry())
-		} else {
-			newAPIError = types.NewError(err, types.ErrorCodeInvalidRequest)
-		}
+		newAPIError = relayRequestParseError(err)
 		return
 	}
 
@@ -295,6 +290,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			perfmetrics.RecordRelaySample(relayInfo, false, 0)
 		})
 	}
+}
+
+func relayRequestParseError(err error) *types.NewAPIError {
+	if common.IsRequestBodyTooLargeError(err) || errors.Is(err, common.ErrRequestBodyTooLarge) {
+		return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusRequestEntityTooLarge, types.ErrOptionWithSkipRetry())
+	}
+	return types.NewError(err, types.ErrorCodeInvalidRequest, types.ErrOptionWithStatusCode(http.StatusBadRequest), types.ErrOptionWithSkipRetry())
 }
 
 func shouldMarkLitePoolExhausted(c *gin.Context, relayInfo *relaycommon.RelayInfo, err *types.NewAPIError, channelSelectionExhausted bool) bool {

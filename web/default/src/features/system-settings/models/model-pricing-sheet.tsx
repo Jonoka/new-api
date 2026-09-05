@@ -691,6 +691,7 @@ export function ModelPricingEditorPanel({
   })
   const [billingExpr, setBillingExpr] = useState('')
   const [requestRuleExpr, setRequestRuleExpr] = useState('')
+  const [requestRulesValid, setRequestRulesValid] = useState(true)
   const [priceUnit, setPriceUnit] = useState<ModelPriceUnit>(
     MODEL_PRICE_UNITS.REQUEST
   )
@@ -740,6 +741,7 @@ export function ModelPricingEditorPanel({
       )
       setBillingExpr(editData.billingExpr || '')
       setRequestRuleExpr(editData.requestRuleExpr || '')
+      setRequestRulesValid(true)
       setPriceUnit(normalizeModelPriceUnit(editData.priceUnit))
     } else {
       form.reset({
@@ -1040,6 +1042,7 @@ export function ModelPricingEditorPanel({
   }, [editData, laneEnabled, lanePrices, pricingMode, promptPrice, t])
 
   const handleSubmit = (values: ModelPricingFormValues) => {
+    if (pricingMode === 'tiered_expr' && !requestRulesValid) return
     if (pricingMode === 'per-request') {
       const price = values.price?.trim() ?? ''
       const parsedPrice = Number(price)
@@ -1343,6 +1346,7 @@ export function ModelPricingEditorPanel({
                     requestRuleExpr={requestRuleExpr}
                     onBillingExprChange={setBillingExpr}
                     onRequestRuleExprChange={setRequestRuleExpr}
+                    onValidityChange={setRequestRulesValid}
                   />
                 </TabsContent>
               </Tabs>
@@ -1409,7 +1413,10 @@ export function ModelPricingEditorPanel({
               <Button type='button' variant='outline' onClick={onCancel}>
                 {t('Cancel')}
               </Button>
-              <Button type='submit'>
+              <Button
+                type='submit'
+                disabled={pricingMode === 'tiered_expr' && !requestRulesValid}
+              >
                 {isEditMode ? t('Update') : t('Add')}
               </Button>
             </div>

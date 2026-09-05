@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Banner,
   Button,
@@ -103,6 +103,7 @@ export default function ModelPricingEditor({
   const [addVisible, setAddVisible] = useState(false);
   const [batchVisible, setBatchVisible] = useState(false);
   const [newModelName, setNewModelName] = useState('');
+  const [requestRulesValid, setRequestRulesValid] = useState(true);
 
   const {
     selectedModel,
@@ -144,6 +145,13 @@ export default function ModelPricingEditor({
     candidateModelNames,
     filterMode,
   });
+
+  useEffect(() => {
+    setRequestRulesValid(true);
+  }, [selectedModelName]);
+
+  const invalidRequestRules =
+    selectedModel?.billingMode === 'tiered_expr' && !requestRulesValid;
 
   const getExprModeLabel = useCallback(
     (model) => {
@@ -287,13 +295,20 @@ export default function ModelPricingEditor({
             type='primary'
             icon={<IconSave />}
             loading={loading}
-            onClick={handleSubmit}
+            onClick={() => {
+              if (!invalidRequestRules) handleSubmit();
+            }}
+            disabled={invalidRequestRules}
             style={isMobile ? { width: '100%' } : undefined}
           >
             {t('应用更改')}
           </Button>
           <Button
-            disabled={!selectedModel || selectedModelNames.length === 0}
+            disabled={
+              invalidRequestRules ||
+              !selectedModel ||
+              selectedModelNames.length === 0
+            }
             onClick={() => setBatchVisible(true)}
             style={isMobile ? { width: '100%' } : undefined}
           >
@@ -514,6 +529,7 @@ export default function ModelPricingEditor({
                     onExprChange={handleBillingExprChange}
                     requestRuleExpr={selectedModel.requestRuleExpr}
                     onRequestRuleExprChange={handleRequestRuleExprChange}
+                    onValidityChange={setRequestRulesValid}
                     t={t}
                   />
                 ) : (

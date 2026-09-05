@@ -31,3 +31,7 @@
 - [Gemini Responses 流提前完成修复记录](../workflows/2026-08/31_gemini_responses_premature_completion.md)
 
 文档中的 API 路径以当前源码为准；部署或升级前请先确认分支版本。
+
+- [Relay header timeout and request boundaries](../workflows/2026-09/05_relay_boundaries.md)
+- [Log privacy, SQL redaction and quota statistics](../workflows/2026-09/05_log_privacy_and_statistics.md)
+- [Time-range billing rules](../workflows/2026-09/05_time_range_billing_rules.md)

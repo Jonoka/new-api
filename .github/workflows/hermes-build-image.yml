@@ -50,11 +50,37 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check changed Go formatting
+        run: |
+          base="$(git merge-base origin/custom-main HEAD)"
+          mapfile -d '' files < <(git diff --name-only --diff-filter=ACM -z "$base" HEAD -- '*.go')
+          if [ "${#files[@]}" -gt 0 ]; then
+            gofmt -w "${files[@]}"
+          fi
+          git diff --binary > "$RUNNER_TEMP/go-format.patch"
+          git diff --exit-code
+
+      - name: Upload formatting correction
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-format-correction
+          path: ${{ runner.temp }}/go-format.patch
+          if-no-files-found: ignore
+
       - name: Check and build default frontend
         working-directory: web/default
         run: |
           bun install --frozen-lockfile
+          bun test src/features/pricing/lib/time-rule-expr.test.mjs src/features/system-settings/models/tiered-pricing-editor.test.mjs
           bun run typecheck
+          bun x eslint src/features/pricing/lib/billing-expr.ts src/features/system-settings/models/tiered-pricing-editor.tsx src/features/system-settings/models/model-pricing-sheet.tsx
           bun run build
 
       - name: Check and build classic frontend
@@ -63,16 +89,18 @@ jobs:
           bun install --frozen-lockfile
           bun run build
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
       - name: Run Go tests
         env:
           NEW_API_TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/newapi_test_ci?sslmode=disable
         run: go test ./... -count=1
+
+      - name: Race-check upgraded boundaries
+        env:
+          NEW_API_TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/newapi_test_ci?sslmode=disable
+        run: >-
+          go test -race ./model ./service ./controller ./middleware
+          -run 'Test(RelayResponseHeaderTimeout|RelayTransportsApplyResponseHeaderTimeout|ResponseHeaderTimeout|RelayRequestParseError|RelayRejectsMalformedRequest|RelayPreservesRequestBodyTooLarge|UserCriticalRateLimit|FormatUserLogsUsesStrictProjection|ProjectUserLogOther|UserAndTokenReadsProject|SumUsedQuotaKeepsHistorical|SanitizeDBError|SanitizedGormWriter|GormLoggerRedacts)'
+          -count=1
 
       - name: Resolve image tags
         id: tags
@@ -111,6 +139,7 @@ jobs:
           images: ghcr.io/${{ github.repository }}
 
       - name: Build & push
+        id: image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -124,6 +153,13 @@ jobs:
             CANVAS_LAUNCHER_CACHE_KEY=${{ hashFiles('web/default/src/features/canvas/lib.ts', 'web/classic/src/helpers/canvas.js') }}
           provenance: false
           sbom: false
+
+      - name: Rehearse candidate startup twice
+        env:
+          CANDIDATE_IMAGE: ghcr.io/${{ github.repository }}@${{ steps.image.outputs.digest }}
+          EXPECTED_REVISION: ${{ github.sha }}
+          TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: bash scripts/ci/batch-a-smoke.sh
 
       - name: Summary
         run: |

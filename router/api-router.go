@@ -119,7 +119,7 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.GET("/models", controller.GetUserModels)
 				selfRoute.PUT("/self", controller.UpdateSelf)
 				selfRoute.DELETE("/self", controller.DeleteSelf)
-				selfRoute.GET("/token", controller.GenerateAccessToken)
+				selfRoute.GET("/token", middleware.UserCriticalRateLimit("access-token"), controller.GenerateAccessToken)
 				selfRoute.GET("/passkey", controller.PasskeyStatus)
 				selfRoute.POST("/passkey/register/begin", controller.PasskeyRegisterBegin)
 				selfRoute.POST("/passkey/register/finish", controller.PasskeyRegisterFinish)
@@ -152,7 +152,7 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.POST("/bepusdt/pay", middleware.CriticalRateLimit(), controller.RequestBepusdtPay)
 				selfRoute.POST("/okpay/amount", controller.RequestOkpayAmount)
 				selfRoute.POST("/okpay/pay", middleware.CriticalRateLimit(), controller.RequestOkpayPay)
-				selfRoute.POST("/aff_transfer", controller.TransferAffQuota)
+				selfRoute.POST("/aff_transfer", middleware.UserCriticalRateLimit("aff-transfer"), controller.TransferAffQuota)
 				selfRoute.PUT("/setting", controller.UpdateUserSetting)
 
 				// 2FA routes
