@@ -20,15 +20,13 @@ func TestAlphaSearchCompatibilitySeed(t *testing.T) {
 	token := &Token{UserId: user.Id, Key: "calphasynthetictoken", Name: "c-alpha-token",
 		Status: common.TokenStatusEnabled, RemainQuota: 100000, Group: "default",
 		ModelLimitsEnabled: true, ModelLimits: "c-alpha-public"}
-	require.NoError(t, db.Create(token).Error)
+	require.NoError(t, token.Insert())
 	channel := &Channel{Name: "c-alpha-channel", Type: constant.ChannelTypeOpenAI,
 		Key: "ci-gateway-key", Status: common.ChannelStatusEnabled,
 		BaseURL: common.GetPointer("http://127.0.0.1:38080/v1"), Models: "c-alpha-public",
 		Group: "default", Weight: common.GetPointer(uint(1)), Priority: common.GetPointer(int64(100)),
 		AutoBan: common.GetPointer(0), ModelMapping: common.GetPointer(`{"c-alpha-public":"c-alpha-mapped"}`)}
-	require.NoError(t, db.Create(channel).Error)
-	require.NoError(t, db.Create(&Ability{Group: "default", Model: "c-alpha-public",
-		ChannelId: channel.Id, Enabled: true, Weight: 1, Priority: common.GetPointer(int64(100))}).Error)
+	require.NoError(t, channel.Insert())
 	for key, value := range map[string]string{
 		"ModelPrice":                `{"c-alpha-public":1234}`,
 		"LogConsumeEnabled":         "true",
