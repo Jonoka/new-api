@@ -29,6 +29,7 @@ import { toast } from 'sonner'
 import { useAuthStore, type AuthUser } from '@/stores/auth-store'
 import { api, getSelf } from '@/lib/api'
 import { OAuthCallbackScreen } from '@/features/auth/components/oauth-callback-screen'
+import { consumeCanvasReturn } from '@/features/canvas/sso'
 import { OAUTH_BIND_STORAGE_KEY } from '@/features/auth/constants'
 
 type OAuthRequestConfig = AxiosRequestConfig & {
@@ -143,7 +144,7 @@ function OAuthCallback() {
       }
 
       const redirectAfterLogin = (target?: string) => {
-        const to = target || search?.redirect || '/dashboard'
+        const to = consumeCanvasReturn() || target || search?.redirect || '/dashboard'
         safeNavigate(to)
         toast.success(i18next.t('Signed in successfully!'))
       }

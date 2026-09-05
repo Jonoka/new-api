@@ -12,6 +12,7 @@
 - 通知中心：Telegram Bot、多个任务和目标、提及、自定义模板、事务 outbox、429 重试、死信和每任务最新五条历史。管理路由为 /api/notification/\*，仅 root 可管理。
 - 自定义 OAuth/OIDC：数据库动态注册、Discovery、字段映射、绑定和解绑。路由为 /api/custom-oauth-provider/\*、/api/oauth/:provider。
 - 异步图片任务：POST/GET /v1/images/tasks，复用渠道、限流和计费链路并按 TTL 清理。代码见 controller/canvas_image_task.go。
+- Canvas 2 SSO: additive identity exchange and separate dual-theme launcher, disabled by default pending paired deployment verification. Requires Redis 7 and exact HTTPS origin; see [Canvas 2 SSO](canvas-sso.md). Legacy canvas and billing are unchanged.
 - 动态计费表达式：覆盖预消费、结算、日志和版本快照；新增变量或函数前必须阅读 pkg/billingexpr/expr.md。
 - 渠道运维：趋势、稳定性、状态码、失败链路、并发限制、亲和缓存和上游模型变更检测。单渠道并发上限调低时从当前在途并发开始，在一分钟内线性收敛；调高或改为不限制仍立即生效。多分组令牌按配置顺序跨组重试，每个分组最多发起一次上游请求，失败后立即进入下一组；每一次选渠道只使用当前重试分组的渠道候选集。分组可标记为独立，独立分组只能单独绑定令牌，历史冲突绑定在请求时返回 503；旧客户端缺失独立字段时保留原值，请求热路径使用可失效快照而不每次查库。结构化接口新建分组时，后端取得真实 ID 后以 ID 的十进制文本作为最终兼容 code；旧分组通过管理员显式预检和事务迁移切换为数字 code，并同步渠道、令牌、用户、能力、订阅、选项和缓存，`default` 保持固定标识。令牌分组迁移遇到已存在的目标绑定时只去重该令牌内部的分组，不删除独立令牌记录。
 - 游戏钱包和预测玩法：主链路存在，但 JudgeProvider 尚未实现，自动判题会回落人工，标记为实验性。

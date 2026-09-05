@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useMemo, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Card, Select, Typography } from '@douyinfe/semi-ui';
 import { ArrowUpRight } from 'lucide-react';
@@ -13,6 +13,7 @@ import {
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
 import { API_ENDPOINTS } from '../../constants/playground.constants';
+import { buildCanvasSSOLaunchUrl, consumeCanvasReturn, rememberCanvasReturn } from '../../helpers/canvas-sso';
 
 const capabilityGroups = [
   { key: 'textGroup', label: '文本分组' },
@@ -38,7 +39,12 @@ const Canvas = () => {
   const [imageGroup, setImageGroup] = useState('');
   const [audioGroup, setAudioGroup] = useState('');
   const [videoGroup, setVideoGroup] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [resumeParams] = useState(() => new URLSearchParams(window.location.search));
+  const resumed = useRef(false);
+  useEffect(() => {
+    if (resumeParams.get('canvas_resume') !== '1') consumeCanvasReturn();
+  }, [resumeParams]);
   const capabilityGroupState = {
     textGroup,
     setTextGroup,
@@ -76,12 +82,20 @@ const Canvas = () => {
         setGroups(groupOptions);
 
         const fallback =
+          groupOptions.find((group) => group.value === resumeParams.get('group'))?.value ||
           groupOptions.find((group) => group.value === 'auto')?.value ||
           groupOptions.find((group) => group.value === 'default')?.value ||
           groupOptions[0]?.value ||
           '';
         setDefaultGroup((current) => current || fallback);
       } catch (error) {
+        if (error?.response?.status === 401 && resumeParams.get('canvas_resume') === '1') {
+          resumed.current = true;
+          rememberCanvasReturn(window.location.pathname + window.location.search);
+          localStorage.removeItem('user');
+          window.location.replace('/login');
+          return;
+        }
         showError(t('加载分组失败'));
       } finally {
         setLoading(false);
@@ -89,7 +103,27 @@ const Canvas = () => {
     };
 
     loadGroups();
-  }, [t, userState?.user?.group]);
+  }, [t, userState?.user?.group, resumeParams]);
+
+  const ssoStatus = statusState?.status;
+  const ssoLaunchUrl = ssoStatus?.canvas_sso_launch_enabled
+    ? buildCanvasSSOLaunchUrl(ssoStatus.canvas_sso_origin, defaultGroup)
+    : '';
+
+  useEffect(() => {
+    if (resumed.current || resumeParams.get('canvas_resume') !== '1' || !ssoStatus || loading) return;
+    resumed.current = true;
+    consumeCanvasReturn();
+    window.history.replaceState(window.history.state, '', '/console/canvas');
+    const target = ssoStatus.canvas_sso_launch_enabled
+      ? buildCanvasSSOLaunchUrl(ssoStatus.canvas_sso_origin, defaultGroup, resumeParams.get('canvas_next'), true)
+      : '';
+    if (!target) {
+      showError(t('新版无限画布暂不可用'));
+      return;
+    }
+    window.location.replace(target);
+  }, [ssoStatus, loading, defaultGroup, resumeParams, t]);
 
   const launchUrl = useMemo(() => {
     if (!defaultGroup || typeof window === 'undefined') return '';
@@ -181,6 +215,18 @@ const Canvas = () => {
         >
           {t('打开无限画布')}
         </Button>
+        {ssoStatus?.canvas_sso_launch_enabled && (
+          <Button
+            className='mt-3'
+            type='primary'
+            block
+            icon={<ArrowUpRight size={16} />}
+            onClick={() => window.open(ssoLaunchUrl, '_blank', 'noopener')}
+            disabled={!ssoLaunchUrl || loading}
+          >
+            {t('打开新版无限画布')}
+          </Button>
+        )}
       </Card>
     </div>
   );

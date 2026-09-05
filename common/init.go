@@ -78,6 +78,11 @@ func InitEnv() {
 
 	// Initialize variables from constants.go that were using environment variables
 	DebugEnabled = os.Getenv("DEBUG") == "true"
+	CanvasSSOOrigin = os.Getenv("CANVAS_SSO_ORIGIN")
+	if err := ValidateCanvasSSOOrigin(CanvasSSOOrigin); err != nil {
+		log.Fatal(err)
+	}
+	CanvasSSOLaunchEnabled = CanvasSSOOrigin != "" && GetEnvOrDefaultBool("CANVAS_SSO_LAUNCH_ENABLED", false)
 	MemoryCacheEnabled = os.Getenv("MEMORY_CACHE_ENABLED") == "true"
 	IsMasterNode = os.Getenv("NODE_TYPE") != "slave"
 	NodeName = os.Getenv("NODE_NAME")

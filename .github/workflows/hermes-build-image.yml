@@ -22,6 +22,15 @@ jobs:
     name: Build & push amd64
     runs-on: ubuntu-latest
     services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
       postgres:
         image: postgres:15
         env:
@@ -50,29 +59,47 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
 
-      - name: Check and build default frontend
-        working-directory: web/default
-        run: |
-          bun install --frozen-lockfile
-          bun run typecheck
-          bun run build
-
-      - name: Check and build classic frontend
-        working-directory: web/classic
-        run: |
-          bun install --frozen-lockfile
-          bun run build
-
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
 
+      - name: Format changed Go source
+        run: |
+          git diff --name-only -z --diff-filter=ACM origin/custom-main...HEAD -- '*.go' | xargs -0 -r gofmt -w
+          git diff --binary -- '*.go' > "$RUNNER_TEMP/source-format.patch"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-format-${{ github.sha }}
+          path: ${{ runner.temp }}/source-format.patch
+
+      - name: Check and build default frontend
+        working-directory: web/default
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun test src/features/canvas/lib.test.ts src/features/canvas/sso.test.ts
+          bun run build
+
+      - name: Check and build classic frontend
+        working-directory: web/classic
+        run: |
+          bun install --frozen-lockfile
+          bun test src/classic-canvas-integration.test.mjs src/canvas-sso.test.mjs
+          bun run build
+
       - name: Run Go tests
         env:
           NEW_API_TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/newapi_test_ci?sslmode=disable
+          NEW_API_TEST_REDIS_URL: redis://localhost:6379/15
         run: go test ./... -count=1
+
+      - name: Check canvas SSO races
+        env:
+          NEW_API_TEST_REDIS_URL: redis://localhost:6379/15
+        run: go test -race ./controller -run TestCanvasAuth -count=1
 
       - name: Resolve image tags
         id: tags

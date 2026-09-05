@@ -86,6 +86,8 @@ export interface ApiResponse {
 // ============================================================================
 
 export interface SystemStatus {
+	canvas_sso_origin?: string
+	canvas_sso_launch_enabled?: boolean
   success?: boolean
   message?: string
   data?: {

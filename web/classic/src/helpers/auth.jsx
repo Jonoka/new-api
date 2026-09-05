@@ -17,9 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
-import { Navigate } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { Navigate, useLocation } from 'react-router-dom';
 import { history } from './history';
+import { rememberCanvasReturn } from './canvas-sso';
 
 export function authHeader() {
   // return authorization header with jwt token
@@ -43,6 +44,12 @@ export const AuthRedirect = ({ children }) => {
 };
 
 function PrivateRoute({ children }) {
+  const location = useLocation();
+  useEffect(() => {
+    if (!localStorage.getItem('user')) {
+      rememberCanvasReturn(location.pathname + location.search);
+    }
+  }, [location.pathname, location.search]);
   if (!localStorage.getItem('user')) {
     return <Navigate to='/login' state={{ from: history.location }} />;
   }

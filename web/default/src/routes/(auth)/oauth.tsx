@@ -23,6 +23,7 @@ import { toast } from 'sonner'
 import { useAuthStore, type AuthUser } from '@/stores/auth-store'
 import { getSelf } from '@/lib/api'
 import { wechatLoginByCode } from '@/features/auth/api'
+import { consumeCanvasReturn } from '@/features/canvas/sso'
 
 function OAuthComponent() {
   const navigate = useNavigate()
@@ -42,7 +43,7 @@ function OAuthComponent() {
         const res = await getSelf()
         if (res?.success) {
           useAuthStore.getState().auth.setUser(res.data as AuthUser)
-          const target = search?.redirect || '/dashboard'
+          const target = consumeCanvasReturn() || search?.redirect || '/dashboard'
           navigate({ to: target, replace: true })
           return
         }

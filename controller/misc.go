@@ -176,6 +176,8 @@ func GetStatus(c *gin.Context) {
 	legalSetting := system_setting.GetLegalSettings()
 
 	data := gin.H{
+		"canvas_sso_origin":           common.CanvasSSOOrigin,
+		"canvas_sso_launch_enabled":   common.CanvasSSOLaunchEnabled && common.CanvasSSOOrigin != "",
 		"version":                     common.Version,
 		"start_time":                  common.StartTime,
 		"email_verification":          common.EmailVerificationEnabled,

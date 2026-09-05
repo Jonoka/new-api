@@ -33,6 +33,9 @@ func CORS() gin.HandlerFunc {
 }
 
 func isAllowedCredentialOrigin(c *gin.Context, origin string) bool {
+	if common.CanvasSSOOrigin != "" && origin == common.CanvasSSOOrigin {
+		return true
+	}
 	if origin == "" {
 		return true
 	}

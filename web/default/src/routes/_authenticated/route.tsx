@@ -20,6 +20,7 @@ import { createFileRoute, redirect } from '@tanstack/react-router'
 import { useAuthStore } from '@/stores/auth-store'
 import { getSelf } from '@/lib/api'
 import { AuthenticatedLayout } from '@/components/layout'
+import { rememberCanvasReturn } from '@/features/canvas/sso'
 
 // 内存中的验证标记，避免同一会话中重复验证
 let sessionVerified = false
@@ -48,6 +49,7 @@ function isAdminRoute(pathname: string): boolean {
 
 export const Route = createFileRoute('/_authenticated')({
   beforeLoad: async ({ location }) => {
+	rememberCanvasReturn(location.href)
     const { auth } = useAuthStore.getState()
     const pathname = location.pathname || ''
 

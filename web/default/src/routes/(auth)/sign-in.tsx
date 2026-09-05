@@ -20,6 +20,7 @@ import { z } from 'zod'
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { useAuthStore } from '@/stores/auth-store'
 import { SignIn } from '@/features/auth/sign-in'
+import { consumeCanvasReturn } from '@/features/canvas/sso'
 
 const searchSchema = z.object({
   redirect: z.string().optional(),
@@ -35,7 +36,7 @@ export const Route = createFileRoute('/(auth)/sign-in')({
     if (auth.user) {
       // 优先使用 redirect 参数（用户之前想去的地方）
       // 否则跳转到 dashboard
-      throw redirect({ to: search?.redirect || '/dashboard' })
+      throw redirect({ to: consumeCanvasReturn() || search?.redirect || '/dashboard' })
     }
   },
 })

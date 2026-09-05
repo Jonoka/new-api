@@ -11,6 +11,12 @@ import (
 )
 
 func SetRelayRouter(router *gin.Engine) {
+	// Register the SSO boundary before broad relay CORS so OPTIONS cannot bypass it.
+	canvasAuthRouter := router.Group("/canvas/auth", controller.CanvasAuthBoundary)
+	canvasAuthRouter.OPTIONS("/authorize", func(c *gin.Context) {})
+	canvasAuthRouter.GET("/launch", controller.CanvasLaunch)
+	canvasAuthRouter.POST("/authorize", middleware.GlobalAPIRateLimit(), middleware.UserSessionAuth(), controller.CanvasAuthorize)
+	canvasAuthRouter.POST("/exchange", middleware.GlobalAPIRateLimit(), controller.CanvasExchange)
 	router.Use(middleware.CORS())
 	router.Use(middleware.DecompressRequestMiddleware())
 	router.Use(middleware.BodyStorageCleanup()) // 清理请求体存储
@@ -84,6 +90,9 @@ func SetRelayRouter(router *gin.Engine) {
 		canvasRelayRouter.Use(middleware.Distribute(), middleware.ModelRequestRateLimit())
 		canvasRelayRouter.POST("/chat/completions", func(c *gin.Context) {
 			controller.Relay(c, types.RelayFormatOpenAI)
+		})
+		canvasRelayRouter.POST("/responses", func(c *gin.Context) {
+			controller.Relay(c, types.RelayFormatOpenAIResponses)
 		})
 		canvasRelayRouter.POST("/images/generations", func(c *gin.Context) {
 			controller.CanvasImageTaskSubmit(c)

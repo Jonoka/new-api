@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowUpRight, Brush } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -17,11 +17,17 @@ import {
 import { GroupSelector } from '@/components/model-group-selector'
 import { getUserGroups } from '@/features/playground/api'
 import { buildCanvasLaunchUrl } from './lib'
+import { buildCanvasSSOLaunchUrl, consumeCanvasReturn } from './sso'
 
 export function CanvasLauncher() {
   const { t } = useTranslation()
-  const { status } = useStatus()
+  const { status, loading: statusLoading } = useStatus()
   const [selectedGroup, setSelectedGroup] = useState('')
+  const [resumeParams] = useState(() => new URLSearchParams(window.location.search))
+  const resumed = useRef(false)
+  useEffect(() => {
+    if (resumeParams.get('canvas_resume') !== '1') consumeCanvasReturn()
+  }, [resumeParams])
   const canvasSettings = useMemo(
     () =>
       getCanvasSettingsFromSidebarModules(
@@ -49,12 +55,34 @@ export function CanvasLauncher() {
 
   useEffect(() => {
     if (selectedGroup || groups.length === 0) return
+    const requestedGroup = resumeParams.get('group')
     const fallback =
+      groups.find((group) => group.value === requestedGroup)?.value ??
       groups.find((group) => group.value === 'auto')?.value ??
       groups.find((group) => group.value === 'default')?.value ??
       groups[0].value
     setSelectedGroup(fallback)
-  }, [groups, selectedGroup])
+  }, [groups, selectedGroup, resumeParams])
+
+  const ssoLaunchUrl = status?.canvas_sso_launch_enabled
+    ? buildCanvasSSOLaunchUrl(status.canvas_sso_origin, selectedGroup)
+    : ''
+
+  useEffect(() => {
+    if (resumed.current || resumeParams.get('canvas_resume') !== '1' || statusLoading || !status || isLoading) return
+    if (status.canvas_sso_launch_enabled && groups.length > 0 && !selectedGroup) return
+    resumed.current = true
+    consumeCanvasReturn()
+    window.history.replaceState(window.history.state, '', '/canvas')
+    const target = status.canvas_sso_launch_enabled
+      ? buildCanvasSSOLaunchUrl(status.canvas_sso_origin, selectedGroup, resumeParams.get('canvas_next'), true)
+      : ''
+    if (!target) {
+      toast.error(t('Canvas 2 is unavailable'))
+      return
+    }
+    window.location.replace(target)
+  }, [status, statusLoading, isLoading, selectedGroup, groups.length, resumeParams, t])
 
   const launchUrl = useMemo(() => {
     if (!selectedGroup || typeof window === 'undefined') return ''
@@ -104,6 +132,16 @@ export function CanvasLauncher() {
             <ArrowUpRight className='h-4 w-4' aria-hidden='true' />
             {t('Open in new tab')}
           </Button>
+          {status?.canvas_sso_launch_enabled && (
+            <Button
+              className='w-full'
+              onClick={() => window.open(ssoLaunchUrl, '_blank', 'noopener')}
+              disabled={!ssoLaunchUrl || isLoading}
+            >
+              <ArrowUpRight className='h-4 w-4' aria-hidden='true' />
+              {t('Open Infinite Canvas 2')}
+            </Button>
+          )}
         </CardContent>
       </Card>
     </div>

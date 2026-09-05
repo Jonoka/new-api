@@ -17,11 +17,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
+import { z } from 'zod'
 import { isSidebarModuleEnabled } from '@/lib/nav-modules'
 import { Main } from '@/components/layout'
 import { CanvasLauncher } from '@/features/canvas'
 
 export const Route = createFileRoute('/_authenticated/canvas/')({
+  validateSearch: z.object({
+    canvas_resume: z.literal('1').optional().catch(undefined),
+    canvas_next: z.string().max(1024).optional().catch(undefined),
+    group: z.string().max(64).optional().catch(undefined),
+  }),
   beforeLoad: () => {
     if (!isSidebarModuleEnabled('chat', 'canvas')) {
       throw redirect({ to: '/dashboard' })
