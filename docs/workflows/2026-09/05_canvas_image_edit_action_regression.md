@@ -68,8 +68,27 @@ Prettier, the new developer-document link, and `git diff --check` passed.
 The repaired controller matches the previously verified controller at
 `18ea6828475a1166cfdb08ffb837c8d92557ef96` byte-for-byte in Git.
 
-The first GitHub Actions run, `33942891324`, passed both frontend gates and
-compiled the Go packages. The new action table test failed because its
-platform assertion compared a plain string with the named `TaskPlatform`
-type. The assertion now uses the explicit named type; production code did
-not change. That run published no image. Final CI validation is pending.
+- Validated source: `0c51d93e6f02163835d536de734b647e96808813`.
+- [GitHub Actions run 33943253775](https://github.com/Jonoka/new-api/actions/runs/33943253775)
+  completed successfully: merge-diff check, Default type-check/build, Classic
+  build, `go test ./... -count=1`, and image publication.
+- The Go suite includes seven submit-action cases and the multipart edit
+  submission/replay test in `controller/canvas_image_task_action_test.go`.
+- Candidate tag: `ghcr.io/jonoka/new-api:hermes-canvas-edit-0c51d93e`.
+- Immutable candidate:
+  `ghcr.io/jonoka/new-api@sha256:bba9a4b80fac9d1b542bb62f087fd433b028bd796effedb8205e9d23a58139bd`.
+- Registry inspection confirmed `linux/amd64` and OCI revision
+  `0c51d93e6f02163835d536de734b647e96808813`.
+- The first CI attempt (`33942891324`) published no image because the new
+  platform assertion compared a plain string with the named `TaskPlatform`
+  type. The final test uses the explicit named type and passed the full suite.
+- No production deployment, channel/configuration change, or paid generation
+  request was performed. Provider image generation after deployment remains
+  unverified; the acceptance evidence here covers request routing and payload
+  preservation using the test relay.
+
+For the concurrent upgrade, bring both source commits `aa9b4f03` and
+`0c51d93e` into its isolated branch, or merge this repair branch. The former
+restores routing and adds the regression tests; the latter corrects the test
+assertion type. Re-run the upgrade's checks on the combined source before
+selecting a production image.
