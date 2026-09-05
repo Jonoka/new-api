@@ -82,13 +82,39 @@ The repaired controller matches the previously verified controller at
 - The first CI attempt (`33942891324`) published no image because the new
   platform assertion compared a plain string with the named `TaskPlatform`
   type. The final test uses the explicit named type and passed the full suite.
-- No production deployment, channel/configuration change, or paid generation
-  request was performed. Provider image generation after deployment remains
-  unverified; the acceptance evidence here covers request routing and payload
-  preservation using the test relay.
+- During source validation, no production deployment, channel/configuration
+  change, or paid generation request was performed. The test evidence covers
+  request routing and payload preservation using the test relay.
 
 For the concurrent upgrade, bring both source commits `aa9b4f03` and
 `0c51d93e` into its isolated branch, or merge this repair branch. The former
 restores routing and adds the regression tests; the latter corrects the test
 assertion type. Re-run the upgrade's checks on the combined source before
 selecting a production image.
+
+## Production Deployment
+
+The owner subsequently approved independent deployment. On 2026-09-05,
+production changed from the verified `6507f079` image to the immutable
+`bba9a4b8` image above. Only `services.new-api.image` changed; only `new-api`
+was recreated with `--no-build --no-deps`.
+
+Six observations passed between 04:48:59Z and 04:51:30Z: exact image/revision,
+running/healthy, restart 0, local/public status HTTP 200, and no critical
+runtime log matches. Twenty unrelated containers, including PostgreSQL,
+Redis, and Infinite Canvas, retained their identities and runtime state.
+Final curl probes of the local and public Canvas root returned HTTP 200.
+
+The restricted byte-preserving backup, deployment evidence, and guarded
+rollback helper are under
+`/opt/newapi-cutover/newapi-canvas-edit-regression-20260905T044818Z/`.
+The override hashes are:
+
+- Before: `f8fbdb9343112029d42d11f6a4cdb7365b19dee3b1758afeeb5a0ef1b3574028`.
+- After: `b06200df849383d9b1cf1109cbb58a6cb4887ba7bd23dac337892ada26b1dea8`.
+
+The remote `vps-ops` service page, index, append-only log, and
+`runbooks/new-api-canvas-image-edit-routing.md` were updated under the topic
+lock with verified preimages and post-write validation. No rollback was
+needed. No paid generation probe was sent, so provider image output after
+cutover remains unverified. Historical failed tasks must be submitted again.
