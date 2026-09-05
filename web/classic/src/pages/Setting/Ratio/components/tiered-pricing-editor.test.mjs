@@ -9,6 +9,7 @@ const requireDefault = createRequire(
 const { JSDOM } = requireDefault('jsdom');
 const browser = new JSDOM('<!doctype html><html><body></body></html>', {
   url: 'https://pricing.example.test/',
+  pretendToBeVisual: true,
 });
 // Semi's animation module initializes a 1px canvas even without visible animation.
 browser.window.HTMLCanvasElement.prototype.getContext = function () {
@@ -74,9 +75,12 @@ globalThis.HTMLCanvasElement = browser.window.HTMLCanvasElement;
 globalThis.SVGElement = browser.window.SVGElement;
 globalThis.DOMParser = browser.window.DOMParser;
 globalThis.ResizeObserver = browser.window.ResizeObserver;
-globalThis.requestAnimationFrame = (callback) =>
-  setTimeout(() => callback(Date.now()), 0);
-globalThis.cancelAnimationFrame = clearTimeout;
+globalThis.requestAnimationFrame = browser.window.requestAnimationFrame.bind(
+  browser.window,
+);
+globalThis.cancelAnimationFrame = browser.window.cancelAnimationFrame.bind(
+  browser.window,
+);
 
 // Provider logos are outside pricing behavior and import a React 19 peer entry.
 const logo = () => null;
