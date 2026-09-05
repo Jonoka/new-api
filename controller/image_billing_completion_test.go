@@ -109,6 +109,7 @@ func TestAsyncTaskCanvasCompletionPreservesChargeAndAttribution(t *testing.T) {
 
 func TestAsyncTaskImageWrapperPreservesConfiguredWalletTrust(t *testing.T) {
 	db := setupFinalGroupRelayDB(t)
+	require.NoError(t, db.AutoMigrate(&model.TaskAccountingEvent{}, &model.TaskAccountingLogReceipt{}))
 	initialQuota := common.GetTrustQuota() + 1000
 	require.Positive(t, common.GetTrustQuota())
 	user, token := seedFinalGroupRelayFunding(t, db, 92, initialQuota)

@@ -147,7 +147,14 @@ func TestBillingSessionSettlementFailureRollsBackAndCanRetryOnce(t *testing.T) {
 	info.ForcePreConsume = true
 	info.PriceData.FreeModel = false
 	require.Nil(t, ReconcileBillingReservation(c, 200, info))
-	require.NoError(t, model.DB.Unscoped().Delete(&model.Token{}, token.Id).Error)
+	db := model.DB
+	callback := "test:billing-settlement-token-failure"
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == "tokens" {
+			tx.AddError(errors.New("injected token write failure"))
+		}
+	}))
+	t.Cleanup(func() { _ = db.Callback().Update().Remove(callback) })
 
 	err := SettleBilling(c, info, 400)
 	require.Error(t, err)
@@ -156,8 +163,7 @@ func TestBillingSessionSettlementFailureRollsBackAndCanRetryOnce(t *testing.T) {
 	require.NoError(t, model.DB.First(&gotUser, user.Id).Error)
 	require.Equal(t, 800, gotUser.Quota)
 
-	restored := &model.Token{Id: token.Id, UserId: user.Id, Key: token.Key, Name: token.Name, RemainQuota: 800, UsedQuota: 200}
-	require.NoError(t, model.DB.Create(restored).Error)
+	require.NoError(t, db.Callback().Update().Remove(callback))
 	require.NoError(t, SettleBilling(c, info, 400))
 	require.NoError(t, SettleBilling(c, info, 400))
 	userQuota, tokenRemain, tokenUsed := readGroupBillingWallet(t, user.Id, token.Id)
@@ -356,4 +362,6 @@ func TestFinalGroupTieredSnapshotAndLogFactsAgree(t *testing.T) {
 	var storedOther map[string]interface{}
 	require.NoError(t, common.UnmarshalJsonStr(log.Other, &storedOther))
 	require.Equal(t, float64(2), storedOther["group_ratio"])
+	require.Equal(t, "tiered_expr", storedOther["billing_mode"])
+	require.NotEmpty(t, storedOther["expr_b64"])
 }

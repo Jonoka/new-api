@@ -40,6 +40,8 @@ func buildTaskConsumptionOther(c *gin.Context, info *relaycommon.RelayInfo) map[
 	other["is_task"] = true
 	if c != nil && c.Request != nil && c.Request.URL != nil {
 		other["request_path"] = c.Request.URL.Path
+	} else if info.RequestURLPath != "" {
+		other["request_path"] = info.RequestURLPath
 	}
 	other["model_price"] = info.PriceData.ModelPrice
 	if info.PriceData.UsePrice {
@@ -64,6 +66,10 @@ func buildTaskConsumptionOther(c *gin.Context, info *relaycommon.RelayInfo) map[
 	if info.IsModelMapped {
 		other["is_model_mapped"] = true
 		other["upstream_model_name"] = info.UpstreamModelName
+	}
+	InjectTieredBillingInfo(other, info, nil)
+	if info.TieredBillingSnapshot != nil {
+		other["matched_tier"] = info.TieredBillingSnapshot.EstimatedTier
 	}
 	attachQuotaSaturationToOther(other, info.QuotaClamp)
 	return other

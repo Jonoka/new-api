@@ -91,6 +91,8 @@ func setupFinalGroupRelayDB(t *testing.T) *gorm.DB {
 	}
 
 	oldDB, oldLogDB := model.DB, model.LOG_DB
+	initModelListColumnNames(t)
+	model.DB, model.LOG_DB = oldDB, oldLogDB
 	oldSQLite, oldMySQL, oldPostgres := common.UsingSQLite, common.UsingMySQL, common.UsingPostgreSQL
 	oldMemoryCache, oldBatch, oldRedis := common.MemoryCacheEnabled, common.BatchUpdateEnabled, common.RedisEnabled
 	oldRetryTimes := common.RetryTimes
