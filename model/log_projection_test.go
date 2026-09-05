@@ -190,7 +190,7 @@ func TestProjectUserLogOtherKeepsWriterDefinedBillingFacts(t *testing.T) {
 			},
 		},
 		{
-			name:  "normalized openai input with inferred cache write",
+			name: "normalized openai input with inferred cache write",
 			other: `{
 				"input_tokens_total":20,
 				"cache_write_tokens":4,
@@ -236,7 +236,7 @@ func TestProjectUserLogOtherAcceptsOnlyWriterDefinedEnumValues(t *testing.T) {
 		"inferred_missing_field",
 		"inferred_untrusted_explicit_zero",
 	} {
-		projected := projectUserLogOther(`{"cache_write_tokens_source":"` + source + `"}`, LogTypeConsume)
+		projected := projectUserLogOther(`{"cache_write_tokens_source":"`+source+`"}`, LogTypeConsume)
 		parsed, err := common.StrToMap(projected)
 		require.NoError(t, err)
 		assert.Equal(t, source, parsed["cache_write_tokens_source"])
