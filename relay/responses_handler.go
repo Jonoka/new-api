@@ -109,6 +109,8 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
 		}
 		requestBody = common.ReaderOnly(storage)
+		info.UpstreamRequestBodySize = storage.Size()
+		info.UpstreamRequestBodyFactory = storage.NewReader
 	} else {
 		normalizedItems, err := service.NormalizeOpenAIResponsesInputHistoryForUpstream(request)
 		if err != nil {
@@ -159,12 +161,13 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 			retryJSONData = service.RemoveOpenAIResponsesPreviousResponseIDFromJSON(retryJSONData)
 			attachedPreviousResponseID = false
 
-			body, size, closer, bodyErr := relaycommon.NewOutboundJSONBody(retryJSONData)
+			body, size, factory, closer, bodyErr := relaycommon.NewOutboundJSONBody(retryJSONData)
 			if bodyErr != nil {
 				return nil, types.NewError(bodyErr, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 			}
 			defer closer.Close()
 			info.UpstreamRequestBodySize = size
+			info.UpstreamRequestBodyFactory = factory
 
 			statusCodeMappingStr := c.GetString("status_code_mapping")
 			respRetry, doErr := adaptor.DoRequest(c, info, body)
@@ -191,13 +194,14 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		}
 
 		logger.LogDebug(c, "requestBody: %s", jsonData)
-		body, size, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
+		body, size, factory, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
 		defer closer.Close()
 		jsonData = nil
 		info.UpstreamRequestBodySize = size
+		info.UpstreamRequestBodyFactory = factory
 		requestBody = body
 	}
 

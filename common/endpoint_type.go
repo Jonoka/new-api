@@ -43,7 +43,7 @@ func GetEndpointTypesByChannelType(channelType int, modelName string) []constant
 		if strings.HasSuffix(modelName, openAICompactModelSuffix) {
 			endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAIResponseCompact}
 		} else {
-			endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAIResponse}
+			endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAIResponse, constant.EndpointTypeOpenAIAlphaSearch}
 		}
 	default:
 		if IsOpenAIResponseOnlyModel(modelName) {
@@ -51,6 +51,9 @@ func GetEndpointTypesByChannelType(channelType int, modelName string) []constant
 		} else {
 			endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAI, constant.EndpointTypeOpenAIResponse}
 		}
+	}
+	if channelType == constant.ChannelTypeOpenAI {
+		endpointTypes = append(endpointTypes, constant.EndpointTypeOpenAIAlphaSearch)
 	}
 	if IsImageGenerationModel(modelName) {
 		// add to first

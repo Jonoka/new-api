@@ -116,7 +116,11 @@ func ApplySensitiveFilterToRequestBody(c *gin.Context, relayFormat types.RelayFo
 	}
 
 	var payload any
-	if err := common.Unmarshal(body, &payload); err != nil {
+	decode := common.Unmarshal
+	if relayFormat == types.RelayFormatOpenAIAlphaSearch {
+		decode = common.UnmarshalUseNumber
+	}
+	if err := decode(body, &payload); err != nil {
 		return nil, err
 	}
 

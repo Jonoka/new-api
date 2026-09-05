@@ -45,6 +45,22 @@ func applyUpstreamContentLength(req *http.Request, info *common.RelayInfo) {
 	}
 }
 
+func applyUpstreamBodyFactory(req *http.Request, info *common.RelayInfo) {
+	if info == nil || info.UpstreamRequestBodyFactory == nil {
+		return
+	}
+	if req.GetBody == nil {
+		req.GetBody = info.UpstreamRequestBodyFactory
+	}
+}
+
+// ApplyUpstreamBodyMetadata supplies metadata that net/http cannot infer from
+// a type-erased BodyStorage reader. Existing native metadata is preserved.
+func ApplyUpstreamBodyMetadata(req *http.Request, info *common.RelayInfo) {
+	applyUpstreamContentLength(req, info)
+	applyUpstreamBodyFactory(req, info)
+}
+
 func SetupApiRequestHeader(info *common.RelayInfo, c *gin.Context, req *http.Header) {
 	if info.RelayMode == constant.RelayModeAudioTranscription || info.RelayMode == constant.RelayModeAudioTranslation {
 		// multipart/form-data
@@ -430,7 +446,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
-	applyUpstreamContentLength(req, info)
+	ApplyUpstreamBodyMetadata(req, info)
 	headers := req.Header
 	err = a.SetupRequestHeader(c, &headers, info)
 	if err != nil {
@@ -462,7 +478,7 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
-	applyUpstreamContentLength(req, info)
+	ApplyUpstreamBodyMetadata(req, info)
 	// set form data
 	req.Header.Set("Content-Type", c.Request.Header.Get("Content-Type"))
 	headers := req.Header
@@ -648,6 +664,17 @@ func selectRelayHTTPClient(c *gin.Context, info *common.RelayInfo) (*http.Client
 	return service.GetHttpClient(), nil
 }
 
+func applyRelayRedirectPolicy(client *http.Client, info *common.RelayInfo) *http.Client {
+	if client == nil || info == nil || info.RelayMode != constant.RelayModeAlphaSearch {
+		return client
+	}
+	alphaClient := *client
+	alphaClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return &alphaClient
+}
+
 // newRelayHTTPRequest 继承入口请求上下文，使客户端断开或后台任务超时能够
 // 及时取消正在等待的上游请求，避免无界占用连接和 goroutine。
 func newRelayHTTPRequest(c *gin.Context, method string, target string, body io.Reader) (*http.Request, error) {
@@ -663,6 +690,7 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	if err != nil {
 		return nil, err
 	}
+	client = applyRelayRedirectPolicy(client, info)
 
 	var stopPinger context.CancelFunc
 	var pingerDone <-chan struct{}
@@ -757,10 +785,7 @@ func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, req
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
-	applyUpstreamContentLength(req, info)
-	req.GetBody = func() (io.ReadCloser, error) {
-		return io.NopCloser(requestBody), nil
-	}
+	ApplyUpstreamBodyMetadata(req, info)
 
 	err = a.BuildRequestHeader(c, req, info)
 	if err != nil {

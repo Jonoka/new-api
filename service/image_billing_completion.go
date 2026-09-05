@@ -46,13 +46,25 @@ func prepareDeferredImageSettlement(c *gin.Context, info *relaycommon.RelayInfo,
 }
 
 func settleDeferredImageSubmission(c *gin.Context, info *relaycommon.RelayInfo, facts model.TaskAccountingLogFacts, countRequest bool, metricUsage *ChannelMetricUsage, operationID string) error {
+	return settleSynchronousSubmission(c, info, facts, metricUsage, operationID, "image", func(tx *gorm.DB, submissionID string, facts model.TaskAccountingLogFacts) error {
+		return model.CompleteImageSubmissionTx(tx, submissionID, facts, countRequest)
+	}, model.ResolveImageSubmissionSettlement)
+}
+
+type synchronousSubmissionCompleter func(*gorm.DB, string, model.TaskAccountingLogFacts) error
+type synchronousSubmissionResolver func(context.Context, model.GroupReservationRequest) (*model.GroupReservationResult, error)
+
+func settleSynchronousSubmission(c *gin.Context, info *relaycommon.RelayInfo, facts model.TaskAccountingLogFacts, metricUsage *ChannelMetricUsage, operationID, billingKind string, complete synchronousSubmissionCompleter, resolve synchronousSubmissionResolver) error {
+	if complete == nil || resolve == nil {
+		return errors.New("synchronous submission accounting callbacks are required")
+	}
 	info.EnsureTaskSubmissionIdentity()
 	var session *BillingSession
 	if info.Billing != nil {
 		var ok bool
 		session, ok = info.Billing.(*BillingSession)
 		if !ok {
-			return errors.New("unsupported image billing session")
+			return errors.New("unsupported " + billingKind + " billing session")
 		}
 		session.mu.Lock()
 		defer session.mu.Unlock()
@@ -60,10 +72,10 @@ func settleDeferredImageSubmission(c *gin.Context, info *relaycommon.RelayInfo, 
 			return nil
 		}
 		if session.refunded {
-			return errors.New("image reservation was released")
+			return errors.New(billingKind + " reservation was released")
 		}
 	} else if facts.Quota != 0 {
-		return errors.New("paid image has no reservation")
+		return errors.New("paid " + billingKind + " has no reservation")
 	}
 	source, reserved := BillingSourceWallet, 0
 	if session != nil {
@@ -81,11 +93,11 @@ func settleDeferredImageSubmission(c *gin.Context, info *relaycommon.RelayInfo, 
 		facts.Other["subscription_post_delta"] = info.SubscriptionPostDelta + int64(facts.Quota-reserved)
 	}
 	result, err := model.WithReconciledGroupReservation(req, func(tx *gorm.DB, _ *model.GroupReservationResult) error {
-		return model.CompleteImageSubmissionTx(tx, req.SubmissionID, facts, countRequest)
+		return complete(tx, req.SubmissionID, facts)
 	})
 	if err != nil {
 		resolveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		resolved, resolveErr := model.ResolveImageSubmissionSettlement(resolveCtx, req)
+		resolved, resolveErr := resolve(resolveCtx, req)
 		cancel()
 		if resolveErr == nil {
 			result, err = resolved, nil
@@ -109,10 +121,10 @@ func settleDeferredImageSubmission(c *gin.Context, info *relaycommon.RelayInfo, 
 	projectionCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := model.ReconcileTaskSubmissionCache(projectionCtx, req.SubmissionID); err != nil {
-		common.SysLog("image submission cache reconciliation pending: " + err.Error())
+		common.SysLog(billingKind + " submission cache reconciliation pending: " + err.Error())
 	}
 	if err := model.DeliverPendingTaskAccountingLogs(projectionCtx, 100); err != nil {
-		common.SysLog("image submission log delivery pending: " + err.Error())
+		common.SysLog(billingKind + " submission log delivery pending: " + err.Error())
 	}
 	if session != nil && facts.Quota != 0 {
 		if source == BillingSourceSubscription {

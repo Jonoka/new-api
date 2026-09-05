@@ -60,18 +60,32 @@ func Sign(c *gin.Context, req *http.Request, apiKey string) error {
 
 	var bodyBytes []byte
 	var err error
+	var hexPayloadHash string
 
-	if req.Body != nil {
+	if req.Body != nil && req.GetBody != nil {
+		hash := sha256.New()
+		if _, err = io.Copy(hash, req.Body); err != nil {
+			return err
+		}
+		_ = req.Body.Close()
+		req.Body, err = req.GetBody()
+		if err != nil {
+			return err
+		}
+		hexPayloadHash = hex.EncodeToString(hash.Sum(nil))
+	} else if req.Body != nil {
 		bodyBytes, err = io.ReadAll(req.Body)
 		if err != nil {
 			return err
 		}
 		_ = req.Body.Close()
 		req.Body = io.NopCloser(bytes.NewBuffer(bodyBytes)) // Rewind
+		payloadHash := sha256.Sum256(bodyBytes)
+		hexPayloadHash = hex.EncodeToString(payloadHash[:])
+	} else {
+		payloadHash := sha256.Sum256(nil)
+		hexPayloadHash = hex.EncodeToString(payloadHash[:])
 	}
-
-	payloadHash := sha256.Sum256(bodyBytes)
-	hexPayloadHash := hex.EncodeToString(payloadHash[:])
 
 	method := c.Request.Method
 	u := req.URL

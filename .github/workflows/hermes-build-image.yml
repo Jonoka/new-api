@@ -104,6 +104,15 @@ jobs:
           NEW_API_TEST_MYSQL_DSN: root:mysql_ci_only@tcp(127.0.0.1:3306)/newapi_test_ci?charset=utf8mb4&parseTime=True&loc=Local
         run: go test ./model ./service ./controller ./relay ./relay/helper -run 'Test(ReconcileGroupReservation|BillingSession|FinalGroup|TaskAccounting|TaskSubmission|AsyncTask|TaskBilling|UserCacheGeneration)' -count=1
 
+      - name: Check C Alpha and replay before frontend builds
+        env:
+          NEW_API_TEST_REDIS_ADDR: 127.0.0.1:6379
+          NEW_API_TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/newapi_test_ci?sslmode=disable
+          NEW_API_TEST_MYSQL_DSN: root:mysql_ci_only@tcp(127.0.0.1:3306)/newapi_test_ci?charset=utf8mb4&parseTime=True&loc=Local
+        run: >-
+          go test ./common ./relay/common ./relay/channel/... ./relay ./service ./controller ./router
+          -run 'Test(AlphaSearch|BodyStorage|NewOutbound|ApplyUpstream|.*Replay|.*IndependentReader)' -count=1
+
       - name: Check and build default frontend
         working-directory: web/default
         run: |
@@ -133,8 +142,8 @@ jobs:
           NEW_API_TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/newapi_test_ci?sslmode=disable
           NEW_API_TEST_MYSQL_DSN: root:mysql_ci_only@tcp(127.0.0.1:3306)/newapi_test_ci?charset=utf8mb4&parseTime=True&loc=Local
         run: >-
-          go test -race ./model ./service ./controller ./middleware ./relay ./relay/helper
-          -run 'Test(RelayResponseHeaderTimeout|RelayTransportsApplyResponseHeaderTimeout|ResponseHeaderTimeout|RelayRequestParseError|RelayRejectsMalformedRequest|RelayRejectsNonObjectRequest|RelayPreservesRequestBodyTooLarge|UserCriticalRateLimit|FormatUserLogsUsesStrictProjection|ProjectUserLogOther|UserAndTokenReadsProject|SumUsedQuotaKeepsHistorical|SanitizeDBError|SanitizedGormWriter|GormLoggerRedacts|ReconcileGroupReservation|BillingSession|ModelPriceHelper|RelayTaskSubmit|FinalGroup|TaskAccounting|TaskSubmission|AsyncTask|TaskBilling|CanvasImageTask|ImageTask|UserCacheGeneration)'
+          go test -race ./common ./relay/common ./relay/channel ./model ./service ./controller ./middleware ./relay ./relay/helper
+          -run 'Test(AlphaSearch|BodyStorage|NewOutbound|ApplyUpstream|.*Replay|.*IndependentReader|RelayResponseHeaderTimeout|RelayTransportsApplyResponseHeaderTimeout|ResponseHeaderTimeout|RelayRequestParseError|RelayRejectsMalformedRequest|RelayRejectsNonObjectRequest|RelayPreservesRequestBodyTooLarge|UserCriticalRateLimit|FormatUserLogsUsesStrictProjection|ProjectUserLogOther|UserAndTokenReadsProject|SumUsedQuotaKeepsHistorical|SanitizeDBError|SanitizedGormWriter|GormLoggerRedacts|ReconcileGroupReservation|BillingSession|ModelPriceHelper|RelayTaskSubmit|FinalGroup|TaskAccounting|TaskSubmission|AsyncTask|TaskBilling|CanvasImageTask|ImageTask|UserCacheGeneration)'
           -count=1
 
       - name: Require committed Go formatting before publishing
@@ -211,6 +220,18 @@ jobs:
           PREVIOUS_IMAGE: ghcr.io/jonoka/new-api@sha256:d666f0ea0b945f01ffa559a6a594545f3067b5b5d32f0fe00da5ab8cfe07eec6
           TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
         run: bash scripts/ci/batch-b-smoke.sh
+
+      - name: Seed candidate Alpha fixture
+        env:
+          NEW_API_TEST_COMPATIBILITY_DSN: postgres://postgres:postgres@localhost:5432/newapi_candidate_smoke?sslmode=disable
+        run: go test ./model -run '^TestAlphaSearchCompatibilitySeed$' -count=1
+
+      - name: Rehearse candidate Alpha through a mock gateway
+        env:
+          CANDIDATE_IMAGE: ghcr.io/${{ github.repository }}@${{ steps.image.outputs.digest }}
+          PREVIOUS_IMAGE: ghcr.io/jonoka/new-api@sha256:e3964616b77d4dfdd2d5daa2356be45d33d1a83ddbc25a87a0e87677fd6d35e9
+          TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: bash scripts/ci/batch-c-smoke.sh
 
       - name: Summary
         run: |

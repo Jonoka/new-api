@@ -50,6 +50,8 @@ func relayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIErro
 		err = relay.EmbeddingHelper(c, info)
 	case relayconstant.RelayModeResponses, relayconstant.RelayModeResponsesCompact:
 		err = relay.ResponsesHelper(c, info)
+	case relayconstant.RelayModeAlphaSearch:
+		err = relay.AlphaSearchHelper(c, info)
 	default:
 		err = relay.TextHelper(c, info)
 	}
@@ -133,18 +135,21 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	common.SetContextKey(c, constant.ContextKeyRelayInfo, relayInfo)
 	service.BindChannelMetricRelayInfo(c, relayInfo)
 
-	needCountToken := constant.CountToken
+	needCountToken := constant.CountToken && relayFormat != types.RelayFormatOpenAIAlphaSearch
 	var meta *types.TokenCountMeta
-	if needCountToken {
+	if needCountToken || relayFormat == types.RelayFormatOpenAIAlphaSearch {
 		meta = request.GetTokenCountMeta()
 	} else {
 		meta = fastTokenCountMetaForPricing(request)
 	}
 
-	tokens, err := service.EstimateRequestToken(c, meta, relayInfo)
-	if err != nil {
-		newAPIError = types.NewError(err, types.ErrorCodeCountTokenFailed)
-		return
+	tokens := 0
+	if relayFormat != types.RelayFormatOpenAIAlphaSearch {
+		tokens, err = service.EstimateRequestToken(c, meta, relayInfo)
+		if err != nil {
+			newAPIError = types.NewError(err, types.ErrorCodeCountTokenFailed)
+			return
+		}
 	}
 
 	relayInfo.SetEstimatePromptTokens(tokens)
@@ -196,19 +201,27 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			}
 		}
 
-		priceData, priceErr := helper.ModelPriceHelper(c, relayInfo, tokens, meta)
-		if priceErr != nil {
-			newAPIError = types.NewError(priceErr, types.ErrorCodeModelPriceError, types.ErrOptionWithStatusCode(http.StatusBadRequest), types.ErrOptionWithSkipRetry())
-			break
-		}
-		reservationTarget := priceData.QuotaToPreConsume
-		if priceData.FreeModel {
-			reservationTarget = 0
-			logger.LogInfo(c, fmt.Sprintf("模型 %s 在分组 %s 免费", relayInfo.OriginModelName, relayInfo.UsingGroup))
-		}
-		if admissionErr := service.ReconcileBillingReservation(c, reservationTarget, relayInfo); admissionErr != nil {
-			newAPIError = admissionErr
-			break
+		if relayFormat == types.RelayFormatOpenAIAlphaSearch {
+			groupRatio := helper.HandleGroupRatio(c, relayInfo)
+			if admissionErr := service.AdmitAlphaSearchBilling(c, relayInfo, groupRatio, meta.BillingRatios); admissionErr != nil {
+				newAPIError = admissionErr
+				break
+			}
+		} else {
+			priceData, priceErr := helper.ModelPriceHelper(c, relayInfo, tokens, meta)
+			if priceErr != nil {
+				newAPIError = types.NewError(priceErr, types.ErrorCodeModelPriceError, types.ErrOptionWithStatusCode(http.StatusBadRequest), types.ErrOptionWithSkipRetry())
+				break
+			}
+			reservationTarget := priceData.QuotaToPreConsume
+			if priceData.FreeModel {
+				reservationTarget = 0
+				logger.LogInfo(c, fmt.Sprintf("模型 %s 在分组 %s 免费", relayInfo.OriginModelName, relayInfo.UsingGroup))
+			}
+			if admissionErr := service.ReconcileBillingReservation(c, reservationTarget, relayInfo); admissionErr != nil {
+				newAPIError = admissionErr
+				break
+			}
 		}
 
 		addUsedChannel(c, channel.Id)

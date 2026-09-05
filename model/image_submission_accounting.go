@@ -10,13 +10,17 @@ import (
 // CompleteImageSubmissionTx runs inside the reservation's final transaction.
 // A synchronous image has no public task row, so its event uses SubmissionID.
 func CompleteImageSubmissionTx(tx *gorm.DB, submissionID string, facts TaskAccountingLogFacts, countRequest bool) error {
-	if submissionID == "" || facts.UserID <= 0 || facts.Quota < 0 {
-		return errors.New("invalid image submission accounting")
+	return completeSynchronousSubmissionTx(tx, submissionID, "synchronous_image", facts, countRequest)
+}
+
+func completeSynchronousSubmissionTx(tx *gorm.DB, submissionID, eventKind string, facts TaskAccountingLogFacts, countRequest bool) error {
+	if submissionID == "" || eventKind == "" || facts.UserID <= 0 || facts.Quota < 0 {
+		return errors.New("invalid synchronous submission accounting")
 	}
 	if err := incrementTaskUsageTx(tx, facts.UserID, facts.ChannelID, facts.Quota, countRequest); err != nil {
 		return err
 	}
-	event, err := createTaskAccountingEventTx(tx, 0, "synchronous_image", facts, true)
+	event, err := createTaskAccountingEventTx(tx, 0, eventKind, facts, true)
 	if err != nil {
 		return err
 	}
@@ -24,6 +28,10 @@ func CompleteImageSubmissionTx(tx *gorm.DB, submissionID string, facts TaskAccou
 }
 
 func ResolveImageSubmissionSettlement(ctx context.Context, req GroupReservationRequest) (*GroupReservationResult, error) {
+	return resolveSynchronousSubmissionSettlement(ctx, req)
+}
+
+func resolveSynchronousSubmissionSettlement(ctx context.Context, req GroupReservationRequest) (*GroupReservationResult, error) {
 	if req.SubmissionFinalState != TaskSubmissionStateSettled {
 		return nil, ErrTaskSubmissionConflict
 	}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"sync"
@@ -189,6 +190,10 @@ type RelayInfo struct {
 	// http.Request.ContentLength manually (net/http only auto-detects it for
 	// *bytes.Reader/Buffer/strings.Reader). 0 means "let net/http decide".
 	UpstreamRequestBodySize int64
+	// UpstreamRequestBodyFactory returns a fresh reader over the final outbound
+	// request bytes. It is paired with UpstreamRequestBodySize for net/http
+	// transport retries when the initial reader is type-erased.
+	UpstreamRequestBodyFactory func() (io.ReadCloser, error)
 
 	PriceData types.PriceData
 
@@ -228,6 +233,8 @@ type RelayInfo struct {
 }
 
 func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
+	info.ResetUpstreamRequestBody()
+
 	channelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)
 	paramOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelParamOverride)
 	headerOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelHeaderOverride)
@@ -278,6 +285,16 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	if info.Request != nil {
 		info.Request.SetModelName(info.OriginModelName)
 	}
+}
+
+// ResetUpstreamRequestBody drops metadata owned by the previous channel
+// attempt. The previous handler may already have closed its storage owner.
+func (info *RelayInfo) ResetUpstreamRequestBody() {
+	if info == nil {
+		return
+	}
+	info.UpstreamRequestBodySize = 0
+	info.UpstreamRequestBodyFactory = nil
 }
 
 func (info *RelayInfo) ToString() string {
@@ -629,6 +646,12 @@ func GenRelayInfo(c *gin.Context, relayFormat types.RelayFormat, request dto.Req
 			return GenRelayInfoResponsesCompaction(c, request), nil
 		}
 		return nil, errors.New("request is not a OpenAIResponsesCompactionRequest")
+	case types.RelayFormatOpenAIAlphaSearch:
+		if request, ok := request.(*dto.AlphaSearchRequest); ok {
+			info = GenRelayInfoAlphaSearch(c, request)
+			break
+		}
+		err = errors.New("request is not an AlphaSearchRequest")
 	case types.RelayFormatTask:
 		info = genBaseRelayInfo(c, nil)
 		info.TaskRelayInfo = &TaskRelayInfo{}
@@ -700,6 +723,15 @@ func GenRelayInfoResponsesCompaction(c *gin.Context, request *dto.OpenAIResponse
 		info.RelayMode = relayconstant.RelayModeResponsesCompact
 	}
 	info.RelayFormat = types.RelayFormatOpenAIResponsesCompaction
+	return info
+}
+
+func GenRelayInfoAlphaSearch(c *gin.Context, request *dto.AlphaSearchRequest) *RelayInfo {
+	info := genBaseRelayInfo(c, request)
+	if info.RelayMode == relayconstant.RelayModeUnknown {
+		info.RelayMode = relayconstant.RelayModeAlphaSearch
+	}
+	info.RelayFormat = types.RelayFormatOpenAIAlphaSearch
 	return info
 }
 

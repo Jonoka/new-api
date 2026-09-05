@@ -143,12 +143,13 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 		service.DropOpenAIResponsesPreviousResponseID(responsesReq)
 		jsonData = service.RemoveOpenAIResponsesPreviousResponseIDFromJSON(jsonData)
 		attachedPreviousResponseID = false
-		body, size, closer, bodyErr := relaycommon.NewOutboundJSONBody(jsonData)
+		body, size, factory, closer, bodyErr := relaycommon.NewOutboundJSONBody(jsonData)
 		if bodyErr != nil {
 			return nil, types.NewError(bodyErr, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
 		defer closer.Close()
 		info.UpstreamRequestBodySize = size
+		info.UpstreamRequestBodyFactory = factory
 		respRetry, doErr := adaptor.DoRequest(c, info, body)
 		if doErr != nil {
 			return nil, types.NewOpenAIError(doErr, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
@@ -190,13 +191,14 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 	}
 	relaycommon.MergeOpenAISessionBridgeOverride(info, jsonData)
 
-	body, size, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
+	body, size, factory, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 	}
 	defer closer.Close()
 	jsonData = nil
 	info.UpstreamRequestBodySize = size
+	info.UpstreamRequestBodyFactory = factory
 	var requestBody io.Reader = body
 
 	var httpResp *http.Response

@@ -368,6 +368,13 @@ func (s *BillingSession) syncRelayInfo() {
 
 // NewBillingSession 根据用户计费偏好创建 BillingSession，处理 subscription_first / wallet_first 的回退。
 func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preConsumedQuota int) (*BillingSession, *types.NewAPIError) {
+	return newBillingSession(c, relayInfo, preConsumedQuota, false)
+}
+
+// newBillingSession can preserve a zero-value durable reservation for flows
+// that require atomic counters and a log outbox even when the configured price
+// is free. Ordinary request billing retains its one-unit subscription marker.
+func newBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preConsumedQuota int, allowZeroSubscription bool) (*BillingSession, *types.NewAPIError) {
 	if relayInfo == nil {
 		return nil, types.NewError(fmt.Errorf("relayInfo is nil"), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
@@ -394,7 +401,7 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 
 	trySubscription := func() (*BillingSession, *types.NewAPIError) {
 		subConsume := int64(preConsumedQuota)
-		if subConsume <= 0 {
+		if subConsume <= 0 && !allowZeroSubscription {
 			subConsume = 1
 		}
 		session := &BillingSession{

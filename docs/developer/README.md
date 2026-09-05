@@ -39,3 +39,6 @@
 - [Final-group pricing and reservation](../workflows/2026-09/05_final_group_billing.md)
 - [Durable async task accounting](../workflows/2026-09/05_async_task_accounting.md)
 - [Task submission reservation recovery](../workflows/2026-09/05_task_submission_durability.md)
+- [Alpha Search and independent request replay](alpha-search.md)
+- [Request-body transport replay workflow](../workflows/2026-09/06_request_body_transport_replay.md)
+- [Alpha Search billing workflow](../workflows/2026-09/06_alpha_search_billing.md)

@@ -20,6 +20,9 @@ type BodyStorage interface {
 	Size() int64
 	// IsDisk 是否是磁盘存储
 	IsDisk() bool
+	// NewReader returns an independent reader positioned at the start of the
+	// stored payload. Closing it never closes the owning storage.
+	NewReader() (io.ReadCloser, error)
 }
 
 // ErrStorageClosed 存储已关闭错误
@@ -35,11 +38,12 @@ type memoryStorage struct {
 }
 
 func newMemoryStorage(data []byte) *memoryStorage {
-	size := int64(len(data))
+	ownedData := bytes.Clone(data)
+	size := int64(len(ownedData))
 	IncrementMemoryBuffers(size)
 	return &memoryStorage{
-		data:   data,
-		reader: bytes.NewReader(data),
+		data:   ownedData,
+		reader: bytes.NewReader(ownedData),
 		size:   size,
 	}
 }
@@ -77,7 +81,16 @@ func (m *memoryStorage) Bytes() ([]byte, error) {
 	if atomic.LoadInt32(&m.closed) == 1 {
 		return nil, ErrStorageClosed
 	}
-	return m.data, nil
+	return bytes.Clone(m.data), nil
+}
+
+func (m *memoryStorage) NewReader() (io.ReadCloser, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if atomic.LoadInt32(&m.closed) == 1 {
+		return nil, ErrStorageClosed
+	}
+	return io.NopCloser(bytes.NewReader(m.data)), nil
 }
 
 func (m *memoryStorage) Size() int64 {
@@ -90,11 +103,36 @@ func (m *memoryStorage) IsDisk() bool {
 
 // diskStorage 磁盘存储实现
 type diskStorage struct {
-	file     *os.File
-	filePath string
-	size     int64
-	closed   int32
-	mu       sync.Mutex
+	file          *os.File
+	filePath      string
+	size          int64
+	closed        int32
+	activeReaders int
+	cleaned       bool
+	mu            sync.Mutex
+}
+
+type diskStorageReader struct {
+	file    *os.File
+	release func() error
+	once    sync.Once
+	err     error
+}
+
+func (r *diskStorageReader) Read(p []byte) (int, error) {
+	return r.file.Read(p)
+}
+
+func (r *diskStorageReader) Close() error {
+	r.once.Do(func() {
+		if err := r.file.Close(); err != nil {
+			r.err = err
+		}
+		if err := r.release(); r.err == nil {
+			r.err = err
+		}
+	})
+	return r.err
 }
 
 func newDiskStorage(data []byte, cachePath string) (*diskStorage, error) {
@@ -187,11 +225,27 @@ func (d *diskStorage) Seek(offset int64, whence int) (int64, error) {
 func (d *diskStorage) Close() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	var closeErr error
 	if atomic.CompareAndSwapInt32(&d.closed, 0, 1) {
-		d.file.Close()
-		os.Remove(d.filePath)
-		DecrementDiskFiles(d.size)
+		closeErr = d.file.Close()
 	}
+	if d.activeReaders == 0 {
+		if cleanupErr := d.cleanupLocked(); closeErr == nil {
+			closeErr = cleanupErr
+		}
+	}
+	return closeErr
+}
+
+func (d *diskStorage) cleanupLocked() error {
+	if d.cleaned {
+		return nil
+	}
+	if err := os.Remove(d.filePath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	d.cleaned = true
+	DecrementDiskFiles(d.size)
 	return nil
 }
 
@@ -227,6 +281,31 @@ func (d *diskStorage) Bytes() ([]byte, error) {
 	}
 
 	return data, nil
+}
+
+func (d *diskStorage) NewReader() (io.ReadCloser, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if atomic.LoadInt32(&d.closed) == 1 {
+		return nil, ErrStorageClosed
+	}
+	file, err := os.Open(d.filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open body cache file for replay: %w", err)
+	}
+	d.activeReaders++
+	return &diskStorageReader{
+		file: file,
+		release: func() error {
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			d.activeReaders--
+			if atomic.LoadInt32(&d.closed) == 1 && d.activeReaders == 0 {
+				return d.cleanupLocked()
+			}
+			return nil
+		},
+	}, nil
 }
 
 func (d *diskStorage) Size() int64 {

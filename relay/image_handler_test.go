@@ -37,6 +37,13 @@ func TestPrepareImagePassthroughBodyPreservesPayloadSize(t *testing.T) {
 
 	require.Equal(t, payload, forwarded)
 	require.Equal(t, int64(len(payload)), info.UpstreamRequestBodySize)
+	require.NotNil(t, info.UpstreamRequestBodyFactory)
+	replay, err := info.UpstreamRequestBodyFactory()
+	require.NoError(t, err)
+	replayed, err := io.ReadAll(replay)
+	require.NoError(t, err)
+	require.NoError(t, replay.Close())
+	require.Equal(t, payload, replayed)
 }
 
 func TestResolveImageSettlementCount(t *testing.T) {

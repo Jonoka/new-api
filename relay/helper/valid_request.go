@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -37,6 +38,8 @@ func GetAndValidateRequest(c *gin.Context, format types.RelayFormat) (request dt
 		request, err = GetAndValidateResponsesRequest(c)
 	case types.RelayFormatOpenAIResponsesCompaction:
 		request, err = GetAndValidateResponsesCompactionRequest(c)
+	case types.RelayFormatOpenAIAlphaSearch:
+		request, err = GetAndValidateAlphaSearchRequest(c)
 
 	case types.RelayFormatOpenAIImage:
 		request, err = GetAndValidOpenAIImageRequest(c, relayMode)
@@ -155,6 +158,53 @@ func GetAndValidateResponsesCompactionRequest(c *gin.Context) (*dto.OpenAIRespon
 	}
 	if request.Model == "" {
 		return nil, errors.New("model is required")
+	}
+	return request, nil
+}
+
+func GetAndValidateAlphaSearchRequest(c *gin.Context) (*dto.AlphaSearchRequest, error) {
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return nil, err
+	}
+	rawBody, err := storage.Bytes()
+	if err != nil {
+		return nil, err
+	}
+	if common.GetJsonType(rawBody) != "object" {
+		return nil, errors.New("request body must be a JSON object")
+	}
+
+	var fields map[string]json.RawMessage
+	if err := common.Unmarshal(rawBody, &fields); err != nil {
+		return nil, err
+	}
+	modelJSON, ok := fields["model"]
+	if !ok || common.GetJsonType(modelJSON) != "string" {
+		return nil, errors.New("model must be a nonempty string")
+	}
+	var model string
+	if err := common.Unmarshal(modelJSON, &model); err != nil || strings.TrimSpace(model) == "" {
+		return nil, errors.New("model must be a nonempty string")
+	}
+	var stream *bool
+	if streamJSON, exists := fields["stream"]; exists {
+		if common.GetJsonType(streamJSON) != "boolean" {
+			return nil, errors.New("stream must be a boolean")
+		}
+		var streamValue bool
+		if err := common.Unmarshal(streamJSON, &streamValue); err != nil {
+			return nil, errors.New("stream must be a boolean")
+		}
+		if streamValue {
+			return nil, errors.New("streaming is not supported for alpha search")
+		}
+		stream = &streamValue
+	}
+	request := &dto.AlphaSearchRequest{
+		Model:   model,
+		Stream:  stream,
+		RawBody: append(json.RawMessage(nil), rawBody...),
 	}
 	return request, nil
 }

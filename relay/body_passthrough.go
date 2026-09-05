@@ -89,27 +89,27 @@ func isRequestBodyPassThroughSettingEnabled(info *relaycommon.RelayInfo) bool {
 		info.ChannelSetting.PassThroughBodyEnabled
 }
 
-func buildClaudeCodeAwarePassthroughBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, int64, io.Closer, error) {
+func buildClaudeCodeAwarePassthroughBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, int64, func() (io.ReadCloser, error), io.Closer, error) {
 	storage, err := common.GetBodyStorage(c)
 	if err != nil {
-		return nil, 0, nil, err
+		return nil, 0, nil, nil, err
 	}
 	if shouldPassThroughRealClaudeCodeRequest(c, info) {
-		return common.ReaderOnly(storage), storage.Size(), nil, nil
+		return common.ReaderOnly(storage), storage.Size(), storage.NewReader, nil, nil
 	}
 	if !shouldApplyClaudeCodePassthroughBodyFingerprint(info) {
-		return common.ReaderOnly(storage), storage.Size(), nil, nil
+		return common.ReaderOnly(storage), storage.Size(), storage.NewReader, nil, nil
 	}
 	bodyBytes, err := storage.Bytes()
 	if err != nil {
-		return nil, 0, nil, err
+		return nil, 0, nil, nil, err
 	}
 	jsonData, err := claude.ApplyClaudeCodePassthroughBodyFingerprint(info, bodyBytes)
 	if err != nil {
-		return nil, 0, nil, err
+		return nil, 0, nil, nil, err
 	}
 	if len(jsonData) == len(bodyBytes) && string(jsonData) == string(bodyBytes) {
-		return common.ReaderOnly(storage), storage.Size(), nil, nil
+		return common.ReaderOnly(storage), storage.Size(), storage.NewReader, nil, nil
 	}
 	return relaycommon.NewOutboundJSONBody(jsonData)
 }

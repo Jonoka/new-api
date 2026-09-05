@@ -310,7 +310,16 @@ func reconcileSubscriptionReservationTx(tx *gorm.DB, req GroupReservationRequest
 		return nil, query.Error
 	}
 	if query.RowsAffected == 0 {
-		if req.ExpectedReserved != 0 || req.TargetReserved <= 0 {
+		if req.ExpectedReserved != 0 {
+			return nil, errors.New("subscription reservation record is missing")
+		}
+		// A durable synchronous request may need an idempotency journal even
+		// when its configured final price is zero. No subscription row is
+		// selected or charged until a later paid attempt resizes the journal.
+		if req.TargetReserved == 0 && req.SubmissionID != "" {
+			return &GroupReservationResult{}, nil
+		}
+		if req.TargetReserved <= 0 {
 			return nil, errors.New("subscription reservation record is missing")
 		}
 		return createSubscriptionReservationTx(tx, req)

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -12,6 +13,36 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCodexAlphaSearchRequestURL(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeAlphaSearch,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:    constant.ChannelTypeCodex,
+			ChannelBaseUrl: "https://chatgpt.com",
+		},
+	}
+	got, err := (&Adaptor{}).GetRequestURL(info)
+	require.NoError(t, err)
+	require.Equal(t, "https://chatgpt.com/backend-api/codex/alpha/search", got)
+}
+
+func TestCodexAlphaSearchUsesOAuthHeadersAndJSON(t *testing.T) {
+	c := newCodexHeaderTestContext()
+	c.Request.URL.Path = "/v1/alpha/search"
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeAlphaSearch,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiKey: `{"access_token":"access-token","account_id":"account-id"}`,
+		},
+	}
+	headers := http.Header{}
+	require.NoError(t, (&Adaptor{}).SetupRequestHeader(c, &headers, info))
+	require.Equal(t, "Bearer access-token", headers.Get("Authorization"))
+	require.Equal(t, "account-id", headers.Get("chatgpt-account-id"))
+	require.Equal(t, "application/json", headers.Get("Content-Type"))
+	require.Equal(t, "application/json", headers.Get("Accept"))
+}
 
 func newCodexHeaderTestContext() *gin.Context {
 	gin.SetMode(gin.TestMode)

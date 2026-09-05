@@ -41,18 +41,18 @@ type ImageURL struct {
 }
 
 type responseTask struct {
-	ID                 string `json:"id"`
-	TaskID             string `json:"task_id,omitempty"` //兼容旧接口
-	Object             string `json:"object"`
-	Model              string `json:"model"`
+	ID                 string           `json:"id"`
+	TaskID             string           `json:"task_id,omitempty"` //兼容旧接口
+	Object             string           `json:"object"`
+	Model              string           `json:"model"`
 	Status             string           `json:"status"`
 	Progress           flexibleProgress `json:"progress"`
 	CreatedAt          int64            `json:"created_at"`
-	CompletedAt        int64  `json:"completed_at,omitempty"`
-	ExpiresAt          int64  `json:"expires_at,omitempty"`
-	Seconds            string `json:"seconds,omitempty"`
-	Size               string `json:"size,omitempty"`
-	RemixedFromVideoID string `json:"remixed_from_video_id,omitempty"`
+	CompletedAt        int64            `json:"completed_at,omitempty"`
+	ExpiresAt          int64            `json:"expires_at,omitempty"`
+	Seconds            string           `json:"seconds,omitempty"`
+	Size               string           `json:"size,omitempty"`
+	RemixedFromVideoID string           `json:"remixed_from_video_id,omitempty"`
 	Error              *struct {
 		Message string `json:"message"`
 		Code    string `json:"code"`
@@ -209,11 +209,17 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	if err != nil {
 		return nil, errors.Wrap(err, "get_request_body_failed")
 	}
+	contentType := c.GetHeader("Content-Type")
+	if !strings.HasPrefix(contentType, "application/json") && !strings.Contains(contentType, "multipart/form-data") {
+		info.UpstreamRequestBodySize = storage.Size()
+		info.UpstreamRequestBodyFactory = storage.NewReader
+		return common.ReaderOnly(storage), nil
+	}
+
 	cachedBody, err := storage.Bytes()
 	if err != nil {
 		return nil, errors.Wrap(err, "read_body_bytes_failed")
 	}
-	contentType := c.GetHeader("Content-Type")
 
 	if strings.HasPrefix(contentType, "application/json") {
 		var bodyMap map[string]interface{}
@@ -277,7 +283,7 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 		return &buf, nil
 	}
 
-	return common.ReaderOnly(storage), nil
+	return bytes.NewReader(cachedBody), nil
 }
 
 // DoRequest delegates to common helper.

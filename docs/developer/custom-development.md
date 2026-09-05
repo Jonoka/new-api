@@ -29,6 +29,10 @@
 
 ## 继续开发的接口
 
+Batch C adds synchronous [Alpha Search and independent request replay](alpha-search.md)
+on its candidate branch. Alpha uses existing native Codex/type1 gateway transports
+and search-only accounting; real-gateway production acceptance remains pending.
+
 Batch B accounting is under validation on its isolated candidate branch. Selected-group pricing resizes the live reservation before the next upstream attempt. Async tasks transfer reservation ownership to durable task accounting; terminal funding, token, used counters and status commit together, and independent log storage uses idempotent event delivery. See [final-group billing](../workflows/2026-09/05_final_group_billing.md) and [async accounting](../workflows/2026-09/05_async_task_accounting.md). Legacy terminal rows are not automatically repaired. An older image must not process B-owned in-flight tasks or pending accounting events; drain and reconcile before rollback.
 
 - 新 AI 渠道：relay/channel/\* 适配器和渠道类型注册；支持 StreamOptions 时加入 streamSupportedChannels。
