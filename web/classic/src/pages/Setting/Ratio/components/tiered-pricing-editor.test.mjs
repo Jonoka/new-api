@@ -137,6 +137,15 @@ function buttonWithText(container, text) {
   return button;
 }
 
+function radioWithLabel(container, text) {
+  const label = [...container.querySelectorAll('label')].find(
+    (candidate) => candidate.textContent.trim() === text,
+  );
+  const input = label?.querySelector('input');
+  assert.ok(input, `missing radio label: ${text}`);
+  return input;
+}
+
 test('model selection preserves each tariff and invalid drafts block switching and apply', async () => {
   const base = 'tier("base", p * 2.5 + c * 15)';
   const legacy = `(${base}) * (hour("UTC") >= 9 || hour("UTC") < 12 ? 2 : 1)`;
@@ -169,10 +178,7 @@ test('model selection preserves each tariff and invalid drafts block switching a
       await act(async () => {
         buttonWithText(container, name).click();
       });
-      const rawMode = [
-        ...container.querySelectorAll('input[type="radio"]'),
-      ].find((input) => input.value === 'raw');
-      assert.ok(rawMode);
+      const rawMode = radioWithLabel(container, '表达式编辑');
       if (!rawMode.checked)
         await act(async () => {
           rawMode.click();
@@ -184,9 +190,7 @@ test('model selection preserves each tariff and invalid drafts block switching a
       );
       if (name === 'B-model') {
         await act(async () => {
-          [...container.querySelectorAll('input[type="radio"]')]
-            .find((input) => input.value === 'visual')
-            .click();
+          radioWithLabel(container, '可视化编辑').click();
         });
       }
     }
@@ -195,10 +199,7 @@ test('model selection preserves each tariff and invalid drafts block switching a
     });
     assert.equal(buttonWithText(container, '应用更改').disabled, true);
     const invalidGroupsBefore = container.querySelectorAll('input').length;
-    const perTokenRadio = [
-      ...container.querySelectorAll('input[type="radio"]'),
-    ].find((input) => input.value === 'per-token');
-    assert.ok(perTokenRadio);
+    const perTokenRadio = radioWithLabel(container, '按量计费');
     assert.equal(perTokenRadio.disabled, true);
     await act(async () => {
       perTokenRadio.click();
