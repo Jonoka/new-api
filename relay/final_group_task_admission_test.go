@@ -73,7 +73,7 @@ func TestRelayTaskSubmitDoesNotSendUpstreamWhenSelectedGroupAdmissionFails(t *te
 		UserId: user.Id, UserQuota: user.Quota, TokenId: token.Id, TokenKey: token.Key,
 		OriginModelName: "final-group-task-model", UpstreamModelName: "final-group-task-model", UsingGroup: "default", UserGroup: "default",
 		RequestId: fmt.Sprintf("task-admission-request-%d", time.Now().UnixNano()), RequestURLPath: "/v1/videos",
-		UserSetting: dto.UserSetting{BillingPreference: "wallet_only"},
+		UserSetting:   dto.UserSetting{BillingPreference: "wallet_only"},
 		TaskRelayInfo: &relaycommon.TaskRelayInfo{},
 	}
 

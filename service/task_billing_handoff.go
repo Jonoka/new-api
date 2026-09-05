@@ -35,10 +35,10 @@ func HandoffTaskBilling(c *gin.Context, info *relaycommon.RelayInfo, task *model
 	}
 
 	request := model.AsyncTaskHandoffRequest{
-		Task: task,
+		Task:           task,
 		ExpectedStatus: expectedStatus,
-		ChargedQuota: chargedQuota,
-		InitialLog: initialTaskAccountingLog(c, info, task, chargedQuota),
+		ChargedQuota:   chargedQuota,
+		InitialLog:     initialTaskAccountingLog(c, info, task, chargedQuota),
 	}
 	persist := func(tx *gorm.DB) error {
 		_, err := model.PersistAsyncTaskHandoffTx(tx, request)
@@ -64,18 +64,18 @@ func HandoffTaskBilling(c *gin.Context, info *relaycommon.RelayInfo, task *model
 		return errors.New("async billing reservation is already closed")
 	}
 	reservation := model.GroupReservationRequest{
-		Source: session.funding.Source(),
-		RequestId: info.RequestId,
-		UserId: info.UserId,
-		ModelName: info.OriginModelName,
-		SubscriptionId: info.SubscriptionId,
-		TokenId: info.TokenId,
-		TokenKey: info.TokenKey,
-		TokenUnlimited: info.TokenUnlimited,
-		SkipTokenQuota: info.IsPlayground || info.SkipTokenQuota,
+		Source:           session.funding.Source(),
+		RequestId:        info.RequestId,
+		UserId:           info.UserId,
+		ModelName:        info.OriginModelName,
+		SubscriptionId:   info.SubscriptionId,
+		TokenId:          info.TokenId,
+		TokenKey:         info.TokenKey,
+		TokenUnlimited:   info.TokenUnlimited,
+		SkipTokenQuota:   info.IsPlayground || info.SkipTokenQuota,
 		ExpectedReserved: session.preConsumedQuota,
-		TargetReserved: chargedQuota,
-		PostConsume: true,
+		TargetReserved:   chargedQuota,
+		PostConsume:      true,
 	}
 	_, err := model.WithReconciledGroupReservation(reservation, func(tx *gorm.DB, result *model.GroupReservationResult) error {
 		task.PrivateData.SubscriptionId = result.SubscriptionId

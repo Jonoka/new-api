@@ -40,9 +40,9 @@ func groupBillingInfo(user *model.User, token *model.Token) *relaycommon.RelayIn
 	return &relaycommon.RelayInfo{
 		UserId: user.Id, UserQuota: user.Quota, TokenId: token.Id, TokenKey: token.Key,
 		OriginModelName: "billing-group-model", UsingGroup: "free", UserGroup: "default",
-		RequestId: fmt.Sprintf("billing-group-request-%d", time.Now().UnixNano()),
+		RequestId:   fmt.Sprintf("billing-group-request-%d", time.Now().UnixNano()),
 		UserSetting: dto.UserSetting{BillingPreference: "wallet_only"},
-		PriceData: types.PriceData{FreeModel: true, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 0}},
+		PriceData:   types.PriceData{FreeModel: true, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 0}},
 	}
 }
 

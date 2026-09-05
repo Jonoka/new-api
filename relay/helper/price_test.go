@@ -132,9 +132,9 @@ func TestModelPriceHelperTieredRefreshesOnlyGroupDependentSnapshotFields(t *test
 		require.NoError(t, config.GlobalConfig.LoadFromDB(saved))
 	})
 	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
-		"billing_setting.billing_mode":      `{"tiered-switch-model":"tiered_expr"}`,
-		"billing_setting.billing_expr":      `{"tiered-switch-model":"tier(\"original\", p * 3 + c * 15)"}`,
-		"group_ratio_setting.group_ratio":   `{"free":0,"paid":2}`,
+		"billing_setting.billing_mode":    `{"tiered-switch-model":"tiered_expr"}`,
+		"billing_setting.billing_expr":    `{"tiered-switch-model":"tier(\"original\", p * 3 + c * 15)"}`,
+		"group_ratio_setting.group_ratio": `{"free":0,"paid":2}`,
 	}))
 
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -156,9 +156,9 @@ func TestModelPriceHelperTieredRefreshesOnlyGroupDependentSnapshotFields(t *test
 	frozenRequest := string(info.BillingRequestInput.Body)
 
 	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
-		"billing_setting.billing_mode":      `{}`,
-		"billing_setting.billing_expr":      `{}`,
-		"group_ratio_setting.group_ratio":   `{"free":0,"paid":2}`,
+		"billing_setting.billing_mode":    `{}`,
+		"billing_setting.billing_expr":    `{}`,
+		"group_ratio_setting.group_ratio": `{"free":0,"paid":2}`,
 	}))
 	ctx.Set("auto_group", "paid")
 	second, err := ModelPriceHelper(ctx, info, 9999, &types.TokenCountMeta{MaxTokens: 1})

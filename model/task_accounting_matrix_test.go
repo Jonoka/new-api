@@ -20,12 +20,17 @@ func taskAccountingMatrixDatabase(t *testing.T, fixture groupReservationDatabase
 	t.Helper()
 	db := useGroupReservationDatabase(t, fixture)
 	require.NoError(t, db.AutoMigrate(&Channel{}, &Task{}, &TaskAccounting{}, &TaskAccountingEvent{}))
-	openLog := func() (*gorm.DB, error) { return gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "separate-log.db")), &gorm.Config{}) }
+	openLog := func() (*gorm.DB, error) {
+		return gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "separate-log.db")), &gorm.Config{})
+	}
 	if fixture.mysql {
 		openLog = fixture.open
 	} else if fixture.sqlite {
 		for _, candidate := range groupReservationDatabases(t) {
-			if candidate.postgres { openLog = candidate.open; break }
+			if candidate.postgres {
+				openLog = candidate.open
+				break
+			}
 		}
 	}
 	logDB, err := openLog()
@@ -144,7 +149,9 @@ func TestTaskAccountingRollbackAndLogRedelivery(t *testing.T) {
 			assertTaskAccountingMatrix(t, db, task, user, token, channel, 0)
 			logFailure := "test:matrix-log-unavailable"
 			require.NoError(t, LOG_DB.Callback().Create().Before("gorm:create").Register(logFailure, func(tx *gorm.DB) {
-				if tx.Statement.Table == "logs" { tx.AddError(errors.New("injected independent log failure")) }
+				if tx.Statement.Table == "logs" {
+					tx.AddError(errors.New("injected independent log failure"))
+				}
 			}))
 			logDB := LOG_DB
 			t.Cleanup(func() { _ = logDB.Callback().Create().Remove(logFailure) })

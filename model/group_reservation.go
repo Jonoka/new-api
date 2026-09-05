@@ -23,19 +23,19 @@ var (
 )
 
 type GroupReservationRequest struct {
-	Source             string
-	RequestId          string
-	UserId             int
-	ModelName          string
-	SubscriptionId     int
-	TokenId            int
-	TokenKey           string
-	TokenUnlimited     bool
-	SkipTokenQuota     bool
-	ExpectedReserved   int
-	TargetReserved     int
+	Source           string
+	RequestId        string
+	UserId           int
+	ModelName        string
+	SubscriptionId   int
+	TokenId          int
+	TokenKey         string
+	TokenUnlimited   bool
+	SkipTokenQuota   bool
+	ExpectedReserved int
+	TargetReserved   int
 	// PostConsume is only for an accepted upstream result, never retry admission.
-	PostConsume        bool
+	PostConsume bool
 }
 
 type GroupReservationResult struct {
@@ -287,12 +287,12 @@ func createSubscriptionReservationTx(tx *gorm.DB, req GroupReservationRequest) (
 			return nil, err
 		}
 		record := &SubscriptionPreConsumeRecord{
-			RequestId:          req.RequestId,
-			UserId:             req.UserId,
-			UserSubscriptionId: sub.Id,
-			PreConsumed:        int64(req.TargetReserved),
+			RequestId:            req.RequestId,
+			UserId:               req.UserId,
+			UserSubscriptionId:   sub.Id,
+			PreConsumed:          int64(req.TargetReserved),
 			ReservationResetTime: common.GetPointer(sub.LastResetTime),
-			Status:             "consumed",
+			Status:               "consumed",
 		}
 		if err := tx.Create(record).Error; err != nil {
 			return nil, err

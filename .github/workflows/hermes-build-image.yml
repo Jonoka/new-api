@@ -95,6 +95,13 @@ jobs:
           path: ${{ runner.temp }}/go-format.patch
           if-no-files-found: ignore
 
+      - name: Check B accounting before frontend builds
+        env:
+          NEW_API_TEST_REDIS_ADDR: 127.0.0.1:6379
+          NEW_API_TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/newapi_test_ci?sslmode=disable
+          NEW_API_TEST_MYSQL_DSN: root:mysql_ci_only@tcp(127.0.0.1:3306)/newapi_test_ci?charset=utf8mb4&parseTime=True&loc=Local
+        run: go test ./model ./service ./controller ./relay ./relay/helper -run 'Test(ReconcileGroupReservation|BillingSession|FinalGroup|TaskAccounting|AsyncTask|TaskBilling|UserCacheGeneration)' -count=1
+
       - name: Check and build default frontend
         working-directory: web/default
         run: |

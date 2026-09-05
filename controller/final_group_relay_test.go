@@ -126,9 +126,9 @@ func setupFinalGroupRelayDB(t *testing.T) *gorm.DB {
 	operation_setting.GetQuotaSetting().EnableFreeModelPreConsume = false
 	operation_setting.AutomaticRetryStatusCodeRanges = []operation_setting.StatusCodeRange{{Start: 500, End: 599}}
 	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
-		"billing_setting.billing_mode":         `{"fg-relay-model":"tiered_expr"}`,
-		"billing_setting.billing_expr":         `{"fg-relay-model":"tier(\"controller\", 200)"}`,
-		"group_ratio_setting.group_ratio":      `{"fg-free-a":0,"fg-paid-a":2,"fg-paid-b":1,"fg-free-b":0,"fg-paid-c":1,"fg-high-c":2,"fg-same":1,"fg-paid-d":1,"fg-high-d":2}`,
+		"billing_setting.billing_mode":          `{"fg-relay-model":"tiered_expr"}`,
+		"billing_setting.billing_expr":          `{"fg-relay-model":"tier(\"controller\", 200)"}`,
+		"group_ratio_setting.group_ratio":       `{"fg-free-a":0,"fg-paid-a":2,"fg-paid-b":1,"fg-free-b":0,"fg-paid-c":1,"fg-high-c":2,"fg-same":1,"fg-paid-d":1,"fg-high-d":2}`,
 		"group_ratio_setting.group_group_ratio": `{}`,
 	}))
 

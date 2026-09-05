@@ -32,7 +32,9 @@ func TestTaskAccountingCompatibilitySeed(t *testing.T) {
 		DB, LOG_DB = oldDB, oldLog
 		common.UsingPostgreSQL, common.UsingSQLite, common.UsingMySQL = oldPG, oldSQLite, oldMySQL
 		common.RedisEnabled, common.BatchUpdateEnabled = oldRedis, oldBatch
-		if sqlDB, err := db.DB(); err == nil { _ = sqlDB.Close() }
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
 	})
 	user := &User{Username: "b-compat-user", Password: "ci-only", Quota: 1000}
 	require.NoError(t, db.Create(user).Error)

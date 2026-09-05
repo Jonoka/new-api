@@ -1546,15 +1546,15 @@ func ExpireDueSubscriptions(limit int) (int, error) {
 
 // SubscriptionPreConsumeRecord stores idempotent pre-consume operations per request.
 type SubscriptionPreConsumeRecord struct {
-	Id                 int    `json:"id"`
-	RequestId          string `json:"request_id" gorm:"type:varchar(64);uniqueIndex"`
-	UserId             int    `json:"user_id" gorm:"index"`
-	UserSubscriptionId int    `json:"user_subscription_id" gorm:"index"`
-	PreConsumed        int64  `json:"pre_consumed" gorm:"type:bigint;not null;default:0"`
+	Id                   int    `json:"id"`
+	RequestId            string `json:"request_id" gorm:"type:varchar(64);uniqueIndex"`
+	UserId               int    `json:"user_id" gorm:"index"`
+	UserSubscriptionId   int    `json:"user_subscription_id" gorm:"index"`
+	PreConsumed          int64  `json:"pre_consumed" gorm:"type:bigint;not null;default:0"`
 	ReservationResetTime *int64 `json:"reservation_reset_time,omitempty" gorm:"type:bigint"`
-	Status             string `json:"status" gorm:"type:varchar(32);index"` // consumed/refunded
-	CreatedAt          int64  `json:"created_at" gorm:"bigint"`
-	UpdatedAt          int64  `json:"updated_at" gorm:"bigint;index"`
+	Status               string `json:"status" gorm:"type:varchar(32);index"` // consumed/refunded
+	CreatedAt            int64  `json:"created_at" gorm:"bigint"`
+	UpdatedAt            int64  `json:"updated_at" gorm:"bigint;index"`
 }
 
 func (r *SubscriptionPreConsumeRecord) BeforeCreate(tx *gorm.DB) error {
