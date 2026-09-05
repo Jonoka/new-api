@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
@@ -23,6 +24,7 @@ import (
 var (
 	relayImageTaskRelay = Relay
 	insertImageTask     = func(task *model.Task) error { return task.Insert() }
+	handoffImageTask    = service.HandoffTaskBilling
 )
 
 // RelayImageTaskSubmit handles upstreams that expose async image jobs through
@@ -33,6 +35,7 @@ var (
 // billing, channel selection, and retries in Relay, then persists the returned
 // task metadata for polling.
 func RelayImageTaskSubmit(c *gin.Context) {
+	c.Set(relaycommon.ContextKeyDeferTaskBilling, true)
 	capture := &imageTaskResponseCapture{ResponseWriter: c.Writer}
 	c.Writer = capture
 	relayImageTaskRelay(c, types.RelayFormatOpenAIImage)
@@ -89,11 +92,13 @@ func RelayImageTaskSubmit(c *gin.Context) {
 	task.PrivateData.TokenId = relayInfo.TokenId
 	task.PrivateData.BillingContext = &model.TaskBillingContext{
 		ModelPrice:      relayInfo.PriceData.ModelPrice,
+		ModelPriceUnit:  relayInfo.PriceData.ModelPriceUnit,
 		GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
 		ModelRatio:      relayInfo.PriceData.ModelRatio,
 		OtherRatios:     relayInfo.PriceData.OtherRatios,
+		BillingMeta:     relayInfo.PriceData.BillingMeta,
 		OriginModelName: relayInfo.OriginModelName,
-		PerCallBilling:  relayInfo.PriceData.UsePrice || relayInfo.TieredBillingSnapshot != nil,
+		PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice || relayInfo.TieredBillingSnapshot != nil,
 	}
 	task.PrivateData.TieredBillingSnapshot = relayInfo.TieredBillingSnapshot
 	task.Quota = relayInfo.PriceData.Quota
@@ -112,25 +117,52 @@ func RelayImageTaskSubmit(c *gin.Context) {
 	if progress != "" {
 		task.Progress = progress
 	}
-	if task.Status == model.TaskStatusFailure {
-		refundImageSubmit(c, relayInfo)
-	}
 	if len(body) > 0 {
 		task.Data = body
 	}
-	if insertErr := insertImageTask(task); insertErr != nil {
-		common.SysError("insert image task error: " + insertErr.Error())
-		if task.Status != model.TaskStatusFailure {
-			refundImageSubmit(c, relayInfo)
+	terminalStatus := task.Status
+	if terminalStatus == model.TaskStatusSuccess || terminalStatus == model.TaskStatusFailure {
+		task.Status = model.TaskStatusSubmitted
+		if task.Progress == "100%" {
+			task.Progress = "0%"
 		}
+	}
+	chargedQuota := relayInfo.FinalPreConsumedQuota
+	if relayInfo.Billing == nil {
+		chargedQuota = task.Quota
+	}
+	if handoffErr := handoffImageTask(c, relayInfo, task, "", chargedQuota); handoffErr != nil {
+		common.SysError("insert image task error: " + handoffErr.Error())
+		refundImageSubmit(c, relayInfo)
 		capture.statusCode = http.StatusInternalServerError
 		capture.buf.Reset()
 		_, _ = capture.buf.WriteString(`{"error":{"message":"failed to persist image task"}}`)
 		capture.flush()
 		return
 	}
-	if task.Status == model.TaskStatusSuccess {
-		settleImageSubmit(relayInfo, task.Quota)
+	if terminalStatus == model.TaskStatusSuccess || terminalStatus == model.TaskStatusFailure {
+		expectedStatus := task.Status
+		task.Status = terminalStatus
+		task.Progress = "100%"
+		task.FinishTime = time.Now().Unix()
+		finalQuota := chargedQuota
+		reason := "upstream completed during async image submission"
+		if relayInfo.TaskBillingActualQuota != nil {
+			finalQuota = *relayInfo.TaskBillingActualQuota
+			reason = "image response actual usage"
+		}
+		if terminalStatus == model.TaskStatusFailure {
+			finalQuota = 0
+			reason = "upstream failed during async image submission"
+		}
+		if _, err := service.FinalizeTaskAccounting(c.Request.Context(), task, expectedStatus, finalQuota, reason); err != nil {
+			common.SysError("finalize terminal image task error: " + err.Error())
+			capture.statusCode = http.StatusInternalServerError
+			capture.buf.Reset()
+			_, _ = capture.buf.WriteString(`{"error":{"message":"failed to settle image task"}}`)
+			capture.flush()
+			return
+		}
 	}
 	capture.flush()
 	common.SysLog(fmt.Sprintf("insert image task success: task_id=%s upstream_task_id=%s channel_id=%d status=%s", task.TaskID, task.PrivateData.UpstreamTaskID, task.ChannelId, task.Status))
@@ -139,14 +171,6 @@ func RelayImageTaskSubmit(c *gin.Context) {
 func refundImageSubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) {
 	if relayInfo != nil && relayInfo.Billing != nil {
 		relayInfo.Billing.Refund(c)
-	}
-}
-
-func settleImageSubmit(relayInfo *relaycommon.RelayInfo, quota int) {
-	if relayInfo != nil && relayInfo.Billing != nil {
-		if err := relayInfo.Billing.Settle(quota); err != nil {
-			common.SysError("failed to settle terminal image task: " + err.Error())
-		}
 	}
 }
 

@@ -298,6 +298,9 @@ func migrateDB() error {
 		&NotificationDelivery{},
 		&QuotaData{},
 		&Task{},
+		&TaskAccounting{},
+		&TaskAccountingEvent{},
+		&TaskAccountingLogReceipt{},
 		&Model{},
 		&Vendor{},
 		&PrefillGroup{},
@@ -385,6 +388,9 @@ func migrateDBFast() error {
 		{&NotificationDelivery{}, "NotificationDelivery"},
 		{&QuotaData{}, "QuotaData"},
 		{&Task{}, "Task"},
+		{&TaskAccounting{}, "TaskAccounting"},
+		{&TaskAccountingEvent{}, "TaskAccountingEvent"},
+		{&TaskAccountingLogReceipt{}, "TaskAccountingLogReceipt"},
 		{&Model{}, "Model"},
 		{&Vendor{}, "Vendor"},
 		{&PrefillGroup{}, "PrefillGroup"},
@@ -475,7 +481,7 @@ func migrateDBFast() error {
 
 func migrateLOGDB() error {
 	var err error
-	if err = LOG_DB.AutoMigrate(&Log{}); err != nil {
+	if err = LOG_DB.AutoMigrate(&Log{}, &TaskAccountingLogReceipt{}); err != nil {
 		return err
 	}
 	return MigrateChannelAnalyticsLogDB(LOG_DB)

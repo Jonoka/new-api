@@ -157,9 +157,15 @@ On save, the expression is validated:
 When a request arrives and the model uses `tiered_expr` billing:
 1. Loads expression from `billing_setting.GetBillingExpr()`
 2. Builds `RequestInput` (headers + body) for `param()` / `header()` functions
-3. Runs expression with estimated tokens: `RunExprWithRequest(expr, {P, C}, requestInput)`
-4. Converts output to quota: `rawCost / 1,000,000 * QuotaPerUnit`
-5. Creates `BillingSnapshot` (frozen state for settlement) and stores on `RelayInfo`
+3. Runs expression with estimated tokens: `RunExprWithRequest(expr, {P, C}, requestInput)`.
+   If the client did not configure a maximum output, the configured default
+   estimate is captured even when the selected group's ratio is zero.
+4. Converts output to quota before group, then applies the selected group:
+   `rawCost / 1,000,000 * QuotaPerUnit * groupRatio`.
+5. Creates `BillingSnapshot` and stores it on `RelayInfo`. Expression source,
+   request input and token estimates freeze on the first priced attempt; group,
+   group ratio, special-group ratio, estimated tier and estimated quota refresh
+   for each selected retry group before admission.
 
 ### 4. Settlement (Actual Billing)
 

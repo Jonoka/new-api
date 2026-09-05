@@ -22,6 +22,15 @@ jobs:
     name: Build & push amd64
     runs-on: ubuntu-latest
     services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
       postgres:
         image: postgres:15
         env:
@@ -35,6 +44,18 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: mysql_ci_only
+          MYSQL_DATABASE: newapi_test_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -pmysql_ci_only"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -92,15 +113,19 @@ jobs:
 
       - name: Run Go tests
         env:
+          NEW_API_TEST_REDIS_ADDR: 127.0.0.1:6379
           NEW_API_TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/newapi_test_ci?sslmode=disable
+          NEW_API_TEST_MYSQL_DSN: root:mysql_ci_only@tcp(127.0.0.1:3306)/newapi_test_ci?charset=utf8mb4&parseTime=True&loc=Local
         run: go test ./... -count=1
 
       - name: Race-check upgraded boundaries
         env:
+          NEW_API_TEST_REDIS_ADDR: 127.0.0.1:6379
           NEW_API_TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/newapi_test_ci?sslmode=disable
+          NEW_API_TEST_MYSQL_DSN: root:mysql_ci_only@tcp(127.0.0.1:3306)/newapi_test_ci?charset=utf8mb4&parseTime=True&loc=Local
         run: >-
-          go test -race ./model ./service ./controller ./middleware
-          -run 'Test(RelayResponseHeaderTimeout|RelayTransportsApplyResponseHeaderTimeout|ResponseHeaderTimeout|RelayRequestParseError|RelayRejectsMalformedRequest|RelayRejectsNonObjectRequest|RelayPreservesRequestBodyTooLarge|UserCriticalRateLimit|FormatUserLogsUsesStrictProjection|ProjectUserLogOther|UserAndTokenReadsProject|SumUsedQuotaKeepsHistorical|SanitizeDBError|SanitizedGormWriter|GormLoggerRedacts)'
+          go test -race ./model ./service ./controller ./middleware ./relay ./relay/helper
+          -run 'Test(RelayResponseHeaderTimeout|RelayTransportsApplyResponseHeaderTimeout|ResponseHeaderTimeout|RelayRequestParseError|RelayRejectsMalformedRequest|RelayRejectsNonObjectRequest|RelayPreservesRequestBodyTooLarge|UserCriticalRateLimit|FormatUserLogsUsesStrictProjection|ProjectUserLogOther|UserAndTokenReadsProject|SumUsedQuotaKeepsHistorical|SanitizeDBError|SanitizedGormWriter|GormLoggerRedacts|ReconcileGroupReservation|BillingSession|ModelPriceHelper|RelayTaskSubmit|FinalGroup|TaskAccounting|AsyncTask|TaskBilling|CanvasImageTask|ImageTask|UserCacheGeneration)'
           -count=1
 
       - name: Resolve image tags
@@ -161,6 +186,18 @@ jobs:
           EXPECTED_REVISION: ${{ github.sha }}
           TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
         run: bash scripts/ci/batch-a-smoke.sh
+
+      - name: Seed interrupted task accounting
+        env:
+          NEW_API_TEST_COMPATIBILITY_DSN: postgres://postgres:postgres@localhost:5432/newapi_candidate_smoke?sslmode=disable
+        run: go test ./model -run '^TestTaskAccountingCompatibilitySeed$' -count=1
+
+      - name: Rehearse B recovery and drained previous image
+        env:
+          CANDIDATE_IMAGE: ghcr.io/${{ github.repository }}@${{ steps.image.outputs.digest }}
+          PREVIOUS_IMAGE: ghcr.io/jonoka/new-api@sha256:d666f0ea0b945f01ffa559a6a594545f3067b5b5d32f0fe00da5ab8cfe07eec6
+          TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: bash scripts/ci/batch-b-smoke.sh
 
       - name: Summary
         run: |

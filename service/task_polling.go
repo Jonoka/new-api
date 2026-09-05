@@ -79,19 +79,23 @@ func sweepTimedOutTaskBatch(ctx context.Context, tasks []*model.Task, reason str
 			task.FailReason = reason
 		}
 
-		won, err := task.UpdateWithStatus(oldStatus)
-		if err != nil {
-			logger.LogError(ctx, fmt.Sprintf("sweepTimedOutTasks CAS update error for task %s: %v", task.TaskID, err))
-			continue
-		}
-		if !won {
-			logger.LogInfo(ctx, fmt.Sprintf("sweepTimedOutTasks: task %s already transitioned, skip", task.TaskID))
-			continue
+		if isLegacy {
+			won, err := task.UpdateWithStatus(oldStatus)
+			if err != nil || !won {
+				logger.LogError(ctx, fmt.Sprintf("sweepTimedOutTasks legacy CAS failed for task %s: %v", task.TaskID, err))
+				continue
+			}
+		} else {
+			result, err := RefundTaskQuota(ctx, task, oldStatus, reason)
+			if err != nil {
+				logger.LogError(ctx, fmt.Sprintf("sweepTimedOutTasks accounting failed for task %s: %v", task.TaskID, err))
+				continue
+			}
+			if result == nil || (!result.Won && result.Accounting.DecisionID == "") {
+				continue
+			}
 		}
 		timedOutCount++
-		if !isLegacy && task.Quota != 0 {
-			RefundTaskQuota(ctx, task, reason)
-		}
 	}
 
 	if timedOutCount > 0 {
@@ -117,27 +121,21 @@ func TaskPollingLoop() {
 			}
 			taskChannelM := make(map[int][]string)
 			taskM := make(map[string]*model.Task)
-			nullTaskIds := make([]int64, 0)
 			for _, task := range tasks {
 				upstreamID := task.GetUpstreamTaskID()
 				if upstreamID == "" {
-					// 统计失败的未完成任务
-					nullTaskIds = append(nullTaskIds, task.ID)
+					oldStatus := task.Status
+					task.Status = model.TaskStatusFailure
+					task.Progress = "100%"
+					task.FinishTime = time.Now().Unix()
+					task.FailReason = "missing upstream task id"
+					if _, err := RefundTaskQuota(ctx, task, oldStatus, task.FailReason); err != nil {
+						logger.LogError(ctx, fmt.Sprintf("finalize missing task id %d: %v", task.ID, err))
+					}
 					continue
 				}
 				taskM[taskPollingKey(task.ChannelId, upstreamID)] = task
 				taskChannelM[task.ChannelId] = append(taskChannelM[task.ChannelId], upstreamID)
-			}
-			if len(nullTaskIds) > 0 {
-				err := model.TaskBulkUpdateByID(nullTaskIds, map[string]any{
-					"status":   "FAILURE",
-					"progress": "100%",
-				})
-				if err != nil {
-					logger.LogError(ctx, fmt.Sprintf("Fix null task_id task error: %v", err))
-				} else {
-					logger.LogInfo(ctx, fmt.Sprintf("Fix null task_id task success: %v", nullTaskIds))
-				}
 			}
 			if len(taskChannelM) == 0 {
 				continue
@@ -186,21 +184,6 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 	ch, err := model.CacheGetChannel(channelId)
 	if err != nil {
 		common.SysLog(fmt.Sprintf("CacheGetChannel: %v", err))
-		// Collect DB primary key IDs for bulk update (taskIds are upstream IDs, not task_id column values)
-		var failedIDs []int64
-		for _, upstreamID := range taskIds {
-			if t, ok := taskM[taskPollingKey(channelId, upstreamID)]; ok {
-				failedIDs = append(failedIDs, t.ID)
-			}
-		}
-		err = model.TaskBulkUpdateByID(failedIDs, map[string]any{
-			"fail_reason": fmt.Sprintf("获取渠道信息失败，请联系管理员，渠道ID：%d", channelId),
-			"status":      "FAILURE",
-			"progress":    "100%",
-		})
-		if err != nil {
-			common.SysLog(fmt.Sprintf("UpdateSunoTask error: %v", err))
-		}
 		return err
 	}
 	adaptor := GetTaskAdaptorFunc(constant.TaskPlatformSuno)
@@ -242,6 +225,7 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 			continue
 		}
 
+		oldStatus := task.Status
 		task.Status = lo.If(model.TaskStatus(responseItem.Status) != "", model.TaskStatus(responseItem.Status)).Else(task.Status)
 		task.FailReason = lo.If(responseItem.FailReason != "", responseItem.FailReason).Else(task.FailReason)
 		task.SubmitTime = lo.If(responseItem.SubmitTime != 0, responseItem.SubmitTime).Else(task.SubmitTime)
@@ -249,15 +233,21 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 		task.FinishTime = lo.If(responseItem.FinishTime != 0, responseItem.FinishTime).Else(task.FinishTime)
 		if responseItem.FailReason != "" || task.Status == model.TaskStatusFailure {
 			logger.LogInfo(ctx, task.TaskID+" 构建失败，"+task.FailReason)
+			task.Status = model.TaskStatusFailure
 			task.Progress = "100%"
-			RefundTaskQuota(ctx, task, task.FailReason)
 		}
 		if responseItem.Status == model.TaskStatusSuccess {
 			task.Progress = "100%"
 		}
 		task.Data = responseItem.Data
 
-		err = task.Update()
+		if task.Status == model.TaskStatusFailure {
+			_, err = RefundTaskQuota(ctx, task, oldStatus, task.FailReason)
+		} else if task.Status == model.TaskStatusSuccess {
+			_, err = FinalizeTaskAccounting(ctx, task, oldStatus, task.Quota, "预扣额度保持不变")
+		} else {
+			_, err = task.UpdateWithStatus(oldStatus)
+		}
 		if err != nil {
 			common.SysLog("UpdateSunoTask task error: " + err.Error())
 		}
@@ -320,21 +310,8 @@ func updateVideoTasks(ctx context.Context, platform constant.TaskPlatform, chann
 	}
 	cacheGetChannel, err := model.CacheGetChannel(channelId)
 	if err != nil {
-		// Collect DB primary key IDs for bulk update (taskIds are upstream IDs, not task_id column values)
-		var failedIDs []int64
-		for _, upstreamID := range taskIds {
-			if t, ok := taskM[taskPollingKey(channelId, upstreamID)]; ok {
-				failedIDs = append(failedIDs, t.ID)
-			}
-		}
-		errUpdate := model.TaskBulkUpdateByID(failedIDs, map[string]any{
-			"fail_reason": fmt.Sprintf("Failed to get channel info, channel ID: %d", channelId),
-			"status":      "FAILURE",
-			"progress":    "100%",
-		})
-		if errUpdate != nil {
-			common.SysLog(fmt.Sprintf("UpdateVideoTask error: %v", errUpdate))
-		}
+		// Channel cache/DB lookup failures are transient. Keep charged tasks
+		// pending so a later polling cycle can retry safely.
 		return fmt.Errorf("CacheGetChannel failed: %w", err)
 	}
 	adaptor := GetTaskAdaptorFunc(platform)
@@ -438,10 +415,6 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		}
 	}
 
-	shouldRefund := false
-	shouldSettle := false
-	quota := task.Quota
-
 	task.Status = model.TaskStatus(taskResult.Status)
 	switch taskResult.Status {
 	case model.TaskStatusSubmitted:
@@ -468,7 +441,6 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 			// No URL from adaptor — construct proxy URL using public task ID
 			task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
 		}
-		shouldSettle = true
 	case model.TaskStatusFailure:
 		logger.LogJson(ctx, fmt.Sprintf("Task %s failed", taskId), task)
 		task.Status = model.TaskStatusFailure
@@ -479,9 +451,6 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		task.FailReason = taskResult.Reason
 		logger.LogInfo(ctx, fmt.Sprintf("Task %s failed: %s", task.TaskID, task.FailReason))
 		taskResult.Progress = taskcommon.ProgressComplete
-		if quota != 0 {
-			shouldRefund = true
-		}
 	default:
 		return fmt.Errorf("unknown task status %s for task %s", taskResult.Status, task.TaskID)
 	}
@@ -490,16 +459,15 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	}
 
 	isDone := task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure
-	if isDone && snap.Status != task.Status {
-		won, err := task.UpdateWithStatus(snap.Status)
-		if err != nil {
-			logger.LogError(ctx, fmt.Sprintf("UpdateWithStatus failed for task %s: %s", task.TaskID, err.Error()))
-			shouldRefund = false
-			shouldSettle = false
-		} else if !won {
-			logger.LogWarn(ctx, fmt.Sprintf("Task %s already transitioned by another process, skip billing", task.TaskID))
-			shouldRefund = false
-			shouldSettle = false
+	if isDone {
+		finalQuota, reason := ResolveTerminalTaskQuota(adaptor, task, taskResult)
+		if task.Status == model.TaskStatusFailure {
+			finalQuota = 0
+			reason = task.FailReason
+		}
+		if _, err := FinalizeTaskAccounting(ctx, task, snap.Status, finalQuota, reason); err != nil {
+			logger.LogError(ctx, fmt.Sprintf("durable terminal accounting failed for task %s: %s", task.TaskID, err.Error()))
+			return err
 		}
 	} else if !snap.Equal(task.Snapshot()) {
 		if _, err := task.UpdateWithStatus(snap.Status); err != nil {
@@ -508,13 +476,6 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	} else {
 		// No changes, skip update
 		logger.LogDebug(ctx, "No update needed for task %s", task.TaskID)
-	}
-
-	if shouldSettle {
-		settleTaskBillingOnComplete(ctx, adaptor, task, taskResult)
-	}
-	if shouldRefund {
-		RefundTaskQuota(ctx, task, task.FailReason)
 	}
 
 	return nil
@@ -569,31 +530,36 @@ func truncateBase64(s string) string {
 	return s[:maxKeep] + "..."
 }
 
-// settleTaskBillingOnComplete 任务完成时的统一计费调整。
-// 优先级：1. adaptor.AdjustBillingOnComplete 返回正数 → 使用 adaptor 计算的额度
-//
-//  2. taskResult.TotalTokens > 0 → 按 token 重算
-//  3. 都不满足 → 保持预扣额度不变
-func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo) {
+// terminalTaskQuota resolves a terminal amount before the decision is stored.
+// The legacy adaptor return value zero means "no adjustment"; callers with an
+// explicit zero actual amount call FinalizeTaskAccounting directly.
+func ResolveTerminalTaskQuota(adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo) (int, string) {
 	// 0. 固定价格任务不回退到 token 计费；按秒任务仍允许适配器按实际结果调整。
 	if bc := task.PrivateData.BillingContext; bc != nil && bc.PerCallBilling {
 		if bc.ModelPriceUnit == types.ModelPriceUnitSecond {
 			if actualQuota := adaptor.AdjustBillingOnComplete(task, taskResult); actualQuota > 0 {
-				RecalculateTaskQuota(ctx, task, actualQuota, "适配器按秒计费调整")
+				return actualQuota, "适配器按秒计费调整"
 			}
 		}
-		logger.LogInfo(ctx, fmt.Sprintf("任务 %s 固定价格计费，跳过 token 差额结算", task.TaskID))
-		return
+		return task.Quota, "固定价格任务保持预扣额度"
 	}
 	// 1. 优先让 adaptor 决定最终额度
 	if actualQuota := adaptor.AdjustBillingOnComplete(task, taskResult); actualQuota > 0 {
-		RecalculateTaskQuota(ctx, task, actualQuota, "adaptor计费调整")
-		return
+		return actualQuota, "adaptor计费调整"
 	}
 	// 2. 回退到 token 重算
 	if taskResult.TotalTokens > 0 {
-		RecalculateTaskQuotaByTokens(ctx, task, taskResult.TotalTokens)
-		return
+		if actualQuota, reason, ok := CalculateTaskQuotaByTokens(task, taskResult.TotalTokens); ok {
+			return actualQuota, reason
+		}
 	}
 	// 3. 无调整，保持预扣额度
+	return task.Quota, "预扣额度保持不变"
+}
+
+// settleTaskBillingOnComplete is retained for package-local compatibility.
+// Production terminal callers resolve the amount before accepting a decision.
+func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo) {
+	quota, reason := ResolveTerminalTaskQuota(adaptor, task, taskResult)
+	_, _ = RecalculateTaskQuota(ctx, task, task.Status, quota, reason)
 }

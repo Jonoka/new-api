@@ -9,8 +9,8 @@ type BillingSettler interface {
 	// 同时调整资金来源（钱包/订阅）和令牌额度。
 	Settle(actualQuota int) error
 
-	// Refund 退还所有预扣费额度（资金来源 + 令牌），幂等安全。
-	// 通过 gopool 异步执行。如果已经结算或退款则不做任何操作。
+	// Refund atomically releases reserved funding and token quota. A failed
+	// transaction leaves the live session retryable.
 	Refund(c *gin.Context)
 
 	// NeedsRefund 返回会话是否存在需要退还的预扣状态（未结算且未退款）。
@@ -19,6 +19,7 @@ type BillingSettler interface {
 	// GetPreConsumedQuota 返回实际预扣的额度值（信任用户可能为 0）。
 	GetPreConsumedQuota() int
 
-	// Reserve 将预扣额度补到目标值；若目标值不高于当前预扣额度则不做任何事。
+	// Reserve reconciles the live reservation to the target in either direction.
+	// It does not settle or close the session.
 	Reserve(targetQuota int) error
 }

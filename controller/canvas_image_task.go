@@ -242,9 +242,11 @@ func runCanvasImageTaskRelayWithExecutor(
 	if err != nil || !exists {
 		return
 	}
+	var liveRelayInfo *relaycommon.RelayInfo
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			common.SysError(fmt.Sprintf("canvas image task panic: %v", recovered))
+			refundCanvasImageSubmit(liveRelayInfo)
 			failCanvasImageTask(task, fmt.Sprintf("image generation failed: %v", recovered), nil)
 		}
 	}()
@@ -273,7 +275,9 @@ func runCanvasImageTaskRelayWithExecutor(
 	}
 
 	recorder, channelID, relayInfo := execute(relayReq)
+	liveRelayInfo = relayInfo
 	if errors.Is(relayReq.Context.Err(), context.DeadlineExceeded) {
+		refundCanvasImageSubmit(relayInfo)
 		failCanvasImageTask(task, imageTaskTimeoutReason(timeout), nil)
 		return
 	}
@@ -307,6 +311,7 @@ func executeCanvasImageRelayWithHandler(relayReq canvasImageTaskRelayRequest, ha
 		for key, value := range relayReq.Keys {
 			c.Set(key, value)
 		}
+		c.Set(relaycommon.ContextKeyDeferTaskBilling, true)
 		c.Next()
 		channelID = common.GetContextKeyInt(c, constant.ContextKeyChannelId)
 		if value, ok := c.Get("relay_info"); ok {
@@ -395,18 +400,41 @@ func finishCanvasImageTask(task *model.Task, channelID int, recorder *httptest.R
 			freezeImageTaskPollingProtocol(task, relayInfo)
 			applyCanvasImageTaskBillingSnapshot(task, relayInfo)
 			task.Data = json.RawMessage(append([]byte(nil), body...))
-			if err := updateCanvasImageTask(task); err != nil {
+			chargedQuota := relayInfo.FinalPreConsumedQuota
+			if relayInfo.Billing == nil {
+				chargedQuota = task.Quota
+			}
+			if err := service.HandoffTaskBilling(nil, relayInfo, task, expectedStatus, chargedQuota); err != nil {
 				common.SysError(fmt.Sprintf("canvas image async handoff update failed: task_id=%s err=%v", task.TaskID, err))
 				refundCanvasImageSubmit(relayInfo)
 				failCanvasImageTask(task, "failed to persist upstream async image task", body)
 			}
 			return
 		}
+		if status == string(model.TaskStatusFailure) {
+			applyCanvasImageTaskBillingSnapshot(task, relayInfo)
+			task.Data = json.RawMessage(append([]byte(nil), body...))
+			task.Status = expectedStatus
+			chargedQuota := relayInfo.FinalPreConsumedQuota
+			if relayInfo.Billing == nil {
+				chargedQuota = task.Quota
+			}
+			if err := service.HandoffTaskBilling(nil, relayInfo, task, expectedStatus, chargedQuota); err != nil {
+				refundCanvasImageSubmit(relayInfo)
+				failCanvasImageTask(task, extractCanvasImageRelayError(body), body)
+				return
+			}
+			task.Status = model.TaskStatusFailure
+			task.Progress = "100%"
+			task.FinishTime = time.Now().Unix()
+			task.FailReason = extractCanvasImageRelayError(body)
+			if _, err := service.FinalizeTaskAccounting(context.Background(), task, expectedStatus, 0, task.FailReason); err != nil {
+				common.SysError(fmt.Sprintf("canvas terminal failure accounting failed: task_id=%s err=%v", task.TaskID, err))
+			}
+			return
+		}
 		if status != string(model.TaskStatusSuccess) {
 			reason := "upstream returned no image task id"
-			if status == string(model.TaskStatusFailure) {
-				reason = extractCanvasImageRelayError(body)
-			}
 			refundCanvasImageSubmit(relayInfo)
 			failCanvasImageTask(task, reason, body)
 			return
@@ -422,17 +450,37 @@ func finishCanvasImageTask(task *model.Task, channelID int, recorder *httptest.R
 	applyCanvasImageTaskBillingSnapshot(task, relayInfo)
 
 	if recorder.Code >= http.StatusOK && recorder.Code < http.StatusMultipleChoices && len(body) > 0 {
-		task.Status = model.TaskStatusSuccess
-		task.Data = json.RawMessage(append([]byte(nil), body...))
-		task.FailReason = ""
-		won, err := task.UpdateWithStatus(expectedStatus)
-		if err != nil {
-			common.SysError(fmt.Sprintf("failed to finish image task %s: %v", task.TaskID, err))
+		if relayInfo == nil {
+			failCanvasImageTask(task, "image relay billing context is missing", body)
 			return
 		}
-		if won {
-			settleCanvasImageSubmit(relayInfo, task.Quota)
-			recalculateCanvasImageTaskQuota(task, body, relayInfo)
+		task.Data = json.RawMessage(append([]byte(nil), body...))
+		task.FailReason = ""
+		task.Status = expectedStatus
+		chargedQuota := relayInfo.FinalPreConsumedQuota
+		if relayInfo.Billing == nil {
+			chargedQuota = task.Quota
+		}
+		if err := service.HandoffTaskBilling(nil, relayInfo, task, expectedStatus, chargedQuota); err != nil {
+			common.SysError(fmt.Sprintf("failed to hand off image task %s: %v", task.TaskID, err))
+			refundCanvasImageSubmit(relayInfo)
+			failCanvasImageTask(task, "failed to persist image task billing", body)
+			return
+		}
+		task.Status = model.TaskStatusSuccess
+		finalQuota, reason := chargedQuota, "预扣额度保持不变"
+		if relayInfo.TaskBillingActualQuota != nil {
+			finalQuota = *relayInfo.TaskBillingActualQuota
+			reason = "image response actual usage"
+		}
+		if relayInfo.TaskBillingActualQuota != nil {
+			finalQuota = *relayInfo.TaskBillingActualQuota
+		}
+		if actualQuota, actualReason, ok := calculateCanvasImageTaskQuota(task, body, relayInfo); ok {
+			finalQuota, reason = actualQuota, actualReason
+		}
+		if _, err := service.FinalizeTaskAccounting(context.Background(), task, expectedStatus, finalQuota, reason); err != nil {
+			common.SysError(fmt.Sprintf("failed to finish image task %s: %v", task.TaskID, err))
 		}
 		return
 	}
@@ -448,14 +496,6 @@ func refundCanvasImageSubmit(relayInfo *relaycommon.RelayInfo) {
 	relayInfo.Billing.Refund(c)
 }
 
-func settleCanvasImageSubmit(relayInfo *relaycommon.RelayInfo, quota int) {
-	if relayInfo != nil && relayInfo.Billing != nil {
-		if err := relayInfo.Billing.Settle(quota); err != nil {
-			common.SysError("failed to settle terminal canvas image task: " + err.Error())
-		}
-	}
-}
-
 func applyCanvasImageTaskBillingSnapshot(task *model.Task, relayInfo *relaycommon.RelayInfo) {
 	if task == nil || relayInfo == nil {
 		return
@@ -465,11 +505,13 @@ func applyCanvasImageTaskBillingSnapshot(task *model.Task, relayInfo *relaycommo
 	task.PrivateData.TokenId = relayInfo.TokenId
 	task.PrivateData.BillingContext = &model.TaskBillingContext{
 		ModelPrice:      relayInfo.PriceData.ModelPrice,
+		ModelPriceUnit:  relayInfo.PriceData.ModelPriceUnit,
 		GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
 		ModelRatio:      relayInfo.PriceData.ModelRatio,
 		OtherRatios:     relayInfo.PriceData.OtherRatios,
+		BillingMeta:     relayInfo.PriceData.BillingMeta,
 		OriginModelName: relayInfo.OriginModelName,
-		PerCallBilling:  relayInfo.PriceData.UsePrice || relayInfo.TieredBillingSnapshot != nil,
+		PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice || relayInfo.TieredBillingSnapshot != nil,
 	}
 	task.PrivateData.TieredBillingSnapshot = relayInfo.TieredBillingSnapshot
 	if relayInfo.PriceData.Quota > 0 {
@@ -486,9 +528,9 @@ func applyCanvasImageTaskBillingSnapshot(task *model.Task, relayInfo *relaycommo
 	}
 }
 
-func recalculateCanvasImageTaskQuota(task *model.Task, body []byte, relayInfo *relaycommon.RelayInfo) {
-	if task == nil || task.Quota <= 0 || task.PrivateData.TieredBillingSnapshot == nil || len(bytes.TrimSpace(body)) == 0 {
-		return
+func calculateCanvasImageTaskQuota(task *model.Task, body []byte, relayInfo *relaycommon.RelayInfo) (int, string, bool) {
+	if task == nil || task.PrivateData.TieredBillingSnapshot == nil || len(bytes.TrimSpace(body)) == 0 {
+		return 0, "", false
 	}
 	var originalInput *billingexpr.RequestInput
 	if relayInfo != nil {
@@ -496,21 +538,20 @@ func recalculateCanvasImageTaskQuota(task *model.Task, body []byte, relayInfo *r
 	}
 	actualInput, actual, ok := buildCanvasImageActualBillingInput(task.PrivateData.TieredBillingSnapshot, body, originalInput)
 	if !ok {
-		return
+		return 0, "", false
 	}
 	result, err := billingexpr.ComputeTieredQuotaWithRequest(task.PrivateData.TieredBillingSnapshot, billingexpr.TokenParams{
 		P:   float64(task.PrivateData.TieredBillingSnapshot.EstimatedPromptTokens),
 		C:   float64(task.PrivateData.TieredBillingSnapshot.EstimatedCompletionTokens),
 		Len: float64(task.PrivateData.TieredBillingSnapshot.EstimatedPromptTokens),
 	}, actualInput)
-	if err != nil || result.ActualQuotaAfterGroup <= 0 {
+	if err != nil || result.ActualQuotaAfterGroup < 0 {
 		common.SysError(fmt.Sprintf("canvas image task actual tiered billing failed: task_id=%s err=%v", task.TaskID, err))
-		return
+		return 0, "", false
 	}
 	reason := fmt.Sprintf("image实际结果重算：requested_tier=%s, actual_tier=%s, actual_size=%s, actual_quality=%s, n=%d",
 		task.PrivateData.TieredBillingSnapshot.EstimatedTier, result.MatchedTier, actual.Size, actual.Quality, actual.N)
-	service.RecalculateTaskQuota(context.Background(), task, result.ActualQuotaAfterGroup, reason)
-	_ = task.Update()
+	return result.ActualQuotaAfterGroup, reason, true
 }
 
 type canvasImageActualBillingMeta struct {
@@ -562,7 +603,7 @@ func buildCanvasImageActualBillingInput(snap *billingexpr.BillingSnapshot, body 
 	if actual.Quality != "" {
 		requestBody["quality"] = actual.Quality
 	}
-	bodyBytes, err := json.Marshal(requestBody)
+	bodyBytes, err := common.Marshal(requestBody)
 	if err != nil {
 		return billingexpr.RequestInput{}, canvasImageActualBillingMeta{}, false
 	}
@@ -578,6 +619,12 @@ func failCanvasImageTask(task *model.Task, reason string, body []byte) {
 	task.FailReason = reason
 	if len(body) > 0 {
 		task.Data = json.RawMessage(append([]byte(nil), body...))
+	}
+	if accounting, err := model.GetTaskAccounting(task.ID); err == nil && accounting.DecisionID == "" {
+		if _, finalizeErr := service.FinalizeTaskAccounting(context.Background(), task, expectedStatus, 0, reason); finalizeErr != nil {
+			common.SysError(fmt.Sprintf("failed to account image task failure %s: %v", task.TaskID, finalizeErr))
+		}
+		return
 	}
 	_, _ = task.UpdateWithStatus(expectedStatus)
 }

@@ -2,882 +2,453 @@ package service
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/schema"
 )
+
+var serviceTestSQLite *gorm.DB
+
+func TestMain(m *testing.M) {
+	db, err := gorm.Open(sqlite.Open("file:service-accounting?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		panic(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		panic(err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	if err := migrateTaskAccountingFixture(db); err != nil {
+		panic(err)
+	}
+	serviceTestSQLite = db
+	model.DB, model.LOG_DB = db, db
+	common.UsingSQLite, common.UsingMySQL, common.UsingPostgreSQL = true, false, false
+	common.RedisEnabled = false
+	common.BatchUpdateEnabled = false
+	common.LogConsumeEnabled = true
+	os.Exit(m.Run())
+}
+
+func migrateTaskAccountingFixture(db *gorm.DB) error {
+	return db.AutoMigrate(
+		&model.Task{}, &model.TaskAccounting{}, &model.TaskAccountingEvent{},
+		&model.TaskAccountingLogReceipt{}, &model.User{}, &model.Token{},
+		&model.Channel{}, &model.Log{}, &model.UserSubscription{},
+		&model.SubscriptionPreConsumeRecord{},
+	)
+}
+
+func resetTaskAccountingFixture(t *testing.T, db, logDB *gorm.DB) {
+	t.Helper()
+	for _, value := range []any{&model.TaskAccountingLogReceipt{}, &model.TaskAccountingEvent{}, &model.TaskAccounting{}, &model.Task{}, &model.Token{}, &model.Channel{}, &model.SubscriptionPreConsumeRecord{}, &model.UserSubscription{}, &model.User{}} {
+		require.NoError(t, db.Unscoped().Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(value).Error)
+	}
+	if logDB != db {
+		require.NoError(t, logDB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.TaskAccountingLogReceipt{}).Error)
+	}
+	require.NoError(t, logDB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.Log{}).Error)
+}
+
+func truncate(t *testing.T) {
+	resetTaskAccountingFixture(t, model.DB, model.LOG_DB)
+}
+
+func useTaskAccountingDB(t *testing.T, db, logDB *gorm.DB, dialect string) {
+	t.Helper()
+	oldDB, oldLogDB := model.DB, model.LOG_DB
+	oldSQLite, oldMySQL, oldPostgres := common.UsingSQLite, common.UsingMySQL, common.UsingPostgreSQL
+	model.DB, model.LOG_DB = db, logDB
+	common.UsingSQLite = dialect == "sqlite"
+	common.UsingMySQL = dialect == "mysql"
+	common.UsingPostgreSQL = dialect == "postgres"
+	t.Cleanup(func() {
+		model.DB, model.LOG_DB = oldDB, oldLogDB
+		common.UsingSQLite, common.UsingMySQL, common.UsingPostgreSQL = oldSQLite, oldMySQL, oldPostgres
+	})
+}
+
+func seedDurablyReservedWalletTask(t *testing.T, charged int) (*model.Task, *relaycommon.RelayInfo) {
+	t.Helper()
+	user := &model.User{Username: "acct-user", Quota: 10000 - charged, Status: common.UserStatusEnabled}
+	require.NoError(t, model.DB.Create(user).Error)
+	token := &model.Token{UserId: user.Id, Key: "acct-token-key", Name: "acct-token", Status: common.TokenStatusEnabled, RemainQuota: 10000 - charged, UsedQuota: charged}
+	require.NoError(t, model.DB.Create(token).Error)
+	channel := &model.Channel{Name: "acct-channel", Key: "provider-key", Status: common.ChannelStatusEnabled}
+	require.NoError(t, model.DB.Create(channel).Error)
+	info := &relaycommon.RelayInfo{
+		UserId: user.Id, TokenId: token.Id, TokenKey: token.Key, UsingGroup: "default",
+		OriginModelName: "async-model", RequestId: common.GetUUID(),
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: channel.Id},
+		PriceData:   types.PriceData{Quota: charged, ModelRatio: 1, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1}},
+	}
+	info.BillingSource = BillingSourceWallet
+	info.Billing = &BillingSession{
+		relayInfo: info, funding: &WalletFunding{userId: user.Id, consumed: charged},
+		preConsumedQuota: charged, tokenConsumed: charged,
+	}
+	task := model.InitTask("video", info)
+	task.Status = model.TaskStatusInProgress
+	task.Progress = "30%"
+	task.Action = "generate"
+	task.PrivateData.BillingContext = &model.TaskBillingContext{OriginModelName: info.OriginModelName, ModelRatio: 1, GroupRatio: 1}
+	return task, info
+}
+
+func handoffWalletTask(t *testing.T, charged int) (*model.Task, *relaycommon.RelayInfo) {
+	t.Helper()
+	task, info := seedDurablyReservedWalletTask(t, charged)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	c.Set("username", "acct-user")
+	c.Set("token_name", "acct-token")
+	require.NoError(t, HandoffTaskBilling(c, info, task, "", charged))
+	require.NotZero(t, task.ID)
+	return task, info
+}
+
+func TestTaskAccountingWalletLifecycleAndDuplicate(t *testing.T) {
+	useTaskAccountingDB(t, serviceTestSQLite, serviceTestSQLite, "sqlite")
+	resetTaskAccountingFixture(t, model.DB, model.LOG_DB)
+	task, _ := handoffWalletTask(t, 3000)
+
+	var afterHandoff model.User
+	require.NoError(t, model.DB.First(&afterHandoff, task.UserId).Error)
+	require.Equal(t, 7000, afterHandoff.Quota)
+	require.Equal(t, 3000, afterHandoff.UsedQuota)
+	require.Equal(t, 1, afterHandoff.RequestCount)
+	require.NoError(t, model.DB.Delete(&model.Token{}, task.PrivateData.TokenId).Error)
+
+	expected := task.Status
+	task.Status = model.TaskStatusFailure
+	task.Progress = "100%"
+	task.FailReason = "raw provider response must not enter billing event"
+	task.FinishTime = time.Now().Unix()
+	result, err := FinalizeTaskAccounting(context.Background(), task, expected, 0, task.FailReason)
+	require.NoError(t, err)
+	require.True(t, result.Applied)
+
+	var user model.User
+	require.NoError(t, model.DB.First(&user, task.UserId).Error)
+	require.Equal(t, 10000, user.Quota)
+	require.Zero(t, user.UsedQuota)
+	require.Equal(t, 1, user.RequestCount)
+	var token model.Token
+	require.NoError(t, model.DB.Unscoped().First(&token, task.PrivateData.TokenId).Error)
+	require.Equal(t, 10000, token.RemainQuota)
+	require.Zero(t, token.UsedQuota)
+	require.True(t, token.DeletedAt.Valid)
+	var channel model.Channel
+	require.NoError(t, model.DB.First(&channel, task.ChannelId).Error)
+	require.Zero(t, channel.UsedQuota)
+	require.Equal(t, model.TaskStatusFailure, task.Status)
+	require.Zero(t, task.Quota)
+
+	_, err = FinalizeTaskAccounting(context.Background(), task, expected, 0, "conflicting repeat")
+	require.NoError(t, err)
+	require.NoError(t, model.DB.First(&user, task.UserId).Error)
+	require.Equal(t, 10000, user.Quota)
+	require.Equal(t, 1, user.RequestCount)
+	var receipts int64
+	require.NoError(t, model.LOG_DB.Model(&model.TaskAccountingLogReceipt{}).Count(&receipts).Error)
+	require.EqualValues(t, 2, receipts)
+	var refund model.Log
+	require.NoError(t, model.LOG_DB.Where("type = ?", model.LogTypeRefund).First(&refund).Error)
+	require.Equal(t, "async task failed", refund.Content)
+	require.NotContains(t, refund.Other, "raw provider response")
+}
+
+func TestTaskAccountingDecisionRecoveryAndFirstDecisionWins(t *testing.T) {
+	useTaskAccountingDB(t, serviceTestSQLite, serviceTestSQLite, "sqlite")
+	resetTaskAccountingFixture(t, model.DB, model.LOG_DB)
+	task, _ := handoffWalletTask(t, 2400)
+	expected := task.Status
+	task.Status = model.TaskStatusSuccess
+	task.Progress = "100%"
+	task.FinishTime = time.Now().Unix()
+	accepted, err := model.AcceptTaskTerminalDecision(context.Background(), model.TaskTerminalDecision{
+		TaskRowID: task.ID, ExpectedStatus: expected, Status: task.Status, Progress: task.Progress,
+		FinishTime: task.FinishTime, Data: []byte(`{"result":"ok"}`), FinalQuota: 600, Reason: "frozen actual",
+	})
+	require.NoError(t, err)
+	require.True(t, accepted.Won)
+	var before model.Task
+	require.NoError(t, model.DB.First(&before, task.ID).Error)
+	require.Equal(t, expected, before.Status)
+	require.Equal(t, 2400, before.Quota)
+	stale := before
+	stale.Progress = "95%"
+	won, err := stale.UpdateWithStatus(expected)
+	require.NoError(t, err)
+	require.False(t, won)
+
+	loser, err := model.AcceptTaskTerminalDecision(context.Background(), model.TaskTerminalDecision{
+		TaskRowID: task.ID, ExpectedStatus: expected, Status: model.TaskStatusFailure,
+		Progress: "100%", FinalQuota: 0, Reason: "late timeout",
+	})
+	require.NoError(t, err)
+	require.False(t, loser.Won)
+	require.Equal(t, 600, loser.Accounting.DecisionQuota)
+
+	require.NoError(t, model.RecoverTaskAccounting(context.Background(), 100))
+	var after model.Task
+	require.NoError(t, model.DB.First(&after, task.ID).Error)
+	require.Equal(t, model.TaskStatusSuccess, after.Status)
+	require.Equal(t, 600, after.Quota)
+	var user model.User
+	require.NoError(t, model.DB.First(&user, task.UserId).Error)
+	require.Equal(t, 9400, user.Quota)
+	require.Equal(t, 600, user.UsedQuota)
+	require.Equal(t, 1, user.RequestCount)
+}
+
+func TestTaskAccountingApplyRollbackThenRecovery(t *testing.T) {
+	useTaskAccountingDB(t, serviceTestSQLite, serviceTestSQLite, "sqlite")
+	resetTaskAccountingFixture(t, model.DB, model.LOG_DB)
+	task, _ := handoffWalletTask(t, 1800)
+	expected := task.Status
+	task.Status, task.Progress = model.TaskStatusSuccess, "100%"
+	accepted, err := model.AcceptTaskTerminalDecision(context.Background(), model.TaskTerminalDecision{
+		TaskRowID: task.ID, ExpectedStatus: expected, Status: task.Status,
+		Progress: task.Progress, FinalQuota: 300, Reason: "partial actual",
+	})
+	require.NoError(t, err)
+	require.True(t, accepted.Won)
+	require.NoError(t, model.DB.Delete(&model.Channel{}, task.ChannelId).Error)
+	_, err = model.ApplyTaskAccountingDecision(context.Background(), task.ID)
+	require.Error(t, err)
+	var pending model.Task
+	require.NoError(t, model.DB.First(&pending, task.ID).Error)
+	require.Equal(t, expected, pending.Status)
+	require.Equal(t, 1800, pending.Quota)
+	var user model.User
+	require.NoError(t, model.DB.First(&user, task.UserId).Error)
+	require.Equal(t, 8200, user.Quota)
+	require.Equal(t, 1800, user.UsedQuota)
+
+	require.NoError(t, model.DB.Create(&model.Channel{Id: task.ChannelId, Name: "restored-channel", Key: "provider-key", Status: common.ChannelStatusEnabled, UsedQuota: 1800}).Error)
+	require.NoError(t, model.RecoverTaskAccounting(context.Background(), 100))
+	require.NoError(t, model.DB.First(&pending, task.ID).Error)
+	require.Equal(t, model.TaskStatusSuccess, pending.Status)
+	require.Equal(t, 300, pending.Quota)
+	require.NoError(t, model.DB.First(&user, task.UserId).Error)
+	require.Equal(t, 9700, user.Quota)
+	require.Equal(t, 300, user.UsedQuota)
+	require.Equal(t, 1, user.RequestCount)
+}
+
+func TestTaskAccountingSeparateLogDBRecoversDelivery(t *testing.T) {
+	logDB, err := gorm.Open(sqlite.Open("file:accounting-log-recovery?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	useTaskAccountingDB(t, serviceTestSQLite, logDB, "sqlite")
+	resetTaskAccountingFixture(t, model.DB, serviceTestSQLite)
+	// LOG_DB intentionally has no tables for the first delivery attempt.
+	task, _ := handoffWalletTask(t, 900)
+	expected := task.Status
+	task.Status, task.Progress = model.TaskStatusFailure, "100%"
+	_, err = FinalizeTaskAccounting(context.Background(), task, expected, 0, "provider diagnostic")
+	require.NoError(t, err)
+	var pending int64
+	require.NoError(t, model.DB.Model(&model.TaskAccountingEvent{}).Where("delivered = ?", false).Count(&pending).Error)
+	require.EqualValues(t, 2, pending)
+	require.NoError(t, logDB.AutoMigrate(&model.Log{}, &model.TaskAccountingLogReceipt{}))
+	require.NoError(t, model.RecoverTaskAccounting(context.Background(), 100))
+	var logs, receipts int64
+	require.NoError(t, logDB.Model(&model.Log{}).Count(&logs).Error)
+	require.NoError(t, logDB.Model(&model.TaskAccountingLogReceipt{}).Count(&receipts).Error)
+	require.EqualValues(t, 2, logs)
+	require.EqualValues(t, 2, receipts)
+	require.NoError(t, model.RecoverTaskAccounting(context.Background(), 100))
+	require.NoError(t, logDB.Model(&model.Log{}).Count(&logs).Error)
+	require.EqualValues(t, 2, logs)
+}
+
+func TestTaskAccountingSubscriptionWithoutToken(t *testing.T) {
+	useTaskAccountingDB(t, serviceTestSQLite, serviceTestSQLite, "sqlite")
+	resetTaskAccountingFixture(t, model.DB, model.LOG_DB)
+	user := &model.User{Username: "subscription-user", Quota: 5000, Status: common.UserStatusEnabled}
+	require.NoError(t, model.DB.Create(user).Error)
+	channel := &model.Channel{Name: "subscription-channel", Key: "provider-key", Status: common.ChannelStatusEnabled}
+	require.NoError(t, model.DB.Create(channel).Error)
+	subscription := &model.UserSubscription{UserId: user.Id, AmountTotal: 10000, AmountUsed: 1000, Status: "active", StartTime: time.Now().Add(-time.Hour).Unix(), EndTime: time.Now().Add(time.Hour).Unix()}
+	require.NoError(t, model.DB.Create(subscription).Error)
+	task := &model.Task{TaskID: model.GenerateTaskID(), UserId: user.Id, ChannelId: channel.Id, Group: "default", Status: model.TaskStatusInProgress, Progress: "30%",
+		PrivateData: model.TaskPrivateData{BillingSource: BillingSourceSubscription, SubscriptionId: subscription.Id}}
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		_, err := model.PersistAsyncTaskHandoffTx(tx, model.AsyncTaskHandoffRequest{Task: task, ChargedQuota: 1000,
+			InitialLog: model.TaskAccountingLogFacts{UserID: user.Id, ChannelID: channel.Id, ModelName: "subscription-model", Group: "default", Other: map[string]any{"is_task": true}}})
+		return err
+	})
+	require.NoError(t, err)
+	expected := task.Status
+	task.Status, task.Progress = model.TaskStatusSuccess, "100%"
+	_, err = FinalizeTaskAccounting(context.Background(), task, expected, 0, "explicit zero actual")
+	require.NoError(t, err)
+	require.NoError(t, model.DB.First(subscription, subscription.Id).Error)
+	require.Zero(t, subscription.AmountUsed)
+	require.NoError(t, model.DB.First(user, user.Id).Error)
+	require.Equal(t, 5000, user.Quota)
+	require.Zero(t, user.UsedQuota)
+	require.Equal(t, 1, user.RequestCount)
+	require.Zero(t, task.PrivateData.TokenId)
+}
+
+type accountingQuotaAdaptor struct{ quota int }
+
+func (*accountingQuotaAdaptor) Init(*relaycommon.RelayInfo) {}
+func (*accountingQuotaAdaptor) FetchTask(string, string, map[string]any, string) (*http.Response, error) {
+	return nil, nil
+}
+func (*accountingQuotaAdaptor) ParseTaskResult([]byte) (*relaycommon.TaskInfo, error) {
+	return nil, nil
+}
+func (a *accountingQuotaAdaptor) AdjustBillingOnComplete(*model.Task, *relaycommon.TaskInfo) int {
+	return a.quota
+}
+
+type terminalPollingAdaptor struct {
+	result *relaycommon.TaskInfo
+	quota  int
+}
+
+func (*terminalPollingAdaptor) Init(*relaycommon.RelayInfo) {}
+func (*terminalPollingAdaptor) FetchTask(string, string, map[string]any, string) (*http.Response, error) {
+	return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+}
+func (a *terminalPollingAdaptor) ParseTaskResult([]byte) (*relaycommon.TaskInfo, error) {
+	return a.result, nil
+}
+func (a *terminalPollingAdaptor) AdjustBillingOnComplete(*model.Task, *relaycommon.TaskInfo) int {
+	return a.quota
+}
+
+func TestGenericPollerUsesDurableTerminalAccounting(t *testing.T) {
+	useTaskAccountingDB(t, serviceTestSQLite, serviceTestSQLite, "sqlite")
+	resetTaskAccountingFixture(t, model.DB, model.LOG_DB)
+	task, _ := handoffWalletTask(t, 1200)
+	var channel model.Channel
+	require.NoError(t, model.DB.First(&channel, task.ChannelId).Error)
+	upstreamID := task.GetUpstreamTaskID()
+	adaptor := &terminalPollingAdaptor{result: &relaycommon.TaskInfo{TaskID: upstreamID, Status: string(model.TaskStatusSuccess), Progress: "100%", Url: "https://example.invalid/result"}, quota: 300}
+	err := updateVideoSingleTask(context.Background(), adaptor, &channel, upstreamID, map[string]*model.Task{taskPollingKey(channel.Id, upstreamID): task})
+	require.NoError(t, err)
+	var persisted model.Task
+	require.NoError(t, model.DB.First(&persisted, task.ID).Error)
+	require.Equal(t, model.TaskStatusSuccess, persisted.Status)
+	require.Equal(t, 300, persisted.Quota)
+	var user model.User
+	require.NoError(t, model.DB.First(&user, task.UserId).Error)
+	require.Equal(t, 9700, user.Quota)
+	require.Equal(t, 300, user.UsedQuota)
+	require.Equal(t, 1, user.RequestCount)
+}
+
+func TestTimeoutSweepUsesDurableTerminalAccounting(t *testing.T) {
+	useTaskAccountingDB(t, serviceTestSQLite, serviceTestSQLite, "sqlite")
+	resetTaskAccountingFixture(t, model.DB, model.LOG_DB)
+	task, _ := handoffWalletTask(t, 750)
+	task.SubmitTime = time.Now().Add(-time.Hour).Unix()
+	won, err := task.UpdateWithStatus(task.Status)
+	require.NoError(t, err)
+	require.True(t, won)
+	sweepTimedOutTaskBatch(context.Background(), []*model.Task{task}, "task timed out")
+	var persisted model.Task
+	require.NoError(t, model.DB.First(&persisted, task.ID).Error)
+	require.Equal(t, model.TaskStatusFailure, persisted.Status)
+	require.Zero(t, persisted.Quota)
+	var user model.User
+	require.NoError(t, model.DB.First(&user, task.UserId).Error)
+	require.Equal(t, 10000, user.Quota)
+	require.Zero(t, user.UsedQuota)
+	require.Equal(t, 1, user.RequestCount)
+}
+
+func TestResolveTerminalTaskQuotaUsesFrozenContext(t *testing.T) {
+	task := &model.Task{Quota: 4000, PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
+		ModelRatio: 2, GroupRatio: 1.5, OtherRatios: map[string]float64{"duration": 2},
+	}}}
+	quota, _, ok := CalculateTaskQuotaByTokens(task, 100)
+	require.True(t, ok)
+	require.Equal(t, common.QuotaFromFloat(600), quota)
+	resolved, reason := ResolveTerminalTaskQuota(&accountingQuotaAdaptor{}, task, &relaycommon.TaskInfo{TotalTokens: 100})
+	require.Equal(t, quota, resolved)
+	require.Contains(t, reason, "modelRatio=2.00")
+	resolved, _ = ResolveTerminalTaskQuota(&accountingQuotaAdaptor{quota: 0}, task, &relaycommon.TaskInfo{})
+	require.Equal(t, task.Quota, resolved)
+}
 
 func TestBuildTaskConsumptionLogContentShowsEffectiveVariantPrice(t *testing.T) {
 	quota, err := common.QuotaFromFloatStrict(0.7 * common.QuotaPerUnit)
 	require.NoError(t, err)
-	info := &relaycommon.RelayInfo{
-		TaskRelayInfo:   &relaycommon.TaskRelayInfo{Action: "textGenerate"},
-		OriginModelName: "grok-imagine-video",
-		PriceData: types.PriceData{
-			UsePrice:       true,
-			ModelPrice:     0.07,
-			ModelPriceUnit: types.ModelPriceUnitSecond,
-			Quota:          quota,
-			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
-			OtherRatios:    map[string]float64{"seconds": 10},
-			BillingMeta: map[string]string{
-				"resolution":           "720p",
-				"variant_price_status": "matched",
-			},
-		},
-	}
+	info := &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{Action: "textGenerate"}, OriginModelName: "grok-imagine-video",
+		PriceData: types.PriceData{UsePrice: true, ModelPrice: 0.07, ModelPriceUnit: types.ModelPriceUnitSecond,
+			Quota: quota, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1}, OtherRatios: map[string]float64{"seconds": 10},
+			BillingMeta: map[string]string{"resolution": "720p", "variant_price_status": "matched"}}}
 	content := buildTaskConsumptionLogContent(info)
-	for _, want := range []string{
-		"按秒计费",
-		"计费分辨率 720p",
-		"档位单价 $0.070000 / 秒",
-		"时长 10 秒",
-		"分组倍率 1",
-		"合计 $0.700000",
-	} {
-		if !strings.Contains(content, want) {
-			t.Fatalf("log content %q does not contain %q", content, want)
-		}
+	for _, want := range []string{"按秒计费", "计费分辨率 720p", "档位单价 $0.070000 / 秒", "时长 10 秒", "分组倍率 1", "合计 $0.700000"} {
+		require.Contains(t, content, want)
 	}
-	if strings.Contains(content, "resolution: 1.40") {
-		t.Fatalf("log content still exposes legacy ratio: %q", content)
+	require.False(t, strings.Contains(content, "resolution: 1.40"))
+}
+
+func TestAsyncTaskAccountingExternalDatabases(t *testing.T) {
+	fixtures := []struct {
+		name, dsn string
+		dialector gorm.Dialector
+	}{}
+	if dsn := os.Getenv("NEW_API_TEST_POSTGRES_DSN"); dsn != "" {
+		fixtures = append(fixtures, struct {
+			name, dsn string
+			dialector gorm.Dialector
+		}{"postgres", dsn, postgres.Open(dsn)})
 	}
-}
-
-func TestMain(m *testing.M) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		panic("failed to open test db: " + err.Error())
+	if dsn := os.Getenv("NEW_API_TEST_MYSQL_DSN"); dsn != "" {
+		fixtures = append(fixtures, struct {
+			name, dsn string
+			dialector gorm.Dialector
+		}{"mysql", dsn, mysql.Open(dsn)})
 	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		panic("failed to get sql.DB: " + err.Error())
+	for _, fixture := range fixtures {
+		fixture := fixture
+		t.Run(fixture.name, func(t *testing.T) {
+			naming := schema.NamingStrategy{TablePrefix: "async_acct_"}
+			db, err := gorm.Open(fixture.dialector, &gorm.Config{NamingStrategy: naming})
+			require.NoError(t, err)
+			require.NoError(t, migrateTaskAccountingFixture(db))
+			logDB, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s-log?mode=memory&cache=shared", fixture.name)), &gorm.Config{NamingStrategy: naming})
+			require.NoError(t, err)
+			require.NoError(t, logDB.AutoMigrate(&model.Log{}, &model.TaskAccountingLogReceipt{}))
+			useTaskAccountingDB(t, db, logDB, fixture.name)
+			resetTaskAccountingFixture(t, db, logDB)
+			task, _ := handoffWalletTask(t, 1000)
+			expected := task.Status
+			task.Status, task.Progress = model.TaskStatusSuccess, "100%"
+			_, err = FinalizeTaskAccounting(context.Background(), task, expected, 250, "external fixture partial refund")
+			require.NoError(t, err)
+			var user model.User
+			require.NoError(t, db.First(&user, task.UserId).Error)
+			require.Equal(t, 9750, user.Quota)
+			require.Equal(t, 250, user.UsedQuota)
+			require.Equal(t, 1, user.RequestCount)
+		})
 	}
-	sqlDB.SetMaxOpenConns(1)
-
-	model.DB = db
-	model.LOG_DB = db
-
-	common.UsingSQLite = true
-	common.RedisEnabled = false
-	common.BatchUpdateEnabled = false
-	common.LogConsumeEnabled = true
-
-	if err := db.AutoMigrate(
-		&model.Task{},
-		&model.User{},
-		&model.Token{},
-		&model.Log{},
-		&model.Channel{},
-		&model.TopUp{},
-		&model.UserSubscription{},
-	); err != nil {
-		panic("failed to migrate: " + err.Error())
-	}
-
-	os.Exit(m.Run())
-}
-
-// ---------------------------------------------------------------------------
-// Seed helpers
-// ---------------------------------------------------------------------------
-
-func truncate(t *testing.T) {
-	t.Helper()
-	t.Cleanup(func() {
-		model.DB.Exec("DELETE FROM tasks")
-		model.DB.Exec("DELETE FROM users")
-		model.DB.Exec("DELETE FROM tokens")
-		model.DB.Exec("DELETE FROM logs")
-		model.DB.Exec("DELETE FROM channels")
-		model.DB.Exec("DELETE FROM top_ups")
-		model.DB.Exec("DELETE FROM user_subscriptions")
-	})
-}
-
-func TestSweepTimedOutTaskBatchMarksImageTaskFailed(t *testing.T) {
-	truncate(t)
-	task := &model.Task{
-		TaskID:     "task_stale_image",
-		Platform:   constant.TaskPlatformImage,
-		Status:     model.TaskStatusInProgress,
-		Progress:   "10%",
-		SubmitTime: time.Now().Add(-time.Hour).Unix(),
-	}
-	require.NoError(t, task.Insert())
-
-	sweepTimedOutTaskBatch(context.Background(), []*model.Task{task}, "图片生成任务超时（30分钟）")
-
-	var reloaded model.Task
-	require.NoError(t, model.DB.First(&reloaded, task.ID).Error)
-	require.Equal(t, model.TaskStatus(model.TaskStatusFailure), reloaded.Status)
-	require.Equal(t, "100%", reloaded.Progress)
-	require.Equal(t, "图片生成任务超时（30分钟）", reloaded.FailReason)
-	require.NotZero(t, reloaded.FinishTime)
-}
-
-func seedUser(t *testing.T, id int, quota int) {
-	t.Helper()
-	user := &model.User{Id: id, Username: "test_user", Quota: quota, Status: common.UserStatusEnabled}
-	require.NoError(t, model.DB.Create(user).Error)
-}
-
-func seedToken(t *testing.T, id int, userId int, key string, remainQuota int) {
-	t.Helper()
-	token := &model.Token{
-		Id:          id,
-		UserId:      userId,
-		Key:         key,
-		Name:        "test_token",
-		Status:      common.TokenStatusEnabled,
-		RemainQuota: remainQuota,
-		UsedQuota:   0,
-	}
-	require.NoError(t, model.DB.Create(token).Error)
-}
-
-func seedSubscription(t *testing.T, id int, userId int, amountTotal int64, amountUsed int64) {
-	t.Helper()
-	sub := &model.UserSubscription{
-		Id:          id,
-		UserId:      userId,
-		AmountTotal: amountTotal,
-		AmountUsed:  amountUsed,
-		Status:      "active",
-		StartTime:   time.Now().Unix(),
-		EndTime:     time.Now().Add(30 * 24 * time.Hour).Unix(),
-	}
-	require.NoError(t, model.DB.Create(sub).Error)
-}
-
-func seedChannel(t *testing.T, id int) {
-	t.Helper()
-	ch := &model.Channel{Id: id, Name: "test_channel", Key: "sk-test", Status: common.ChannelStatusEnabled}
-	require.NoError(t, model.DB.Create(ch).Error)
-}
-
-func makeTask(userId, channelId, quota, tokenId int, billingSource string, subscriptionId int) *model.Task {
-	return &model.Task{
-		TaskID:    "task_" + time.Now().Format("150405.000"),
-		UserId:    userId,
-		ChannelId: channelId,
-		Quota:     quota,
-		Status:    model.TaskStatus(model.TaskStatusInProgress),
-		Group:     "default",
-		Data:      json.RawMessage(`{}`),
-		CreatedAt: time.Now().Unix(),
-		UpdatedAt: time.Now().Unix(),
-		Properties: model.Properties{
-			OriginModelName: "test-model",
-		},
-		PrivateData: model.TaskPrivateData{
-			BillingSource:  billingSource,
-			SubscriptionId: subscriptionId,
-			TokenId:        tokenId,
-			BillingContext: &model.TaskBillingContext{
-				ModelPrice:      0.02,
-				GroupRatio:      1.0,
-				OriginModelName: "test-model",
-			},
-		},
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Read-back helpers
-// ---------------------------------------------------------------------------
-
-func getUserQuota(t *testing.T, id int) int {
-	t.Helper()
-	var user model.User
-	require.NoError(t, model.DB.Select("quota").Where("id = ?", id).First(&user).Error)
-	return user.Quota
-}
-
-func getTokenRemainQuota(t *testing.T, id int) int {
-	t.Helper()
-	var token model.Token
-	require.NoError(t, model.DB.Select("remain_quota").Where("id = ?", id).First(&token).Error)
-	return token.RemainQuota
-}
-
-func getTokenUsedQuota(t *testing.T, id int) int {
-	t.Helper()
-	var token model.Token
-	require.NoError(t, model.DB.Select("used_quota").Where("id = ?", id).First(&token).Error)
-	return token.UsedQuota
-}
-
-func getSubscriptionUsed(t *testing.T, id int) int64 {
-	t.Helper()
-	var sub model.UserSubscription
-	require.NoError(t, model.DB.Select("amount_used").Where("id = ?", id).First(&sub).Error)
-	return sub.AmountUsed
-}
-
-func getLastLog(t *testing.T) *model.Log {
-	t.Helper()
-	var log model.Log
-	err := model.LOG_DB.Order("id desc").First(&log).Error
-	if err != nil {
-		return nil
-	}
-	return &log
-}
-
-func countLogs(t *testing.T) int64 {
-	t.Helper()
-	var count int64
-	model.LOG_DB.Model(&model.Log{}).Count(&count)
-	return count
-}
-
-// ===========================================================================
-// RefundTaskQuota tests
-// ===========================================================================
-
-func TestRefundTaskQuota_Wallet(t *testing.T) {
-	truncate(t)
-	ctx := context.Background()
-
-	const userID, tokenID, channelID = 1, 1, 1
-	const initQuota, preConsumed = 10000, 3000
-	const tokenRemain = 5000
-
-	seedUser(t, userID, initQuota)
-	seedToken(t, tokenID, userID, "sk-test-key", tokenRemain)
-	seedChannel(t, channelID)
-
-	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
-
-	RefundTaskQuota(ctx, task, "task failed: upstream error")
-
-	// User quota should increase by preConsumed
-	assert.Equal(t, initQuota+preConsumed, getUserQuota(t, userID))
-
-	// Token remain_quota should increase, used_quota should decrease
-	assert.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
-	assert.Equal(t, -preConsumed, getTokenUsedQuota(t, tokenID))
-
-	// A refund log should be created
-	log := getLastLog(t)
-	require.NotNil(t, log)
-	assert.Equal(t, model.LogTypeRefund, log.Type)
-	assert.Equal(t, preConsumed, log.Quota)
-	assert.Equal(t, "test-model", log.ModelName)
-}
-
-func TestRefundTaskQuota_Subscription(t *testing.T) {
-	truncate(t)
-	ctx := context.Background()
-
-	const userID, tokenID, channelID, subID = 2, 2, 2, 1
-	const preConsumed = 2000
-	const subTotal, subUsed int64 = 100000, 50000
-	const tokenRemain = 8000
-
-	seedUser(t, userID, 0)
-	seedToken(t, tokenID, userID, "sk-sub-key", tokenRemain)
-	seedChannel(t, channelID)
-	seedSubscription(t, subID, userID, subTotal, subUsed)
-
-	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceSubscription, subID)
-
-	RefundTaskQuota(ctx, task, "subscription task failed")
-
-	// Subscription used should decrease by preConsumed
-	assert.Equal(t, subUsed-int64(preConsumed), getSubscriptionUsed(t, subID))
-
-	// Token should also be refunded
-	assert.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
-
-	log := getLastLog(t)
-	require.NotNil(t, log)
-	assert.Equal(t, model.LogTypeRefund, log.Type)
-}
-
-func TestRefundTaskQuota_ZeroQuota(t *testing.T) {
-	truncate(t)
-	ctx := context.Background()
-
-	const userID = 3
-	seedUser(t, userID, 5000)
-
-	task := makeTask(userID, 0, 0, 0, BillingSourceWallet, 0)
-
-	RefundTaskQuota(ctx, task, "zero quota task")
-
-	// No change to user quota
-	assert.Equal(t, 5000, getUserQuota(t, userID))
-
-	// No log created
-	assert.Equal(t, int64(0), countLogs(t))
-}
-
-func TestRefundTaskQuota_NoToken(t *testing.T) {
-	truncate(t)
-	ctx := context.Background()
-
-	const userID, channelID = 4, 4
-	const initQuota, preConsumed = 10000, 1500
-
-	seedUser(t, userID, initQuota)
-	seedChannel(t, channelID)
-
-	task := makeTask(userID, channelID, preConsumed, 0, BillingSourceWallet, 0) // TokenId=0
-
-	RefundTaskQuota(ctx, task, "no token task failed")
-
-	// User quota refunded
-	assert.Equal(t, initQuota+preConsumed, getUserQuota(t, userID))
-
-	// Log created
-	log := getLastLog(t)
-	require.NotNil(t, log)
-	assert.Equal(t, model.LogTypeRefund, log.Type)
-}
-
-// ===========================================================================
-// RecalculateTaskQuota tests
-// ===========================================================================
-
-func TestRecalculate_PositiveDelta(t *testing.T) {
-	truncate(t)
-	ctx := context.Background()
-
-	const userID, tokenID, channelID = 10, 10, 10
-	const initQuota, preConsumed = 10000, 2000
-	const actualQuota = 3000 // under-charged by 1000
-	const tokenRemain = 5000
-
-	seedUser(t, userID, initQuota)
-	seedToken(t, tokenID, userID, "sk-recalc-pos", tokenRemain)
-	seedChannel(t, channelID)
-
-	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
-
-	RecalculateTaskQuota(ctx, task, actualQuota, "adaptor adjustment")
-
-	// User quota should decrease by the delta (1000 additional charge)
-	assert.Equal(t, initQuota-(actualQuota-preConsumed), getUserQuota(t, userID))
-
-	// Token should also be charged the delta
-	assert.Equal(t, tokenRemain-(actualQuota-preConsumed), getTokenRemainQuota(t, tokenID))
-
-	// task.Quota should be updated to actualQuota
-	assert.Equal(t, actualQuota, task.Quota)
-
-	// Log type should be Consume (additional charge)
-	log := getLastLog(t)
-	require.NotNil(t, log)
-	assert.Equal(t, model.LogTypeConsume, log.Type)
-	assert.Equal(t, actualQuota-preConsumed, log.Quota)
-}
-
-func TestRecalculate_NegativeDelta(t *testing.T) {
-	truncate(t)
-	ctx := context.Background()
-
-	const userID, tokenID, channelID = 11, 11, 11
-	const initQuota, preConsumed = 10000, 5000
-	const actualQuota = 3000 // over-charged by 2000
-	const tokenRemain = 5000
-
-	seedUser(t, userID, initQuota)
-	seedToken(t, tokenID, userID, "sk-recalc-neg", tokenRemain)
-	seedChannel(t, channelID)
-
-	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
-
-	RecalculateTaskQuota(ctx, task, actualQuota, "adaptor adjustment")
-
-	// User quota should increase by abs(delta) = 2000 (refund overpayment)
-	assert.Equal(t, initQuota+(preConsumed-actualQuota), getUserQuota(t, userID))
-
-	// Token should be refunded the difference
-	assert.Equal(t, tokenRemain+(preConsumed-actualQuota), getTokenRemainQuota(t, tokenID))
-
-	// task.Quota updated
-	assert.Equal(t, actualQuota, task.Quota)
-
-	// Log type should be Refund
-	log := getLastLog(t)
-	require.NotNil(t, log)
-	assert.Equal(t, model.LogTypeRefund, log.Type)
-	assert.Equal(t, preConsumed-actualQuota, log.Quota)
-}
-
-func TestRecalculate_ZeroDelta(t *testing.T) {
-	truncate(t)
-	ctx := context.Background()
-
-	const userID = 12
-	const initQuota, preConsumed = 10000, 3000
-
-	seedUser(t, userID, initQuota)
-
-	task := makeTask(userID, 0, preConsumed, 0, BillingSourceWallet, 0)
-
-	RecalculateTaskQuota(ctx, task, preConsumed, "exact match")
-
-	// No change to user quota
-	assert.Equal(t, initQuota, getUserQuota(t, userID))
-
-	// No log created (delta is zero)
-	assert.Equal(t, int64(0), countLogs(t))
-}
-
-func TestRecalculate_ActualQuotaZero(t *testing.T) {
-	truncate(t)
-	ctx := context.Background()
-
-	const userID = 13
-	const initQuota = 10000
-
-	seedUser(t, userID, initQuota)
-
-	task := makeTask(userID, 0, 5000, 0, BillingSourceWallet, 0)
-
-	RecalculateTaskQuota(ctx, task, 0, "zero actual")
-
-	// No change (early return)
-	assert.Equal(t, initQuota, getUserQuota(t, userID))
-	assert.Equal(t, int64(0), countLogs(t))
-}
-
-func TestRecalculatePersistsQuotaAndBillingContext(t *testing.T) {
-	truncate(t)
-	ctx := context.Background()
-
-	const userID, channelID = 15, 15
-	const preConsumed, actualQuota = 5000, 3000
-	seedUser(t, userID, 10000)
-	seedChannel(t, channelID)
-
-	task := makeTask(userID, channelID, preConsumed, 0, BillingSourceWallet, 0)
-	task.PrivateData.BillingContext.OtherRatios = map[string]float64{"seconds": 8}
-	task.PrivateData.BillingContext.BillingMeta = map[string]string{
-		"resolution":           "720p",
-		"variant_price_status": "matched",
-	}
-	require.NoError(t, model.DB.Create(task).Error)
-
-	// 模拟适配器在终态响应中拿到实际时长后更新计费快照。
-	task.PrivateData.BillingContext.OtherRatios["seconds"] = 10
-	RecalculateTaskQuota(ctx, task, actualQuota, "actual duration")
-
-	var reloaded model.Task
-	require.NoError(t, model.DB.First(&reloaded, task.ID).Error)
-	assert.Equal(t, actualQuota, reloaded.Quota)
-	require.NotNil(t, reloaded.PrivateData.BillingContext)
-	assert.Equal(t, float64(10), reloaded.PrivateData.BillingContext.OtherRatios["seconds"])
-	assert.Equal(t, "720p", reloaded.PrivateData.BillingContext.BillingMeta["resolution"])
-	assert.Equal(t, "matched", reloaded.PrivateData.BillingContext.BillingMeta["variant_price_status"])
-}
-
-func TestRecalculate_Subscription_NegativeDelta(t *testing.T) {
-	truncate(t)
-	ctx := context.Background()
-
-	const userID, tokenID, channelID, subID = 14, 14, 14, 2
-	const preConsumed = 5000
-	const actualQuota = 2000 // over-charged by 3000
-	const subTotal, subUsed int64 = 100000, 50000
-	const tokenRemain = 8000
-
-	seedUser(t, userID, 0)
-	seedToken(t, tokenID, userID, "sk-sub-recalc", tokenRemain)
-	seedChannel(t, channelID)
-	seedSubscription(t, subID, userID, subTotal, subUsed)
-
-	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceSubscription, subID)
-
-	RecalculateTaskQuota(ctx, task, actualQuota, "subscription over-charge")
-
-	// Subscription used should decrease by delta (refund 3000)
-	assert.Equal(t, subUsed-int64(preConsumed-actualQuota), getSubscriptionUsed(t, subID))
-
-	// Token refunded
-	assert.Equal(t, tokenRemain+(preConsumed-actualQuota), getTokenRemainQuota(t, tokenID))
-
-	assert.Equal(t, actualQuota, task.Quota)
-
-	log := getLastLog(t)
-	require.NotNil(t, log)
-	assert.Equal(t, model.LogTypeRefund, log.Type)
-}
-
-// ===========================================================================
-// CAS + Billing integration tests
-// Simulates the flow in updateVideoSingleTask (service/task_polling.go)
-// ===========================================================================
-
-// simulatePollBilling reproduces the CAS + billing logic from updateVideoSingleTask.
-// It takes a persisted task (already in DB), applies the new status, and performs
-// the conditional update + billing exactly as the polling loop does.
-func simulatePollBilling(ctx context.Context, task *model.Task, newStatus model.TaskStatus, actualQuota int) {
-	snap := task.Snapshot()
-
-	shouldRefund := false
-	shouldSettle := false
-	quota := task.Quota
-
-	task.Status = newStatus
-	switch string(newStatus) {
-	case model.TaskStatusSuccess:
-		task.Progress = "100%"
-		task.FinishTime = 9999
-		shouldSettle = true
-	case model.TaskStatusFailure:
-		task.Progress = "100%"
-		task.FinishTime = 9999
-		task.FailReason = "upstream error"
-		if quota != 0 {
-			shouldRefund = true
-		}
-	default:
-		task.Progress = "50%"
-	}
-
-	isDone := task.Status == model.TaskStatus(model.TaskStatusSuccess) || task.Status == model.TaskStatus(model.TaskStatusFailure)
-	if isDone && snap.Status != task.Status {
-		won, err := task.UpdateWithStatus(snap.Status)
-		if err != nil {
-			shouldRefund = false
-			shouldSettle = false
-		} else if !won {
-			shouldRefund = false
-			shouldSettle = false
-		}
-	} else if !snap.Equal(task.Snapshot()) {
-		_, _ = task.UpdateWithStatus(snap.Status)
-	}
-
-	if shouldSettle && actualQuota > 0 {
-		RecalculateTaskQuota(ctx, task, actualQuota, "test settle")
-	}
-	if shouldRefund {
-		RefundTaskQuota(ctx, task, task.FailReason)
-	}
-}
-
-func TestCASGuardedRefund_Win(t *testing.T) {
-	truncate(t)
-	ctx := context.Background()
-
-	const userID, tokenID, channelID = 20, 20, 20
-	const initQuota, preConsumed = 10000, 4000
-	const tokenRemain = 6000
-
-	seedUser(t, userID, initQuota)
-	seedToken(t, tokenID, userID, "sk-cas-refund-win", tokenRemain)
-	seedChannel(t, channelID)
-
-	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
-	task.Status = model.TaskStatus(model.TaskStatusInProgress)
-	require.NoError(t, model.DB.Create(task).Error)
-
-	simulatePollBilling(ctx, task, model.TaskStatus(model.TaskStatusFailure), 0)
-
-	// CAS wins: task in DB should now be FAILURE
-	var reloaded model.Task
-	require.NoError(t, model.DB.First(&reloaded, task.ID).Error)
-	assert.EqualValues(t, model.TaskStatusFailure, reloaded.Status)
-
-	// Refund should have happened
-	assert.Equal(t, initQuota+preConsumed, getUserQuota(t, userID))
-	assert.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
-
-	log := getLastLog(t)
-	require.NotNil(t, log)
-	assert.Equal(t, model.LogTypeRefund, log.Type)
-}
-
-func TestCASGuardedRefund_Lose(t *testing.T) {
-	truncate(t)
-	ctx := context.Background()
-
-	const userID, tokenID, channelID = 21, 21, 21
-	const initQuota, preConsumed = 10000, 4000
-	const tokenRemain = 6000
-
-	seedUser(t, userID, initQuota)
-	seedToken(t, tokenID, userID, "sk-cas-refund-lose", tokenRemain)
-	seedChannel(t, channelID)
-
-	// Create task with IN_PROGRESS in DB
-	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
-	task.Status = model.TaskStatus(model.TaskStatusInProgress)
-	require.NoError(t, model.DB.Create(task).Error)
-
-	// Simulate another process already transitioning to FAILURE
-	model.DB.Model(&model.Task{}).Where("id = ?", task.ID).Update("status", model.TaskStatusFailure)
-
-	// Our process still has the old in-memory state (IN_PROGRESS) and tries to transition
-	// task.Status is still IN_PROGRESS in the snapshot
-	simulatePollBilling(ctx, task, model.TaskStatus(model.TaskStatusFailure), 0)
-
-	// CAS lost: user quota should NOT change (no double refund)
-	assert.Equal(t, initQuota, getUserQuota(t, userID))
-	assert.Equal(t, tokenRemain, getTokenRemainQuota(t, tokenID))
-
-	// No billing log should be created
-	assert.Equal(t, int64(0), countLogs(t))
-}
-
-func TestCASGuardedSettle_Win(t *testing.T) {
-	truncate(t)
-	ctx := context.Background()
-
-	const userID, tokenID, channelID = 22, 22, 22
-	const initQuota, preConsumed = 10000, 5000
-	const actualQuota = 3000 // over-charged, should get partial refund
-	const tokenRemain = 8000
-
-	seedUser(t, userID, initQuota)
-	seedToken(t, tokenID, userID, "sk-cas-settle-win", tokenRemain)
-	seedChannel(t, channelID)
-
-	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
-	task.Status = model.TaskStatus(model.TaskStatusInProgress)
-	require.NoError(t, model.DB.Create(task).Error)
-
-	simulatePollBilling(ctx, task, model.TaskStatus(model.TaskStatusSuccess), actualQuota)
-
-	// CAS wins: task should be SUCCESS
-	var reloaded model.Task
-	require.NoError(t, model.DB.First(&reloaded, task.ID).Error)
-	assert.EqualValues(t, model.TaskStatusSuccess, reloaded.Status)
-	assert.Equal(t, actualQuota, reloaded.Quota)
-
-	// Settlement should refund the over-charge (5000 - 3000 = 2000 back to user)
-	assert.Equal(t, initQuota+(preConsumed-actualQuota), getUserQuota(t, userID))
-	assert.Equal(t, tokenRemain+(preConsumed-actualQuota), getTokenRemainQuota(t, tokenID))
-
-	// task.Quota should be updated to actualQuota
-	assert.Equal(t, actualQuota, task.Quota)
-}
-
-func TestNonTerminalUpdate_NoBilling(t *testing.T) {
-	truncate(t)
-	ctx := context.Background()
-
-	const userID, channelID = 23, 23
-	const initQuota, preConsumed = 10000, 3000
-
-	seedUser(t, userID, initQuota)
-	seedChannel(t, channelID)
-
-	task := makeTask(userID, channelID, preConsumed, 0, BillingSourceWallet, 0)
-	task.Status = model.TaskStatus(model.TaskStatusInProgress)
-	task.Progress = "20%"
-	require.NoError(t, model.DB.Create(task).Error)
-
-	// Simulate a non-terminal poll update (still IN_PROGRESS, progress changed)
-	simulatePollBilling(ctx, task, model.TaskStatus(model.TaskStatusInProgress), 0)
-
-	// User quota should NOT change
-	assert.Equal(t, initQuota, getUserQuota(t, userID))
-
-	// No billing log
-	assert.Equal(t, int64(0), countLogs(t))
-
-	// Task progress should be updated in DB
-	var reloaded model.Task
-	require.NoError(t, model.DB.First(&reloaded, task.ID).Error)
-	assert.Equal(t, "50%", reloaded.Progress)
-}
-
-// ===========================================================================
-// Mock adaptor for settleTaskBillingOnComplete tests
-// ===========================================================================
-
-type mockAdaptor struct {
-	adjustReturn int
-}
-
-func (m *mockAdaptor) Init(_ *relaycommon.RelayInfo) {}
-func (m *mockAdaptor) FetchTask(string, string, map[string]any, string) (*http.Response, error) {
-	return nil, nil
-}
-func (m *mockAdaptor) ParseTaskResult([]byte) (*relaycommon.TaskInfo, error) { return nil, nil }
-func (m *mockAdaptor) AdjustBillingOnComplete(_ *model.Task, _ *relaycommon.TaskInfo) int {
-	return m.adjustReturn
-}
-
-// ===========================================================================
-// PerCallBilling tests — settleTaskBillingOnComplete
-// ===========================================================================
-
-func TestSettle_PerCallBilling_SkipsAdaptorAdjust(t *testing.T) {
-	truncate(t)
-	ctx := context.Background()
-
-	const userID, tokenID, channelID = 30, 30, 30
-	const initQuota, preConsumed = 10000, 5000
-	const tokenRemain = 8000
-
-	seedUser(t, userID, initQuota)
-	seedToken(t, tokenID, userID, "sk-percall-adaptor", tokenRemain)
-	seedChannel(t, channelID)
-
-	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
-	task.PrivateData.BillingContext.PerCallBilling = true
-
-	adaptor := &mockAdaptor{adjustReturn: 2000}
-	taskResult := &relaycommon.TaskInfo{Status: model.TaskStatusSuccess}
-
-	settleTaskBillingOnComplete(ctx, adaptor, task, taskResult)
-
-	// Per-call: no adjustment despite adaptor returning 2000
-	assert.Equal(t, initQuota, getUserQuota(t, userID))
-	assert.Equal(t, tokenRemain, getTokenRemainQuota(t, tokenID))
-	assert.Equal(t, preConsumed, task.Quota)
-	assert.Equal(t, int64(0), countLogs(t))
-}
-
-func TestSettle_PerCallBilling_SkipsTotalTokens(t *testing.T) {
-	truncate(t)
-	ctx := context.Background()
-
-	const userID, tokenID, channelID = 31, 31, 31
-	const initQuota, preConsumed = 10000, 4000
-	const tokenRemain = 7000
-
-	seedUser(t, userID, initQuota)
-	seedToken(t, tokenID, userID, "sk-percall-tokens", tokenRemain)
-	seedChannel(t, channelID)
-
-	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
-	task.PrivateData.BillingContext.PerCallBilling = true
-
-	adaptor := &mockAdaptor{adjustReturn: 0}
-	taskResult := &relaycommon.TaskInfo{Status: model.TaskStatusSuccess, TotalTokens: 9999}
-
-	settleTaskBillingOnComplete(ctx, adaptor, task, taskResult)
-
-	// Per-call: no recalculation by tokens
-	assert.Equal(t, initQuota, getUserQuota(t, userID))
-	assert.Equal(t, tokenRemain, getTokenRemainQuota(t, tokenID))
-	assert.Equal(t, preConsumed, task.Quota)
-	assert.Equal(t, int64(0), countLogs(t))
-}
-
-func TestSettle_PerSecondFixedPriceAllowsAdaptorAdjustment(t *testing.T) {
-	truncate(t)
-	ctx := context.Background()
-
-	const userID, tokenID, channelID = 33, 33, 33
-	const initQuota, preConsumed = 10000, 5000
-	const actualQuota = 3000
-	const tokenRemain = 8000
-
-	seedUser(t, userID, initQuota)
-	seedToken(t, tokenID, userID, "sk-persecond-adaptor", tokenRemain)
-	seedChannel(t, channelID)
-
-	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
-	task.PrivateData.BillingContext.PerCallBilling = true
-	task.PrivateData.BillingContext.ModelPriceUnit = types.ModelPriceUnitSecond
-
-	adaptor := &mockAdaptor{adjustReturn: actualQuota}
-	taskResult := &relaycommon.TaskInfo{Status: model.TaskStatusSuccess, TotalTokens: 9999}
-
-	settleTaskBillingOnComplete(ctx, adaptor, task, taskResult)
-
-	assert.Equal(t, initQuota+(preConsumed-actualQuota), getUserQuota(t, userID))
-	assert.Equal(t, tokenRemain+(preConsumed-actualQuota), getTokenRemainQuota(t, tokenID))
-	assert.Equal(t, actualQuota, task.Quota)
-}
-
-func TestSettle_PerSecondFixedPriceDoesNotFallBackToTokens(t *testing.T) {
-	truncate(t)
-	ctx := context.Background()
-
-	const userID, channelID = 34, 34
-	const initQuota, preConsumed = 10000, 4000
-
-	seedUser(t, userID, initQuota)
-	seedChannel(t, channelID)
-
-	task := makeTask(userID, channelID, preConsumed, 0, BillingSourceWallet, 0)
-	task.PrivateData.BillingContext.PerCallBilling = true
-	task.PrivateData.BillingContext.ModelPriceUnit = types.ModelPriceUnitSecond
-
-	settleTaskBillingOnComplete(
-		ctx,
-		&mockAdaptor{adjustReturn: 0},
-		task,
-		&relaycommon.TaskInfo{Status: model.TaskStatusSuccess, TotalTokens: 9999},
-	)
-
-	assert.Equal(t, initQuota, getUserQuota(t, userID))
-	assert.Equal(t, preConsumed, task.Quota)
-	assert.Equal(t, int64(0), countLogs(t))
-}
-
-func TestTaskBillingOtherIncludesPriceUnitAndVideoRatios(t *testing.T) {
-	task := &model.Task{
-		PrivateData: model.TaskPrivateData{
-			BillingContext: &model.TaskBillingContext{
-				ModelPrice:     0.05,
-				ModelPriceUnit: types.ModelPriceUnitSecond,
-				GroupRatio:     1,
-				OtherRatios: map[string]float64{
-					"seconds":    8,
-					"resolution": 1.4,
-				},
-			},
-		},
-	}
-
-	other := taskBillingOther(task)
-	assert.Equal(t, true, other["is_task"])
-	assert.Equal(t, types.ModelPriceUnitSecond, other["model_price_unit"])
-	assert.Equal(t, float64(8), other["seconds"])
-	assert.Equal(t, 1.4, other["resolution"])
-}
-
-func TestSettle_NonPerCall_AdaptorAdjustWorks(t *testing.T) {
-	truncate(t)
-	ctx := context.Background()
-
-	const userID, tokenID, channelID = 32, 32, 32
-	const initQuota, preConsumed = 10000, 5000
-	const adaptorQuota = 3000
-	const tokenRemain = 8000
-
-	seedUser(t, userID, initQuota)
-	seedToken(t, tokenID, userID, "sk-nonpercall-adj", tokenRemain)
-	seedChannel(t, channelID)
-
-	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
-	// PerCallBilling defaults to false
-
-	adaptor := &mockAdaptor{adjustReturn: adaptorQuota}
-	taskResult := &relaycommon.TaskInfo{Status: model.TaskStatusSuccess}
-
-	settleTaskBillingOnComplete(ctx, adaptor, task, taskResult)
-
-	// Non-per-call: adaptor adjustment applies (refund 2000)
-	assert.Equal(t, initQuota+(preConsumed-adaptorQuota), getUserQuota(t, userID))
-	assert.Equal(t, tokenRemain+(preConsumed-adaptorQuota), getTokenRemainQuota(t, tokenID))
-	assert.Equal(t, adaptorQuota, task.Quota)
-
-	log := getLastLog(t)
-	require.NotNil(t, log)
-	assert.Equal(t, model.LogTypeRefund, log.Type)
 }

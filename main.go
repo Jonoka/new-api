@@ -130,6 +130,9 @@ func main() {
 	// 清理超过保留期的图片异步任务响应体。
 	service.StartImageTaskDataCleanupTask()
 
+	// 异步任务资金、缓存和独立日志库恢复；不依赖上游轮询开关。
+	service.StartTaskAccountingRecovery()
+
 	// 通知中心异步投递任务。
 	service.StartNotificationDispatcher()
 

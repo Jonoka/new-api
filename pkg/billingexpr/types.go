@@ -43,7 +43,10 @@ type BillingSnapshot struct {
 	ModelName                 string  `json:"model_name"`
 	ExprString                string  `json:"expr_string"`
 	ExprHash                  string  `json:"expr_hash"`
+	Group                     string  `json:"group"`
 	GroupRatio                float64 `json:"group_ratio"`
+	GroupSpecialRatio         float64 `json:"group_special_ratio"`
+	HasGroupSpecialRatio      bool    `json:"has_group_special_ratio"`
 	EstimatedPromptTokens     int     `json:"estimated_prompt_tokens"`
 	EstimatedCompletionTokens int     `json:"estimated_completion_tokens"`
 	EstimatedQuotaBeforeGroup float64 `json:"estimated_quota_before_group"`

@@ -143,6 +143,9 @@ type RelayInfo struct {
 	// 强制预扣全额。用于异步任务（视频/音乐生成等），因为请求返回后任务仍在运行，
 	// 必须在提交前锁定全额。
 	ForcePreConsume bool
+	// Async task controllers transfer the reservation to durable task accounting.
+	DeferTaskBilling bool
+	TaskBillingActualQuota *int
 	// Billing 是计费会话，封装了预扣费/结算/退款的统一生命周期。
 	// 免费模型时为 nil。
 	Billing BillingSettler
@@ -180,8 +183,17 @@ type RelayInfo struct {
 
 	PriceData types.PriceData
 
+	// PricingInitialized freezes non-group pricing facts on the first selected
+	// attempt. Retries refresh only group-dependent derived values.
+	PricingInitialized         bool
+	PricingPerCall             bool
+	PricingBillingMode         string
+	PricingPromptTokens        int
+	PricingMaxCompletionTokens int
+
 	// TieredBillingSnapshot is a frozen snapshot of tiered billing rules
-	// captured at pre-consume time. Non-nil only when billing mode is "tiered_expr".
+	// captured on the first priced attempt; retry group fields are refreshed.
+	// Non-nil only when billing mode is "tiered_expr".
 	TieredBillingSnapshot *billingexpr.BillingSnapshot
 	BillingRequestInput   *billingexpr.RequestInput
 	QuotaClamp            *common.QuotaClamp
@@ -439,6 +451,10 @@ func GenRelayInfoGemini(c *gin.Context, request dto.Request) *RelayInfo {
 func GenRelayInfoImage(c *gin.Context, request dto.Request) *RelayInfo {
 	info := genBaseRelayInfo(c, request)
 	info.RelayFormat = types.RelayFormatOpenAIImage
+	info.DeferTaskBilling = c.GetBool(ContextKeyDeferTaskBilling)
+	if info.DeferTaskBilling {
+		info.ForcePreConsume = true
+	}
 	return info
 }
 

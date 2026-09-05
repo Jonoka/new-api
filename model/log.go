@@ -388,6 +388,12 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	}
 }
 
+// ShouldRecordUserLogIP exposes the existing privacy decision to durable log
+// producers so they freeze only data that the ordinary log path may retain.
+func ShouldRecordUserLogIP(userID int) bool {
+	return shouldRecordUserLogIp(userID)
+}
+
 type RecordTaskBillingLogParams struct {
 	UserId    int
 	LogType   int

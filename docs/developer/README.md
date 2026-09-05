@@ -36,3 +36,5 @@
 - [Relay header timeout and request boundaries](../workflows/2026-09/05_relay_boundaries.md)
 - [Log privacy, SQL redaction and quota statistics](../workflows/2026-09/05_log_privacy_and_statistics.md)
 - [Time-range billing rules](../workflows/2026-09/05_time_range_billing_rules.md)
+- [Final-group pricing and reservation](../workflows/2026-09/05_final_group_billing.md)
+- [Durable async task accounting](../workflows/2026-09/05_async_task_accounting.md)

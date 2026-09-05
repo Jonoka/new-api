@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -39,6 +40,33 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 		return apiErr
 	}
 	relayInfo.Billing = session
+	return nil
+}
+
+// ReconcileBillingReservation admits the selected group's pricing before an
+// upstream attempt. It creates funding on the first paid attempt and otherwise
+// resizes the existing live session in either direction without settling it.
+func ReconcileBillingReservation(c *gin.Context, targetQuota int, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
+	if relayInfo == nil {
+		return types.NewError(errors.New("relayInfo is nil"), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
+	}
+	if relayInfo.QuotaClamp != nil || targetQuota < 0 {
+		return PreConsumeBilling(c, targetQuota, relayInfo)
+	}
+	if relayInfo.Billing == nil {
+		if relayInfo.PriceData.FreeModel && targetQuota == 0 {
+			relayInfo.FinalPreConsumedQuota = 0
+			return nil
+		}
+		return PreConsumeBilling(c, targetQuota, relayInfo)
+	}
+	if err := relayInfo.Billing.Reserve(targetQuota); err != nil {
+		var apiErr *types.NewAPIError
+		if errors.As(err, &apiErr) {
+			return apiErr
+		}
+		return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
+	}
 	return nil
 }
 

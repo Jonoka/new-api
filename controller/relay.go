@@ -146,22 +146,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	relayInfo.SetEstimatePromptTokens(tokens)
 
-	priceData, err := helper.ModelPriceHelper(c, relayInfo, tokens, meta)
-	if err != nil {
-		newAPIError = types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithStatusCode(http.StatusBadRequest))
-		return
-	}
-
 	// common.SetContextKey(c, constant.ContextKeyTokenCountMeta, meta)
-
-	if priceData.FreeModel {
-		logger.LogInfo(c, fmt.Sprintf("模型 %s 免费，跳过预扣费", relayInfo.OriginModelName))
-	} else {
-		newAPIError = service.PreConsumeBilling(c, priceData.QuotaToPreConsume, relayInfo)
-		if newAPIError != nil {
-			return
-		}
-	}
 
 	defer func() {
 		// Only return quota if downstream failed and quota was actually pre-consumed
@@ -206,6 +191,21 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			if !waitForRelayRetry(c, delay) {
 				return
 			}
+		}
+
+		priceData, priceErr := helper.ModelPriceHelper(c, relayInfo, tokens, meta)
+		if priceErr != nil {
+			newAPIError = types.NewError(priceErr, types.ErrorCodeModelPriceError, types.ErrOptionWithStatusCode(http.StatusBadRequest), types.ErrOptionWithSkipRetry())
+			break
+		}
+		reservationTarget := priceData.QuotaToPreConsume
+		if priceData.FreeModel {
+			reservationTarget = 0
+			logger.LogInfo(c, fmt.Sprintf("模型 %s 在分组 %s 免费", relayInfo.OriginModelName, relayInfo.UsingGroup))
+		}
+		if admissionErr := service.ReconcileBillingReservation(c, reservationTarget, relayInfo); admissionErr != nil {
+			newAPIError = admissionErr
+			break
 		}
 
 		addUsedChannel(c, channel.Id)
@@ -967,6 +967,13 @@ func RelayTask(c *gin.Context) {
 		respondTaskError(c, taskErr)
 		return
 	}
+	// Task responses remain buffered until their accounting ownership is durable.
+	capture := &imageTaskResponseCapture{ResponseWriter: c.Writer}
+	c.Writer = capture
+	defer func() {
+		c.Writer = capture.ResponseWriter
+		capture.flush()
+	}()
 
 	var result *relay.TaskSubmitResult
 	var taskErr *dto.TaskError
@@ -1044,6 +1051,9 @@ func RelayTask(c *gin.Context) {
 		if taskErr == nil {
 			break
 		}
+		capture.buf.Reset()
+		capture.statusCode = 0
+		capture.wroteHeader = false
 
 		shouldRetry := shouldRetryTaskRelay(c, channel.Id, taskErr, remainingRelayRetries(maxRetries, attemptIndex))
 		if !taskErr.LocalError {
@@ -1079,17 +1089,8 @@ func RelayTask(c *gin.Context) {
 		logger.LogInfo(c, retryLogStr)
 	}
 
-	// ── 成功：结算 + 日志 + 插入任务 ──
+	// Persist the task, reservation adjustment, counters and log event together.
 	if taskErr == nil {
-		settleErr := service.SettleBilling(c, relayInfo, result.Quota)
-		if settleErr != nil {
-			common.SysError("settle task billing error: " + settleErr.Error())
-		}
-		service.AttachChannelMetricUsageAfterSettlement(c, service.ChannelMetricUsage{}, result.Quota, settleErr)
-		service.FinishChannelMetricAttempt(c, relayInfo, nil, false, "")
-		metricErr = nil
-		service.LogTaskConsumption(c, relayInfo)
-
 		task := model.InitTask(result.Platform, relayInfo)
 		if result.PublicTaskID != "" {
 			task.TaskID = result.PublicTaskID
@@ -1113,8 +1114,17 @@ func RelayTask(c *gin.Context) {
 		task.Quota = result.Quota
 		task.Data = result.TaskData
 		task.Action = relayInfo.Action
-		if insertErr := task.Insert(); insertErr != nil {
-			common.SysError("insert task error: " + insertErr.Error())
+		if handoffErr := service.HandoffTaskBilling(c, relayInfo, task, "", result.Quota); handoffErr != nil {
+			common.SysError("persist task billing error: " + handoffErr.Error())
+			taskErr = service.TaskErrorWrapperLocal(handoffErr, "persist_task_billing_failed", http.StatusInternalServerError)
+			capture.buf.Reset()
+			capture.statusCode = 0
+			capture.wroteHeader = false
+			service.AttachChannelMetricUsageAfterSettlement(c, service.ChannelMetricUsage{}, result.Quota, handoffErr)
+		} else {
+			service.AttachChannelMetricUsageAfterSettlement(c, service.ChannelMetricUsage{}, result.Quota, nil)
+			service.FinishChannelMetricAttempt(c, relayInfo, nil, false, "")
+			metricErr = nil
 		}
 	}
 

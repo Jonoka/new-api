@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -143,9 +144,9 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 
 // RelayTaskSubmit 完成 task 提交的全部流程（每次尝试调用一次）：
 // 刷新渠道元数据 → 确定 platform/adaptor → 验证请求 →
-// 估算计费(EstimateBilling) → 计算价格 → 预扣费（仅首次）→
+// 估算计费(EstimateBilling) → 计算价格 → 对当前分组执行预扣准入 →
 // 构建/发送/解析上游请求 → 提交后计费调整(AdjustBillingOnSubmit)。
-// 控制器负责 defer Refund 和成功后 Settle。
+// 控制器负责失败退款和成功后的 durable task accounting handoff。
 func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitResult, *dto.TaskError) {
 	info.InitChannelMeta(c)
 
@@ -233,12 +234,14 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		noteTaskQuotaClamp(info, clamp)
 	}
 
-	// 7. 预扣费（仅首次 — 重试时 info.Billing 已存在，跳过）
-	if info.Billing == nil && !info.PriceData.FreeModel {
-		info.ForcePreConsume = true
-		if apiErr := service.PreConsumeBilling(c, info.PriceData.Quota, info); apiErr != nil {
-			return nil, service.TaskErrorFromAPIError(apiErr)
-		}
+	// 7. 每次尝试都按已选分组核对预扣；同组是零差额，跨组可增减。
+	info.ForcePreConsume = true
+	reservationTarget := info.PriceData.Quota
+	if info.PriceData.FreeModel {
+		reservationTarget = 0
+	}
+	if apiErr := service.ReconcileBillingReservation(c, reservationTarget, info); apiErr != nil {
+		return nil, service.TaskErrorFromAPIError(apiErr)
 	}
 
 	// 8. 构建请求体
@@ -498,10 +501,12 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 
 	isOpenAIVideoAPI := isOpenAIVideoRequestURI(c.Request.RequestURI)
 
-	// Gemini/Vertex 支持实时查询：用户 fetch 时直接从上游拉取最新状态
-	if realtimeResp := tryRealtimeFetch(originTask, isOpenAIVideoAPI); len(realtimeResp) > 0 {
-		respBody = realtimeResp
-		return
+	// Gemini/Vertex 支持实时查询；已终态任务直接返回持久化结果。
+	if originTask.Status != model.TaskStatusSuccess && originTask.Status != model.TaskStatusFailure {
+		if realtimeResp := tryRealtimeFetch(originTask, isOpenAIVideoAPI); len(realtimeResp) > 0 {
+			respBody = realtimeResp
+			return
+		}
 	}
 
 	// OpenAI Video API 格式: 走各 adaptor 的 ConvertToOpenAIVideo
@@ -591,6 +596,15 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 	if ti.Progress != "" {
 		task.Progress = ti.Progress
 	}
+	if task.Status == model.TaskStatusFailure && ti.Reason != "" {
+		task.FailReason = ti.Reason
+	}
+	if task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure {
+		task.Progress = "100%"
+		if task.FinishTime == 0 {
+			task.FinishTime = common.GetTimestamp()
+		}
+	}
 	if strings.HasPrefix(ti.Url, "data:") {
 		// data: URI — kept in Data, not ResultURL
 	} else if ti.Url != "" {
@@ -600,8 +614,23 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 		task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
 	}
 
-	if !snap.Equal(task.Snapshot()) {
-		_, _ = task.UpdateWithStatus(snap.Status)
+	if task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure {
+		finalQuota, reason := task.Quota, "预扣额度保持不变"
+		if task.Status == model.TaskStatusFailure {
+			finalQuota = 0
+			reason = task.FailReason
+		} else {
+			finalQuota, reason = service.ResolveTerminalTaskQuota(adaptor, task, ti)
+		}
+		if _, err := service.FinalizeTaskAccounting(context.Background(), task, snap.Status, finalQuota, reason); err != nil {
+			reloadCanonicalTask(task)
+			return nil
+		}
+	} else if !snap.Equal(task.Snapshot()) {
+		won, _ := task.UpdateWithStatus(snap.Status)
+		if !won {
+			reloadCanonicalTask(task)
+		}
 	}
 
 	// OpenAI Video API 由调用者的 ConvertToOpenAIVideo 分支处理
@@ -624,6 +653,16 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 		Data: out,
 	})
 	return respBody
+}
+
+func reloadCanonicalTask(task *model.Task) {
+	if task == nil {
+		return
+	}
+	canonical, exists, err := model.GetByTaskId(task.UserId, task.TaskID)
+	if err == nil && exists {
+		*task = *canonical
+	}
 }
 
 // detectVideoFormat 从 Gemini/Vertex 原始响应中探测视频格式

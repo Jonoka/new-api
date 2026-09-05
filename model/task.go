@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -318,6 +319,7 @@ func getTimedOutUnfinishedTasks(cutoffUnix int64, limit int, platforms []constan
 	var tasks []*Task
 	query := DB.Where("progress != ?", "100%").
 		Where("status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
+		Where("NOT EXISTS (?)", DB.Model(&TaskAccounting{}).Select("1").Where("task_row_id = tasks.id AND decision_id <> ?", "")).
 		Where("submit_time < ?", cutoffUnix)
 	if len(platforms) > 0 {
 		query = query.Where("platform IN ?", platforms)
@@ -339,6 +341,7 @@ func GetAllUnFinishSyncTasks(limit int) []*Task {
 	err = DB.Where("progress != ?", "100%").
 		Where("status != ?", TaskStatusFailure).
 		Where("status != ?", TaskStatusSuccess).
+		Where("NOT EXISTS (?)", DB.Model(&TaskAccounting{}).Select("1").Where("task_row_id = tasks.id AND decision_id <> ?", "")).
 		Where("platform NOT IN ? OR channel_id > 0", constant.ImageTaskPlatforms()).
 		Limit(limit).
 		Order("id").
@@ -431,9 +434,23 @@ func (t *Task) Snapshot() taskSnapshot {
 }
 
 func (Task *Task) Update() error {
-	var err error
-	err = DB.Save(Task).Error
-	return err
+	if Task == nil || Task.ID <= 0 {
+		return errors.New("persisted task id is required")
+	}
+	query := DB.Model(Task)
+	if isTaskTerminal(Task.Status) {
+		query = query.Where("NOT EXISTS (?)", DB.Model(&TaskAccounting{}).Select("1").Where("task_row_id = ?", Task.ID))
+	} else {
+		query = query.Where("NOT EXISTS (?)", DB.Model(&TaskAccounting{}).Select("1").Where("task_row_id = ? AND decision_id <> ?", Task.ID, ""))
+	}
+	result := query.Select("*").Updates(Task)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrTaskAccountingConflict
+	}
+	return nil
 }
 
 // UpdateBillingSettlement 持久化异步差额结算后的额度与计费快照。
@@ -457,7 +474,13 @@ func (t *Task) UpdateBillingSettlement() error {
 // falls back to INSERT ON CONFLICT when the WHERE-guarded UPDATE matches
 // zero rows, which silently bypasses the CAS guard.
 func (t *Task) UpdateWithStatus(fromStatus TaskStatus) (bool, error) {
-	result := DB.Model(t).Where("status = ?", fromStatus).Select("*").Updates(t)
+	query := DB.Model(t).Where("status = ?", fromStatus)
+	if isTaskTerminal(t.Status) {
+		query = query.Where("NOT EXISTS (?)", DB.Model(&TaskAccounting{}).Select("1").Where("task_row_id = ?", t.ID))
+	} else {
+		query = query.Where("NOT EXISTS (?)", DB.Model(&TaskAccounting{}).Select("1").Where("task_row_id = ? AND decision_id <> ?", t.ID, ""))
+	}
+	result := query.Select("*").Updates(t)
 	if result.Error != nil {
 		return false, result.Error
 	}

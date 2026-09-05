@@ -29,6 +29,8 @@
 
 ## 继续开发的接口
 
+Batch B accounting is under validation on its isolated candidate branch. Selected-group pricing resizes the live reservation before the next upstream attempt. Async tasks transfer reservation ownership to durable task accounting; terminal funding, token, used counters and status commit together, and independent log storage uses idempotent event delivery. See [final-group billing](../workflows/2026-09/05_final_group_billing.md) and [async accounting](../workflows/2026-09/05_async_task_accounting.md). Legacy terminal rows are not automatically repaired. An older image must not process B-owned in-flight tasks or pending accounting events; drain and reconcile before rollback.
+
 - 新 AI 渠道：relay/channel/\* 适配器和渠道类型注册；支持 StreamOptions 时加入 streamSupportedChannels。
 - 新异步任务：复用 service.TaskPollingAdaptor 和主节点调度器，明确租约、超时、清理、多节点行为。
 - 新 OAuth：实现 oauth.Provider 并接入注册表。

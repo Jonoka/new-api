@@ -68,13 +68,23 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 }
 
 func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens int, meta *types.TokenCountMeta) (types.PriceData, error) {
-	modelPrice, usePrice := ratio_setting.GetModelPrice(info.OriginModelName, false)
-
 	groupRatioInfo := HandleGroupRatio(c, info)
+	if info.PricingInitialized && !info.PricingPerCall {
+		if info.PricingBillingMode == billing_setting.BillingModeTieredExpr {
+			return modelPriceHelperTiered(c, info, promptTokens, meta, groupRatioInfo)
+		}
+		return refreshTokenPriceForGroup(c, info, groupRatioInfo)
+	}
+
+	modelPrice, usePrice := ratio_setting.GetModelPrice(info.OriginModelName, false)
 
 	// Check if this model uses tiered_expr billing
 	if billing_setting.GetBillingMode(info.OriginModelName) == billing_setting.BillingModeTieredExpr {
-		return modelPriceHelperTiered(c, info, promptTokens, meta, groupRatioInfo)
+		priceData, err := modelPriceHelperTiered(c, info, promptTokens, meta, groupRatioInfo)
+		if err == nil {
+			freezePricing(info, false, billing_setting.BillingModeTieredExpr, promptTokens, meta.MaxTokens)
+		}
+		return priceData, err
 	}
 
 	var preConsumedQuota int
@@ -178,6 +188,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		logger.LogDebug(c, "model_price_helper result: %s", priceData.ToSetting())
 	}
 	info.PriceData = priceData
+	freezePricing(info, false, billing_setting.BillingModeRatio, promptTokens, meta.MaxTokens)
 	return priceData, nil
 }
 
@@ -185,6 +196,18 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 // 固定单价的具体单位由 PriceData.ModelPriceUnit 决定。
 func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types.PriceData, error) {
 	groupRatioInfo := HandleGroupRatio(c, info)
+	if info.PricingInitialized && info.PricingPerCall {
+		if info.PricingBillingMode == billing_setting.BillingModeTieredExpr {
+			priceData, err := modelPriceHelperTiered(c, info, 0, &types.TokenCountMeta{}, groupRatioInfo)
+			if err != nil {
+				return types.PriceData{}, err
+			}
+			priceData.Quota = priceData.QuotaToPreConsume
+			info.PriceData = priceData
+			return priceData, nil
+		}
+		return refreshPerCallPriceForGroup(info, groupRatioInfo)
+	}
 	if billing_setting.GetBillingMode(info.OriginModelName) == billing_setting.BillingModeTieredExpr {
 		priceData, err := modelPriceHelperTiered(c, info, 0, &types.TokenCountMeta{}, groupRatioInfo)
 		if err != nil {
@@ -192,6 +215,7 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types
 		}
 		priceData.Quota = priceData.QuotaToPreConsume
 		info.PriceData = priceData
+		freezePricing(info, true, billing_setting.BillingModeTieredExpr, 0, 0)
 		return priceData, nil
 	}
 
@@ -258,6 +282,73 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types
 		Quota:          quota,
 		GroupRatioInfo: groupRatioInfo,
 	}
+	info.PriceData = priceData
+	freezePricing(info, true, billing_setting.BillingModeRatio, 0, 0)
+	return priceData, nil
+}
+
+func freezePricing(info *relaycommon.RelayInfo, perCall bool, mode string, promptTokens int, maxCompletionTokens int) {
+	info.PricingInitialized = true
+	info.PricingPerCall = perCall
+	info.PricingBillingMode = mode
+	info.PricingPromptTokens = promptTokens
+	info.PricingMaxCompletionTokens = maxCompletionTokens
+}
+
+func refreshTokenPriceForGroup(c *gin.Context, info *relaycommon.RelayInfo, groupRatioInfo types.GroupRatioInfo) (types.PriceData, error) {
+	priceData := info.PriceData
+	priceData.GroupRatioInfo = groupRatioInfo
+	priceData.FreeModel = false
+	if priceData.UsePrice {
+		quotaValue := priceData.ApplyOtherRatiosToFloat(priceData.ModelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio)
+		quota, err := common.QuotaFromFloatStrict(quotaValue)
+		if err != nil {
+			return types.PriceData{}, err
+		}
+		priceData.QuotaToPreConsume = quota
+	} else {
+		preConsumedTokens := common.Max(info.PricingPromptTokens, common.PreConsumedQuota)
+		if info.PricingMaxCompletionTokens != 0 {
+			preConsumedTokens += info.PricingMaxCompletionTokens
+		}
+		quota, err := common.QuotaFromFloatStrict(float64(preConsumedTokens) * priceData.ModelRatio * groupRatioInfo.GroupRatio)
+		if err != nil {
+			return types.PriceData{}, err
+		}
+		priceData.QuotaToPreConsume = quota
+	}
+	if !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume &&
+		(groupRatioInfo.GroupRatio == 0 || (priceData.UsePrice && priceData.ModelPrice == 0) || (!priceData.UsePrice && priceData.ModelRatio == 0)) {
+		priceData.QuotaToPreConsume = 0
+		priceData.FreeModel = true
+	}
+	info.PriceData = priceData
+	if common.DebugEnabled {
+		logger.LogDebug(c, "refresh_token_price_for_group result: %s", priceData.ToSetting())
+	}
+	return priceData, nil
+}
+
+func refreshPerCallPriceForGroup(info *relaycommon.RelayInfo, groupRatioInfo types.GroupRatioInfo) (types.PriceData, error) {
+	priceData := info.PriceData
+	priceData.GroupRatioInfo = groupRatioInfo
+	priceData.FreeModel = false
+	quotaValue := priceData.ModelRatio / 2 * common.QuotaPerUnit * groupRatioInfo.GroupRatio
+	if priceData.UsePrice {
+		quotaValue = priceData.ModelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio
+	}
+	quota, err := common.QuotaFromFloatStrict(quotaValue)
+	if err != nil {
+		return types.PriceData{}, err
+	}
+	if !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume &&
+		(groupRatioInfo.GroupRatio == 0 || (priceData.UsePrice && priceData.ModelPrice == 0) || (!priceData.UsePrice && priceData.ModelRatio == 0)) {
+		quota = 0
+		priceData.FreeModel = true
+	}
+	priceData.Quota = quota
+	priceData.QuotaToPreConsume = quota
+	info.PriceData = priceData
 	return priceData, nil
 }
 
@@ -276,13 +367,21 @@ func HasModelBillingConfig(modelName string) bool {
 }
 
 func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptTokens int, meta *types.TokenCountMeta, groupRatioInfo types.GroupRatioInfo) (types.PriceData, error) {
-	exprStr, ok := billing_setting.GetBillingExpr(info.OriginModelName)
-	if !ok {
-		return types.PriceData{}, fmt.Errorf("model %s is configured as tiered_expr but has no billing expression", info.OriginModelName)
-	}
-
+	exprStr := ""
+	estimatedPromptTokens := promptTokens
 	estimatedCompletionTokens := meta.MaxTokens
-	if estimatedCompletionTokens == 0 && groupRatioInfo.GroupRatio != 0 {
+	if frozen := info.TieredBillingSnapshot; frozen != nil && frozen.BillingMode == billing_setting.BillingModeTieredExpr && frozen.ModelName == info.OriginModelName {
+		exprStr = frozen.ExprString
+		estimatedPromptTokens = frozen.EstimatedPromptTokens
+		estimatedCompletionTokens = frozen.EstimatedCompletionTokens
+	} else {
+		var ok bool
+		exprStr, ok = billing_setting.GetBillingExpr(info.OriginModelName)
+		if !ok {
+			return types.PriceData{}, fmt.Errorf("model %s is configured as tiered_expr but has no billing expression", info.OriginModelName)
+		}
+	}
+	if estimatedCompletionTokens == 0 {
 		estimatedCompletionTokens = defaultTieredPreConsumeMaxTokens
 	}
 
@@ -292,9 +391,9 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptT
 	}
 
 	rawCost, trace, err := billingexpr.RunExprWithRequest(exprStr, billingexpr.TokenParams{
-		P:   float64(promptTokens),
+		P:   float64(estimatedPromptTokens),
 		C:   float64(estimatedCompletionTokens),
-		Len: float64(promptTokens),
+		Len: float64(estimatedPromptTokens),
 	}, requestInput)
 	if err != nil {
 		return types.PriceData{}, fmt.Errorf("model %s tiered expr run failed: %w", info.OriginModelName, err)
@@ -321,8 +420,11 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptT
 		ModelName:                 info.OriginModelName,
 		ExprString:                exprStr,
 		ExprHash:                  exprHash,
+		Group:                     info.UsingGroup,
 		GroupRatio:                groupRatioInfo.GroupRatio,
-		EstimatedPromptTokens:     promptTokens,
+		GroupSpecialRatio:         groupRatioInfo.GroupSpecialRatio,
+		HasGroupSpecialRatio:      groupRatioInfo.HasSpecialRatio,
+		EstimatedPromptTokens:     estimatedPromptTokens,
 		EstimatedCompletionTokens: estimatedCompletionTokens,
 		EstimatedQuotaBeforeGroup: quotaBeforeGroup,
 		EstimatedQuotaAfterGroup:  preConsumedQuota,

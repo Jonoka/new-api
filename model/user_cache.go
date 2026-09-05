@@ -13,6 +13,8 @@ import (
 	"github.com/bytedance/gopkg/util/gopool"
 )
 
+const userCacheGenerationRedisKey = "user-cache-generation"
+
 // UserBase is the compact user snapshot stored in cache and request context.
 type UserBase struct {
 	Id       int    `json:"id"`
@@ -56,7 +58,7 @@ func invalidateUserCache(userId int) error {
 	if !common.RedisEnabled {
 		return nil
 	}
-	return common.RedisDelKey(getUserCacheKey(userId))
+	return common.RedisBumpGenerationAndDeleteKeys(userCacheGenerationRedisKey, []string{getUserCacheKey(userId)})
 }
 
 // InvalidateUserCache is the exported version of invalidateUserCache.
@@ -65,28 +67,28 @@ func InvalidateUserCache(userId int) error {
 	return invalidateUserCache(userId)
 }
 
-// updateUserCache updates all user cache fields using hash
+// updateUserCache invalidates after a mutation. A supplied snapshot may already
+// predate a concurrent accounting commit, so only a new DB read can refill it.
 func updateUserCache(user User) error {
-	if !common.RedisEnabled {
-		return nil
-	}
+	return invalidateUserCache(user.Id)
+}
 
-	return common.RedisHSetObj(
-		getUserCacheKey(user.Id),
-		user.ToBaseUser(),
-		time.Duration(common.RedisKeyCacheSeconds())*time.Second,
-	)
+func fillUserCacheIfGeneration(user User, generation int64) (bool, error) {
+	return common.RedisHSetObjIfGeneration(userCacheGenerationRedisKey, getUserCacheKey(user.Id),
+		generation, user.ToBaseUser(), time.Duration(common.RedisKeyCacheSeconds())*time.Second)
 }
 
 // GetUserCache gets complete user cache from hash
 func GetUserCache(userId int) (userCache *UserBase, err error) {
 	var user *User
 	var fromDB bool
+	var cacheGeneration int64
+	var canFillCache bool
 	defer func() {
 		// Update Redis cache asynchronously on successful DB read
-		if shouldUpdateRedis(fromDB, err) && user != nil {
+		if shouldUpdateRedis(fromDB, err) && user != nil && canFillCache {
 			gopool.Go(func() {
-				if err := updateUserCache(*user); err != nil {
+				if _, err := fillUserCacheIfGeneration(*user, cacheGeneration); err != nil {
 					common.SysLog("failed to update user status cache: " + err.Error())
 				}
 			})
@@ -108,6 +110,11 @@ func GetUserCache(userId int) (userCache *UserBase, err error) {
 
 	// If Redis fails, get from DB
 	fromDB = true
+	if common.RedisEnabled {
+		var generationErr error
+		cacheGeneration, generationErr = common.RedisGetGeneration(userCacheGenerationRedisKey)
+		canFillCache = generationErr == nil
+	}
 	user, err = GetUserById(userId, false)
 	if err != nil {
 		return nil, err // Return nil and error if DB lookup fails

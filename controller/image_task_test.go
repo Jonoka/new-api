@@ -18,7 +18,7 @@ import (
 
 type imageTaskBillingSpy struct{ refunds, settles int }
 
-func (s *imageTaskBillingSpy) Settle(int) error        { s.settles++; return nil }
+func (s *imageTaskBillingSpy) Settle(int) error         { s.settles++; return nil }
 func (s *imageTaskBillingSpy) Refund(*gin.Context)      { s.refunds++ }
 func (s *imageTaskBillingSpy) NeedsRefund() bool        { return true }
 func (s *imageTaskBillingSpy) GetPreConsumedQuota() int { return 123 }
@@ -75,14 +75,16 @@ func TestRelayImageTaskSubmitDoesNotPersistErrorResponse(t *testing.T) {
 
 func TestRelayImageTaskSubmitRefundsPersistenceFailure(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	originalRelay, originalInsert := relayImageTaskRelay, insertImageTask
-	t.Cleanup(func() { relayImageTaskRelay, insertImageTask = originalRelay, originalInsert })
+	originalRelay, originalHandoff := relayImageTaskRelay, handoffImageTask
+	t.Cleanup(func() { relayImageTaskRelay, handoffImageTask = originalRelay, originalHandoff })
 	spy := &imageTaskBillingSpy{}
 	relayImageTaskRelay = func(c *gin.Context, _ types.RelayFormat) {
 		c.Set("relay_info", &relaycommon.RelayInfo{Billing: spy, ChannelMeta: &relaycommon.ChannelMeta{ChannelOtherSettings: dto.ChannelOtherSettings{ImageAsyncMode: dto.ImageAsyncModeTasksEndpoint}}})
 		c.JSON(http.StatusAccepted, gin.H{"task_id": "task_persist_fail", "status": "queued"})
 	}
-	insertImageTask = func(*model.Task) error { return errors.New("db unavailable") }
+	handoffImageTask = func(*gin.Context, *relaycommon.RelayInfo, *model.Task, model.TaskStatus, int) error {
+		return errors.New("db unavailable")
+	}
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
@@ -93,14 +95,16 @@ func TestRelayImageTaskSubmitRefundsPersistenceFailure(t *testing.T) {
 
 func TestRelayImageTaskSubmitRefundsImmediateTerminalFailureOnce(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	originalRelay, originalInsert := relayImageTaskRelay, insertImageTask
-	t.Cleanup(func() { relayImageTaskRelay, insertImageTask = originalRelay, originalInsert })
+	originalRelay, originalHandoff := relayImageTaskRelay, handoffImageTask
+	t.Cleanup(func() { relayImageTaskRelay, handoffImageTask = originalRelay, originalHandoff })
 	spy := &imageTaskBillingSpy{}
 	relayImageTaskRelay = func(c *gin.Context, _ types.RelayFormat) {
 		c.Set("relay_info", &relaycommon.RelayInfo{Billing: spy, ChannelMeta: &relaycommon.ChannelMeta{}})
 		c.JSON(http.StatusOK, gin.H{"task_id": "task_failed", "status": "failed"})
 	}
-	insertImageTask = func(*model.Task) error { return errors.New("db unavailable too") }
+	handoffImageTask = func(*gin.Context, *relaycommon.RelayInfo, *model.Task, model.TaskStatus, int) error {
+		return errors.New("db unavailable too")
+	}
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
@@ -146,10 +150,10 @@ func TestRelayImageTaskSubmitPassesThroughSynchronousResponseWithoutTaskID(t *te
 func TestRelayImageTaskSubmitPersistsSuccessfulFinalRelayMetadata(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	originalRelay := relayImageTaskRelay
-	originalInsert := insertImageTask
+	originalHandoff := handoffImageTask
 	t.Cleanup(func() {
 		relayImageTaskRelay = originalRelay
-		insertImageTask = originalInsert
+		handoffImageTask = originalHandoff
 	})
 
 	relayImageTaskRelay = func(c *gin.Context, relayFormat types.RelayFormat) {
@@ -172,8 +176,9 @@ func TestRelayImageTaskSubmitPersistsSuccessfulFinalRelayMetadata(t *testing.T) 
 	}
 
 	var inserted *model.Task
-	insertImageTask = func(task *model.Task) error {
+	handoffImageTask = func(_ *gin.Context, _ *relaycommon.RelayInfo, task *model.Task, _ model.TaskStatus, _ int) error {
 		inserted = task
+		task.ID = 1
 		return nil
 	}
 
@@ -217,15 +222,19 @@ func TestImageTaskResponseCaptureDoesNotCommitUnderlyingWriterOnFlush(t *testing
 
 func TestRelayImageTaskSubmitFreezesTasksEndpointPollingProtocol(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	originalRelay, originalInsert := relayImageTaskRelay, insertImageTask
-	t.Cleanup(func() { relayImageTaskRelay, insertImageTask = originalRelay, originalInsert })
+	originalRelay, originalHandoff := relayImageTaskRelay, handoffImageTask
+	t.Cleanup(func() { relayImageTaskRelay, handoffImageTask = originalRelay, originalHandoff })
 	relayImageTaskRelay = func(c *gin.Context, _ types.RelayFormat) {
 		c.Set("relay_info", &relaycommon.RelayInfo{UserId: 7, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 34, ChannelType: 1,
 			ChannelOtherSettings: dto.ChannelOtherSettings{ImageAsyncMode: dto.ImageAsyncModeTasksEndpoint, ImageTasksEndpoint: "/v1/images/tasks"}}})
 		c.JSON(http.StatusAccepted, gin.H{"task_id": "upstream-task-id", "status": "queued"})
 	}
 	var inserted *model.Task
-	insertImageTask = func(task *model.Task) error { inserted = task; return nil }
+	handoffImageTask = func(_ *gin.Context, _ *relaycommon.RelayInfo, task *model.Task, _ model.TaskStatus, _ int) error {
+		inserted = task
+		task.ID = 1
+		return nil
+	}
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)

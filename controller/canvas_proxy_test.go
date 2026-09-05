@@ -309,7 +309,7 @@ func TestFinishCanvasImageTaskStoresSuccessfulRelayResponse(t *testing.T) {
 	task := &model.Task{TaskID: "task_ok", UserId: 1, Status: model.TaskStatusInProgress}
 	require.NoError(t, task.Insert())
 
-	finishCanvasImageTask(task, 12, recorder, nil)
+	finishCanvasImageTask(task, 12, recorder, &relaycommon.RelayInfo{UserId: 1, UsingGroup: "default", ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 12}})
 
 	reloaded, exists, err := model.GetByTaskId(1, "task_ok")
 	require.NoError(t, err)
@@ -330,7 +330,7 @@ func TestFinishCanvasImageTaskHandsOffQueuedTasksEndpointResponse(t *testing.T) 
 
 	task := &model.Task{TaskID: "task_canvas_async", Platform: constant.TaskPlatformCanvasImage, UserId: 1, Status: model.TaskStatusInProgress}
 	require.NoError(t, task.Insert())
-	relayInfo := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
+	relayInfo := &relaycommon.RelayInfo{UserId: 1, UsingGroup: "default", ChannelMeta: &relaycommon.ChannelMeta{
 		ChannelId:   34,
 		ChannelType: constant.ChannelTypeOpenAI,
 		ChannelOtherSettings: dto.ChannelOtherSettings{
@@ -359,7 +359,7 @@ func TestFinishCanvasImageTaskRejectsAndRefundsMissingTaskID(t *testing.T) {
 	_, _ = recorder.WriteString(`{"status":"queued"}`)
 	task := &model.Task{TaskID: "task_canvas_missing", UserId: 1, Status: model.TaskStatusInProgress}
 	require.NoError(t, task.Insert())
-	relayInfo := &relaycommon.RelayInfo{Billing: spy, ChannelMeta: &relaycommon.ChannelMeta{ChannelOtherSettings: dto.ChannelOtherSettings{ImageAsyncMode: dto.ImageAsyncModeTasksEndpoint}}}
+	relayInfo := &relaycommon.RelayInfo{UserId: 1, Billing: spy, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 34, ChannelOtherSettings: dto.ChannelOtherSettings{ImageAsyncMode: dto.ImageAsyncModeTasksEndpoint}}}
 	finishCanvasImageTask(task, 34, recorder, relayInfo)
 	reloaded, exists, err := model.GetByTaskId(1, task.TaskID)
 	require.NoError(t, err)
@@ -379,7 +379,7 @@ func TestFinishCanvasImageTaskRefundsHandoffPersistenceFailure(t *testing.T) {
 	_, _ = recorder.WriteString(`{"task_id":"upstream_async","status":"queued"}`)
 	task := &model.Task{TaskID: "task_canvas_update_fail", UserId: 1, Status: model.TaskStatusInProgress}
 	require.NoError(t, task.Insert())
-	relayInfo := &relaycommon.RelayInfo{Billing: spy, ChannelMeta: &relaycommon.ChannelMeta{ChannelOtherSettings: dto.ChannelOtherSettings{ImageAsyncMode: dto.ImageAsyncModeTasksEndpoint}}}
+	relayInfo := &relaycommon.RelayInfo{UserId: 1, Billing: spy, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 34, ChannelOtherSettings: dto.ChannelOtherSettings{ImageAsyncMode: dto.ImageAsyncModeTasksEndpoint}}}
 	finishCanvasImageTask(task, 34, recorder, relayInfo)
 	require.Equal(t, 1, spy.refunds)
 }
@@ -392,7 +392,7 @@ func TestFinishCanvasImageTaskRefundsImmediateTerminalFailure(t *testing.T) {
 	_, _ = recorder.WriteString(`{"task_id":"failed_async","status":"failed","error":{"message":"rejected"}}`)
 	task := &model.Task{TaskID: "task_canvas_terminal_fail", UserId: 1, Status: model.TaskStatusInProgress}
 	require.NoError(t, task.Insert())
-	relayInfo := &relaycommon.RelayInfo{Billing: spy, ChannelMeta: &relaycommon.ChannelMeta{ChannelOtherSettings: dto.ChannelOtherSettings{ImageAsyncMode: dto.ImageAsyncModeTasksEndpoint}}}
+	relayInfo := &relaycommon.RelayInfo{UserId: 1, Billing: spy, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 34, ChannelOtherSettings: dto.ChannelOtherSettings{ImageAsyncMode: dto.ImageAsyncModeTasksEndpoint}}}
 	finishCanvasImageTask(task, 34, recorder, relayInfo)
 
 	reloaded, exists, err := model.GetByTaskId(1, task.TaskID)
@@ -637,16 +637,19 @@ func TestBuildCanvasImageActualBillingInputUsesReturnedSizeQuality(t *testing.T)
 func setupCanvasImageTaskTestDB(t *testing.T) {
 	t.Helper()
 
-	oldDB := model.DB
+	oldDB, oldLogDB := model.DB, model.LOG_DB
 	oldUsingSQLite := common.UsingSQLite
 	t.Cleanup(func() {
-		model.DB = oldDB
+		model.DB, model.LOG_DB = oldDB, oldLogDB
 		common.UsingSQLite = oldUsingSQLite
 	})
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	common.UsingSQLite = true
-	model.DB = db
-	require.NoError(t, db.AutoMigrate(&model.Task{}))
+	model.DB, model.LOG_DB = db, db
+	require.NoError(t, db.AutoMigrate(&model.Task{}, &model.TaskAccounting{}, &model.TaskAccountingEvent{}, &model.TaskAccountingLogReceipt{}, &model.User{}, &model.Channel{}, &model.Log{}))
+	require.NoError(t, db.Create(&model.User{Id: 1, Username: "canvas-user", Status: common.UserStatusEnabled}).Error)
+	require.NoError(t, db.Create(&model.Channel{Id: 12, Name: "canvas-12", Key: "test", Status: common.ChannelStatusEnabled}).Error)
+	require.NoError(t, db.Create(&model.Channel{Id: 34, Name: "canvas-34", Key: "test", Status: common.ChannelStatusEnabled}).Error)
 }
