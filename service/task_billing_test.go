@@ -62,7 +62,7 @@ func migrateTaskAccountingFixture(db *gorm.DB) error {
 
 func resetTaskAccountingFixture(t *testing.T, db, logDB *gorm.DB) {
 	t.Helper()
-	for _, value := range []any{&model.BalanceCacheRepair{}, &model.TaskSubmission{}, &model.TaskAccountingLogReceipt{}, &model.TaskAccountingEvent{}, &model.TaskAccounting{}, &model.Task{}, &model.Token{}, &model.Channel{}, &model.SubscriptionPreConsumeRecord{}, &model.UserSubscription{}, &model.User{}} {
+	for _, value := range []any{&model.BalanceCacheRepair{}, &model.Midjourney{}, &model.TaskSubmission{}, &model.TaskAccountingLogReceipt{}, &model.TaskAccountingEvent{}, &model.TaskAccounting{}, &model.Task{}, &model.Token{}, &model.Channel{}, &model.SubscriptionPreConsumeRecord{}, &model.UserSubscription{}, &model.User{}} {
 		require.NoError(t, db.Unscoped().Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(value).Error)
 	}
 	if logDB != db {

@@ -97,8 +97,10 @@ func TestWalletRealtimeUsesCumulativeReservationAndFinalSettlementOnce(t *testin
 	info.OriginModelName = "gpt-4o-realtime-preview"
 	info.UsingGroup = "default"
 	info.ForcePreConsume = true
-	info.PriceData.FreeModel = false
+	modelRatio, _, _ := ratio_setting.GetModelRatio(info.OriginModelName)
+	info.PriceData = types.PriceData{ModelRatio: modelRatio, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1}}
 	require.Nil(t, ReconcileBillingReservation(ctx, 0, info))
+	t.Cleanup(func() { info.Billing.Refund(ctx) })
 
 	first := &dto.RealtimeUsage{TotalTokens: 10, InputTokens: 10}
 	first.InputTokenDetails.TextTokens = 10
@@ -117,7 +119,6 @@ func TestWalletRealtimeUsesCumulativeReservationAndFinalSettlementOnce(t *testin
 	require.Equal(t, 100000-finalQuota, userQuota)
 	require.Equal(t, 100000-finalQuota, tokenRemain)
 	require.Equal(t, finalQuota, tokenUsed)
-	modelRatio, _, _ := ratio_setting.GetModelRatio(info.OriginModelName)
 	require.NotZero(t, modelRatio)
 }
 

@@ -53,15 +53,7 @@ func UpdateMidjourneyTaskBulk() {
 				nullTaskIds = append(nullTaskIds, task.Id)
 				continue
 			}
-			key := midjourneyPollingKey(task.ChannelId, task.MjId)
-			taskM[key] = append(taskM[key], task)
-			if taskChannelSeen[task.ChannelId] == nil {
-				taskChannelSeen[task.ChannelId] = make(map[string]struct{})
-			}
-			if _, exists := taskChannelSeen[task.ChannelId][task.MjId]; !exists {
-				taskChannelSeen[task.ChannelId][task.MjId] = struct{}{}
-				taskChannelM[task.ChannelId] = append(taskChannelM[task.ChannelId], task.MjId)
-			}
+			indexMidjourneyPollingTask(task, taskChannelM, taskChannelSeen, taskM)
 		}
 		if len(nullTaskIds) > 0 {
 			err := model.MjBulkUpdateByTaskIds(nullTaskIds, map[string]any{
@@ -224,6 +216,22 @@ func UpdateMidjourneyTaskBulk() {
 			}
 		}
 	}
+}
+
+func indexMidjourneyPollingTask(task *model.Midjourney, channelTasks map[int][]string, channelSeen map[int]map[string]struct{}, taskIndex map[string][]*model.Midjourney) {
+	if task == nil {
+		return
+	}
+	key := midjourneyPollingKey(task.ChannelId, task.MjId)
+	taskIndex[key] = append(taskIndex[key], task)
+	if channelSeen[task.ChannelId] == nil {
+		channelSeen[task.ChannelId] = make(map[string]struct{})
+	}
+	if _, exists := channelSeen[task.ChannelId][task.MjId]; exists {
+		return
+	}
+	channelSeen[task.ChannelId][task.MjId] = struct{}{}
+	channelTasks[task.ChannelId] = append(channelTasks[task.ChannelId], task.MjId)
 }
 
 func failLinkedMidjourneyTask(ctx context.Context, task *model.Midjourney, reason string) error {

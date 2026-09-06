@@ -97,6 +97,24 @@ func TestGenericTaskPollingExcludesInternalMidjourneyRows(t *testing.T) {
 	require.Zero(t, model.TaskCountAllUserTask(0, model.SyncTaskQueryParams{Platform: constant.TaskPlatformMidjourney}))
 }
 
+func TestMidjourneyPollingIndexesEveryOwnerForDuplicateUpstreamID(t *testing.T) {
+	channelTasks := make(map[int][]string)
+	channelSeen := make(map[int]map[string]struct{})
+	taskIndex := make(map[string][]*model.Midjourney)
+	first := &model.Midjourney{Id: 1, ChannelId: 7, MjId: "shared-upstream-id"}
+	second := &model.Midjourney{Id: 2, ChannelId: 7, MjId: "shared-upstream-id"}
+	otherChannel := &model.Midjourney{Id: 3, ChannelId: 8, MjId: "shared-upstream-id"}
+
+	indexMidjourneyPollingTask(first, channelTasks, channelSeen, taskIndex)
+	indexMidjourneyPollingTask(second, channelTasks, channelSeen, taskIndex)
+	indexMidjourneyPollingTask(otherChannel, channelTasks, channelSeen, taskIndex)
+
+	require.Equal(t, []string{"shared-upstream-id"}, channelTasks[7])
+	require.Equal(t, []string{"shared-upstream-id"}, channelTasks[8])
+	require.Len(t, taskIndex[midjourneyPollingKey(7, "shared-upstream-id")], 2)
+	require.Len(t, taskIndex[midjourneyPollingKey(8, "shared-upstream-id")], 1)
+}
+
 func TestMidjourneyPollerPreservesLegacyWalletOnlyRefund(t *testing.T) {
 	oldDB, oldLogDB := model.DB, model.LOG_DB
 	oldSQLite, oldRedis := common.UsingSQLite, common.RedisEnabled
