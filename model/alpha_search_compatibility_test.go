@@ -23,7 +23,7 @@ func TestAlphaSearchCompatibilitySeed(t *testing.T) {
 	require.NoError(t, token.Insert())
 	channel := &Channel{Name: "c-alpha-channel", Type: constant.ChannelTypeOpenAI,
 		Key: "ci-gateway-key", Status: common.ChannelStatusEnabled,
-		BaseURL: common.GetPointer("http://127.0.0.1:38080/v1"), Models: "c-alpha-public",
+		BaseURL: common.GetPointer("http://127.0.0.2:38080/v1"), Models: "c-alpha-public",
 		Group: "default", Weight: common.GetPointer(uint(1)), Priority: common.GetPointer(int64(100)),
 		AutoBan: common.GetPointer(0), ModelMapping: common.GetPointer(`{"c-alpha-public":"c-alpha-mapped"}`)}
 	require.NoError(t, channel.Insert())

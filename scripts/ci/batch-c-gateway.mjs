@@ -33,7 +33,7 @@ const gateway = http.createServer(async (req, res) => {
 });
 await new Promise((resolve, reject) => {
   gateway.once('error', reject);
-  gateway.listen(38080, '127.0.0.1', resolve);
+  gateway.listen(38080, '127.0.0.2', resolve);
 });
 try {
   const body = (extra = '') => '{"model":"c-alpha-public","input":"fixture","opaque":9007199254740993,"zero":0,"flag":false,"null":null' + extra + '}';

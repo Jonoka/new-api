@@ -15,7 +15,7 @@ diagnose_failure() {
   docker logs "$container" 2>&1 | tail -80
   query "SELECT id,name,status,models,to_jsonb(c)->>'group' FROM channels c WHERE name='c-alpha-channel'"
   query "SELECT to_jsonb(a) FROM abilities a WHERE model='c-alpha-public'"
-  query "SELECT to_jsonb(b) FROM channel_group_bindings b WHERE channel_id IN (SELECT id FROM channels WHERE name='c-alpha-channel')"
+  query "SELECT to_jsonb(b) FROM channel_groups b WHERE channel_id IN (SELECT id FROM channels WHERE name='c-alpha-channel')"
 }
 trap diagnose_failure ERR
 start_image() {
