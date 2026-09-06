@@ -32,14 +32,17 @@ var (
 	ErrTaskSubmissionConflict    = errors.New("task submission identity conflict")
 )
 
-// TaskSubmission owns a reservation from the first paid async attempt until it
-// is released, synchronously settled, or transferred to TaskAccounting.
+// TaskSubmission owns a BillingSession reservation until it is released,
+// synchronously settled, or transferred to TaskAccounting.
 type TaskSubmission struct {
-	SubmissionID    string `json:"submission_id" gorm:"type:varchar(64);primaryKey"`
-	Version         int    `json:"version" gorm:"not null;default:1"`
-	State           string `json:"state" gorm:"type:varchar(20);not null;index:idx_task_submission_recovery,priority:1"`
-	LeaseToken      string `json:"lease_token" gorm:"type:varchar(64);not null"`
-	LastOperationID string `json:"last_operation_id" gorm:"type:varchar(64);not null;default:''"`
+	SubmissionID      string `json:"submission_id" gorm:"type:varchar(64);primaryKey"`
+	Version           int    `json:"version" gorm:"not null;default:1"`
+	State             string `json:"state" gorm:"type:varchar(20);not null;index:idx_task_submission_recovery,priority:1"`
+	LeaseToken        string `json:"lease_token" gorm:"type:varchar(64);not null"`
+	LastOperationID   string `json:"last_operation_id" gorm:"type:varchar(64);not null;default:''"`
+	LastExpectedQuota int    `json:"last_expected_quota" gorm:"not null;default:0"`
+	LastTargetQuota   int    `json:"last_target_quota" gorm:"not null;default:0"`
+	LastFinalState    string `json:"last_final_state" gorm:"type:varchar(20);not null;default:''"`
 	// FoldedBatchOperationIDs is immutable commit evidence for legacy in-memory
 	// batch values folded by reservation transactions. It never stores token keys.
 	FoldedBatchOperationIDs string `json:"-" gorm:"type:text"`
@@ -198,7 +201,7 @@ func prepareTaskSubmissionReservationTx(tx *gorm.DB, req GroupReservationRequest
 	if submission.LeaseToken != req.SubmissionLeaseToken {
 		return nil, ErrTaskSubmissionLeaseLost
 	}
-	if submission.UserID != req.UserId || submission.ReservedQuota != req.ExpectedReserved {
+	if submission.UserID != req.UserId || (!req.UseDurableExpected && submission.ReservedQuota != req.ExpectedReserved) {
 		return nil, ErrTaskSubmissionConflict
 	}
 	if submission.TaskRowID != nil && req.SubmissionTaskRowID > 0 && *submission.TaskRowID != req.SubmissionTaskRowID {
@@ -254,6 +257,9 @@ func updateTaskSubmissionReservationTx(tx *gorm.DB, submission *TaskSubmission, 
 		"lease_expires_at":        now + taskSubmissionLeaseSeconds(req.SubmissionLeaseSeconds),
 		"updated_at":              now,
 		"last_operation_id":       req.SubmissionOperationID,
+		"last_expected_quota":     req.ExpectedReserved,
+		"last_target_quota":       req.TargetReserved,
+		"last_final_state":        req.SubmissionFinalState,
 	}
 	if foldedBatchOperationID != "" {
 		operationIDs, err := appendTaskSubmissionFoldedBatchOperationID(submission.FoldedBatchOperationIDs, foldedBatchOperationID)
@@ -339,6 +345,9 @@ func resolveTaskSubmissionReservationCommit(ctx context.Context, req GroupReserv
 	if submission.Version != TaskSubmissionVersion || submission.LeaseToken != req.SubmissionLeaseToken || submission.UserID != req.UserId {
 		return nil, ErrTaskSubmissionConflict
 	}
+	if req.UseDurableExpected {
+		req.ExpectedReserved = submission.LastExpectedQuota
+	}
 	if submission.TaskRowID != nil && req.SubmissionTaskRowID > 0 && *submission.TaskRowID != req.SubmissionTaskRowID {
 		return nil, ErrTaskSubmissionConflict
 	}
@@ -355,6 +364,7 @@ func resolveTaskSubmissionReservationCommit(ctx context.Context, req GroupReserv
 	resolution := &taskSubmissionReservationResolution{
 		Result: GroupReservationResult{
 			Reserved:                         req.TargetReserved,
+			PreviousReserved:                 req.ExpectedReserved,
 			SubscriptionId:                   submission.SubscriptionID,
 			SubscriptionReservationResetTime: submission.SubscriptionResetTime,
 		},
@@ -363,6 +373,9 @@ func resolveTaskSubmissionReservationCommit(ctx context.Context, req GroupReserv
 		// This transaction did not publish its operation identity. Any batch
 		// deltas pulled before it began therefore remain safe to restore.
 		return resolution, nil
+	}
+	if submission.LastExpectedQuota != req.ExpectedReserved || submission.LastTargetQuota != req.TargetReserved || submission.LastFinalState != req.SubmissionFinalState {
+		return nil, ErrTaskSubmissionConflict
 	}
 	if submission.FundingSource == GroupReservationSubscription && submission.SubscriptionID > 0 {
 		var subscription UserSubscription
@@ -766,7 +779,43 @@ func RecoverExpiredTaskSubmissions(ctx context.Context, limit int) error {
 			firstErr = err
 		}
 	}
+	if err := DeleteClosedOrdinaryTaskSubmissions(ctx, now-7*24*60*60, limit); err != nil && firstErr == nil {
+		firstErr = err
+	}
 	return firstErr
+}
+
+// DeleteClosedOrdinaryTaskSubmissions bounds generic receipt retention only
+// after every durable owner and pending projection has been ruled out.
+func DeleteClosedOrdinaryTaskSubmissions(ctx context.Context, olderThan int64, limit int) error {
+	if olderThan <= 0 {
+		return errors.New("closed task submission retention cutoff is required")
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	query := DB.WithContext(ctx).Model(&TaskSubmission{}).
+		Where("state IN ?", []string{TaskSubmissionStateSettled, TaskSubmissionStateReleased}).
+		Where("task_row_id IS NULL AND cache_pending = ? AND updated_at < ?", false, olderThan).
+		Where("folded_batch_operation_ids IS NULL OR folded_batch_operation_ids = ?", "")
+	if DB.Migrator().HasTable(&TaskAccountingEvent{}) {
+		query = query.Where("NOT EXISTS (?)", DB.WithContext(ctx).Model(&TaskAccountingEvent{}).
+			Select("1").Where("task_accounting_events.submission_id = task_submissions.submission_id AND task_accounting_events.delivered = ?", false))
+	}
+	var ids []string
+	if err := query.Order("updated_at asc").Limit(limit).Pluck("submission_id", &ids).Error; err != nil || len(ids) == 0 {
+		return err
+	}
+	result := DB.WithContext(ctx).Where("submission_id IN ?", ids).
+		Where("state IN ?", []string{TaskSubmissionStateSettled, TaskSubmissionStateReleased}).
+		Where("task_row_id IS NULL AND cache_pending = ? AND updated_at < ?", false, olderThan).
+		Where("folded_batch_operation_ids IS NULL OR folded_batch_operation_ids = ?", "")
+	if DB.Migrator().HasTable(&TaskAccountingEvent{}) {
+		result = result.Where("NOT EXISTS (?)", DB.WithContext(ctx).Model(&TaskAccountingEvent{}).
+			Select("1").Where("task_accounting_events.submission_id = task_submissions.submission_id AND task_accounting_events.delivered = ?", false))
+	}
+	result = result.Delete(&TaskSubmission{})
+	return result.Error
 }
 
 func ReconcileTaskSubmissionCache(ctx context.Context, submissionID string) error {

@@ -27,6 +27,7 @@ type BillingSession struct {
 	relayInfo        *relaycommon.RelayInfo
 	funding          FundingSource
 	preConsumedQuota int  // 实际预扣额度（信任用户可能为 0）
+	previousReserved int  // durable expected amount used by the latest operation
 	tokenConsumed    int  // 令牌额度实际扣减量
 	trusted          bool // 是否命中信任额度旁路
 	fundingSettled   bool // final funding ownership/settlement has committed
@@ -51,11 +52,14 @@ func (s *BillingSession) Settle(actualQuota int) error {
 	if actualQuota < 0 {
 		return errors.New("actual quota cannot be negative")
 	}
-	delta := actualQuota - s.preConsumedQuota
+	previousReserved := s.preConsumedQuota
+	delta := actualQuota - previousReserved
 	if delta != 0 || s.funding.Source() == BillingSourceSubscription || s.hasTaskSubmission() {
 		if apiErr := s.reconcileReservationWithFinal(s.preConsumedQuota, actualQuota, true, model.TaskSubmissionStateSettled, ""); apiErr != nil {
 			return apiErr
 		}
+		previousReserved = s.previousReserved
+		delta = actualQuota - previousReserved
 	}
 	s.fundingSettled = true
 	s.settled = true
@@ -75,12 +79,13 @@ func (s *BillingSession) Refund(c *gin.Context) {
 	}
 	closedByDurableOwner := false
 	if err := refundWithRetry(func() error {
-		result, err := s.reconcileReservationRaw(s.preConsumedQuota, 0, true, model.TaskSubmissionStateReleased, "live request ended before task handoff")
+		result, err := s.reconcileReservationRaw(s.preConsumedQuota, 0, true, model.TaskSubmissionStateReleased, "live request ended before task handoff", 0)
 		if errors.Is(err, model.ErrTaskSubmissionTransferred) || errors.Is(err, model.ErrTaskSubmissionSettled) {
 			closedByDurableOwner = true
 			return nil
 		}
 		if errors.Is(err, model.ErrTaskSubmissionReleased) {
+			s.markReleasedReservationLocked()
 			return nil
 		}
 		if err != nil {
@@ -101,6 +106,18 @@ func (s *BillingSession) Refund(c *gin.Context) {
 	s.syncRelayInfo()
 	s.refunded = true
 	s.stopTaskSubmissionHeartbeatLocked()
+}
+
+func (s *BillingSession) markReleasedReservationLocked() {
+	s.previousReserved = s.preConsumedQuota
+	s.preConsumedQuota = 0
+	s.tokenConsumed = 0
+	switch funding := s.funding.(type) {
+	case *WalletFunding:
+		funding.consumed = 0
+	case *SubscriptionFunding:
+		funding.preConsumed = 0
+	}
 }
 
 // NeedsRefund 返回是否存在需要退还的预扣状态。
@@ -175,23 +192,39 @@ func (s *BillingSession) Reserve(targetQuota int) error {
 func (s *BillingSession) preConsume(c *gin.Context, quota int) *types.NewAPIError {
 	effectiveQuota := quota
 
-	// ---- 信任额度旁路 ----
-	if s.shouldTrust(c) {
-		s.trusted = true
+	trustQuota := s.trustQuotaForAdmission()
+	result, err := s.reconcileReservationRaw(0, effectiveQuota, false, "", "", trustQuota)
+	if err != nil {
+		return groupReservationError(err)
+	}
+	if result == nil {
+		return types.NewError(errors.New("billing reservation result is missing"), types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
+	}
+	if result.Reserved != effectiveQuota && !result.Trusted {
+		return types.NewError(errors.New("billing reservation target mismatch"), types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
+	}
+	if result.Trusted && result.Reserved != 0 {
+		return types.NewError(errors.New("trusted billing reservation is not zero"), types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
+	}
+	if result.Trusted && s.funding.Source() != BillingSourceWallet {
+		return types.NewError(errors.New("only wallet billing may use trust"), types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
+	}
+	if result.Trusted && trustQuota <= 0 {
+		return types.NewError(errors.New("trusted billing reservation has no configured threshold"), types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
+	}
+	if result.Trusted {
 		effectiveQuota = 0
+	}
+	if result.Reserved != effectiveQuota {
+		return types.NewError(errors.New("billing reservation result does not match its target"), types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
+	}
+	s.applyReservationResult(result)
+	s.trusted = result.Trusted
+	s.startTaskSubmissionHeartbeatLocked()
+	if s.trusted {
 		logger.LogInfo(c, fmt.Sprintf("用户 %d 额度充足, 信任且不需要预扣费 (funding=%s)", s.relayInfo.UserId, s.funding.Source()))
 	} else if effectiveQuota > 0 {
 		logger.LogInfo(c, fmt.Sprintf("用户 %d 需要预扣费 %s (funding=%s)", s.relayInfo.UserId, logger.FormatQuota(effectiveQuota), s.funding.Source()))
-	}
-	if s.trusted {
-		s.preConsumedQuota = 0
-		s.tokenConsumed = 0
-		s.syncRelayInfo()
-		return nil
-	}
-
-	if apiErr := s.reconcileReservation(0, effectiveQuota, false); apiErr != nil {
-		return apiErr
 	}
 
 	// ---- 同步 RelayInfo 兼容字段 ----
@@ -205,7 +238,7 @@ func (s *BillingSession) reconcileReservation(currentQuota int, targetQuota int,
 }
 
 func (s *BillingSession) reconcileReservationWithFinal(currentQuota int, targetQuota int, postConsume bool, finalState, finalReason string) *types.NewAPIError {
-	result, err := s.reconcileReservationRaw(currentQuota, targetQuota, postConsume, finalState, finalReason)
+	result, err := s.reconcileReservationRaw(currentQuota, targetQuota, postConsume, finalState, finalReason, 0)
 	if err != nil {
 		return groupReservationError(err)
 	}
@@ -216,7 +249,7 @@ func (s *BillingSession) reconcileReservationWithFinal(currentQuota int, targetQ
 	return nil
 }
 
-func (s *BillingSession) reconcileReservationRaw(currentQuota int, targetQuota int, postConsume bool, finalState, finalReason string) (*model.GroupReservationResult, error) {
+func (s *BillingSession) reconcileReservationRaw(currentQuota int, targetQuota int, postConsume bool, finalState, finalReason string, trustQuota int) (*model.GroupReservationResult, error) {
 	s.ensureTaskSubmissionIdentityLocked()
 	req := model.GroupReservationRequest{
 		Source:                s.funding.Source(),
@@ -230,6 +263,8 @@ func (s *BillingSession) reconcileReservationRaw(currentQuota int, targetQuota i
 		SkipTokenQuota:        s.relayInfo.IsPlayground || s.relayInfo.SkipTokenQuota,
 		ExpectedReserved:      currentQuota,
 		TargetReserved:        targetQuota,
+		TrustQuota:            trustQuota,
+		UseDurableExpected:    finalState != "",
 		PostConsume:           postConsume,
 		SubmissionFinalState:  finalState,
 		SubmissionFinalReason: finalReason,
@@ -252,6 +287,7 @@ func (s *BillingSession) applyReservationResult(result *model.GroupReservationRe
 		return
 	}
 	s.preConsumedQuota = result.Reserved
+	s.previousReserved = result.PreviousReserved
 	if s.relayInfo.IsPlayground || s.relayInfo.SkipTokenQuota {
 		s.tokenConsumed = 0
 	} else {
@@ -279,7 +315,7 @@ func (s *BillingSession) hasTaskSubmission() bool {
 }
 
 func (s *BillingSession) ensureTaskSubmissionIdentityLocked() {
-	if s.relayInfo != nil && (s.relayInfo.ForcePreConsume || s.relayInfo.DeferTaskBilling) {
+	if s.relayInfo != nil {
 		s.relayInfo.EnsureTaskSubmissionIdentity()
 	}
 }
@@ -309,37 +345,18 @@ func groupReservationError(err error) *types.NewAPIError {
 	}
 }
 
-// shouldTrust 统一信任额度检查，适用于钱包和订阅。
-func (s *BillingSession) shouldTrust(c *gin.Context) bool {
+// trustQuotaForAdmission returns only policy input. Locked database rows decide
+// eligibility inside the reservation transaction.
+func (s *BillingSession) trustQuotaForAdmission() int {
 	// 异步任务（ForcePreConsume=true）必须预扣全额，不允许信任旁路
 	if s.relayInfo.ForcePreConsume {
-		return false
+		return 0
 	}
 
-	trustQuota := common.GetTrustQuota()
-	if trustQuota <= 0 {
-		return false
+	if s.funding.Source() != BillingSourceWallet {
+		return 0
 	}
-
-	// 检查令牌是否充足
-	tokenTrusted := s.relayInfo.TokenUnlimited
-	if !tokenTrusted {
-		tokenQuota := c.GetInt("token_quota")
-		tokenTrusted = tokenQuota > trustQuota
-	}
-	if !tokenTrusted {
-		return false
-	}
-
-	switch s.funding.Source() {
-	case BillingSourceWallet:
-		return s.relayInfo.UserQuota > trustQuota
-	case BillingSourceSubscription:
-		// Subscription admission must create a request-scoped reservation record.
-		return false
-	default:
-		return false
-	}
+	return common.GetTrustQuota()
 }
 
 // syncRelayInfo 将 BillingSession 的状态同步到 RelayInfo 的兼容字段上。

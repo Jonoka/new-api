@@ -115,7 +115,7 @@ func TestGameExchangeQuotaToTokensMovesBalance(t *testing.T) {
 	assert.EqualValues(t, 50000, getGameWalletBalance(t, 1))
 }
 
-func TestGameExchangeQuotaToTokensHonorsPendingBatchQuotaUpdates(t *testing.T) {
+func TestGameExchangeQuotaToTokensHonorsCommittedQuotaWithBatchEnabled(t *testing.T) {
 	setupGameTest(t)
 	userID := 990001
 	seedGameUser(t, userID, 1000)
@@ -124,15 +124,15 @@ func TestGameExchangeQuotaToTokensHonorsPendingBatchQuotaUpdates(t *testing.T) {
 		common.BatchUpdateEnabled = false
 	})
 	require.NoError(t, model.DecreaseUserQuota(userID, 800, false))
-	assert.Equal(t, 1000, getGameUserQuota(t, userID))
+	assert.Equal(t, 200, getGameUserQuota(t, userID))
 
 	_, err := ExchangeQuotaToGameTokens(userID, 500)
 
 	require.ErrorIs(t, err, ErrGameInsufficientQuota)
-	assert.Equal(t, 1000, getGameUserQuota(t, userID))
+	assert.Equal(t, 200, getGameUserQuota(t, userID))
 }
 
-func TestGameExchangeQuotaToTokensConsumesPendingBatchQuotaOnce(t *testing.T) {
+func TestGameExchangeQuotaToTokensDoesNotReplayCommittedQuota(t *testing.T) {
 	setupGameTest(t)
 	userID := 990002
 	seedGameUser(t, userID, 1000)
@@ -141,7 +141,7 @@ func TestGameExchangeQuotaToTokensConsumesPendingBatchQuotaOnce(t *testing.T) {
 		common.BatchUpdateEnabled = false
 	})
 	require.NoError(t, model.DecreaseUserQuota(userID, 800, false))
-	assert.Equal(t, 1000, getGameUserQuota(t, userID))
+	assert.Equal(t, 200, getGameUserQuota(t, userID))
 
 	_, err := ExchangeQuotaToGameTokens(userID, 100)
 

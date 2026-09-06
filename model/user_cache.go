@@ -149,12 +149,11 @@ func cacheGetUserBase(userId int) (*UserBase, error) {
 	return &userCache, nil
 }
 
-// Add atomic quota operations using hash fields
+// Legacy callers retain this helper name, but balance projections are now
+// invalidated after database commit instead of being adjusted independently.
 func cacheIncrUserQuota(userId int, delta int64) error {
-	if !common.RedisEnabled {
-		return nil
-	}
-	return common.RedisHIncrBy(getUserCacheKey(userId), "Quota", delta)
+	_ = delta
+	return invalidateUserCache(userId)
 }
 
 func cacheDecrUserQuota(userId int, delta int64) error {
@@ -162,7 +161,8 @@ func cacheDecrUserQuota(userId int, delta int64) error {
 }
 
 func AdjustUserQuotaCache(userId int, delta int64) error {
-	return cacheIncrUserQuota(userId, delta)
+	_ = delta
+	return invalidateUserCache(userId)
 }
 
 // Helper functions to get individual fields if needed
@@ -216,13 +216,6 @@ func updateUserStatusCache(userId int, status bool) error {
 		statusInt = common.UserStatusDisabled
 	}
 	return common.RedisHSetField(getUserCacheKey(userId), "Status", fmt.Sprintf("%d", statusInt))
-}
-
-func updateUserQuotaCache(userId int, quota int) error {
-	if !common.RedisEnabled {
-		return nil
-	}
-	return common.RedisHSetField(getUserCacheKey(userId), "Quota", fmt.Sprintf("%d", quota))
 }
 
 func updateUserGroupCache(userId int, group string) error {

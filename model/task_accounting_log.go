@@ -113,7 +113,7 @@ func deliverTaskAccountingLog(ctx context.Context, event *TaskAccountingEvent) e
 	if err != nil {
 		return err
 	}
-	if createdLog && common.DataExportEnabled && (event.Kind == "initial" || event.Kind == "synchronous_image" || event.Kind == "alpha_search") {
+	if createdLog && common.DataExportEnabled && (event.Kind == "initial" || event.Kind == "synchronous_image" || event.Kind == "alpha_search" || event.Kind == "violation_fee") {
 		gopool.Go(func() {
 			LogQuotaData(facts.UserID, facts.Username, facts.ModelName, facts.Quota, facts.CreatedAt, facts.PromptTokens+facts.CompletionTokens)
 		})

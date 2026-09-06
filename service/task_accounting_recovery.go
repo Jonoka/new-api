@@ -33,6 +33,9 @@ func runTaskAccountingRecovery() {
 	if err := model.RecoverExpiredTaskSubmissions(ctx, taskAccountingRecoveryLimit); err != nil {
 		common.SysLog("task submission recovery pending: " + err.Error())
 	}
+	if err := model.RecoverBalanceCacheRepairs(ctx, taskAccountingRecoveryLimit); err != nil {
+		common.SysLog("balance cache recovery pending: " + err.Error())
+	}
 	if err := model.RecoverTaskAccounting(ctx, taskAccountingRecoveryLimit); err != nil {
 		common.SysLog("task accounting recovery pending: " + err.Error())
 	}

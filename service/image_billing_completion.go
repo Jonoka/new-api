@@ -86,13 +86,14 @@ func settleSynchronousSubmission(c *gin.Context, info *relaycommon.RelayInfo, fa
 		SubscriptionId: info.SubscriptionId, TokenId: info.TokenId, TokenKey: info.TokenKey,
 		TokenUnlimited: info.TokenUnlimited, SkipTokenQuota: info.SkipTokenQuota || info.IsPlayground,
 		ExpectedReserved: reserved, TargetReserved: facts.Quota, PostConsume: true,
-		SubmissionID: info.TaskSubmissionID, SubmissionLeaseToken: info.TaskSubmissionLeaseToken,
+		UseDurableExpected: true,
+		SubmissionID:       info.TaskSubmissionID, SubmissionLeaseToken: info.TaskSubmissionLeaseToken,
 		SubmissionOperationID: operationID, SubmissionFinalState: model.TaskSubmissionStateSettled,
 	}
-	if source == BillingSourceSubscription && facts.Other != nil {
-		facts.Other["subscription_post_delta"] = info.SubscriptionPostDelta + int64(facts.Quota-reserved)
-	}
-	result, err := model.WithReconciledGroupReservation(req, func(tx *gorm.DB, _ *model.GroupReservationResult) error {
+	result, err := model.WithReconciledGroupReservation(req, func(tx *gorm.DB, result *model.GroupReservationResult) error {
+		if source == BillingSourceSubscription && facts.Other != nil {
+			facts.Other["subscription_post_delta"] = info.SubscriptionPostDelta + int64(facts.Quota-result.PreviousReserved)
+		}
 		return complete(tx, req.SubmissionID, facts)
 	})
 	if err != nil {
@@ -110,6 +111,7 @@ func settleSynchronousSubmission(c *gin.Context, info *relaycommon.RelayInfo, fa
 		return err
 	}
 	if session != nil {
+		reserved = result.PreviousReserved
 		session.applyReservationResult(result)
 		session.fundingSettled, session.settled = true, true
 		session.stopTaskSubmissionHeartbeatLocked()

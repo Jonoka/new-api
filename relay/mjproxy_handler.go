@@ -21,6 +21,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 )
@@ -116,6 +117,32 @@ func RelayMidjourneyNotify(c *gin.Context) *dto.MidjourneyResponse {
 			Result:      "",
 		}
 	}
+	preStatus := midjourneyTask.Status
+	if midjourneyTask.TaskRowID != nil && (midjRequest.Status == string(model.TaskStatusSuccess) || midjRequest.Status == string(model.TaskStatusFailure)) {
+		accountingTask, err := model.GetTaskByRowID(*midjourneyTask.TaskRowID)
+		if err != nil {
+			return service.MidjourneyErrorWrapper(constant.MjRequestError, "load_midjourney_billing_failed")
+		}
+		if midjRequest.Status == string(model.TaskStatusFailure) && midjRequest.Progress != "100%" {
+			midjRequest.Progress = "100%"
+		}
+		reason := "midjourney notification completed"
+		if midjRequest.Status == string(model.TaskStatusFailure) {
+			reason = midjRequest.FailReason
+		}
+		if _, err := service.FinalizeMidjourneyTaskAccounting(c.Request.Context(), accountingTask, midjRequest, midjourneyTask.Quota, reason); err != nil {
+			return service.MidjourneyErrorWrapper(constant.MjRequestError, "finalize_midjourney_billing_failed")
+		}
+		projection, err := service.MidjourneyTaskProjection(accountingTask)
+		if err != nil {
+			return service.MidjourneyErrorWrapper(constant.MjRequestError, "project_midjourney_task_failed")
+		}
+		service.ApplyMidjourneyTaskProjection(midjourneyTask, projection)
+		if _, err := midjourneyTask.UpdateWithStatus(preStatus); err != nil {
+			return service.MidjourneyErrorWrapper(constant.MjRequestError, "update_midjourney_task_failed")
+		}
+		return nil
+	}
 	midjourneyTask.Progress = midjRequest.Progress
 	midjourneyTask.PromptEn = midjRequest.PromptEn
 	midjourneyTask.State = midjRequest.State
@@ -128,7 +155,11 @@ func RelayMidjourneyNotify(c *gin.Context) *dto.MidjourneyResponse {
 	midjourneyTask.VideoUrls = string(videoUrlsStr)
 	midjourneyTask.Status = midjRequest.Status
 	midjourneyTask.FailReason = midjRequest.FailReason
-	err = midjourneyTask.Update()
+	if midjourneyTask.TaskRowID != nil {
+		_, err = midjourneyTask.UpdateWithStatus(preStatus)
+	} else {
+		err = midjourneyTask.Update()
+	}
 	if err != nil {
 		return &dto.MidjourneyResponse{
 			Code:        4,
@@ -210,20 +241,15 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 		}
 	}
 
-	userQuota, err := model.GetUserQuota(info.UserId, false)
-	if err != nil {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: err.Error(),
-		}
+	if billingErr := service.ReserveMidjourneyBilling(c, info, priceData.Quota); billingErr != nil {
+		return midjourneyBillingError(billingErr)
 	}
-
-	if userQuota-priceData.Quota < 0 {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: "quota_not_enough",
+	reservationActive := true
+	defer func() {
+		if reservationActive && info.Billing != nil {
+			info.Billing.Refund(c)
 		}
-	}
+	}()
 	requestURL := getMjRequestPath(c.Request.URL.String())
 	baseURL := c.GetString("base_url")
 	fullRequestURL := fmt.Sprintf("%s%s", baseURL, requestURL)
@@ -231,30 +257,6 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 	if err != nil {
 		return &mjResp.Response
 	}
-	defer func() {
-		if mjResp.StatusCode == 200 && mjResp.Response.Code == 1 {
-			err := service.PostConsumeQuota(info, priceData.Quota, 0, true)
-			if err != nil {
-				common.SysLog("error consuming token remain quota: " + err.Error())
-			}
-
-			tokenName := c.GetString("token_name")
-			logContent := fmt.Sprintf("模型固定价格 %.2f，分组倍率 %.2f，操作 %s", priceData.ModelPrice, priceData.GroupRatioInfo.GroupRatio, constant.MjActionSwapFace)
-			other := service.GenerateMjOtherInfo(info, priceData)
-			model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
-				ChannelId: info.ChannelId,
-				ModelName: modelName,
-				TokenName: tokenName,
-				Quota:     priceData.Quota,
-				Content:   logContent,
-				TokenId:   info.TokenId,
-				Group:     info.UsingGroup,
-				Other:     other,
-			})
-			model.UpdateUserUsedQuotaAndRequestCount(info.UserId, priceData.Quota)
-			model.UpdateChannelUsedQuota(info.ChannelId, priceData.Quota)
-		}
-	}()
 	midjResponse := &mjResp.Response
 	midjourneyTask := &model.Midjourney{
 		UserId:      info.UserId,
@@ -275,9 +277,20 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 		ChannelId:   c.GetInt("channel_id"),
 		Quota:       priceData.Quota,
 	}
-	err = midjourneyTask.Insert()
-	if err != nil {
-		return service.MidjourneyErrorWrapper(constant.MjRequestError, "insert_midjourney_task_failed")
+	accepted := mjResp.StatusCode == http.StatusOK && midjResponse.Code == 1 && strings.TrimSpace(midjResponse.Result) != ""
+	if !accepted {
+		if err := midjourneyTask.Insert(); err != nil {
+			return service.MidjourneyErrorWrapper(constant.MjRequestError, "insert_midjourney_task_failed")
+		}
+		info.Billing.Refund(c)
+		reservationActive = false
+	} else {
+		info.Action = constant.MjActionSwapFace
+		task := newMidjourneyAccountingTask(info, modelName, constant.MjActionSwapFace, midjResponse.Result)
+		if err := service.HandoffMidjourneyBilling(c, info, midjourneyTask, task, "", priceData.Quota); err != nil {
+			return service.MidjourneyErrorWrapper(constant.MjRequestError, "persist_midjourney_billing_failed")
+		}
+		reservationActive = false
 	}
 	c.Writer.WriteHeader(mjResp.StatusCode)
 	respBody, err := common.Marshal(midjResponse)
@@ -481,7 +494,11 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 			}
 			c.Set("base_url", channel.GetBaseURL())
 			c.Set("channel_id", originTask.ChannelId)
+			common.SetContextKey(c, constant.ContextKeyChannelId, originTask.ChannelId)
+			common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, channel.GetBaseURL())
+			common.SetContextKey(c, constant.ContextKeyChannelKey, channel.Key)
 			c.Request.Header.Set("Authorization", fmt.Sprintf("Bearer %s", channel.Key))
+			relayInfo.InitChannelMeta(c)
 			logger.LogDebug(c, "Midjourney action uses origin channel: id=%s, base_url=%s", strconv.Itoa(originTask.ChannelId), channel.GetBaseURL())
 		}
 		midjRequest.Prompt = originTask.Prompt
@@ -494,7 +511,7 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		//}
 	}
 
-	if midjRequest.Action == constant.MjActionInPaint || midjRequest.Action == constant.MjActionCustomZoom {
+	if !midjourneyConsumesQuota(midjRequest.Action) {
 		consumeQuota = false
 	}
 
@@ -517,19 +534,17 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		}
 	}
 
-	userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
-	if err != nil {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: err.Error(),
+	reservationActive := false
+	if consumeQuota {
+		if billingErr := service.ReserveMidjourneyBilling(c, relayInfo, priceData.Quota); billingErr != nil {
+			return midjourneyBillingError(billingErr)
 		}
-	}
-
-	if consumeQuota && userQuota-priceData.Quota < 0 {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: "quota_not_enough",
-		}
+		reservationActive = true
+		defer func() {
+			if reservationActive && relayInfo.Billing != nil {
+				relayInfo.Billing.Refund(c)
+			}
+		}()
 	}
 
 	midjResponseWithStatus, responseBody, err := service.DoMidjourneyHttpRequest(c, time.Second*60, fullRequestURL)
@@ -537,30 +552,10 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		return &midjResponseWithStatus.Response
 	}
 	midjResponse := &midjResponseWithStatus.Response
-
-	defer func() {
-		if consumeQuota && midjResponseWithStatus.StatusCode == 200 {
-			err := service.PostConsumeQuota(relayInfo, priceData.Quota, 0, true)
-			if err != nil {
-				common.SysLog("error consuming token remain quota: " + err.Error())
-			}
-			tokenName := c.GetString("token_name")
-			logContent := fmt.Sprintf("模型固定价格 %.2f，分组倍率 %.2f，操作 %s，ID %s", priceData.ModelPrice, priceData.GroupRatioInfo.GroupRatio, midjRequest.Action, midjResponse.Result)
-			other := service.GenerateMjOtherInfo(relayInfo, priceData)
-			model.RecordConsumeLog(c, relayInfo.UserId, model.RecordConsumeLogParams{
-				ChannelId: relayInfo.ChannelId,
-				ModelName: modelName,
-				TokenName: tokenName,
-				Quota:     priceData.Quota,
-				Content:   logContent,
-				TokenId:   relayInfo.TokenId,
-				Group:     relayInfo.UsingGroup,
-				Other:     other,
-			})
-			model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, priceData.Quota)
-			model.UpdateChannelUsedQuota(relayInfo.ChannelId, priceData.Quota)
-		}
-	}()
+	originalResponseCode := midjResponse.Code
+	accepted := midjResponseWithStatus.StatusCode == http.StatusOK &&
+		(originalResponseCode == 1 || originalResponseCode == 21 || originalResponseCode == 22) &&
+		strings.TrimSpace(midjResponse.Result) != ""
 
 	// 文档：https://github.com/novicezk/midjourney-proxy/blob/main/docs/api.md
 	//1-提交成功
@@ -601,7 +596,6 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 	if midjResponse.Code != 1 && midjResponse.Code != 21 && midjResponse.Code != 22 {
 		//非1-提交成功,21-任务已存在和22-排队中，则记录错误原因
 		midjourneyTask.FailReason = midjResponse.Description
-		consumeQuota = false
 	}
 
 	if midjResponse.Code == 21 { //21-任务已存在（处理中或者有结果了）
@@ -631,11 +625,47 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		midjourneyTask.Progress = "100%"
 		midjourneyTask.Status = "SUCCESS"
 	}
-	err = midjourneyTask.Insert()
-	if err != nil {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: "insert_midjourney_task_failed",
+	terminalAtSubmit := accepted && (midjourneyTask.Status == string(model.TaskStatusSuccess) || midjourneyTask.Status == string(model.TaskStatusFailure))
+	terminalProjection := *midjourneyTask
+	if consumeQuota && terminalAtSubmit {
+		midjourneyTask.Status = ""
+		midjourneyTask.Progress = "0%"
+		midjourneyTask.FailReason = ""
+	}
+	if !consumeQuota || !accepted {
+		if err := midjourneyTask.Insert(); err != nil {
+			return &dto.MidjourneyResponse{
+				Code:        4,
+				Description: "insert_midjourney_task_failed",
+			}
+		}
+	}
+	if consumeQuota {
+		if !accepted {
+			relayInfo.Billing.Refund(c)
+			reservationActive = false
+		} else {
+			relayInfo.Action = midjRequest.Action
+			task := newMidjourneyAccountingTask(relayInfo, modelName, midjRequest.Action, midjResponse.Result)
+			if err := service.HandoffMidjourneyBilling(c, relayInfo, midjourneyTask, task, "", priceData.Quota); err != nil {
+				return service.MidjourneyErrorWrapper(constant.MjRequestError, "persist_midjourney_billing_failed")
+			}
+			reservationActive = false
+			if terminalAtSubmit {
+				terminalDTO := midjourneyModelToAccountingDTO(&terminalProjection)
+				if _, err := service.FinalizeMidjourneyTaskAccounting(c.Request.Context(), task, terminalDTO, priceData.Quota, "midjourney completed during submission"); err != nil {
+					return service.MidjourneyErrorWrapper(constant.MjRequestError, "finalize_midjourney_billing_failed")
+				}
+				canonical, err := service.MidjourneyTaskProjection(task)
+				if err != nil {
+					return service.MidjourneyErrorWrapper(constant.MjRequestError, "project_midjourney_task_failed")
+				}
+				service.ApplyMidjourneyTaskProjection(midjourneyTask, canonical)
+				won, err := midjourneyTask.UpdateWithStatus("")
+				if err != nil || !won {
+					return service.MidjourneyErrorWrapper(constant.MjRequestError, "project_midjourney_task_failed")
+				}
+			}
 		}
 	}
 
@@ -667,6 +697,56 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		}
 	}
 	return nil
+}
+
+func midjourneyBillingError(err *types.NewAPIError) *dto.MidjourneyResponse {
+	if err == nil {
+		return nil
+	}
+	description := err.Error()
+	if err.GetErrorCode() == types.ErrorCodeInsufficientUserQuota {
+		description = "quota_not_enough"
+	}
+	return service.MidjourneyErrorWrapper(constant.MjRequestError, description)
+}
+
+func midjourneyConsumesQuota(action string) bool {
+	return action != constant.MjActionInPaint && action != constant.MjActionCustomZoom
+}
+
+func newMidjourneyAccountingTask(info *relaycommon.RelayInfo, modelName string, action string, upstreamTaskID string) *model.Task {
+	task := model.InitTask(constant.TaskPlatformMidjourney, info)
+	task.PrivateData.UpstreamTaskID = upstreamTaskID
+	task.PrivateData.BillingSource = service.BillingSourceWallet
+	task.PrivateData.TokenId = info.TokenId
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		ModelPrice:      info.PriceData.ModelPrice,
+		ModelPriceUnit:  info.PriceData.ModelPriceUnit,
+		GroupRatio:      info.PriceData.GroupRatioInfo.GroupRatio,
+		ModelRatio:      info.PriceData.ModelRatio,
+		OtherRatios:     info.PriceData.OtherRatios,
+		BillingMeta:     info.PriceData.BillingMeta,
+		OriginModelName: modelName,
+		PerCallBilling:  true,
+	}
+	task.PrivateData.TieredBillingSnapshot = info.TieredBillingSnapshot
+	task.Action = action
+	task.Status = model.TaskStatusSubmitted
+	task.Progress = "0%"
+	return task
+}
+
+func midjourneyModelToAccountingDTO(task *model.Midjourney) dto.MidjourneyDto {
+	if task == nil {
+		return dto.MidjourneyDto{}
+	}
+	return dto.MidjourneyDto{
+		MjId: task.MjId, Action: task.Action, Prompt: task.Prompt, PromptEn: task.PromptEn,
+		Description: task.Description, State: task.State, SubmitTime: task.SubmitTime,
+		StartTime: task.StartTime, FinishTime: task.FinishTime, ImageUrl: task.ImageUrl,
+		VideoUrl: task.VideoUrl, Status: task.Status, Progress: task.Progress,
+		FailReason: task.FailReason,
+	}
 }
 
 type taskChangeParams struct {

@@ -91,8 +91,8 @@ func TestTaskSubmissionBatchAmbiguousRollbackRestoresAfterUnavailableReceipt(t *
 			resetTaskSubmissionBatchState(t)
 			common.BatchUpdateEnabled = true
 			user, token := seedGroupReservationWallet(t, db, "ambiguous-rollback-"+fixture.name, 1000, 1000)
-			require.NoError(t, DecreaseUserQuota(user.Id, 100, false))
-			require.NoError(t, DecreaseTokenQuota(token.Id, token.Key, 100))
+			addNewRecord(BatchUpdateTypeUserQuota, user.Id, -100)
+			addNewRecord(BatchUpdateTypeTokenQuota, token.Id, -100)
 
 			pool := installTaskSubmissionCommitErrorPool(t, db)
 			pool.failCommitBefore = true
@@ -221,8 +221,8 @@ func TestTaskSubmissionBatchRollbackRestoresBeforeUnavailableReceiptRead(t *test
 			resetTaskSubmissionBatchState(t)
 			common.BatchUpdateEnabled = true
 			user, token := seedGroupReservationWallet(t, db, "rollback-batch-"+fixture.name, 1000, 1000)
-			require.NoError(t, DecreaseUserQuota(user.Id, 100, false))
-			require.NoError(t, DecreaseTokenQuota(token.Id, token.Key, 100))
+			addNewRecord(BatchUpdateTypeUserQuota, user.Id, -100)
+			addNewRecord(BatchUpdateTypeTokenQuota, token.Id, -100)
 
 			pool := installTaskSubmissionCommitErrorPool(t, db)
 			pool.queryErrorsAfterRollback = 1
@@ -256,8 +256,8 @@ func TestTaskSubmissionBatchCommitErrorResolvesCommittedReceipt(t *testing.T) {
 			resetTaskSubmissionBatchState(t)
 			common.BatchUpdateEnabled = true
 			user, token := seedGroupReservationWallet(t, db, "commit-batch-"+fixture.name, 1000, 1000)
-			require.NoError(t, DecreaseUserQuota(user.Id, 100, false))
-			require.NoError(t, DecreaseTokenQuota(token.Id, token.Key, 100))
+			addNewRecord(BatchUpdateTypeUserQuota, user.Id, -100)
+			addNewRecord(BatchUpdateTypeTokenQuota, token.Id, -100)
 
 			pool := installTaskSubmissionCommitErrorPool(t, db)
 			pool.failCommit = true
@@ -289,8 +289,8 @@ func TestTaskSubmissionBatchUnavailableBlocksThenRecoversOnceAfterJournalAdvance
 	resetTaskSubmissionBatchState(t)
 	common.BatchUpdateEnabled = true
 	user, token := seedGroupReservationWallet(t, db, "parked-batch", 1000, 1000)
-	require.NoError(t, DecreaseUserQuota(user.Id, 100, false))
-	require.NoError(t, DecreaseTokenQuota(token.Id, token.Key, 100))
+	addNewRecord(BatchUpdateTypeUserQuota, user.Id, -100)
+	addNewRecord(BatchUpdateTypeTokenQuota, token.Id, -100)
 
 	pool := installTaskSubmissionCommitErrorPool(t, db)
 	pool.failCommit = true
@@ -340,7 +340,7 @@ func TestTokenBatchFlushSerializesReservationAdmission(t *testing.T) {
 	resetTaskSubmissionBatchState(t)
 	common.BatchUpdateEnabled = true
 	user, token := seedGroupReservationWallet(t, db, "token-flush-race", 2000, 1000)
-	require.NoError(t, DecreaseTokenQuota(token.Id, token.Key, 100))
+	addNewRecord(BatchUpdateTypeTokenQuota, token.Id, -100)
 
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -390,7 +390,7 @@ func TestTaskSubmissionFoldedBatchReceiptDoesNotContainTokenKey(t *testing.T) {
 	resetTaskSubmissionBatchState(t)
 	common.BatchUpdateEnabled = true
 	user, token := seedGroupReservationWallet(t, db, fmt.Sprintf("receipt-privacy-%d", time.Now().UnixNano()), 1000, 1000)
-	require.NoError(t, DecreaseTokenQuota(token.Id, token.Key, 10))
+	addNewRecord(BatchUpdateTypeTokenQuota, token.Id, -10)
 	req := newTaskSubmissionBatchRequest(user, token, 20)
 	_, err := ReconcileGroupReservation(req)
 	require.NoError(t, err)

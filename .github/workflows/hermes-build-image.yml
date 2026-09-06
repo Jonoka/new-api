@@ -113,6 +113,13 @@ jobs:
           go test ./common ./relay/common ./relay/channel/... ./relay ./service ./controller ./router
           -run 'Alpha|Replay|MemoryStorage|DiskStorage|Outbound|BodyFactory|BodyMetadata|ResetUpstream' -count=1
 
+      - name: Check D wallet concurrency before frontend builds
+        env:
+          NEW_API_TEST_REDIS_ADDR: 127.0.0.1:6379
+          NEW_API_TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/newapi_test_ci?sslmode=disable
+          NEW_API_TEST_MYSQL_DSN: root:mysql_ci_only@tcp(127.0.0.1:3306)/newapi_test_ci?charset=utf8mb4&parseTime=True&loc=Local
+        run: go test ./model ./service ./controller ./relay ./relay/channel/openai -run 'Wallet|Midjourney|Realtime|QuotaCache|Balance|BillingSession' -count=1
+
       - name: Check and build default frontend
         working-directory: web/default
         run: |
@@ -143,7 +150,7 @@ jobs:
           NEW_API_TEST_MYSQL_DSN: root:mysql_ci_only@tcp(127.0.0.1:3306)/newapi_test_ci?charset=utf8mb4&parseTime=True&loc=Local
         run: >-
           go test -race ./common ./relay/common ./relay/channel ./model ./service ./controller ./middleware ./relay ./relay/helper
-          -run 'Alpha|Replay|MemoryStorage|DiskStorage|Outbound|BodyFactory|BodyMetadata|ResetUpstream|Test(RelayResponseHeaderTimeout|RelayTransportsApplyResponseHeaderTimeout|ResponseHeaderTimeout|RelayRequestParseError|RelayRejectsMalformedRequest|RelayRejectsNonObjectRequest|RelayPreservesRequestBodyTooLarge|UserCriticalRateLimit|FormatUserLogsUsesStrictProjection|ProjectUserLogOther|UserAndTokenReadsProject|SumUsedQuotaKeepsHistorical|SanitizeDBError|SanitizedGormWriter|GormLoggerRedacts|ReconcileGroupReservation|BillingSession|ModelPriceHelper|RelayTaskSubmit|FinalGroup|TaskAccounting|TaskSubmission|AsyncTask|TaskBilling|CanvasImageTask|ImageTask|UserCacheGeneration)'
+          -run 'Wallet|Midjourney|Realtime|QuotaCache|Balance|Alpha|Replay|MemoryStorage|DiskStorage|Outbound|BodyFactory|BodyMetadata|ResetUpstream|Test(RelayResponseHeaderTimeout|RelayTransportsApplyResponseHeaderTimeout|ResponseHeaderTimeout|RelayRequestParseError|RelayRejectsMalformedRequest|RelayRejectsNonObjectRequest|RelayPreservesRequestBodyTooLarge|UserCriticalRateLimit|FormatUserLogsUsesStrictProjection|ProjectUserLogOther|UserAndTokenReadsProject|SumUsedQuotaKeepsHistorical|SanitizeDBError|SanitizedGormWriter|GormLoggerRedacts|ReconcileGroupReservation|BillingSession|ModelPriceHelper|RelayTaskSubmit|FinalGroup|TaskAccounting|TaskSubmission|AsyncTask|TaskBilling|CanvasImageTask|ImageTask|UserCacheGeneration)'
           -count=1
 
       - name: Require committed Go formatting before publishing
@@ -232,6 +239,19 @@ jobs:
           PREVIOUS_IMAGE: ghcr.io/jonoka/new-api@sha256:e3964616b77d4dfdd2d5daa2356be45d33d1a83ddbc25a87a0e87677fd6d35e9
           TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
         run: bash scripts/ci/batch-c-smoke.sh
+
+      - name: Seed D concurrency fixtures
+        env:
+          NEW_API_TEST_COMPATIBILITY_DSN: postgres://postgres:postgres@localhost:5432/newapi_candidate_smoke?sslmode=disable
+        run: go test ./model -run '^TestWalletConcurrencyCompatibilitySeed$' -count=1
+
+      - name: Rehearse D multi-process admission and restart
+        env:
+          CANDIDATE_IMAGE: ghcr.io/${{ github.repository }}@${{ steps.image.outputs.digest }}
+          PREVIOUS_IMAGE: ghcr.io/jonoka/new-api@sha256:7fb3ebb45298b502c4c3c232bb632346f01410ce7ad9a6b46452b4c4384693ec
+          TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+          TEST_REDIS_CONTAINER: ${{ job.services.redis.id }}
+        run: bash scripts/ci/batch-d-smoke.sh
 
       - name: Summary
         run: |

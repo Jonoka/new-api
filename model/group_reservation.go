@@ -36,10 +36,16 @@ type GroupReservationRequest struct {
 	SkipTokenQuota   bool
 	ExpectedReserved int
 	TargetReserved   int
+	// TrustQuota requests the configured wallet trust exemption. Eligibility is
+	// decided from locked primary rows; TargetReserved remains the paid fallback.
+	TrustQuota int
+	// UseDurableExpected is restricted to terminal settlement/refund. It lets a
+	// stale live owner close the journal amount committed by an ambiguous resize.
+	UseDurableExpected bool
 	// PostConsume is only for an accepted upstream result, never retry admission.
 	PostConsume bool
-	// Submission fields are populated only for ForcePreConsume/DeferTaskBilling
-	// flows. They bind every resize to one durable async submission owner.
+	// Submission fields bind every BillingSession resize to one durable owner.
+	// Async handoff may additionally associate that owner with a task row.
 	SubmissionID           string
 	SubmissionLeaseToken   string
 	SubmissionOperationID  string
@@ -51,6 +57,8 @@ type GroupReservationRequest struct {
 
 type GroupReservationResult struct {
 	Reserved                         int
+	PreviousReserved                 int
+	Trusted                          bool
 	SubscriptionId                   int
 	SubscriptionAmountTotal          int64
 	SubscriptionAmountUsedAfter      int64
@@ -94,10 +102,13 @@ func WithReconciledGroupReservation(req GroupReservationRequest, apply func(*gor
 		tokenQuotaBatchApplyLock.Lock()
 		defer tokenQuotaBatchApplyLock.Unlock()
 		recoverCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		err := recoverPendingTaskSubmissionBatchesForReservationLocked(recoverCtx, req.UserId, req.TokenId)
+		err := recoverPendingBalanceBatchesForReservationLocked(recoverCtx, req.UserId, req.TokenId)
+		if err == nil {
+			err = recoverPendingTaskSubmissionBatchesForReservationLocked(recoverCtx, req.UserId, req.TokenId)
+		}
 		cancel()
 		if err != nil {
-			return nil, fmt.Errorf("reconcile pending task submission batch values: %w", err)
+			return nil, fmt.Errorf("reconcile pending balance batch values: %w", err)
 		}
 	}
 
@@ -129,7 +140,7 @@ func WithReconciledGroupReservation(req GroupReservationRequest, apply func(*gor
 		}
 	}
 
-	result := &GroupReservationResult{Reserved: req.TargetReserved}
+	result := &GroupReservationResult{Reserved: req.TargetReserved, PreviousReserved: req.ExpectedReserved}
 	transactionBodyCompleted := false
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var submission *TaskSubmission
@@ -138,6 +149,24 @@ func WithReconciledGroupReservation(req GroupReservationRequest, apply func(*gor
 			submission, err = prepareTaskSubmissionReservationTx(tx, req)
 			if err != nil {
 				return err
+			}
+			if req.UseDurableExpected {
+				if req.SubmissionFinalState == "" {
+					return errors.New("durable expected reservation is only valid for a final operation")
+				}
+				req.ExpectedReserved = submission.ReservedQuota
+				result.PreviousReserved = submission.ReservedQuota
+			}
+		}
+		if req.TrustQuota > 0 {
+			trusted, err := walletTrustEligibleTx(tx, req, pendingUser, pendingToken)
+			if err != nil {
+				return err
+			}
+			if trusted {
+				req.TargetReserved = 0
+				result.Reserved = 0
+				result.Trusted = true
 			}
 		}
 		delta := req.TargetReserved - req.ExpectedReserved
@@ -208,6 +237,7 @@ func WithReconciledGroupReservation(req GroupReservationRequest, apply func(*gor
 			cancel()
 			if resolveErr == nil && resolution.Committed {
 				if resolution.CanReturn && apply == nil {
+					resolution.Result.Trusted = result.Trusted
 					if cacheErr := ReconcileTaskSubmissionCache(context.Background(), req.SubmissionID); cacheErr != nil {
 						common.SysLog("failed to invalidate task submission quota cache after commit reconciliation: " + cacheErr.Error())
 					}
@@ -267,6 +297,35 @@ func reconcileWalletReservationTx(tx *gorm.DB, userId int, pendingDelta int, res
 	return tx.Model(&User{}).Where("id = ?", userId).Update("quota", newQuota).Error
 }
 
+func walletTrustEligibleTx(tx *gorm.DB, req GroupReservationRequest, pendingUser, pendingToken int) (bool, error) {
+	if req.Source != GroupReservationWallet || req.TrustQuota <= 0 || req.ExpectedReserved != 0 {
+		return false, nil
+	}
+	var user User
+	if err := lockForUpdate(tx).Where("id = ?", req.UserId).First(&user).Error; err != nil {
+		return false, err
+	}
+	effectiveUserQuota, err := checkedAccountingQuota(user.Quota, pendingUser, 0)
+	if err != nil {
+		return false, err
+	}
+	if effectiveUserQuota <= req.TrustQuota {
+		return false, nil
+	}
+	if req.TokenId <= 0 || strings.TrimSpace(req.TokenKey) == "" {
+		return false, errors.New("invalid token trust identity")
+	}
+	var token Token
+	if err := lockForUpdate(tx).Where("id = ?", req.TokenId).First(&token).Error; err != nil {
+		return false, err
+	}
+	effectiveTokenQuota, err := checkedAccountingQuota(token.RemainQuota, pendingToken, 0)
+	if err != nil {
+		return false, err
+	}
+	return token.UnlimitedQuota || effectiveTokenQuota > req.TrustQuota, nil
+}
+
 func reconcileTokenReservationTx(tx *gorm.DB, req GroupReservationRequest, pendingDelta int, reservationDelta int) error {
 	if req.SkipTokenQuota {
 		return nil
@@ -289,7 +348,7 @@ func reconcileTokenReservationTx(tx *gorm.DB, req GroupReservationRequest, pendi
 	if err != nil {
 		return err
 	}
-	if !req.PostConsume && !req.TokenUnlimited && reservationDelta > 0 && newRemain < 0 {
+	if !req.PostConsume && !token.UnlimitedQuota && reservationDelta > 0 && newRemain < 0 {
 		return ErrGroupReservationTokenInsufficient
 	}
 	newUsed, err := checkedAccountingQuota(token.UsedQuota, reservationDelta, pendingDelta)
@@ -318,6 +377,9 @@ func reconcileSubscriptionReservationTx(tx *gorm.DB, req GroupReservationRequest
 		// selected or charged until a later paid attempt resizes the journal.
 		if req.TargetReserved == 0 && req.SubmissionID != "" {
 			return &GroupReservationResult{}, nil
+		}
+		if req.PostConsume && req.SubscriptionId > 0 && req.SubmissionID != "" {
+			return createPostConsumeSubscriptionReservationTx(tx, req)
 		}
 		if req.TargetReserved <= 0 {
 			return nil, errors.New("subscription reservation record is missing")
@@ -384,6 +446,36 @@ func reconcileSubscriptionReservationTx(tx *gorm.DB, req GroupReservationRequest
 		SubscriptionId:                   sub.Id,
 		SubscriptionAmountTotal:          sub.AmountTotal,
 		SubscriptionAmountUsedAfter:      sub.AmountUsed,
+		SubscriptionReservationResetTime: common.GetPointer(sub.LastResetTime),
+	}, nil
+}
+
+func createPostConsumeSubscriptionReservationTx(tx *gorm.DB, req GroupReservationRequest) (*GroupReservationResult, error) {
+	var sub UserSubscription
+	if err := lockForUpdate(tx).Where("id = ? AND user_id = ?", req.SubscriptionId, req.UserId).First(&sub).Error; err != nil {
+		return nil, err
+	}
+	if sub.AmountUsed > math.MaxInt64-int64(req.TargetReserved) {
+		return nil, errors.New("subscription post-consume quota out of range")
+	}
+	newUsed := sub.AmountUsed + int64(req.TargetReserved)
+	if sub.AmountTotal > 0 && newUsed > sub.AmountTotal {
+		return nil, fmt.Errorf("subscription used exceeds total, used=%d total=%d", newUsed, sub.AmountTotal)
+	}
+	sub.AmountUsed = newUsed
+	if err := tx.Save(&sub).Error; err != nil {
+		return nil, err
+	}
+	record := &SubscriptionPreConsumeRecord{
+		RequestId: req.RequestId, UserId: req.UserId, UserSubscriptionId: sub.Id,
+		PreConsumed: int64(req.TargetReserved), ReservationResetTime: common.GetPointer(sub.LastResetTime), Status: "consumed",
+	}
+	if err := tx.Create(record).Error; err != nil {
+		return nil, err
+	}
+	return &GroupReservationResult{
+		Reserved: req.TargetReserved, SubscriptionId: sub.Id,
+		SubscriptionAmountTotal: sub.AmountTotal, SubscriptionAmountUsedAfter: sub.AmountUsed,
 		SubscriptionReservationResetTime: common.GetPointer(sub.LastResetTime),
 	}, nil
 }

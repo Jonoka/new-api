@@ -323,6 +323,8 @@ func getTimedOutUnfinishedTasks(cutoffUnix int64, limit int, platforms []constan
 		Where("submit_time < ?", cutoffUnix)
 	if len(platforms) > 0 {
 		query = query.Where("platform IN ?", platforms)
+	} else {
+		query = query.Where("platform <> ?", constant.TaskPlatformMidjourney)
 	}
 	err := query.
 		Order("submit_time").
@@ -342,6 +344,7 @@ func GetAllUnFinishSyncTasks(limit int) []*Task {
 		Where("status != ?", TaskStatusFailure).
 		Where("status != ?", TaskStatusSuccess).
 		Where("NOT EXISTS (?)", DB.Model(&TaskAccounting{}).Select("1").Where("task_row_id = tasks.id AND decision_id <> ?", "")).
+		Where("platform <> ?", constant.TaskPlatformMidjourney).
 		Where("platform NOT IN ? OR channel_id > 0", constant.ImageTaskPlatforms()).
 		Limit(limit).
 		Order("id").

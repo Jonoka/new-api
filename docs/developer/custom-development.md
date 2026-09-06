@@ -29,6 +29,10 @@
 
 ## 继续开发的接口
 
+Batch D extends [wallet reservation concurrency](wallet-reservations.md) across
+ordinary sessions and remaining legacy relay callers, retaining B/C transaction
+ownership and the configured trust, subscription and post-use policies.
+
 Batch C adds synchronous [Alpha Search and independent request replay](alpha-search.md)
 on its candidate branch. Alpha uses existing native Codex/type1 gateway transports
 and search-only accounting; real-gateway production acceptance remains pending.

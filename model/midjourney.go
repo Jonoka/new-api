@@ -1,5 +1,13 @@
 package model
 
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"gorm.io/gorm"
+)
+
 type Midjourney struct {
 	Id          int    `json:"id"`
 	Code        int    `json:"code"`
@@ -23,6 +31,7 @@ type Midjourney struct {
 	Quota       int    `json:"quota"`
 	Buttons     string `json:"buttons"`
 	Properties  string `json:"properties"`
+	TaskRowID   *int64 `json:"-" gorm:"index"`
 }
 
 // TaskQueryParams 用于包含所有搜索条件的结构体，可以根据需求添加更多字段
@@ -168,6 +177,79 @@ func (midjourney *Midjourney) UpdateWithStatus(fromStatus string) (bool, error) 
 		return false, result.Error
 	}
 	return result.RowsAffected > 0, nil
+}
+
+// PersistMidjourneySubmissionLink creates the internal task and legacy public
+// row, then attaches both to the already-funded submission journal. Accounting
+// ownership is transferred by service.HandoffTaskBilling afterward.
+func PersistMidjourneySubmissionLink(ctx context.Context, submissionID, leaseToken string, midjourney *Midjourney, task *Task) error {
+	if submissionID == "" || leaseToken == "" || midjourney == nil || task == nil || task.UserId <= 0 || task.UserId != midjourney.UserId {
+		return errors.New("invalid midjourney submission link")
+	}
+	err := DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := getDBTimestampTx(tx)
+		task.CreatedAt = now
+		task.UpdatedAt = now
+		if err := tx.Create(task).Error; err != nil {
+			return err
+		}
+		taskRowID := task.ID
+		midjourney.TaskRowID = &taskRowID
+		if err := tx.Create(midjourney).Error; err != nil {
+			return err
+		}
+		result := tx.Model(&TaskSubmission{}).
+			Where("submission_id = ? AND state = ? AND lease_token = ? AND user_id = ? AND task_row_id IS NULL", submissionID, TaskSubmissionStateActive, leaseToken, task.UserId).
+			Updates(map[string]any{
+				"task_row_id":      task.ID,
+				"lease_expires_at": now + taskSubmissionLeaseSeconds(0),
+				"updated_at":       now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrTaskSubmissionConflict
+		}
+		return nil
+	})
+	if err == nil {
+		return nil
+	}
+	if verifyErr := verifyMidjourneySubmissionLink(ctx, submissionID, leaseToken, midjourney, task); verifyErr != nil {
+		return fmt.Errorf("persist midjourney submission link failed (%v); durable result unresolved: %w", err, verifyErr)
+	}
+	return nil
+}
+
+func verifyMidjourneySubmissionLink(ctx context.Context, submissionID, leaseToken string, expectedMidjourney *Midjourney, expectedTask *Task) error {
+	if expectedMidjourney.Id <= 0 || expectedTask.ID <= 0 {
+		return errors.New("midjourney submission link identity is missing")
+	}
+	return DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var midjourney Midjourney
+		if err := tx.First(&midjourney, expectedMidjourney.Id).Error; err != nil {
+			return err
+		}
+		if midjourney.TaskRowID == nil || *midjourney.TaskRowID != expectedTask.ID || midjourney.UserId != expectedMidjourney.UserId || midjourney.MjId != expectedMidjourney.MjId {
+			return errors.New("midjourney submission link mismatch")
+		}
+		var task Task
+		if err := tx.First(&task, expectedTask.ID).Error; err != nil {
+			return err
+		}
+		if task.TaskID != expectedTask.TaskID || task.UserId != expectedTask.UserId || task.Platform != expectedTask.Platform || task.PrivateData.UpstreamTaskID != expectedTask.PrivateData.UpstreamTaskID {
+			return errors.New("midjourney accounting task mismatch")
+		}
+		var submission TaskSubmission
+		if err := tx.Where("submission_id = ?", submissionID).First(&submission).Error; err != nil {
+			return err
+		}
+		if submission.State != TaskSubmissionStateActive || submission.LeaseToken != leaseToken || submission.UserID != expectedTask.UserId || submission.TaskRowID == nil || *submission.TaskRowID != expectedTask.ID {
+			return errors.New("midjourney task submission link mismatch")
+		}
+		return nil
+	})
 }
 
 func MjBulkUpdate(mjIds []string, params map[string]any) error {

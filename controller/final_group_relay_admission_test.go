@@ -46,7 +46,7 @@ func TestFinalGroupRelayDoesNotSendSelectedPaidGroupBeforeAdmission(t *testing.T
 	common.BatchUpdateEnabled = false
 	common.RedisEnabled = false
 	constant.CountToken = false
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}, &model.TaskSubmission{}))
 	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"final-group-controller-model":1}`))
 	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"paid":1}`))
 

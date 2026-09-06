@@ -42,3 +42,7 @@
 - [Alpha Search and independent request replay](alpha-search.md)
 - [Request-body transport replay workflow](../workflows/2026-09/06_request_body_transport_replay.md)
 - [Alpha Search billing workflow](../workflows/2026-09/06_alpha_search_billing.md)
+- [Wallet reservation concurrency](wallet-reservations.md)
+- [Ordinary reservation durability](../workflows/2026-09/06_wallet_reservation_durability.md)
+- [Wallet cache consistency](../workflows/2026-09/06_wallet_cache_consistency.md)
+- [Midjourney reservation ownership](../workflows/2026-09/06_midjourney_reservation.md)

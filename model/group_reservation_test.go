@@ -65,7 +65,7 @@ func useGroupReservationDatabase(t *testing.T, fixture groupReservationDatabase)
 	common.UsingPostgreSQL = fixture.postgres
 	common.BatchUpdateEnabled = false
 	common.RedisEnabled = false
-	require.NoError(t, db.AutoMigrate(&User{}, &Token{}, &SubscriptionPlan{}, &UserSubscription{}, &SubscriptionPreConsumeRecord{}))
+	require.NoError(t, db.AutoMigrate(&User{}, &Token{}, &SubscriptionPlan{}, &UserSubscription{}, &SubscriptionPreConsumeRecord{}, &BalanceCacheRepair{}))
 	t.Cleanup(func() {
 		DB = oldDB
 		common.UsingSQLite, common.UsingMySQL, common.UsingPostgreSQL = oldSQLite, oldMySQL, oldPostgres
@@ -173,8 +173,8 @@ func TestReconcileGroupReservationFoldsPendingBatchDeltasOnce(t *testing.T) {
 	db := useGroupReservationDatabase(t, fixture)
 	user, token := seedGroupReservationWallet(t, db, fmt.Sprintf("batch-%d", time.Now().UnixNano()), 1000, 1000)
 	common.BatchUpdateEnabled = true
-	require.NoError(t, DecreaseUserQuota(user.Id, 100, false))
-	require.NoError(t, DecreaseTokenQuota(token.Id, token.Key, 100))
+	addNewRecord(BatchUpdateTypeUserQuota, user.Id, -100)
+	addNewRecord(BatchUpdateTypeTokenQuota, token.Id, -100)
 
 	_, err := ReconcileGroupReservation(GroupReservationRequest{
 		Source: GroupReservationWallet, UserId: user.Id, TokenId: token.Id, TokenKey: token.Key, TargetReserved: 200,

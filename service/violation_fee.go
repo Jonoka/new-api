@@ -1,8 +1,10 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -14,13 +16,21 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 const (
 	ViolationFeeCodePrefix     = "violation_fee."
 	CSAMViolationMarker        = "Failed check: SAFETY_CHECK_TYPE"
 	ContentViolatesUsageMarker = "Content violates usage guidelines"
+	violationFeeStateKey       = "violation_fee_billing_state"
 )
+
+type violationFeeBillingState struct {
+	submissionID string
+	leaseToken   string
+	operationID  string
+}
 
 func IsViolationFeeCode(code types.ErrorCode) bool {
 	return strings.HasPrefix(string(code), ViolationFeeCodePrefix)
@@ -122,16 +132,7 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		return false
 	}
 
-	if err := PostConsumeQuota(relayInfo, feeQuota, 0, true); err != nil {
-		logger.LogError(ctx, fmt.Sprintf("failed to charge violation fee: %s", err.Error()))
-		return false
-	}
-
-	model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, feeQuota)
-	model.UpdateChannelUsedQuota(relayInfo.ChannelId, feeQuota)
-
 	useTimeMs := relayInfo.ElapsedMilliseconds()
-	tokenName := ctx.GetString("token_name")
 	oai := apiErr.ToOpenAIError()
 
 	other := map[string]any{
@@ -147,18 +148,72 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		"use_time_ms":          float64(useTimeMs),
 	}
 
-	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
-		ChannelId:      relayInfo.ChannelId,
-		ModelName:      relayInfo.OriginModelName,
-		TokenName:      tokenName,
-		Quota:          feeQuota,
-		Content:        "Violation fee charged",
-		TokenId:        relayInfo.TokenId,
-		UseTimeSeconds: int(useTimeMs / 1000),
-		IsStream:       relayInfo.IsStream,
-		Group:          relayInfo.UsingGroup,
-		Other:          other,
+	facts := BuildTaskAccountingLogFacts(ctx, relayInfo, feeQuota)
+	facts.Content = "Violation fee charged"
+	facts.UseTimeSeconds = int(useTimeMs / 1000)
+	facts.IsStream = relayInfo.IsStream
+	facts.Other = other
+
+	state := getViolationFeeBillingState(ctx)
+	source := relayInfo.BillingSource
+	if source == "" {
+		source = BillingSourceWallet
+	}
+	req := model.GroupReservationRequest{
+		Source: source, UserId: relayInfo.UserId, ModelName: relayInfo.OriginModelName,
+		SubscriptionId: relayInfo.SubscriptionId, TokenId: relayInfo.TokenId, TokenKey: relayInfo.TokenKey,
+		TokenUnlimited: relayInfo.TokenUnlimited, SkipTokenQuota: relayInfo.IsPlayground || relayInfo.SkipTokenQuota,
+		ExpectedReserved: 0, TargetReserved: feeQuota, PostConsume: true,
+		SubmissionID: state.submissionID, SubmissionLeaseToken: state.leaseToken,
+		SubmissionOperationID: state.operationID, SubmissionFinalState: model.TaskSubmissionStateSettled,
+	}
+	result, err := model.WithReconciledGroupReservation(req, func(tx *gorm.DB, _ *model.GroupReservationResult) error {
+		return model.CompleteViolationFeeSubmissionTx(tx, req.SubmissionID, facts)
 	})
+	replayed := false
+	if err != nil {
+		resolveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		result, err = model.ResolveViolationFeeSettlement(resolveCtx, req)
+		cancel()
+		replayed = err == nil
+	}
+	if err != nil || result == nil {
+		if err == nil {
+			err = fmt.Errorf("violation fee reservation result is missing")
+		}
+		logger.LogError(ctx, fmt.Sprintf("failed to charge violation fee: %s", err.Error()))
+		return false
+	}
+	if source == BillingSourceSubscription && !replayed {
+		relayInfo.SubscriptionPostDelta += int64(feeQuota)
+	}
+
+	projectionCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := model.ReconcileTaskSubmissionCache(projectionCtx, req.SubmissionID); err != nil {
+		common.SysLog("violation fee cache reconciliation pending: " + err.Error())
+	}
+	if err := model.DeliverPendingTaskAccountingLogs(projectionCtx, 100); err != nil {
+		common.SysLog("violation fee log delivery pending: " + err.Error())
+	}
+	if !replayed {
+		checkAndSendQuotaNotify(relayInfo, feeQuota, 0)
+	}
 
 	return true
+}
+
+func getViolationFeeBillingState(ctx *gin.Context) *violationFeeBillingState {
+	if value, ok := ctx.Get(violationFeeStateKey); ok {
+		if state, ok := value.(*violationFeeBillingState); ok && state != nil {
+			return state
+		}
+	}
+	state := &violationFeeBillingState{
+		submissionID: common.GetUUID(),
+		leaseToken:   common.GetUUID(),
+		operationID:  common.GetUUID(),
+	}
+	ctx.Set(violationFeeStateKey, state)
+	return state
 }

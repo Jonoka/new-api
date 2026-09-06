@@ -164,16 +164,20 @@ func cacheDeleteTokens(keys []string) error {
 }
 
 func cacheIncrTokenQuota(key string, increment int64) error {
-	key = common.GenerateHMAC(key)
-	err := common.RedisHIncrBy(fmt.Sprintf("token:%s", key), constant.TokenFiledRemainQuota, increment)
-	if err != nil {
-		return err
-	}
-	return nil
+	_ = increment
+	return cacheDeleteToken(key)
 }
 
 func cacheDecrTokenQuota(key string, decrement int64) error {
-	return cacheIncrTokenQuota(key, -decrement)
+	_ = decrement
+	return cacheDeleteToken(key)
+}
+
+func invalidateTokenCacheDataKey(dataKey string) error {
+	if !common.RedisEnabled {
+		return nil
+	}
+	return common.RedisBumpGenerationAndDeleteKeys(tokenCacheGenerationRedisKey, []string{dataKey})
 }
 
 func cacheSetTokenField(key string, field string, value string) error {
