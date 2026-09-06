@@ -1,7 +1,7 @@
 # Alpha Search and Request Replay
 
-Batch C implementation contract. Candidate validation and real-gateway production
-acceptance are pending. This document evolves with the implementation.
+Batch C implementation contract. Production acceptance requires the separately
+approved real-gateway canary described below; candidate evidence lives in its CI run.
 
 ## API and Compatibility
 
@@ -56,6 +56,11 @@ reservation, matching existing probe behavior; its test log has zero quota. The
 probe itself still calls the configured provider and may incur provider cost.
 Streaming probes are rejected. Automatic tests retain their existing default
 endpoint and do not automatically start Alpha searches.
+
+Both channel-test dialogs expose Alpha as a synchronous-only endpoint. Probe
+traffic remains separate from ordinary performance summaries. Request success
+samples are recorded only after client publication, so a write failure cannot
+produce both a success and a failure sample for the same request.
 
 If a client disconnects while publishing an already validated and settled search,
 the completed search remains charged once and is never replayed. A transport or

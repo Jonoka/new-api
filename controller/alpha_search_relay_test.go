@@ -12,6 +12,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -22,11 +23,23 @@ import (
 func setupAlphaSearchRelayDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db := setupFinalGroupRelayDB(t)
-	require.NoError(t, db.AutoMigrate(&model.TaskAccountingEvent{}, &model.TaskAccountingLogReceipt{}))
+	require.NoError(t, db.AutoMigrate(&model.TaskAccountingEvent{}, &model.TaskAccountingLogReceipt{}, &model.PerfMetric{}))
 	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
 		"tool_price_setting.prices": `{"web_search_preview":10}`,
 	}))
 	return db
+}
+
+func alphaSearchPerformanceRequestCount(t *testing.T, modelName string) int64 {
+	t.Helper()
+	summary, err := perfmetrics.QuerySummaryAll(1, nil)
+	require.NoError(t, err)
+	for _, item := range summary.Models {
+		if item.ModelName == modelName {
+			return item.RequestCount
+		}
+	}
+	return 0
 }
 
 func setAlphaSearchRelayBody(c *gin.Context, body string) {
@@ -213,6 +226,7 @@ func TestAlphaSearchRelaySettlementAndPublicationFailures(t *testing.T) {
 	for _, failSettlement := range []bool{false, true} {
 		t.Run(fmt.Sprintf("settlement_failure_%t", failSettlement), func(t *testing.T) {
 			db := setupAlphaSearchRelayDB(t)
+			performanceBefore := alphaSearchPerformanceRequestCount(t, finalGroupRelayModel)
 			user, token := seedFinalGroupRelayFunding(t, db, 1, 100000)
 			var calls atomic.Int32
 			response := `{"output":"validated search"}`
@@ -238,6 +252,7 @@ func TestAlphaSearchRelaySettlementAndPublicationFailures(t *testing.T) {
 				c.Writer = writer
 			}
 			Relay(c, types.RelayFormatOpenAIAlphaSearch)
+			require.EqualValues(t, performanceBefore+1, alphaSearchPerformanceRequestCount(t, finalGroupRelayModel), "one request must produce one performance sample")
 			require.EqualValues(t, 1, calls.Load())
 			gotUser, gotToken, _, gotChannel := readFinalGroupRelayState(t, db, user.Id, token.Id, channel.Id, channel.Id)
 			if failSettlement {

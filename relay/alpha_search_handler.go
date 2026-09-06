@@ -126,6 +126,7 @@ func AlphaSearchHelper(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAP
 	if _, err := c.Writer.Write(responseBody); err != nil {
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError, types.ErrOptionWithSkipRetry())
 	}
+	service.RecordAlphaSearchPerformanceSample(info)
 	return nil
 }
 

@@ -17,6 +17,7 @@ func TestAlphaSearchChannelTestUsesValidatedSyncTransportWithoutDebit(t *testing
 	for _, channelType := range []int{constant.ChannelTypeOpenAI, constant.ChannelTypeCodex} {
 		t.Run(constant.GetChannelTypeName(channelType), func(t *testing.T) {
 			db := setupAlphaSearchRelayDB(t)
+			performanceBefore := alphaSearchPerformanceRequestCount(t, finalGroupRelayModel)
 			user, _ := seedFinalGroupRelayFunding(t, db, 1, 100000)
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -56,6 +57,7 @@ func TestAlphaSearchChannelTestUsesValidatedSyncTransportWithoutDebit(t *testing
 			result = testChannel(channel, user.Id, finalGroupRelayModel, string(constant.EndpointTypeOpenAIAlphaSearch), true)
 			require.Error(t, result.localErr)
 			require.EqualValues(t, 1, calls.Load())
+			require.Equal(t, performanceBefore, alphaSearchPerformanceRequestCount(t, finalGroupRelayModel), "probes must not enter ordinary performance samples")
 		})
 	}
 }

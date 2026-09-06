@@ -192,8 +192,16 @@ func SettleAlphaSearchBilling(c *gin.Context, info *relaycommon.RelayInfo) error
 		return err
 	}
 	state.settled = true
-	recordTextPerformanceSample(info, 0)
 	return nil
+}
+
+// RecordAlphaSearchPerformanceSample records success only after the validated,
+// settled response has been written to the client.
+func RecordAlphaSearchPerformanceSample(info *relaycommon.RelayInfo) {
+	if info == nil || info.IsChannelTest {
+		return
+	}
+	recordTextPerformanceSample(info, 0)
 }
 
 func buildAlphaSearchLogFacts(c *gin.Context, info *relaycommon.RelayInfo, state *alphaSearchBillingState) model.TaskAccountingLogFacts {
