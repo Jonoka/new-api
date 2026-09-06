@@ -62,6 +62,11 @@ decision once. Only then does the poller project terminal fields to the legacy
 Midjourney row. If the selected channel can no longer be loaded, the same linked
 owner is finalized as failed before the public failure is projected.
 
+The provider-list request uses its own bounded child context. Completing or
+canceling that HTTP read does not cancel the parent context subsequently used for
+the durable terminal decision; otherwise a valid provider result would remain
+unsettled and unprojected on every polling pass.
+
 If the process stops after accounting but before public projection, the next
 Midjourney pass reads the terminal internal task and projects its frozen data
 without contacting the provider. Concurrent or duplicate terminal observations
@@ -99,12 +104,15 @@ database over later money movements.
 
 ## Verification
 
-GitHub-hosted tests cover exact K-of-N provider sends for wallet and token limits,
-insufficient admission, provider rejection release, accepted-code compatibility,
-accepted handoff/link, duplicate terminal failure, restart projection, legacy
-wallet-only refund compatibility, internal task privacy, and free actions. Database
-matrix fixtures use SQLite plus configured MySQL/PostgreSQL DSNs. No source tests,
-builds, provider calls or fault injection run on the production checkout.
+GitHub-hosted tests cover wallet-limited K-of-N Midjourney provider sends,
+finite-token no-send admission, provider rejection release, accepted-code
+compatibility, accepted handoff/link, duplicate terminal failure, restart
+projection, poll-context isolation, legacy wallet-only refund compatibility,
+internal task privacy, and free actions. The D gateway fixture separately covers
+wallet- and token-limited K-of-N admission through the shared reservation
+primitive. Database matrix fixtures use SQLite plus configured MySQL/PostgreSQL
+DSNs. No source tests, builds, provider calls or fault injection run on the
+production checkout.
 
 Local source verification uses the repository Go version's pinned `gofmt` and
 `git diff --check`. Executable verification must run in GitHub Actions with:

@@ -455,8 +455,10 @@ func TestBalanceCacheRepairSurvivesRedisOutageAndRecovery(t *testing.T) {
 	quota, err := GetUserQuota(user.Id, false)
 	require.NoError(t, err)
 	require.Equal(t, 900, quota)
-	require.Zero(t, realClient.Exists(context.Background(), getUserCacheKey(user.Id)).Val(),
-		"quota-only fallback must not create an unfenced full user hash")
+	require.Eventually(t, func() bool {
+		cached, cacheErr := cacheGetUserBase(user.Id)
+		return cacheErr == nil && cached.Id == user.Id && cached.Username == user.Username && cached.Quota == 900
+	}, time.Second, 10*time.Millisecond, "fallback may refill only the complete generation-fenced user snapshot")
 }
 
 func TestBalanceCacheRepairRejectsMalformedProjection(t *testing.T) {

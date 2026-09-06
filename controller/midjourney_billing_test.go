@@ -3,6 +3,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -113,6 +115,26 @@ func TestMidjourneyPollingIndexesEveryOwnerForDuplicateUpstreamID(t *testing.T) 
 	require.Equal(t, []string{"shared-upstream-id"}, channelTasks[8])
 	require.Len(t, taskIndex[midjourneyPollingKey(7, "shared-upstream-id")], 2)
 	require.Len(t, taskIndex[midjourneyPollingKey(8, "shared-upstream-id")], 1)
+}
+
+func TestMidjourneyPollingFetchDoesNotCancelAccountingContext(t *testing.T) {
+	service.InitHttpClient()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/mj/task/list-by-condition", r.URL.Path)
+		require.Equal(t, "test-secret", r.Header.Get("mj-api-secret"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":"mj-poll-context","status":"SUCCESS","progress":"100%"}]`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	accountingCtx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	items, err := fetchMidjourneyTaskUpdates(accountingCtx, upstream.URL, "test-secret", []string{"mj-poll-context"})
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, "mj-poll-context", items[0].MjId)
+	require.NoError(t, accountingCtx.Err(), "the bounded HTTP request must not cancel later durable accounting")
 }
 
 func TestMidjourneyPollerPreservesLegacyWalletOnlyRefund(t *testing.T) {
