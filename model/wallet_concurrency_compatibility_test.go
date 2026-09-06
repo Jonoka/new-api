@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -23,6 +24,7 @@ func TestWalletConcurrencyCompatibilitySeed(t *testing.T) {
 	}{
 		{"wallet", 6000, 60000}, {"token", 60000, 6000}, {"stale", 100, 100},
 		{"trust", 6000000, 6000000}, {"refund", 12000, 12000}, {"restart", 12000, 12000},
+		{"cache", 12000, 12000},
 	} {
 		name := "d-wallet-" + fixture.name
 		user := &User{Username: name, Password: "ci-only", Quota: fixture.wallet,
@@ -53,10 +55,12 @@ func TestWalletConcurrencyCompatibilityStaleCache(t *testing.T) {
 	address := os.Getenv("NEW_API_TEST_REDIS_ADDR")
 	require.NotEmpty(t, address)
 	client := redis.NewClient(&redis.Options{Addr: address, DB: 13})
-	oldClient, oldEnabled, oldCrypto := common.RDB, common.RedisEnabled, common.CryptoSecret
+	oldClient, oldEnabled, oldCrypto, oldFrequency := common.RDB, common.RedisEnabled, common.CryptoSecret, common.SyncFrequency
 	common.RDB, common.RedisEnabled, common.CryptoSecret = client, true, "d-ci-crypto-only"
+	common.SyncFrequency = 3600
 	t.Cleanup(func() {
 		common.RDB, common.RedisEnabled, common.CryptoSecret = oldClient, oldEnabled, oldCrypto
+		common.SyncFrequency = oldFrequency
 		_ = client.Close()
 	})
 	require.NoError(t, client.Ping(context.Background()).Err())
@@ -77,4 +81,45 @@ func TestWalletConcurrencyCompatibilityStaleCache(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, filled)
 	fmt.Println("Seeded stale-high synthetic cache for authoritative trust rejection fixture.")
+}
+
+func TestWalletConcurrencyCompatibilityCacheOutage(t *testing.T) {
+	db := taskAccountingCompatibilityDatabase(t)
+	address := os.Getenv("NEW_API_TEST_REDIS_ADDR")
+	require.NotEmpty(t, address)
+	client := redis.NewClient(&redis.Options{Addr: address, DB: 13})
+	broken := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", MaxRetries: -1, DialTimeout: 20 * time.Millisecond, ReadTimeout: 20 * time.Millisecond, WriteTimeout: 20 * time.Millisecond})
+	oldClient, oldEnabled, oldCrypto, oldFrequency := common.RDB, common.RedisEnabled, common.CryptoSecret, common.SyncFrequency
+	common.RDB, common.RedisEnabled, common.CryptoSecret = client, true, "d-ci-crypto-only"
+	common.SyncFrequency = 3600
+	t.Cleanup(func() {
+		common.RDB, common.RedisEnabled, common.CryptoSecret = oldClient, oldEnabled, oldCrypto
+		common.SyncFrequency = oldFrequency
+		_ = client.Close()
+		_ = broken.Close()
+	})
+	var user User
+	var token Token
+	require.NoError(t, db.Where("username = ?", "d-wallet-cache").First(&user).Error)
+	require.NoError(t, db.Where("name = ?", "d-wallet-cache").First(&token).Error)
+	generation, err := common.RedisGetGeneration(userCacheGenerationRedisKey)
+	require.NoError(t, err)
+	filled, err := fillUserCacheIfGeneration(user, generation)
+	require.NoError(t, err)
+	require.True(t, filled)
+	backend := redisTokenCacheBackend{}
+	generation, err = backend.generation()
+	require.NoError(t, err)
+	filled, err = backend.setTokenIfGeneration(token, generation, false)
+	require.NoError(t, err)
+	require.True(t, filled)
+	common.RDB = broken
+	require.NoError(t, DecreaseUserQuota(user.Id, 1000, false))
+	require.NoError(t, DecreaseTokenQuota(token.Id, token.Key, 1000))
+	var pending int64
+	require.NoError(t, db.Model(&BalanceCacheRepair{}).Where("repaired_at = 0 AND (user_id = ? OR token_cache_key = ?)", user.Id, tokenCacheRedisKey(token.Key)).Count(&pending).Error)
+	require.EqualValues(t, 2, pending)
+	require.Equal(t, "12000", client.HGet(context.Background(), getUserCacheKey(user.Id), "Quota").Val())
+	require.Equal(t, "12000", client.HGet(context.Background(), tokenCacheRedisKey(token.Key), "RemainQuota").Val())
+	fmt.Println("PostgreSQL balance mutations committed with two durable cache repairs pending after Redis failure.")
 }

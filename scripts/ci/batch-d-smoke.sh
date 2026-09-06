@@ -38,6 +38,9 @@ start() {
 }
 
 docker exec "$TEST_REDIS_CONTAINER" redis-cli -n 13 FLUSHDB >/dev/null
+NEW_API_TEST_COMPATIBILITY_DSN=postgres://postgres:postgres@127.0.0.1:5432/newapi_candidate_smoke?sslmode=disable \
+NEW_API_TEST_REDIS_ADDR=127.0.0.1:6379 \
+  go test ./model -run '^TestWalletConcurrencyCompatibilityCacheOutage$' -count=1
 start newapi-batch-d-a 38001 "${CANDIDATE_IMAGE,,}"
 start newapi-batch-d-b 38002 "${CANDIDATE_IMAGE,,}"
 NEW_API_TEST_COMPATIBILITY_DSN=postgres://postgres:postgres@127.0.0.1:5432/newapi_candidate_smoke?sslmode=disable \

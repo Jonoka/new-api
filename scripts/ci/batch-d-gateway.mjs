@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { createHmac } from 'node:crypto';
 import http from 'node:http';
 
 assert.equal(process.env.GITHUB_ACTIONS, 'true');
@@ -61,6 +62,13 @@ const ready = async (port) => {
   catch { return false; }
 };
 try {
+  await waitFor(() => query("SELECT count(*) FROM balance_cache_repairs WHERE repaired_at=0") === '0', 'durable Redis repair in fresh candidate processes');
+  assert.deepEqual(state('cache'), { wallet: 11000, remain: 11000, tokenUsed: 1000, used: 0, channelUsed: 0, requests: 0 });
+  const cacheUserID = query("SELECT id FROM users WHERE username='d-wallet-cache'");
+  const cacheTokenHash = createHmac('sha256', 'd-ci-crypto-only').update('dwalletcache').digest('hex');
+  const cacheExists = execFileSync('docker', ['exec', process.env.TEST_REDIS_CONTAINER, 'redis-cli', '-n', '13', 'EXISTS', `user:${cacheUserID}`, `token:${cacheTokenHash}`], { encoding: 'utf8' }).trim();
+  assert.equal(cacheExists, '0', 'fresh processes must invalidate both stale projections without replaying money');
+  console.log('PostgreSQL and Redis outage/restart convergence passed with unchanged committed balances.');
   for (const [name, count, expected] of [['wallet', 16, 3], ['token', 16, 3], ['stale', 4, 0], ['trust', 8, 8], ['refund', 4, 0]]) {
     const results = await Promise.all(Array.from({ length: count }, (_, index) => request(name, index)));
     assert.equal(results.filter((r) => r.status === 200).length, expected, JSON.stringify({ name, results }));
