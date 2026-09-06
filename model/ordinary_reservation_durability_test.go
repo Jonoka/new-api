@@ -17,7 +17,13 @@ func ordinaryReservationRequest(user *User, token *Token, target int) GroupReser
 }
 
 func TestWalletOrdinaryReservationCommitErrorsClassifyEveryMoneyOperation(t *testing.T) {
-	db := useGroupReservationDatabase(t, groupReservationDatabases(t)[0])
+	for _, fixture := range groupReservationDatabases(t) {
+		t.Run(fixture.name, func(t *testing.T) { checkOrdinaryReservationCommitErrors(t, fixture) })
+	}
+}
+
+func checkOrdinaryReservationCommitErrors(t *testing.T, fixture groupReservationDatabase) {
+	db := useGroupReservationDatabase(t, fixture)
 	require.NoError(t, db.AutoMigrate(&TaskSubmission{}, &TaskAccountingEvent{}))
 	user, token := seedGroupReservationWallet(t, db, "ordinary-commit", 2000, 2000)
 	pool := installTaskSubmissionCommitErrorPool(t, db)
@@ -54,7 +60,13 @@ func TestWalletOrdinaryReservationCommitErrorsClassifyEveryMoneyOperation(t *tes
 }
 
 func TestWalletOrdinaryReservationAmbiguousResizeThenRefundUsesDurableAmountOnce(t *testing.T) {
-	db := useGroupReservationDatabase(t, groupReservationDatabases(t)[0])
+	for _, fixture := range groupReservationDatabases(t) {
+		t.Run(fixture.name, func(t *testing.T) { checkOrdinaryReservationAmbiguousResize(t, fixture) })
+	}
+}
+
+func checkOrdinaryReservationAmbiguousResize(t *testing.T, fixture groupReservationDatabase) {
+	db := useGroupReservationDatabase(t, fixture)
 	require.NoError(t, db.AutoMigrate(&TaskSubmission{}, &TaskAccountingEvent{}))
 	user, token := seedGroupReservationWallet(t, db, "ordinary-refund", 1000, 1000)
 	req := ordinaryReservationRequest(user, token, 200)
@@ -92,7 +104,13 @@ func TestWalletOrdinaryReservationAmbiguousResizeThenRefundUsesDurableAmountOnce
 }
 
 func TestWalletKnownSettlementMarkerClassifiesCommitErrorExactly(t *testing.T) {
-	db := useGroupReservationDatabase(t, groupReservationDatabases(t)[0])
+	for _, fixture := range groupReservationDatabases(t) {
+		t.Run(fixture.name, func(t *testing.T) { checkKnownSettlementMarker(t, fixture) })
+	}
+}
+
+func checkKnownSettlementMarker(t *testing.T, fixture groupReservationDatabase) {
+	db := useGroupReservationDatabase(t, fixture)
 	require.NoError(t, db.AutoMigrate(&TaskSubmission{}, &TaskAccountingEvent{}))
 	user, token := seedGroupReservationWallet(t, db, "known-settlement-marker", 1000, 1000)
 	req := ordinaryReservationRequest(user, token, 200)
@@ -117,7 +135,13 @@ func TestWalletKnownSettlementMarkerClassifiesCommitErrorExactly(t *testing.T) {
 }
 
 func TestWalletOrdinaryReservationRestartRecoveryAndSafeRetention(t *testing.T) {
-	db := useGroupReservationDatabase(t, groupReservationDatabases(t)[0])
+	for _, fixture := range groupReservationDatabases(t) {
+		t.Run(fixture.name, func(t *testing.T) { checkOrdinaryReservationRecovery(t, fixture) })
+	}
+}
+
+func checkOrdinaryReservationRecovery(t *testing.T, fixture groupReservationDatabase) {
+	db := useGroupReservationDatabase(t, fixture)
 	require.NoError(t, db.AutoMigrate(&TaskSubmission{}, &TaskAccounting{}, &TaskAccountingEvent{}))
 	user, token := seedGroupReservationWallet(t, db, "ordinary-restart", 1000, 1000)
 	req := ordinaryReservationRequest(user, token, 250)

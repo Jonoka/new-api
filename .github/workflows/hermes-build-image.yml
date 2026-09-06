@@ -149,7 +149,7 @@ jobs:
           NEW_API_TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/newapi_test_ci?sslmode=disable
           NEW_API_TEST_MYSQL_DSN: root:mysql_ci_only@tcp(127.0.0.1:3306)/newapi_test_ci?charset=utf8mb4&parseTime=True&loc=Local
         run: >-
-          go test -race ./common ./relay/common ./relay/channel ./model ./service ./controller ./middleware ./relay ./relay/helper
+          go test -race ./common ./relay/common ./relay/channel ./relay/channel/openai ./model ./service ./controller ./middleware ./relay ./relay/helper
           -run 'Wallet|Midjourney|Realtime|QuotaCache|Balance|Alpha|Replay|MemoryStorage|DiskStorage|Outbound|BodyFactory|BodyMetadata|ResetUpstream|Test(RelayResponseHeaderTimeout|RelayTransportsApplyResponseHeaderTimeout|ResponseHeaderTimeout|RelayRequestParseError|RelayRejectsMalformedRequest|RelayRejectsNonObjectRequest|RelayPreservesRequestBodyTooLarge|UserCriticalRateLimit|FormatUserLogsUsesStrictProjection|ProjectUserLogOther|UserAndTokenReadsProject|SumUsedQuotaKeepsHistorical|SanitizeDBError|SanitizedGormWriter|GormLoggerRedacts|ReconcileGroupReservation|BillingSession|ModelPriceHelper|RelayTaskSubmit|FinalGroup|TaskAccounting|TaskSubmission|AsyncTask|TaskBilling|CanvasImageTask|ImageTask|UserCacheGeneration)'
           -count=1
 
