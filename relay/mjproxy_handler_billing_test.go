@@ -165,9 +165,9 @@ func TestRelayMidjourneySubmitSendsOnlyAdmittedRequests(t *testing.T) {
 	require.Equal(t, 2*quota, gotUser.Quota)
 	require.Equal(t, 10*quota, gotToken.RemainQuota)
 	require.Zero(t, gotToken.UsedQuota)
-	var rejected model.Midjourney
-	require.NoError(t, db.Where("code = ?", 23).First(&rejected).Error)
-	require.Nil(t, rejected.TaskRowID)
+	var rejectedTask model.Midjourney
+	require.NoError(t, db.Where("code = ?", 23).First(&rejectedTask).Error)
+	require.Nil(t, rejectedTask.TaskRowID)
 
 	// Swap uses the same authoritative admission boundary and cannot send when
 	// the wallet row no longer has the required amount.

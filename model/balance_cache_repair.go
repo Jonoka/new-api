@@ -102,11 +102,19 @@ func isBalanceCacheRepairInFlight(operationID string) bool {
 	return ok
 }
 
-func balanceCacheRepairExists(ctx context.Context, operationID string) (bool, error) {
+func balanceCacheRepairExists(ctx context.Context, repair *BalanceCacheRepair) (bool, error) {
+	if err := validateBalanceCacheRepair(repair); err != nil {
+		return false, err
+	}
 	var count int64
-	err := DB.WithContext(ctx).Model(&BalanceCacheRepair{}).
-		Where("id = ? AND version = ?", operationID, balanceCacheRepairVersion).
-		Count(&count).Error
+	query := DB.WithContext(ctx).Model(&BalanceCacheRepair{}).
+		Where("id = ? AND version = ?", repair.ID, repair.Version)
+	if repair.UserID != nil {
+		query = query.Where("user_id = ? AND token_cache_key = ?", *repair.UserID, "")
+	} else {
+		query = query.Where("user_id IS NULL AND token_cache_key = ?", repair.TokenCacheKey)
+	}
+	err := query.Count(&count).Error
 	return count == 1, err
 }
 
@@ -167,7 +175,7 @@ func classifyBalanceMutationCommit(
 	transactionErr error,
 	keepUnresolved bool,
 ) error {
-	committed, resolveErr := balanceCacheRepairExists(ctx, repair.ID)
+	committed, resolveErr := balanceCacheRepairExists(ctx, repair)
 	if resolveErr != nil {
 		if keepUnresolved {
 			markBalanceCacheRepairInFlight(repair.ID)
@@ -240,7 +248,7 @@ func applyTokenQuotaDeltaWithOperation(id, delta int, operationID string, keepUn
 	transactionBodyCompleted := false
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var token Token
-		if err := lockForUpdate(tx).Select("id", commonKeyCol).First(&token, "id = ?", id).Error; err != nil {
+		if err := lockForUpdate(tx).Select([]string{"id", "key"}).First(&token, "id = ?", id).Error; err != nil {
 			return err
 		}
 		if delta == 0 {

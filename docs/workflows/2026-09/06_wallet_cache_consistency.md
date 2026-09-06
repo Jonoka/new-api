@@ -31,6 +31,11 @@ Every newly requested balance change now:
 A rejected or rolled-back database write never changes Redis. Token writes
 update `remain_quota` and `used_quota` together with their existing signs.
 Zero-delta calls still prove row existence but do not create repair work.
+Transaction callback and `Begin` failures are definite rollbacks and return
+without querying a repair receipt. Only an error after the transaction body has
+completed is treated as a potentially ambiguous `Commit` result and classified
+by the exact marker. A receipt-read outage therefore cannot turn a known
+rollback into a parked operation.
 
 ## Projection repair schema
 
@@ -86,6 +91,15 @@ The compatibility maps are still process-local historical state; this change
 does not invent a second durable wallet queue or claim to repair a value lost by
 terminating an older process before it hands that value to the new code.
 
+Before a required wallet/token reservation extracts legacy map values, it holds
+the user apply lock and then the token apply lock and classifies every parked
+balance operation matching either identity. An unreadable marker blocks the
+reservation before its database transaction; a confirmed rollback restores the
+delta for the same transaction to fold, while a retained receipt proves that the
+delta is already reflected in the database. The user-only legacy admission
+helper used by game exchange applies the same gate, including matching parked
+task-submission values, before it extracts a user delta.
+
 ## Known limit
 
 Acknowledged repair receipts are retained because an unresolved legacy flush in
@@ -98,7 +112,9 @@ the receipt; age alone is not such proof.
 
 GitHub-hosted tests cover SQLite and optional MySQL/PostgreSQL balance helpers,
 missing rows, rejected writes, batching enabled, legacy flush failure and
-commit classification, real Redis stale-fill ordering, cache failure/recovery,
+commit classification, definite rollback with an unavailable receipt read,
+required-admission blocking and exact-once recovery for parked values, retained
+cross-node commit proof, real Redis stale-fill ordering, cache failure/recovery,
 and restart-style repair passes. No executable tests or builds run on the
 production checkout.
 

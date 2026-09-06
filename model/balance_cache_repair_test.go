@@ -147,6 +147,28 @@ func TestRepairedReceiptStillClassifiesLostCommitReply(t *testing.T) {
 	}
 }
 
+func TestBalanceCommitClassificationRequiresExactRepairTarget(t *testing.T) {
+	for _, fixture := range groupReservationDatabases(t) {
+		fixture := fixture
+		t.Run(fixture.name, func(t *testing.T) {
+			db := prepareBalanceRepairDatabase(t, fixture)
+			user, _ := seedGroupReservationWallet(t, db, "exact-receipt-target-"+fixture.name, 1000, 1000)
+			otherUser := user.Id + 1_000_000_000
+			operationID := common.GetUUID()
+			stored, err := newUserBalanceCacheRepair(operationID, otherUser)
+			require.NoError(t, err)
+			require.NoError(t, db.Create(stored).Error)
+			expected, err := newUserBalanceCacheRepair(operationID, user.Id)
+			require.NoError(t, err)
+
+			err = classifyBalanceMutationCommit(
+				context.Background(), expected, errInjectedTaskSubmissionCommit, false,
+			)
+			require.ErrorIs(t, err, errInjectedTaskSubmissionCommit)
+		})
+	}
+}
+
 func TestRejectedBalanceWriteDoesNotInvalidateCache(t *testing.T) {
 	for _, fixture := range groupReservationDatabases(t) {
 		fixture := fixture
