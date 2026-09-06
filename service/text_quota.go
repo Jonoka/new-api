@@ -469,6 +469,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		settleErr = SettleBilling(ctx, relayInfo, summary.Quota)
 		if settleErr != nil {
 			logger.LogError(ctx, "error settling billing: "+settleErr.Error())
+			preserveKnownBillingSettlement(ctx, relayInfo, summary.Quota, settleErr)
 		}
 	}
 	var deferredMetricUsage *ChannelMetricUsage

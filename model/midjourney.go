@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/QuantumNous/new-api/constant"
 	"gorm.io/gorm"
 )
 
@@ -167,9 +168,6 @@ func (midjourney *Midjourney) Update() error {
 }
 
 // UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).
-// Returns (true, nil) if this caller won the update, (false, nil) if
-// another process already moved the task out of fromStatus.
-// UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).
 // Uses Model().Select("*").Updates() to avoid GORM Save()'s INSERT fallback.
 func (midjourney *Midjourney) UpdateWithStatus(fromStatus string) (bool, error) {
 	result := DB.Model(midjourney).Where("status = ?", fromStatus).Select("*").Updates(midjourney)
@@ -185,6 +183,10 @@ func (midjourney *Midjourney) UpdateWithStatus(fromStatus string) (bool, error) 
 func PersistMidjourneySubmissionLink(ctx context.Context, submissionID, leaseToken string, midjourney *Midjourney, task *Task) error {
 	if submissionID == "" || leaseToken == "" || midjourney == nil || task == nil || task.UserId <= 0 || task.UserId != midjourney.UserId {
 		return errors.New("invalid midjourney submission link")
+	}
+	if task.Platform != constant.TaskPlatformMidjourney || task.TaskID == "" || midjourney.MjId == "" ||
+		task.PrivateData.UpstreamTaskID != midjourney.MjId || task.ChannelId != midjourney.ChannelId || task.Action != midjourney.Action {
+		return errors.New("midjourney submission identity mismatch")
 	}
 	err := DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := getDBTimestampTx(tx)
@@ -231,14 +233,19 @@ func verifyMidjourneySubmissionLink(ctx context.Context, submissionID, leaseToke
 		if err := tx.First(&midjourney, expectedMidjourney.Id).Error; err != nil {
 			return err
 		}
-		if midjourney.TaskRowID == nil || *midjourney.TaskRowID != expectedTask.ID || midjourney.UserId != expectedMidjourney.UserId || midjourney.MjId != expectedMidjourney.MjId {
+		if midjourney.TaskRowID == nil || *midjourney.TaskRowID != expectedTask.ID ||
+			midjourney.UserId != expectedMidjourney.UserId || midjourney.MjId != expectedMidjourney.MjId ||
+			midjourney.ChannelId != expectedMidjourney.ChannelId || midjourney.Action != expectedMidjourney.Action ||
+			midjourney.Quota != expectedMidjourney.Quota {
 			return errors.New("midjourney submission link mismatch")
 		}
 		var task Task
 		if err := tx.First(&task, expectedTask.ID).Error; err != nil {
 			return err
 		}
-		if task.TaskID != expectedTask.TaskID || task.UserId != expectedTask.UserId || task.Platform != expectedTask.Platform || task.PrivateData.UpstreamTaskID != expectedTask.PrivateData.UpstreamTaskID {
+		if task.TaskID != expectedTask.TaskID || task.UserId != expectedTask.UserId || task.Platform != expectedTask.Platform ||
+			task.ChannelId != expectedTask.ChannelId || task.Action != expectedTask.Action ||
+			task.PrivateData.UpstreamTaskID != expectedTask.PrivateData.UpstreamTaskID {
 			return errors.New("midjourney accounting task mismatch")
 		}
 		var submission TaskSubmission

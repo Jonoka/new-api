@@ -44,7 +44,7 @@ NEW_API_TEST_COMPATIBILITY_DSN=postgres://postgres:postgres@127.0.0.1:5432/newap
 NEW_API_TEST_REDIS_ADDR=127.0.0.1:6379 \
   go test ./model -run '^TestWalletConcurrencyCompatibilityStaleCache$' -count=1
 timeout 240s node scripts/ci/batch-d-gateway.mjs
-test "$(query "SELECT count(*) FROM task_submissions WHERE state='active' OR cache_pending")" = 0
+test "$(query "SELECT count(*) FROM task_submissions WHERE state IN ('active','settlement_pending') OR cache_pending")" = 0
 test "$(query "SELECT count(*) FROM task_accountings WHERE NOT money_applied OR cache_pending")" = 0
 test "$(query "SELECT count(*) FROM task_accounting_events WHERE NOT delivered")" = 0
 test "$(query "SELECT count(*) FROM balance_cache_repairs WHERE repaired_at=0")" = 0

@@ -24,18 +24,19 @@ import (
 // BillingSession 封装单次请求的预扣费/结算/退款生命周期。
 // 实现 relaycommon.BillingSettler 接口。
 type BillingSession struct {
-	relayInfo        *relaycommon.RelayInfo
-	funding          FundingSource
-	preConsumedQuota int  // 实际预扣额度（信任用户可能为 0）
-	previousReserved int  // durable expected amount used by the latest operation
-	tokenConsumed    int  // 令牌额度实际扣减量
-	trusted          bool // 是否命中信任额度旁路
-	fundingSettled   bool // final funding ownership/settlement has committed
-	settled          bool // Settle 全部完成（资金 + 令牌）
-	refunded         bool // Refund 已调用
-	requestContext   context.Context
-	heartbeatStop    func()
-	mu               sync.Mutex
+	relayInfo         *relaycommon.RelayInfo
+	funding           FundingSource
+	preConsumedQuota  int  // 实际预扣额度（信任用户可能为 0）
+	previousReserved  int  // durable expected amount used by the latest operation
+	tokenConsumed     int  // 令牌额度实际扣减量
+	trusted           bool // 是否命中信任额度旁路
+	fundingSettled    bool // final funding ownership/settlement has committed
+	settled           bool // Settle 全部完成（资金 + 令牌）
+	refunded          bool // Refund 已调用
+	settlementPending bool // measured ordinary usage must not be abandoned/refunded
+	requestContext    context.Context
+	heartbeatStop     func()
+	mu                sync.Mutex
 }
 
 // Settle adjusts funding, token quota and the subscription reservation record
@@ -128,7 +129,7 @@ func (s *BillingSession) NeedsRefund() bool {
 }
 
 func (s *BillingSession) needsRefundLocked() bool {
-	if s.settled || s.refunded || s.fundingSettled {
+	if s.settled || s.refunded || s.fundingSettled || s.settlementPending {
 		// fundingSettled 时资金来源已提交结算，不能再退预扣费
 		return false
 	}
@@ -146,6 +147,66 @@ func (s *BillingSession) needsRefundLocked() bool {
 		return true
 	}
 	return false
+}
+
+func preserveKnownBillingSettlement(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuota int, settlementErr error) {
+	if settlementErr == nil || actualQuota <= 0 || relayInfo == nil || relayInfo.Billing == nil {
+		return
+	}
+	session, ok := relayInfo.Billing.(*BillingSession)
+	if !ok {
+		return
+	}
+	if err := session.preserveKnownSettlement(actualQuota); err != nil {
+		logger.LogError(ctx, "failed to preserve known billing settlement: "+err.Error())
+	}
+}
+
+func (s *BillingSession) preserveKnownSettlement(actualQuota int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.settled || s.settlementPending {
+		return nil
+	}
+	if s.refunded || !s.hasTaskSubmission() {
+		return errors.New("billing session cannot preserve known settlement")
+	}
+	preserveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	submission, err := model.PreserveKnownTaskSubmissionSettlement(
+		preserveCtx,
+		s.relayInfo.TaskSubmissionID,
+		s.relayInfo.TaskSubmissionLeaseToken,
+		s.relayInfo.UserId,
+		actualQuota,
+	)
+	if err != nil {
+		return err
+	}
+	s.stopTaskSubmissionHeartbeatLocked()
+	if submission.State == model.TaskSubmissionStateSettled {
+		previousReserved := s.preConsumedQuota
+		s.previousReserved = previousReserved
+		s.preConsumedQuota = actualQuota
+		if s.relayInfo.IsPlayground || s.relayInfo.SkipTokenQuota {
+			s.tokenConsumed = 0
+		} else {
+			s.tokenConsumed = actualQuota
+		}
+		switch funding := s.funding.(type) {
+		case *WalletFunding:
+			funding.consumed = actualQuota
+		case *SubscriptionFunding:
+			funding.preConsumed = int64(actualQuota)
+			s.relayInfo.SubscriptionPostDelta += int64(actualQuota - previousReserved)
+		}
+		s.fundingSettled = true
+		s.settled = true
+		s.syncRelayInfo()
+		return nil
+	}
+	s.settlementPending = true
+	return nil
 }
 
 // GetPreConsumedQuota 返回实际预扣的额度。

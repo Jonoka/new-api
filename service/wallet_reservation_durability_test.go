@@ -9,10 +9,13 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestWalletOrdinaryAndAuthoritativeTrustAdmissionsAreJournaled(t *testing.T) {
@@ -93,6 +96,7 @@ func TestWalletRealtimeUsesCumulativeReservationAndFinalSettlementOnce(t *testin
 	info := groupBillingInfo(user, token)
 	info.OriginModelName = "gpt-4o-realtime-preview"
 	info.UsingGroup = "default"
+	info.ForcePreConsume = true
 	info.PriceData.FreeModel = false
 	require.Nil(t, ReconcileBillingReservation(ctx, 0, info))
 
@@ -117,6 +121,64 @@ func TestWalletRealtimeUsesCumulativeReservationAndFinalSettlementOnce(t *testin
 	require.NotZero(t, modelRatio)
 }
 
+func TestWalletRealtimeCumulativeReservationUsesFrozenTieredPrice(t *testing.T) {
+	useTaskAccountingDB(t, serviceTestSQLite, serviceTestSQLite, "sqlite")
+	resetTaskAccountingFixture(t, model.DB, model.LOG_DB)
+	user, token := seedGroupBillingWallet(t, 100000, 100000)
+	ctx := groupBillingContext(t)
+	info := groupBillingInfo(user, token)
+	info.OriginModelName = "realtime-tiered"
+	info.ForcePreConsume = true
+	info.PriceData = types.PriceData{ModelRatio: 0.000001, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 0.000001}}
+	info.TieredBillingSnapshot = &billingexpr.BillingSnapshot{
+		BillingMode: "tiered_expr", ModelName: info.OriginModelName,
+		ExprString: "p * 1000000", ExprHash: billingexpr.ExprHashString("p * 1000000"),
+		Group: "default", GroupRatio: 2, QuotaPerUnit: 1, ExprVersion: billingexpr.DefaultExprVersion,
+	}
+	require.Nil(t, ReconcileBillingReservation(ctx, 0, info))
+	usage := &dto.RealtimeUsage{TotalTokens: 30, InputTokens: 30}
+	usage.InputTokenDetails.TextTokens = 30
+	require.NoError(t, PreWssConsumeQuota(ctx, info, usage))
+	require.Equal(t, 60, info.Billing.GetPreConsumedQuota())
+	require.NoError(t, SettleBilling(ctx, info, 60))
+}
+
+func TestWalletKnownSettlementFailureIsNotRecoveredAsAbandoned(t *testing.T) {
+	useTaskAccountingDB(t, serviceTestSQLite, serviceTestSQLite, "sqlite")
+	resetTaskAccountingFixture(t, model.DB, model.LOG_DB)
+	user, token := seedGroupBillingWallet(t, 1000, 1000)
+	ctx := groupBillingContext(t)
+	info := groupBillingInfo(user, token)
+	info.ForcePreConsume = true
+	info.PriceData.FreeModel = false
+	require.Nil(t, ReconcileBillingReservation(ctx, 200, info))
+
+	db := model.DB
+	callback := "test:known-settlement-token-failure"
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == "tokens" {
+			tx.AddError(errors.New("injected known settlement token failure"))
+		}
+	}))
+	t.Cleanup(func() { _ = db.Callback().Update().Remove(callback) })
+	settleErr := SettleBilling(ctx, info, 400)
+	require.Error(t, settleErr)
+	preserveKnownBillingSettlement(ctx, info, 400, settleErr)
+	require.False(t, info.Billing.NeedsRefund())
+	require.NoError(t, db.Callback().Update().Remove(callback))
+
+	submission, err := model.GetTaskSubmission(info.TaskSubmissionID)
+	require.NoError(t, err)
+	require.Equal(t, model.TaskSubmissionStateSettlementPending, submission.State)
+	require.Equal(t, 200, submission.ReservedQuota)
+	require.Equal(t, 400, submission.AcceptedQuota)
+	require.NoError(t, model.RecoverExpiredTaskSubmissions(ctx, 100))
+	userQuota, tokenRemain, tokenUsed := readGroupBillingWallet(t, user.Id, token.Id)
+	require.Equal(t, 800, userQuota)
+	require.Equal(t, 800, tokenRemain)
+	require.Equal(t, 200, tokenUsed)
+}
+
 func TestWalletViolationFeeMoneyCountersAndLogAreIdempotent(t *testing.T) {
 	useTaskAccountingDB(t, serviceTestSQLite, serviceTestSQLite, "sqlite")
 	resetTaskAccountingFixture(t, model.DB, model.LOG_DB)
@@ -127,7 +189,7 @@ func TestWalletViolationFeeMoneyCountersAndLogAreIdempotent(t *testing.T) {
 	ctx.Set("username", user.Username)
 	ctx.Set("token_name", token.Name)
 	info := groupBillingInfo(user, token)
-	info.ChannelId = channel.Id
+	info.ChannelMeta = &relaycommon.ChannelMeta{ChannelId: channel.Id}
 	info.BillingSource = BillingSourceWallet
 	info.PriceData.GroupRatioInfo.GroupRatio = 1
 	settings := model_setting.GetGrokSettings()

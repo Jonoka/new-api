@@ -41,8 +41,9 @@ func ReserveMidjourneyBilling(c *gin.Context, info *relaycommon.RelayInfo, quota
 	return nil
 }
 
-// HandoffMidjourneyBilling transfers a live reservation to TaskAccounting and
-// links the legacy Midjourney row atomically with that transfer.
+// HandoffMidjourneyBilling first durably links the legacy and internal task rows,
+// then transfers the live reservation through the canonical task handoff. A
+// linked active submission remains recoverable if the second transaction fails.
 func HandoffMidjourneyBilling(c *gin.Context, info *relaycommon.RelayInfo, midjourney *model.Midjourney, task *model.Task, expectedStatus model.TaskStatus, chargedQuota int) error {
 	if info == nil || midjourney == nil || task == nil || chargedQuota < 0 {
 		return errors.New("invalid midjourney billing handoff")

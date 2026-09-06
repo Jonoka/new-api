@@ -30,6 +30,19 @@ func TestMidjourneyFreeActionsRemainUncharged(t *testing.T) {
 	require.False(t, midjourneyConsumesQuota(constant.MjActionCustomZoom))
 	require.True(t, midjourneyConsumesQuota(constant.MjActionImagine))
 	require.True(t, midjourneyConsumesQuota(constant.MjActionSwapFace))
+	require.Zero(t, midjourneyStoredQuota(false, 100))
+	require.Equal(t, 100, midjourneyStoredQuota(true, 100))
+}
+
+func TestMidjourneyAcceptedResponseCodesRemainCompatible(t *testing.T) {
+	for _, code := range []int{1, 21, 22} {
+		require.True(t, midjourneySubmitAccepted(http.StatusOK, code, "upstream-id"), "submit code %d", code)
+	}
+	require.False(t, midjourneySubmitAccepted(http.StatusOK, 23, "upstream-id"))
+	require.False(t, midjourneySubmitAccepted(http.StatusBadGateway, 1, "upstream-id"))
+	require.False(t, midjourneySubmitAccepted(http.StatusOK, 1, " "))
+	require.True(t, midjourneySwapAccepted(http.StatusOK, 1, "upstream-id"))
+	require.False(t, midjourneySwapAccepted(http.StatusOK, 21, "upstream-id"))
 }
 
 func TestRelayMidjourneySubmitSendsOnlyAdmittedRequests(t *testing.T) {
@@ -52,6 +65,7 @@ func TestRelayMidjourneySubmitSendsOnlyAdmittedRequests(t *testing.T) {
 	require.NoError(t, err)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	model.DB = db
 	model.LOG_DB = db
@@ -168,6 +182,20 @@ func TestRelayMidjourneySubmitSendsOnlyAdmittedRequests(t *testing.T) {
 	var rejectedTask model.Midjourney
 	require.NoError(t, db.Where("code = ?", 23).First(&rejectedTask).Error)
 	require.Nil(t, rejectedTask.TaskRowID)
+	require.Zero(t, rejectedTask.Quota, "a released provider rejection must not be eligible for a later legacy refund")
+
+	// The handler must stop before provider I/O when the authoritative finite
+	// token balance rejects an otherwise funded request.
+	require.NoError(t, db.Model(&model.Token{}).Where("id = ?", token.Id).Updates(map[string]any{
+		"remain_quota": quota / 2, "used_quota": 0,
+	}).Error)
+	require.NotNil(t, invoke(100))
+	require.EqualValues(t, 3, upstreamCalls.Load())
+	require.NoError(t, db.First(&gotUser, user.Id).Error)
+	require.Equal(t, 2*quota, gotUser.Quota)
+	require.NoError(t, db.Model(&model.Token{}).Where("id = ?", token.Id).Updates(map[string]any{
+		"remain_quota": 10 * quota, "used_quota": 0,
+	}).Error)
 
 	// Swap uses the same authoritative admission boundary and cannot send when
 	// the wallet row no longer has the required amount.

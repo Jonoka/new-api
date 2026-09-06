@@ -51,6 +51,7 @@ func TestMain(m *testing.M) {
 func migrateTaskAccountingFixture(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&model.BalanceCacheRepair{},
+		&model.Midjourney{},
 		&model.Task{}, &model.TaskAccounting{}, &model.TaskAccountingEvent{},
 		&model.TaskSubmission{},
 		&model.TaskAccountingLogReceipt{}, &model.User{}, &model.Token{},

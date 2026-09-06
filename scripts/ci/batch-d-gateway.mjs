@@ -92,7 +92,7 @@ try {
   await waitFor(() => state('restart').wallet === 12000 && state('restart').remain === 12000, 'expired ordinary reservation recovery');
   assert.deepEqual(state('restart'), { wallet: 12000, remain: 12000, tokenUsed: 0, used: 0, channelUsed: 0, requests: 0 });
   assert.equal(calls.get('restart'), 2, 'recovery must never contact upstream');
-  await waitFor(() => query("SELECT count(*) FROM task_submissions WHERE model_name LIKE 'd-wallet-%' AND (state='active' OR cache_pending)") === '0', 'D journals and cache markers drain');
+  await waitFor(() => query("SELECT count(*) FROM task_submissions WHERE model_name LIKE 'd-wallet-%' AND (state IN ('active','settlement_pending') OR cache_pending)") === '0', 'D journals and cache markers drain');
   assert.deepEqual(failures, []);
   console.log('Ordinary reservations recovered after two process exits without duplicate refund or provider retry.');
 } finally {

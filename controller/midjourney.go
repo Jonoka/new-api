@@ -32,7 +32,8 @@ func UpdateMidjourneyTaskBulk() {
 
 		logger.LogInfo(ctx, fmt.Sprintf("检测到未完成的任务数有: %v", len(tasks)))
 		taskChannelM := make(map[int][]string)
-		taskM := make(map[string]*model.Midjourney)
+		taskChannelSeen := make(map[int]map[string]struct{})
+		taskM := make(map[string][]*model.Midjourney)
 		nullTaskIds := make([]int, 0)
 		for _, task := range tasks {
 			projected, err := projectCompletedMidjourneyAccounting(ctx, task)
@@ -52,8 +53,15 @@ func UpdateMidjourneyTaskBulk() {
 				nullTaskIds = append(nullTaskIds, task.Id)
 				continue
 			}
-			taskM[midjourneyPollingKey(task.ChannelId, task.MjId)] = task
-			taskChannelM[task.ChannelId] = append(taskChannelM[task.ChannelId], task.MjId)
+			key := midjourneyPollingKey(task.ChannelId, task.MjId)
+			taskM[key] = append(taskM[key], task)
+			if taskChannelSeen[task.ChannelId] == nil {
+				taskChannelSeen[task.ChannelId] = make(map[string]struct{})
+			}
+			if _, exists := taskChannelSeen[task.ChannelId][task.MjId]; !exists {
+				taskChannelSeen[task.ChannelId][task.MjId] = struct{}{}
+				taskChannelM[task.ChannelId] = append(taskChannelM[task.ChannelId], task.MjId)
+			}
 		}
 		if len(nullTaskIds) > 0 {
 			err := model.MjBulkUpdateByTaskIds(nullTaskIds, map[string]any{
@@ -78,19 +86,28 @@ func UpdateMidjourneyTaskBulk() {
 			midjourneyChannel, err := model.CacheGetChannel(channelId)
 			if err != nil {
 				logger.LogError(ctx, fmt.Sprintf("CacheGetChannel: %v", err))
-				legacyTaskIDs := make([]string, 0, len(taskIds))
+				legacyTaskRowIDs := make([]int, 0, len(taskIds))
+				failureReason := fmt.Sprintf("获取渠道信息失败，请联系管理员，渠道ID：%d", channelId)
 				for _, taskID := range taskIds {
-					if task := taskM[midjourneyPollingKey(channelId, taskID)]; task != nil && task.TaskRowID == nil {
-						legacyTaskIDs = append(legacyTaskIDs, taskID)
+					for _, task := range taskM[midjourneyPollingKey(channelId, taskID)] {
+						if task.TaskRowID == nil {
+							legacyTaskRowIDs = append(legacyTaskRowIDs, task.Id)
+							continue
+						}
+						if err := failLinkedMidjourneyTask(ctx, task, failureReason); err != nil {
+							logger.LogError(ctx, fmt.Sprintf("fail linked Midjourney task %d: %v", task.Id, err))
+						}
 					}
 				}
-				err := model.MjBulkUpdate(legacyTaskIDs, map[string]any{
-					"fail_reason": fmt.Sprintf("获取渠道信息失败，请联系管理员，渠道ID：%d", channelId),
-					"status":      "FAILURE",
-					"progress":    "100%",
-				})
-				if err != nil {
-					logger.LogInfo(ctx, fmt.Sprintf("UpdateMidjourneyTask error: %v", err))
+				if len(legacyTaskRowIDs) > 0 {
+					err := model.MjBulkUpdateByTaskIds(legacyTaskRowIDs, map[string]any{
+						"fail_reason": failureReason,
+						"status":      "FAILURE",
+						"progress":    "100%",
+					})
+					if err != nil {
+						logger.LogInfo(ctx, fmt.Sprintf("UpdateMidjourneyTask error: %v", err))
+					}
 				}
 				continue
 			}
@@ -136,75 +153,118 @@ func UpdateMidjourneyTaskBulk() {
 			cancel()
 
 			for _, responseItem := range responseItems {
-				task := taskM[midjourneyPollingKey(channelId, responseItem.MjId)]
-				if task == nil {
+				tasksForResponse := taskM[midjourneyPollingKey(channelId, responseItem.MjId)]
+				if len(tasksForResponse) == 0 {
 					continue
 				}
+				for _, task := range tasksForResponse {
+					item := responseItem
+					useTime := (time.Now().UnixNano() / int64(time.Millisecond)) - task.SubmitTime
+					// 如果时间超过一小时，且进度不是100%，则认为任务失败
+					if useTime > 3600000 && task.Progress != "100%" {
+						item.FailReason = "上游任务超时（超过1小时）"
+						item.Status = "FAILURE"
+					}
+					if !checkMjTaskNeedUpdate(task, item) {
+						continue
+					}
+					preStatus := task.Status
+					task.Code = 1
+					task.Progress = item.Progress
+					task.PromptEn = item.PromptEn
+					task.State = item.State
+					task.SubmitTime = item.SubmitTime
+					task.StartTime = item.StartTime
+					task.FinishTime = item.FinishTime
+					task.ImageUrl = item.ImageUrl
+					task.Status = item.Status
+					task.FailReason = item.FailReason
+					service.ApplyMidjourneyTaskProjection(task, item)
 
-				useTime := (time.Now().UnixNano() / int64(time.Millisecond)) - task.SubmitTime
-				// 如果时间超过一小时，且进度不是100%，则认为任务失败
-				if useTime > 3600000 && task.Progress != "100%" {
-					responseItem.FailReason = "上游任务超时（超过1小时）"
-					responseItem.Status = "FAILURE"
-				}
-				if !checkMjTaskNeedUpdate(task, responseItem) {
-					continue
-				}
-				preStatus := task.Status
-				task.Code = 1
-				task.Progress = responseItem.Progress
-				task.PromptEn = responseItem.PromptEn
-				task.State = responseItem.State
-				task.SubmitTime = responseItem.SubmitTime
-				task.StartTime = responseItem.StartTime
-				task.FinishTime = responseItem.FinishTime
-				task.ImageUrl = responseItem.ImageUrl
-				task.Status = responseItem.Status
-				task.FailReason = responseItem.FailReason
-				service.ApplyMidjourneyTaskProjection(task, responseItem)
-
-				shouldReturnQuota := false
-				if (task.Progress != "100%" && responseItem.FailReason != "") || (task.Progress == "100%" && task.Status == "FAILURE") {
-					logger.LogInfo(ctx, task.MjId+" 构建失败，"+task.FailReason)
-					task.Progress = "100%"
-					if task.Quota != 0 {
-						shouldReturnQuota = true
+					shouldReturnQuota := false
+					if (task.Progress != "100%" && item.FailReason != "") || (task.Progress == "100%" && task.Status == "FAILURE") {
+						logger.LogInfo(ctx, task.MjId+" 构建失败，"+task.FailReason)
+						task.Progress = "100%"
+						if task.Quota != 0 {
+							shouldReturnQuota = true
+						}
 					}
-				}
-				if task.TaskRowID != nil && (task.Status == string(model.TaskStatusSuccess) || task.Status == string(model.TaskStatusFailure)) {
-					accountingTask, err := model.GetTaskByRowID(*task.TaskRowID)
+					if task.TaskRowID != nil && (task.Status == string(model.TaskStatusSuccess) || task.Status == string(model.TaskStatusFailure)) {
+						accountingTask, err := model.GetTaskByRowID(*task.TaskRowID)
+						if err != nil {
+							logger.LogError(ctx, fmt.Sprintf("load Midjourney accounting task %d: %v", *task.TaskRowID, err))
+							continue
+						}
+						reason := "midjourney task completed"
+						if shouldReturnQuota {
+							reason = "构图失败"
+						}
+						terminalProjection := item
+						terminalProjection.Status = task.Status
+						terminalProjection.Progress = task.Progress
+						terminalProjection.FailReason = task.FailReason
+						if _, err := service.FinalizeMidjourneyTaskAccounting(ctx, accountingTask, terminalProjection, task.Quota, reason); err != nil {
+							logger.LogError(ctx, "finalize Midjourney task accounting: "+err.Error())
+							continue
+						}
+						projection, err := service.MidjourneyTaskProjection(accountingTask)
+						if err != nil {
+							logger.LogError(ctx, "load Midjourney task projection: "+err.Error())
+							continue
+						}
+						service.ApplyMidjourneyTaskProjection(task, projection)
+					}
+					won, err := updateMidjourneyTaskWithLegacyRefund(ctx, task, preStatus, shouldReturnQuota)
 					if err != nil {
-						logger.LogError(ctx, fmt.Sprintf("load Midjourney accounting task %d: %v", *task.TaskRowID, err))
-						continue
+						logger.LogError(ctx, "UpdateMidjourneyTask task error: "+err.Error())
+					} else if !won {
+						logger.LogInfo(ctx, fmt.Sprintf("Midjourney task %d was updated by another poller", task.Id))
 					}
-					reason := "midjourney task completed"
-					if shouldReturnQuota {
-						reason = "构图失败"
-					}
-					terminalProjection := responseItem
-					terminalProjection.Status = task.Status
-					terminalProjection.Progress = task.Progress
-					terminalProjection.FailReason = task.FailReason
-					if _, err := service.FinalizeMidjourneyTaskAccounting(ctx, accountingTask, terminalProjection, task.Quota, reason); err != nil {
-						logger.LogError(ctx, "finalize Midjourney task accounting: "+err.Error())
-						continue
-					}
-					projection, err := service.MidjourneyTaskProjection(accountingTask)
-					if err != nil {
-						logger.LogError(ctx, "load Midjourney task projection: "+err.Error())
-						continue
-					}
-					service.ApplyMidjourneyTaskProjection(task, projection)
-				}
-				won, err := task.UpdateWithStatus(preStatus)
-				if err != nil {
-					logger.LogError(ctx, "UpdateMidjourneyTask task error: "+err.Error())
-				} else if !won {
-					logger.LogInfo(ctx, fmt.Sprintf("Midjourney task %d was updated by another poller", task.Id))
 				}
 			}
 		}
 	}
+}
+
+func failLinkedMidjourneyTask(ctx context.Context, task *model.Midjourney, reason string) error {
+	if task == nil || task.TaskRowID == nil {
+		return nil
+	}
+	accountingTask, err := model.GetTaskByRowID(*task.TaskRowID)
+	if err != nil {
+		return err
+	}
+	terminal := dto.MidjourneyDto{
+		MjId: task.MjId, Status: string(model.TaskStatusFailure), Progress: "100%",
+		FailReason: reason, FinishTime: time.Now().UnixMilli(),
+	}
+	if _, err := service.FinalizeMidjourneyTaskAccounting(ctx, accountingTask, terminal, task.Quota, reason); err != nil {
+		return err
+	}
+	projection, err := service.MidjourneyTaskProjection(accountingTask)
+	if err != nil {
+		return err
+	}
+	preStatus := task.Status
+	service.ApplyMidjourneyTaskProjection(task, projection)
+	_, err = task.UpdateWithStatus(preStatus)
+	return err
+}
+
+func updateMidjourneyTaskWithLegacyRefund(ctx context.Context, task *model.Midjourney, preStatus string, shouldReturnQuota bool) (bool, error) {
+	won, err := task.UpdateWithStatus(preStatus)
+	if err != nil || !won || task.TaskRowID != nil || !shouldReturnQuota {
+		return won, err
+	}
+	if err := model.IncreaseUserQuota(task.UserId, task.Quota, false); err != nil {
+		return true, err
+	}
+	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
+		UserId: task.UserId, LogType: model.LogTypeRefund, ChannelId: task.ChannelId,
+		ModelName: service.CovertMjpActionToModelName(task.Action), Quota: task.Quota,
+		Other: map[string]interface{}{"task_id": task.MjId, "reason": "构图失败"},
+	})
+	return true, nil
 }
 
 func projectCompletedMidjourneyAccounting(ctx context.Context, task *model.Midjourney) (bool, error) {

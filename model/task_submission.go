@@ -19,17 +19,21 @@ const (
 	TaskSubmissionStateTransferred = "transferred"
 	TaskSubmissionStateSettled     = "settled"
 	TaskSubmissionStateReleased    = "released"
+	// SettlementPending retains a measured ordinary request whose post-use
+	// settlement failed. Recovery must not reinterpret known usage as abandoned.
+	TaskSubmissionStateSettlementPending = "settlement_pending"
 
 	TaskSubmissionLeaseDuration = 45 * time.Second
 )
 
 var (
-	ErrTaskSubmissionNotFound    = errors.New("task submission is not durable")
-	ErrTaskSubmissionLeaseLost   = errors.New("task submission lease ownership was lost")
-	ErrTaskSubmissionTransferred = errors.New("task submission reservation was transferred")
-	ErrTaskSubmissionSettled     = errors.New("task submission reservation was settled")
-	ErrTaskSubmissionReleased    = errors.New("task submission reservation was released")
-	ErrTaskSubmissionConflict    = errors.New("task submission identity conflict")
+	ErrTaskSubmissionNotFound          = errors.New("task submission is not durable")
+	ErrTaskSubmissionLeaseLost         = errors.New("task submission lease ownership was lost")
+	ErrTaskSubmissionTransferred       = errors.New("task submission reservation was transferred")
+	ErrTaskSubmissionSettled           = errors.New("task submission reservation was settled")
+	ErrTaskSubmissionReleased          = errors.New("task submission reservation was released")
+	ErrTaskSubmissionSettlementPending = errors.New("task submission has known usage pending settlement")
+	ErrTaskSubmissionConflict          = errors.New("task submission identity conflict")
 )
 
 // TaskSubmission owns a BillingSession reservation until it is released,
@@ -121,9 +125,93 @@ func taskSubmissionStateError(state string) error {
 		return ErrTaskSubmissionSettled
 	case TaskSubmissionStateReleased:
 		return ErrTaskSubmissionReleased
+	case TaskSubmissionStateSettlementPending:
+		return ErrTaskSubmissionSettlementPending
 	default:
 		return fmt.Errorf("%w: unexpected state %q", ErrTaskSubmissionConflict, state)
 	}
+}
+
+// PreserveKnownTaskSubmissionSettlement records usage that reached the
+// ordinary response accounting path but whose monetary settlement failed. It
+// intentionally does not move money: the legacy counters/log path is not owned
+// by this transaction, so automatic replay would claim an atomicity guarantee
+// that does not exist. The retained state prevents abandoned recovery from
+// refunding the reservation as if usage had never been observed.
+func PreserveKnownTaskSubmissionSettlement(ctx context.Context, submissionID, leaseToken string, userID, actualQuota int) (*TaskSubmission, error) {
+	if err := validateTaskSubmissionIdentity(submissionID, leaseToken, userID); err != nil {
+		return nil, err
+	}
+	if actualQuota <= 0 || actualQuota > common.MaxQuota {
+		return nil, errors.New("known settlement quota is out of range")
+	}
+	var preserved TaskSubmission
+	transactionBodyCompleted := false
+	err := DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockForUpdate(tx).Where("submission_id = ?", submissionID).First(&preserved).Error; err != nil {
+			return err
+		}
+		if preserved.UserID != userID || preserved.LeaseToken != leaseToken || preserved.TaskRowID != nil {
+			return ErrTaskSubmissionConflict
+		}
+		switch preserved.State {
+		case TaskSubmissionStateSettled:
+			if preserved.AcceptedQuota != actualQuota {
+				return ErrTaskSubmissionConflict
+			}
+			transactionBodyCompleted = true
+			return nil
+		case TaskSubmissionStateSettlementPending:
+			if preserved.AcceptedQuota != actualQuota {
+				return ErrTaskSubmissionConflict
+			}
+			transactionBodyCompleted = true
+			return nil
+		case TaskSubmissionStateActive:
+		default:
+			return taskSubmissionStateError(preserved.State)
+		}
+		now := getDBTimestampTx(tx)
+		result := tx.Model(&TaskSubmission{}).
+			Where("submission_id = ? AND state = ? AND lease_token = ?", submissionID, TaskSubmissionStateActive, leaseToken).
+			Updates(map[string]any{
+				"state":            TaskSubmissionStateSettlementPending,
+				"accepted_quota":   actualQuota,
+				"lease_expires_at": int64(0),
+				"updated_at":       now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrTaskSubmissionConflict
+		}
+		preserved.State = TaskSubmissionStateSettlementPending
+		preserved.AcceptedQuota = actualQuota
+		preserved.LeaseExpiresAt = 0
+		preserved.UpdatedAt = now
+		transactionBodyCompleted = true
+		return nil
+	})
+	if err == nil {
+		return &preserved, nil
+	}
+	if !transactionBodyCompleted {
+		return nil, err
+	}
+	// A reported Commit error is accepted only after the exact retained fact is
+	// readable. Absence or any different identity/state remains unresolved.
+	var resolved TaskSubmission
+	query := DB.WithContext(ctx).Where("submission_id = ?", submissionID).Limit(1).Find(&resolved)
+	if query.Error != nil {
+		return nil, err
+	}
+	if query.RowsAffected == 1 && resolved.UserID == userID && resolved.LeaseToken == leaseToken && resolved.TaskRowID == nil &&
+		((resolved.State == TaskSubmissionStateSettlementPending && resolved.AcceptedQuota == actualQuota) ||
+			(resolved.State == TaskSubmissionStateSettled && resolved.AcceptedQuota == actualQuota)) {
+		return &resolved, nil
+	}
+	return nil, err
 }
 
 func taskSubmissionTaskRowID(taskRowID int64) *int64 {

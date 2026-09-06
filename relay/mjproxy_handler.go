@@ -277,8 +277,9 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 		ChannelId:   c.GetInt("channel_id"),
 		Quota:       priceData.Quota,
 	}
-	accepted := mjResp.StatusCode == http.StatusOK && midjResponse.Code == 1 && strings.TrimSpace(midjResponse.Result) != ""
+	accepted := midjourneySwapAccepted(mjResp.StatusCode, midjResponse.Code, midjResponse.Result)
 	if !accepted {
+		midjourneyTask.Quota = 0
 		if err := midjourneyTask.Insert(); err != nil {
 			return service.MidjourneyErrorWrapper(constant.MjRequestError, "insert_midjourney_task_failed")
 		}
@@ -553,9 +554,7 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 	}
 	midjResponse := &midjResponseWithStatus.Response
 	originalResponseCode := midjResponse.Code
-	accepted := midjResponseWithStatus.StatusCode == http.StatusOK &&
-		(originalResponseCode == 1 || originalResponseCode == 21 || originalResponseCode == 22) &&
-		strings.TrimSpace(midjResponse.Result) != ""
+	accepted := midjourneySubmitAccepted(midjResponseWithStatus.StatusCode, originalResponseCode, midjResponse.Result)
 
 	// 文档：https://github.com/novicezk/midjourney-proxy/blob/main/docs/api.md
 	//1-提交成功
@@ -581,7 +580,7 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		Progress:    "0%",
 		FailReason:  "",
 		ChannelId:   c.GetInt("channel_id"),
-		Quota:       priceData.Quota,
+		Quota:       midjourneyStoredQuota(consumeQuota, priceData.Quota),
 	}
 	if midjResponse.Code == 3 {
 		//无实例账号自动禁用渠道（No available account instance）
@@ -633,6 +632,9 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		midjourneyTask.FailReason = ""
 	}
 	if !consumeQuota || !accepted {
+		if !accepted {
+			midjourneyTask.Quota = 0
+		}
 		if err := midjourneyTask.Insert(); err != nil {
 			return &dto.MidjourneyResponse{
 				Code:        4,
@@ -712,6 +714,23 @@ func midjourneyBillingError(err *types.NewAPIError) *dto.MidjourneyResponse {
 
 func midjourneyConsumesQuota(action string) bool {
 	return action != constant.MjActionInPaint && action != constant.MjActionCustomZoom
+}
+
+func midjourneyStoredQuota(charged bool, quota int) int {
+	if !charged {
+		return 0
+	}
+	return quota
+}
+
+func midjourneySubmitAccepted(statusCode, responseCode int, result string) bool {
+	return statusCode == http.StatusOK &&
+		(responseCode == 1 || responseCode == 21 || responseCode == 22) &&
+		strings.TrimSpace(result) != ""
+}
+
+func midjourneySwapAccepted(statusCode, responseCode int, result string) bool {
+	return statusCode == http.StatusOK && responseCode == 1 && strings.TrimSpace(result) != ""
 }
 
 func newMidjourneyAccountingTask(info *relaycommon.RelayInfo, modelName string, action string, upstreamTaskID string) *model.Task {

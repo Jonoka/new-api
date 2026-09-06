@@ -22,8 +22,11 @@ classified. Pending repair means `repaired_at = 0`, not every retained row.
 Realtime cumulative completed usage belongs to the same reservation that final
 settlement closes. Charged Midjourney submit/swap must reserve before provider I/O
 and hand accepted work to durable task accounting; explicitly free actions and
-legacy wallet-only funding are preserved. Historical unlinked tasks are not fixed
-by inference. Violation fees keep their existing trigger/tariff and post-use policy.
+legacy wallet-only funding are preserved. Historical unlinked Midjourney failures
+retain their old status-CAS then wallet-credit routine without inferred token
+refunds or new owners; new free/rejected rows store zero refundable quota. This old
+routine is not status/refund atomic and is not a substitute for linked accounting.
+Violation fees keep their existing trigger/tariff and post-use policy.
 
 ## Verification
 
@@ -36,7 +39,7 @@ Assertions cover exact upstream-call counts, authoritative balances, used quota,
 request count, logs and durable owner state. Unit/integration fixtures inject
 commit replies, database rollback and Redis failures on all supported databases.
 
-Rollback to C requires drained active reservations, managed tasks, pending cache
+Rollback to C requires drained active or settlement_pending reservations, managed tasks, pending cache
 repair and undelivered accounting events. No image rollback reverses committed
 financial movements. Production operation and real paid probes require their
 separately reviewed candidate and authorization.

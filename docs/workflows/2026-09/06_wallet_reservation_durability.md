@@ -41,6 +41,17 @@ until both derived cache projections are invalidated. Recovery never contacts a
 provider and cannot reconstruct usage that was not observed before a process
 failure.
 
+Ordinary Text, Audio and Realtime handlers retain their established behavior of
+publishing measured usage counters and consume logs when post-use settlement
+reports an error. For a positive known actual quota, the journal moves to
+`settlement_pending`, preserving the durable reservation and measured target.
+Abandoned recovery never refunds this state. This avoids turning known successful
+usage into a full refund, while deliberately not replaying the adjustment because
+the legacy counters/log are not transactionally owned by this journal. These rows
+require explicit reconciliation. If the database is unavailable for both the
+settlement and this preservation write, the row can remain `active`; subsequent
+abandoned recovery remains an operational risk in that narrower failure window.
+
 Closed ordinary rows may be removed only after a bounded retention period and
 only when they are not active or transferred, have no task link, no pending
 cache marker, no pending folded-batch receipt and no accounting/log dependency.
@@ -49,10 +60,11 @@ Retention is evidence cleanup, never a balance operation.
 ## Realtime and violation fees
 
 Realtime `response.done` admission resizes the same live session to the
-cumulative completed-response cost. A failed required increase stops the cycle
-before another upstream exchange, while final post-use settlement keeps the
-existing arrears behavior. The final aggregate is not charged a second time;
-it reconciles the cumulative reservation to the actual total.
+cumulative completed-response cost using the same frozen group/model snapshot
+and tiered expression as final settlement. A failed required increase stops the
+cycle before another upstream exchange, while final post-use settlement keeps
+the existing arrears behavior. The final aggregate is not charged a second
+time; it reconciles the cumulative reservation to the actual total.
 
 The existing violation trigger and tariff remain unchanged. Its wallet/token
 movement, counters and log are committed synchronously under a distinct durable
@@ -68,11 +80,13 @@ the same row to `TaskAccounting`. The journal adds portable scalar
 `last_expected_quota`, `last_target_quota` and `last_final_state` columns beside
 `last_operation_id`; normal and fast GORM migrations add them on SQLite, MySQL
 and PostgreSQL. Older images ignore these columns. Before rollback, drain active
-ordinary/task journals and pending cache/log work because older code cannot
-classify D operations from the new exact receipt fields.
+ordinary/task journals, `settlement_pending` rows and pending cache/log work
+because older code cannot classify D operations from the new exact receipt
+fields.
 
 GitHub-hosted tests cover ordinary and trusted zero journals, stale-cache trust,
 required rejection, ambiguous initial/resize/settlement/refund commits, expired
-restart release, cumulative Realtime reservation and idempotent violation fees.
-They assert authoritative wallet/token balances, journal state, counters and
-logs. No executable tests or builds run on the production checkout.
+restart release, known-settlement retention, cumulative Realtime reservation,
+frozen tiered Realtime pricing and idempotent violation fees. They assert
+authoritative wallet/token balances, journal state, counters and logs. No
+executable tests or builds run on the production checkout.

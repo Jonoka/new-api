@@ -76,6 +76,7 @@ func TestWalletOrdinaryReservationAmbiguousResizeThenRefundUsesDurableAmountOnce
 	refund.UseDurableExpected = true
 	refund.SubmissionOperationID = common.GetUUID()
 	refund.SubmissionFinalState = TaskSubmissionStateReleased
+	pool.queryErrorsAfterCommit = 0
 	pool.failCommit = true
 	result, err := ReconcileGroupReservation(refund)
 	require.NoError(t, err)
@@ -88,6 +89,31 @@ func TestWalletOrdinaryReservationAmbiguousResizeThenRefundUsesDurableAmountOnce
 	require.Equal(t, 1000, userQuota)
 	require.Equal(t, 1000, tokenRemain)
 	require.Zero(t, tokenUsed)
+}
+
+func TestWalletKnownSettlementMarkerClassifiesCommitErrorExactly(t *testing.T) {
+	db := useGroupReservationDatabase(t, groupReservationDatabases(t)[0])
+	require.NoError(t, db.AutoMigrate(&TaskSubmission{}, &TaskAccountingEvent{}))
+	user, token := seedGroupReservationWallet(t, db, "known-settlement-marker", 1000, 1000)
+	req := ordinaryReservationRequest(user, token, 200)
+	_, err := ReconcileGroupReservation(req)
+	require.NoError(t, err)
+
+	pool := installTaskSubmissionCommitErrorPool(t, db)
+	pool.failCommit = true
+	preserved, err := PreserveKnownTaskSubmissionSettlement(context.Background(), req.SubmissionID, req.SubmissionLeaseToken, user.Id, 400)
+	require.NoError(t, err)
+	require.Equal(t, TaskSubmissionStateSettlementPending, preserved.State)
+	require.Equal(t, 200, preserved.ReservedQuota)
+	require.Equal(t, 400, preserved.AcceptedQuota)
+
+	preserved, err = PreserveKnownTaskSubmissionSettlement(context.Background(), req.SubmissionID, req.SubmissionLeaseToken, user.Id, 400)
+	require.NoError(t, err)
+	require.Equal(t, TaskSubmissionStateSettlementPending, preserved.State)
+	userQuota, tokenRemain, tokenUsed := readGroupReservationBalances(t, db, user.Id, token.Id)
+	require.Equal(t, 800, userQuota)
+	require.Equal(t, 800, tokenRemain)
+	require.Equal(t, 200, tokenUsed)
 }
 
 func TestWalletOrdinaryReservationRestartRecoveryAndSafeRetention(t *testing.T) {
