@@ -202,7 +202,7 @@ func TestRelayFinalGroupBilling(t *testing.T) {
 				}
 			}
 			if len(owners) > 0 && owners[0] != nil {
-				require.Equal(t, attempts[0].EstimatedQuotaAfterGroup, info.FinalPreConsumedQuota, "repricing must not replace actual reserved quota")
+				require.Equal(t, attempts[0].snapshot.EstimatedQuotaAfterGroup, info.FinalPreConsumedQuota, "repricing must not replace actual reserved quota")
 			}
 
 			wantQuota := 0
