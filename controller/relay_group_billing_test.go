@@ -94,7 +94,7 @@ func TestRelayFinalGroupBilling(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			ctx, _ := gin.CreateTestContext(recorder)
 			t.Cleanup(func() { common.CleanupBodyStorage(ctx) })
-			ctx.Request = httptest.NewRequest(http.MethodPost, "http://billing-client.invalid/v1/chat/completions", strings.NewReader(`{"model":"final-group-billing-test","messages":[{"role":"user","content":"hello"}],"max_tokens":100}`))
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"final-group-billing-test","messages":[{"role":"user","content":"hello"}],"max_tokens":100}`))
 			ctx.Request.Header.Set("Content-Type", "application/json")
 			ctx.Set(string(constant.ContextKeyUserId), user.Id)
 			ctx.Set(string(constant.ContextKeyUserGroup), "customer")
