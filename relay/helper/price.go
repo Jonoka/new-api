@@ -67,6 +67,25 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 	return groupRatioInfo
 }
 
+// RefreshSelectedGroupPricing updates only routing-dependent billing facts.
+// The expression, request input and ungrouped estimate remain frozen, while the
+// actual reservation continues to belong to BillingSession (not this estimate).
+func RefreshSelectedGroupPricing(c *gin.Context, info *relaycommon.RelayInfo) error {
+	groupRatioInfo := HandleGroupRatio(c, info)
+	if snap := info.TieredBillingSnapshot; snap != nil {
+		quota, err := billingexpr.QuotaRoundStrict(snap.EstimatedQuotaBeforeGroup * groupRatioInfo.GroupRatio)
+		if err != nil {
+			return err
+		}
+		snap.GroupRatio = groupRatioInfo.GroupRatio
+		snap.EstimatedQuotaAfterGroup = quota
+		info.PriceData.QuotaToPreConsume = quota
+		info.PriceData.FreeModel = !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume && groupRatioInfo.GroupRatio == 0
+	}
+	info.PriceData.GroupRatioInfo = groupRatioInfo
+	return nil
+}
+
 func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens int, meta *types.TokenCountMeta) (types.PriceData, error) {
 	modelPrice, usePrice := ratio_setting.GetModelPrice(info.OriginModelName, false)
 

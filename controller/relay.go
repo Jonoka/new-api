@@ -206,6 +206,17 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			break
 		}
 
+		// An initially free tiered request has no session. If routing moves it
+		// to a paid group, admit it through the normal funding/token checks
+		// before dispatch. Never replace an existing reservation, including
+		// when a paid request moves to a free group: it must settle/refund once.
+		if relayInfo.TieredBillingSnapshot != nil && relayInfo.Billing == nil && !relayInfo.PriceData.FreeModel {
+			newAPIError = service.PreConsumeBilling(c, relayInfo.PriceData.QuotaToPreConsume, relayInfo)
+			if newAPIError != nil {
+				break
+			}
+		}
+
 		if delay := channelRetryDelay(channelRetryStates, channel.Id, time.Now()); delay > 0 {
 			logger.LogInfo(c, fmt.Sprintf("429 重试复用渠道 #%d，等待 %s", channel.Id, delay))
 			if !waitForRelayRetry(c, delay) {
@@ -421,6 +432,9 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 
 func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
 	if info.ChannelMeta == nil {
+		if err := helper.RefreshSelectedGroupPricing(c, info); err != nil {
+			return nil, types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithStatusCode(http.StatusBadRequest), types.ErrOptionWithSkipRetry())
+		}
 		autoBan := c.GetBool("auto_ban")
 		autoBanInt := 1
 		if !autoBan {
@@ -440,8 +454,6 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 	}
 	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
 
-	info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
-
 	if err != nil {
 		return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, info.OriginModelName, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
@@ -458,6 +470,9 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
 	if newAPIError != nil {
 		return nil, newAPIError
+	}
+	if err := helper.RefreshSelectedGroupPricing(c, info); err != nil {
+		return nil, types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithStatusCode(http.StatusBadRequest), types.ErrOptionWithSkipRetry())
 	}
 	return channel, nil
 }
