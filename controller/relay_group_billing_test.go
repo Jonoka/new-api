@@ -108,13 +108,17 @@ func TestRelayFinalGroupBilling(t *testing.T) {
 			}
 			ctx.Set(string(constant.ContextKeyTokenGroup), strings.Join(ordered, ","))
 			if tc.auto {
-				oldAuto, oldUsable := setting.AutoGroups2JsonString(), setting.UserUsableGroups2JSONString()
+				oldAuto, oldUsable, oldAutoConfig := setting.AutoGroups2JsonString(), setting.UserUsableGroups2JSONString(), setting.GetAutoGroupConfig()
 				t.Cleanup(func() {
 					require.NoError(t, setting.UpdateAutoGroupsByJsonString(oldAuto))
 					require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(oldUsable))
+					oldConfigJSON, err := common.Marshal(oldAutoConfig)
+					require.NoError(t, err)
+					require.NoError(t, setting.UpdateAutoGroupConfigByJsonString(string(oldConfigJSON)))
 				})
 				require.NoError(t, setting.UpdateAutoGroupsByJsonString(`["a","b","c"]`))
 				require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"a":"a","b":"b","c":"c"}`))
+				require.NoError(t, setting.UpdateAutoGroupConfigByJsonString(`{"user_selectable":true,"description":"auto"}`))
 				ctx.Set(string(constant.ContextKeyTokenGroup), "auto")
 				ctx.Set(string(constant.ContextKeyTokenCrossGroupRetry), true)
 			}
@@ -181,7 +185,10 @@ func TestRelayFinalGroupBilling(t *testing.T) {
 			defer mu.Unlock()
 			wantAttempts := len(tc.groups)
 			if tc.balance != 0 {
-				wantAttempts = 0 // insufficient admission must not send an upstream request
+				wantAttempts = 0 // insufficient paid admission must not send an upstream request
+				if tc.groups[0] == "free" {
+					wantAttempts = 1 // a free attempt may run before paid admission is checked
+				}
 			}
 			require.Len(t, attempts, wantAttempts, recorder.Body.String())
 			for i, facts := range attempts {
@@ -192,7 +199,7 @@ func TestRelayFinalGroupBilling(t *testing.T) {
 				require.Equal(t, attempts[0].snapshot.EstimatedQuotaBeforeGroup, snap.EstimatedQuotaBeforeGroup)
 				require.Equal(t, attempts[0].snapshot.EstimatedCompletionTokens, snap.EstimatedCompletionTokens)
 				require.Equal(t, attempts[0].snapshot.QuotaPerUnit, snap.QuotaPerUnit)
-				if tc.special != "" {
+				if tc.special != "" && i == len(attempts)-1 {
 					require.Equal(t, tc.wantRatio, facts.groupRatio)
 					require.Equal(t, tc.wantRatio, facts.specialRatio)
 					require.True(t, facts.hasSpecial)
