@@ -213,6 +213,8 @@ jobs:
         env:
           CANDIDATE_IMAGE: ghcr.io/${{ github.repository }}@${{ steps.image.outputs.digest }}
           EXPECTED_REVISION: ${{ github.sha }}
+          PRODUCTION_IMAGE: ghcr.io/jonoka/new-api@sha256:1611754fd5d229d91292089a760f58ca64e8e2cc8770b0096c418f587eaa5134
+          PRODUCTION_REVISION: d05e01e2d69a1141cdb68360b84f9542ff12a048
           TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
         run: bash scripts/ci/batch-a-smoke.sh
 
@@ -249,6 +251,8 @@ jobs:
         env:
           CANDIDATE_IMAGE: ghcr.io/${{ github.repository }}@${{ steps.image.outputs.digest }}
           PREVIOUS_IMAGE: ghcr.io/jonoka/new-api@sha256:7fb3ebb45298b502c4c3c232bb632346f01410ce7ad9a6b46452b4c4384693ec
+          PRODUCTION_IMAGE: ghcr.io/jonoka/new-api@sha256:1611754fd5d229d91292089a760f58ca64e8e2cc8770b0096c418f587eaa5134
+          PRODUCTION_REVISION: d05e01e2d69a1141cdb68360b84f9542ff12a048
           TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
           TEST_REDIS_CONTAINER: ${{ job.services.redis.id }}
         run: bash scripts/ci/batch-d-smoke.sh

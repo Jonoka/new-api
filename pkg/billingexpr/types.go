@@ -36,7 +36,8 @@ type TraceResult struct {
 	Cost        float64 `json:"cost"`
 }
 
-// BillingSnapshot captures the billing rule state frozen at pre-consume time.
+// BillingSnapshot freezes model/request pricing at pre-consume time. Group facts
+// follow the selected routing group before each attempt is dispatched.
 // It is fully serializable and contains no compiled program pointers.
 type BillingSnapshot struct {
 	BillingMode               string  `json:"billing_mode"`

@@ -125,8 +125,13 @@ func TestModelPriceHelperTieredUsesCompletionFallbackAndRejectsOverflow(t *testi
 func TestModelPriceHelperTieredRefreshesOnlyGroupDependentSnapshotFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	oldFreePreConsume := operation_setting.GetQuotaSetting().EnableFreeModelPreConsume
+	oldQuotaPerUnit := common.QuotaPerUnit
 	operation_setting.GetQuotaSetting().EnableFreeModelPreConsume = false
-	t.Cleanup(func() { operation_setting.GetQuotaSetting().EnableFreeModelPreConsume = oldFreePreConsume })
+	common.QuotaPerUnit = 500_000
+	t.Cleanup(func() {
+		operation_setting.GetQuotaSetting().EnableFreeModelPreConsume = oldFreePreConsume
+		common.QuotaPerUnit = oldQuotaPerUnit
+	})
 	saved := map[string]string{}
 	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
 		saved[key] = value
@@ -156,6 +161,7 @@ func TestModelPriceHelperTieredRefreshesOnlyGroupDependentSnapshotFields(t *test
 	require.NoError(t, err)
 	require.True(t, first.FreeModel)
 	require.Equal(t, defaultTieredPreConsumeMaxTokens, info.TieredBillingSnapshot.EstimatedCompletionTokens)
+	frozen := *info.TieredBillingSnapshot
 	frozenExpr := info.TieredBillingSnapshot.ExprString
 	frozenRequest := string(info.BillingRequestInput.Body)
 
@@ -164,6 +170,7 @@ func TestModelPriceHelperTieredRefreshesOnlyGroupDependentSnapshotFields(t *test
 		"billing_setting.billing_expr":    `{}`,
 		"group_ratio_setting.group_ratio": `{"free":0,"paid":2}`,
 	}))
+	common.QuotaPerUnit = 900_000
 	ctx.Set("auto_group", "paid")
 	second, err := ModelPriceHelper(ctx, info, 9999, &types.TokenCountMeta{MaxTokens: 1})
 	require.NoError(t, err)
@@ -174,6 +181,8 @@ func TestModelPriceHelperTieredRefreshesOnlyGroupDependentSnapshotFields(t *test
 	require.Equal(t, frozenExpr, info.TieredBillingSnapshot.ExprString)
 	require.Equal(t, 1000, info.TieredBillingSnapshot.EstimatedPromptTokens)
 	require.Equal(t, defaultTieredPreConsumeMaxTokens, info.TieredBillingSnapshot.EstimatedCompletionTokens)
+	require.Equal(t, frozen.EstimatedQuotaBeforeGroup, info.TieredBillingSnapshot.EstimatedQuotaBeforeGroup)
+	require.Equal(t, frozen.QuotaPerUnit, info.TieredBillingSnapshot.QuotaPerUnit)
 	require.Equal(t, frozenRequest, string(info.BillingRequestInput.Body))
 	require.Equal(t, "original", info.TieredBillingSnapshot.EstimatedTier)
 }
@@ -310,4 +319,71 @@ func TestModelPriceHelperPerCallRejectsSelectedGroupOverflow(t *testing.T) {
 	var clamp *common.QuotaClamp
 	require.ErrorAs(t, err, &clamp)
 	require.Equal(t, common.QuotaClampOverflow, clamp.Kind)
+}
+
+func TestModelPriceHelperTieredRetryPreservesFrozenFacts(t *testing.T) {
+	saved := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error { saved[key] = value; return nil }))
+	oldFree := operation_setting.GetQuotaSetting().EnableFreeModelPreConsume
+	oldQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() {
+		require.NoError(t, config.GlobalConfig.LoadFromDB(saved))
+		operation_setting.GetQuotaSetting().EnableFreeModelPreConsume = oldFree
+		common.QuotaPerUnit = oldQuotaPerUnit
+	})
+	operation_setting.GetQuotaSetting().EnableFreeModelPreConsume = false
+	common.QuotaPerUnit = 500_000
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_mode":          `{"frozen-group-test":"tiered_expr"}`,
+		"billing_setting.billing_expr":          `{"frozen-group-test":"param(\"stream\") == true ? tier(\"stream\", p * 3 + c * 10) : tier(\"other\", p * 9)"}`,
+		"group_ratio_setting.group_ratio":       `{"initial":0.22,"final":0.7,"free":0}`,
+		"group_ratio_setting.group_group_ratio": `{"customer":{"special":0.4,"zero-special":0}}`,
+	}))
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "frozen-group-test", UsingGroup: "initial", UserGroup: "customer",
+		BillingRequestInput: &billingexpr.RequestInput{Body: []byte(`{"stream":true}`)},
+	}
+	_, err := ModelPriceHelper(ctx, info, 1000, &types.TokenCountMeta{MaxTokens: 100})
+	require.NoError(t, err)
+	frozen := *info.TieredBillingSnapshot
+	requestInput := info.BillingRequestInput
+	info.FinalPreConsumedQuota = 321 // deliberately not equal to the estimate
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_mode": `{"frozen-group-test":"ratio"}`,
+		"billing_setting.billing_expr": `{"frozen-group-test":"p * 9999"}`,
+	}))
+	common.QuotaPerUnit = 900_000
+	for _, tc := range []struct {
+		group   string
+		ratio   float64
+		special bool
+	}{
+		{"final", .7, false}, {"final", .7, false}, {"free", 0, false},
+		{"special", .4, true}, {"zero-special", 0, true}, {"initial", .22, false},
+	} {
+		ctx.Set("auto_group", tc.group)
+		priceData, err := ModelPriceHelper(ctx, info, 9999, &types.TokenCountMeta{MaxTokens: 1})
+		require.NoError(t, err)
+		snap := *info.TieredBillingSnapshot
+		require.Equal(t, tc.group, info.UsingGroup)
+		require.Equal(t, tc.group, snap.Group)
+		require.Equal(t, tc.ratio, snap.GroupRatio)
+		require.Equal(t, tc.ratio, priceData.GroupRatioInfo.GroupRatio)
+		require.Equal(t, tc.special, priceData.GroupRatioInfo.HasSpecialRatio)
+		if tc.special {
+			require.Equal(t, tc.ratio, priceData.GroupRatioInfo.GroupSpecialRatio)
+		}
+		require.Equal(t, tc.ratio == 0, priceData.FreeModel)
+		require.Equal(t, billingexpr.QuotaRound(frozen.EstimatedQuotaBeforeGroup*tc.ratio), snap.EstimatedQuotaAfterGroup)
+		require.Equal(t, snap.EstimatedQuotaAfterGroup, priceData.QuotaToPreConsume)
+		require.Equal(t, 321, info.FinalPreConsumedQuota)
+		require.Same(t, requestInput, info.BillingRequestInput)
+		snap.Group = frozen.Group
+		snap.GroupRatio = frozen.GroupRatio
+		snap.GroupSpecialRatio = frozen.GroupSpecialRatio
+		snap.HasGroupSpecialRatio = frozen.HasGroupSpecialRatio
+		snap.EstimatedQuotaAfterGroup = frozen.EstimatedQuotaAfterGroup
+		require.Equal(t, frozen, snap, "all non-group snapshot facts stay frozen")
+	}
 }

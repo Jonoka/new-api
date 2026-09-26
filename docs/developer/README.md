@@ -46,3 +46,4 @@
 - [Ordinary reservation durability](../workflows/2026-09/06_wallet_reservation_durability.md)
 - [Wallet cache consistency](../workflows/2026-09/06_wallet_cache_consistency.md)
 - [Midjourney reservation ownership](../workflows/2026-09/06_midjourney_reservation.md)
+- [Production billing hotfix and A-D integration](../workflows/2026-09/26_production_billing_ad_integration.md)

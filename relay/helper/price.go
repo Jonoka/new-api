@@ -367,20 +367,33 @@ func HasModelBillingConfig(modelName string) bool {
 }
 
 func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptTokens int, meta *types.TokenCountMeta, groupRatioInfo types.GroupRatioInfo) (types.PriceData, error) {
-	exprStr := ""
+	if frozen := info.TieredBillingSnapshot; frozen != nil && frozen.BillingMode == billing_setting.BillingModeTieredExpr && frozen.ModelName == info.OriginModelName {
+		preConsumedQuota, err := billingexpr.QuotaRoundStrict(frozen.EstimatedQuotaBeforeGroup * groupRatioInfo.GroupRatio)
+		if err != nil {
+			return types.PriceData{}, err
+		}
+		freeModel := !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume && groupRatioInfo.GroupRatio == 0
+		frozen.Group = info.UsingGroup
+		frozen.GroupRatio = groupRatioInfo.GroupRatio
+		frozen.GroupSpecialRatio = groupRatioInfo.GroupSpecialRatio
+		frozen.HasGroupSpecialRatio = groupRatioInfo.HasSpecialRatio
+		frozen.EstimatedQuotaAfterGroup = preConsumedQuota
+		priceData := types.PriceData{
+			FreeModel:         freeModel,
+			GroupRatioInfo:    groupRatioInfo,
+			QuotaToPreConsume: preConsumedQuota,
+		}
+		info.PriceData = priceData
+		logger.LogDebug(c, "model_price_helper_tiered result: model=%s preConsume=%d quotaBeforeGroup=%.2f groupRatio=%.2f tier=%s", info.OriginModelName, preConsumedQuota, frozen.EstimatedQuotaBeforeGroup, groupRatioInfo.GroupRatio, frozen.EstimatedTier)
+		return priceData, nil
+	}
+
+	exprStr, ok := billing_setting.GetBillingExpr(info.OriginModelName)
+	if !ok {
+		return types.PriceData{}, fmt.Errorf("model %s is configured as tiered_expr but has no billing expression", info.OriginModelName)
+	}
 	estimatedPromptTokens := promptTokens
 	estimatedCompletionTokens := meta.MaxTokens
-	if frozen := info.TieredBillingSnapshot; frozen != nil && frozen.BillingMode == billing_setting.BillingModeTieredExpr && frozen.ModelName == info.OriginModelName {
-		exprStr = frozen.ExprString
-		estimatedPromptTokens = frozen.EstimatedPromptTokens
-		estimatedCompletionTokens = frozen.EstimatedCompletionTokens
-	} else {
-		var ok bool
-		exprStr, ok = billing_setting.GetBillingExpr(info.OriginModelName)
-		if !ok {
-			return types.PriceData{}, fmt.Errorf("model %s is configured as tiered_expr but has no billing expression", info.OriginModelName)
-		}
-	}
 	if estimatedCompletionTokens == 0 {
 		estimatedCompletionTokens = defaultTieredPreConsumeMaxTokens
 	}

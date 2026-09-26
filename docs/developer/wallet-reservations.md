@@ -39,7 +39,11 @@ Assertions cover exact upstream-call counts, authoritative balances, used quota,
 request count, logs and durable owner state. Unit/integration fixtures inject
 commit replies, database rollback and Redis failures on all supported databases.
 
-Rollback to C requires drained active or settlement_pending reservations, managed tasks, pending cache
+Rollback to C or the production billing-hotfix image requires drained active or settlement_pending reservations, managed tasks, pending cache
 repair and undelivered accounting events. No image rollback reverses committed
 financial movements. Production operation and real paid probes require their
 separately reviewed candidate and authorization.
+
+The production integration rehearsal starts each rollback image against a separate
+copy of the drained candidate database and preserves financial records and durable
+receipts. See the [integration workflow](../workflows/2026-09/26_production_billing_ad_integration.md).
