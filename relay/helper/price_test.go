@@ -10,6 +10,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -170,4 +171,62 @@ func TestModelPriceHelperPerCallCarriesConfiguredPriceUnit(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, types.ModelPriceUnitSecond, priceData.ModelPriceUnit)
+}
+
+func TestRefreshSelectedGroupPricingPreservesFrozenFacts(t *testing.T) {
+	saved := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error { saved[key] = value; return nil }))
+	oldFree := operation_setting.GetQuotaSetting().EnableFreeModelPreConsume
+	t.Cleanup(func() {
+		require.NoError(t, config.GlobalConfig.LoadFromDB(saved))
+		operation_setting.GetQuotaSetting().EnableFreeModelPreConsume = oldFree
+	})
+	operation_setting.GetQuotaSetting().EnableFreeModelPreConsume = false
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_mode":          `{"frozen-group-test":"tiered_expr"}`,
+		"billing_setting.billing_expr":          `{"frozen-group-test":"param(\"stream\") == true ? tier(\"stream\", p * 3 + c * 10) : tier(\"other\", p * 9)"}`,
+		"group_ratio_setting.group_ratio":       `{"initial":0.22,"final":0.7,"free":0}`,
+		"group_ratio_setting.group_group_ratio": `{"customer":{"special":0.4,"zero-special":0}}`,
+	}))
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "frozen-group-test", UsingGroup: "initial", UserGroup: "customer",
+		BillingRequestInput: &billingexpr.RequestInput{Body: []byte(`{"stream":true}`)},
+	}
+	_, err := ModelPriceHelper(ctx, info, 1000, &types.TokenCountMeta{MaxTokens: 100})
+	require.NoError(t, err)
+	frozen := *info.TieredBillingSnapshot
+	requestInput := info.BillingRequestInput
+	info.FinalPreConsumedQuota = 321 // deliberately not equal to the estimate
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_mode": `{"frozen-group-test":"ratio"}`,
+		"billing_setting.billing_expr": `{"frozen-group-test":"p * 9999"}`,
+	}))
+	for _, tc := range []struct {
+		group   string
+		ratio   float64
+		special bool
+	}{
+		{"final", .7, false}, {"final", .7, false}, {"free", 0, false},
+		{"special", .4, true}, {"zero-special", 0, true}, {"initial", .22, false},
+	} {
+		ctx.Set("auto_group", tc.group)
+		require.NoError(t, RefreshSelectedGroupPricing(ctx, info))
+		snap := *info.TieredBillingSnapshot
+		require.Equal(t, tc.group, info.UsingGroup)
+		require.Equal(t, tc.ratio, snap.GroupRatio)
+		require.Equal(t, tc.ratio, info.PriceData.GroupRatioInfo.GroupRatio)
+		require.Equal(t, tc.special, info.PriceData.GroupRatioInfo.HasSpecialRatio)
+		if tc.special {
+			require.Equal(t, tc.ratio, info.PriceData.GroupRatioInfo.GroupSpecialRatio)
+		}
+		require.Equal(t, tc.ratio == 0, info.PriceData.FreeModel)
+		require.Equal(t, billingexpr.QuotaRound(frozen.EstimatedQuotaBeforeGroup*tc.ratio), snap.EstimatedQuotaAfterGroup)
+		require.Equal(t, snap.EstimatedQuotaAfterGroup, info.PriceData.QuotaToPreConsume)
+		require.Equal(t, 321, info.FinalPreConsumedQuota)
+		require.Same(t, requestInput, info.BillingRequestInput)
+		snap.GroupRatio = frozen.GroupRatio
+		snap.EstimatedQuotaAfterGroup = frozen.EstimatedQuotaAfterGroup
+		require.Equal(t, frozen, snap, "all non-group snapshot facts stay frozen")
+	}
 }
