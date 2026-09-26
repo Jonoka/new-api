@@ -4,6 +4,8 @@ set -euo pipefail
 test "${GITHUB_ACTIONS:-}" = true
 test -n "${CANDIDATE_IMAGE:-}"
 test -n "${PREVIOUS_IMAGE:-}"
+test -n "${EXPECTED_REVISION:-}"
+test -n "${PREVIOUS_REVISION:-}"
 test -n "${TEST_POSTGRES_CONTAINER:-}"
 container=newapi-batch-b-smoke
 cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; }
@@ -13,11 +15,14 @@ query() {
 }
 start_image() {
   docker run -d --name "$container" --network host \
+    --health-cmd "wget -q -O - http://127.0.0.1:3000/api/status | grep -Eq '\"success\"[[:space:]]*:[[:space:]]*true'" \
+    --health-interval 5s --health-timeout 10s --health-retries 3 \
     -e SQL_DSN=postgres://postgres:postgres@127.0.0.1:5432/newapi_candidate_smoke?sslmode=disable \
     -e SESSION_SECRET=disposable-ci-session-only -e UPDATE_TASK=false \
     "$1" >/dev/null
   for attempt in $(seq 1 90); do
-    if curl -fsS --max-time 2 http://127.0.0.1:3000/api/status > "$RUNNER_TEMP/batch-b-status.json"; then
+    if curl -fsS --max-time 2 http://127.0.0.1:3000/api/status > "$RUNNER_TEMP/batch-b-status.json" &&
+      [ "$(docker inspect --format '{{.State.Health.Status}}' "$container")" = healthy ]; then
       return
     fi
     sleep 2
@@ -43,7 +48,16 @@ rollback_ready() {
   test "$(query "SELECT count(*) FROM task_accounting_events WHERE NOT delivered")" = 0
 }
 
+for image in "${CANDIDATE_IMAGE,,}" "${PREVIOUS_IMAGE,,}"; do
+  docker pull "$image"
+  test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image")" = linux/amd64
+  expected_revision="$EXPECTED_REVISION"
+  if [ "$image" = "${PREVIOUS_IMAGE,,}" ]; then expected_revision="$PREVIOUS_REVISION"; fi
+  test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image")" = "$expected_revision"
+done
 start_image "${CANDIDATE_IMAGE,,}"
+node -e 'const fs=require("node:fs");const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(s.success!==true)process.exit(1)' "$RUNNER_TEMP/batch-b-status.json"
+test "$(docker inspect --format '{{.State.Status}}/{{.State.Health.Status}}/{{.RestartCount}}' "$container")" = running/healthy/0
 for attempt in $(seq 1 45); do
   if [ "$(query "SELECT count(*) FROM tasks WHERE task_id='b-compat-pending' AND status='FAILURE' AND quota=0")" = 1 ] && \
      [ "$(query "SELECT count(*) FROM task_submissions WHERE state='active' OR cache_pending")" = 0 ] && \
@@ -71,9 +85,9 @@ cleanup
 
 # Old code is only rehearsed after every B-owned task and projection is drained.
 # It must never process an in-flight task governed by the new ownership record.
-docker pull "${PREVIOUS_IMAGE,,}"
 start_image "${PREVIOUS_IMAGE,,}"
+node -e 'const fs=require("node:fs");const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(s.success!==true)process.exit(1)' "$RUNNER_TEMP/batch-b-status.json"
 assert_settled
-test "$(docker inspect --format '{{.State.Status}}/{{.RestartCount}}' "$container")" = running/0
+test "$(docker inspect --format '{{.State.Status}}/{{.State.Health.Status}}/{{.RestartCount}}' "$container")" = running/healthy/0
 docker logs "$container" > "$RUNNER_TEMP/batch-b-previous-image.log" 2>&1
 printf 'Batch B restart recovery and drained previous-image compatibility passed.\n'

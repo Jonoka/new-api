@@ -4,6 +4,7 @@ set -euo pipefail
 test "${GITHUB_ACTIONS:-}" = true
 test -n "${CANDIDATE_IMAGE:-}"
 test -n "${PREVIOUS_IMAGE:-}"
+test -n "${PREVIOUS_REVISION:-}"
 test -n "${PRODUCTION_IMAGE:-}"
 test -n "${PRODUCTION_REVISION:-}"
 test -n "${TEST_POSTGRES_CONTAINER:-}"
@@ -83,9 +84,9 @@ for target in c production; do
   docker exec "$TEST_POSTGRES_CONTAINER" createdb -U postgres -T newapi_candidate_smoke "$rollback_database"
   docker pull "$rollback_image"
   test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$rollback_image")" = linux/amd64
-  if [ "$target" = production ]; then
-    test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$rollback_image")" = "$PRODUCTION_REVISION"
-  fi
+  expected_revision="$PREVIOUS_REVISION"
+  if [ "$target" = production ]; then expected_revision="$PRODUCTION_REVISION"; fi
+  test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$rollback_image")" = "$expected_revision"
   start newapi-batch-d-a 38001 "$rollback_image" "$rollback_database"
   test "$(financial_snapshot "$rollback_database")" = "$snapshot"
   test "$(docker inspect --format '{{.State.Status}}/{{.State.Health.Status}}/{{.RestartCount}}' newapi-batch-d-a)" = running/healthy/0

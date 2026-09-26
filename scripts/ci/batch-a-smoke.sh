@@ -29,18 +29,23 @@ docker pull "${PRODUCTION_IMAGE,,}"
 test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "${PRODUCTION_IMAGE,,}")" = "$PRODUCTION_REVISION"
 test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "${PRODUCTION_IMAGE,,}")" = linux/amd64
 docker run -d --name newapi-batch-a-smoke --network host \
+  --health-cmd "wget -q -O - http://127.0.0.1:3000/api/status | grep -Eq '\"success\"[[:space:]]*:[[:space:]]*true'" \
+  --health-interval 5s --health-timeout 10s --health-retries 3 \
   -e SQL_DSN=postgres://postgres:postgres@127.0.0.1:5432/newapi_candidate_smoke?sslmode=disable \
   -e SESSION_SECRET=disposable-ci-session-only -e UPDATE_TASK=false \
   "${PRODUCTION_IMAGE,,}" >/dev/null
 production_ready=false
 for attempt in $(seq 1 90); do
-  if curl -fsS --max-time 2 http://127.0.0.1:3000/api/status >/dev/null; then
+  if curl -fsS --max-time 2 http://127.0.0.1:3000/api/status > "$RUNNER_TEMP/batch-a-production-status.json" &&
+    [ "$(docker inspect --format '{{.State.Health.Status}}' newapi-batch-a-smoke)" = healthy ]; then
     production_ready=true
     break
   fi
   sleep 2
 done
 test "$production_ready" = true
+test "$(docker inspect --format '{{.State.Status}}/{{.State.Health.Status}}/{{.RestartCount}}' newapi-batch-a-smoke)" = running/healthy/0
+node -e 'const fs=require("node:fs");const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(s.success!==true)process.exit(1)' "$RUNNER_TEMP/batch-a-production-status.json"
 test "$(query "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('task_submissions','task_accountings','task_accounting_events','task_accounting_log_receipts','balance_cache_repairs')")" = 0
 query "INSERT INTO users(username,password,status,quota,used_quota,request_count,aff_code) VALUES('upgrade-history','not-a-login-hash',2,125000,75000,3,'upgrade-history');
   INSERT INTO tokens(user_id,key,status,name,remain_quota,used_quota) SELECT id,'upgrade-disabled-synthetic-token',2,'upgrade-history',90000,75000 FROM users WHERE username='upgrade-history';

@@ -23,6 +23,13 @@ The final
 D rehearsal also checks rollback to actual production image
 `ghcr.io/jonoka/new-api@sha256:1611754fd5d229d91292089a760f58ca64e8e2cc8770b0096c418f587eaa5134`
 with source `d05e01e2d69a1141cdb68360b84f9542ff12a048`.
+The production bootstrap, candidate, A/B/C rollback and production rollback all
+inject the effective Compose status-success healthcheck, require
+`running/healthy` with zero restarts, and verify `linux/amd64`. The rollback
+images also bind their immutable digests to their expected source revisions:
+A `69444ce731494da6010885b517ab3d8130c59553`, B
+`80b7d65697d1421caff06d6e4a6062c9c221fccd`, C
+`9b4c4bf6d3de412fb17a8ff40b77be78ccea71d2`, and the production source above.
 
 C and production start against separate clones of the drained candidate database;
 an intermediate old-image migration must not mask incompatibility. Financial
